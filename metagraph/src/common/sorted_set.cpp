@@ -22,7 +22,7 @@ typename SortedSet<T, Container>::result_type& SortedSet<T, Container>::data() {
     std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
     if (sorted_end_ != data_.size()) {
-        sort_and_remove_duplicates(&data_, num_threads_);
+        sort_and_remove_duplicates();
         sorted_end_ = data_.size();
     }
 
@@ -39,17 +39,12 @@ void SortedSet<T, Container>::clear() {
 }
 
 template <typename T, class Container>
-void SortedSet<T, Container>::sort_and_remove_duplicates(Container *vector,
-                                                         size_t num_threads) const {
-    assert(vector);
-
-    ips4o::parallel::sort(vector->begin(), vector->end(),
-                          std::less<value_type>(), num_threads);
+void SortedSet<T, Container>::sort_and_remove_duplicates() {
+    ips4o::parallel::sort(data_.begin(), data_.end(),
+                          std::less<value_type>(), num_threads_);
     // remove duplicates
-    auto unique_end = std::unique(vector->begin(), vector->end());
-    vector->erase(unique_end, vector->end());
-
-    cleanup_(vector);
+    auto unique_end = std::unique(data_.begin(), data_.end());
+    data_.erase(unique_end, data_.end());
 }
 
 template <typename T, class Container>
@@ -57,7 +52,7 @@ void SortedSet<T, Container>::shrink_data() {
     logger->trace("Allocated capacity exceeded, erase duplicate values...");
 
     size_t old_size = data_.size();
-    sort_and_remove_duplicates(&data_, num_threads_);
+    sort_and_remove_duplicates();
     sorted_end_ = data_.size();
 
     logger->trace("Erasing duplicate values done. Size reduced from {} to {}, {} MiB",

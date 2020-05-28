@@ -11,18 +11,16 @@ namespace mg {
 namespace common {
 
 template <typename T, typename C>
-void SortedMultisetDisk<T, C>::sort_and_remove_duplicates(storage_type *vector,
-                                                    size_t num_threads) const {
-    assert(vector);
+void SortedMultisetDisk<T, C>::sort_and_dedupe() {
     ips4o::parallel::sort(
-            vector->begin(), vector->end(),
+            this->data_.begin(), this->data_.end(),
             [](const value_type &first, const value_type &second) {
                 return first.first < second.first;
             },
-            num_threads);
+            this->num_threads_);
 
-    auto first = vector->begin();
-    auto last = vector->end();
+    auto first = this->data_.begin();
+    auto last = this->data_.end();
 
     auto dest = first;
 
@@ -38,9 +36,7 @@ void SortedMultisetDisk<T, C>::sort_and_remove_duplicates(storage_type *vector,
         }
     }
 
-    vector->erase(++dest, this->data_.end());
-
-    this->cleanup_(vector);
+    this->data_.erase(++dest, this->data_.end());
 }
 
 template class SortedMultisetDisk<uint64_t, uint8_t>;

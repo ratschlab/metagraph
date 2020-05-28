@@ -26,9 +26,8 @@ class SortedMultiset {
     typedef Container storage_type;
     typedef Container result_type;
 
-    SortedMultiset(std::function<void(storage_type*)> cleanup = [](storage_type*) {},
-                   size_t num_threads = 1, size_t max_num_elements = 0)
-          : num_threads_(num_threads), cleanup_(cleanup) {
+    SortedMultiset(size_t num_threads = 1, size_t max_num_elements = 0)
+          : num_threads_(num_threads) {
         reserve(max_num_elements);
     }
 
@@ -48,14 +47,12 @@ class SortedMultiset {
   private:
     void shrink_data();
 
-    void sort_and_merge_duplicates();
+    void sort_and_merge_counts();
 
     void try_reserve(size_t size, size_t min_size = 0);
 
     storage_type data_;
     size_t num_threads_;
-
-    std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;

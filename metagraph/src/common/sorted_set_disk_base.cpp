@@ -11,8 +11,7 @@ namespace mg {
 namespace common {
 
 template <typename T>
-SortedSetDiskBase<T>::SortedSetDiskBase(std::function<void(storage_type *)> cleanup,
-                                        size_t num_threads,
+SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
                                         size_t reserved_num_elements,
                                         const std::filesystem::path &tmp_dir,
                                         size_t max_disk_space_bytes)
@@ -20,8 +19,7 @@ SortedSetDiskBase<T>::SortedSetDiskBase(std::function<void(storage_type *)> clea
       reserved_num_elements_(reserved_num_elements),
       max_disk_space_bytes_(max_disk_space_bytes),
       chunk_file_prefix_(tmp_dir/"chunk_"),
-      merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT)),
-      cleanup_(cleanup) {
+      merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT)) {
     if (reserved_num_elements == 0) {
         logger->error("SortedSetDisk buffer cannot have size 0");
         std::exit(EXIT_FAILURE);
@@ -38,7 +36,7 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
         is_merging_ = true;
         // write any residual data left
         if (!data_.empty()) {
-            sort_and_remove_duplicates(&data_, num_threads_);
+            sort_and_dedupe();
             dump_to_file(true /* is_done */);
         }
         if (free_buffer) {
@@ -59,7 +57,7 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     // write any residual data left
     if (!data_.empty()) {
-        sort_and_remove_duplicates(&data_, num_threads_);
+        sort_and_dedupe();
         dump_to_file(true /* is_done */);
     }
     return get_file_names();
@@ -103,7 +101,7 @@ void SortedSetDiskBase<T>::shrink_data() {
     logger->trace("Allocated capacity exceeded, erasing duplicate values...");
 
     size_t old_size = data_.size();
-    sort_and_remove_duplicates(&data_, num_threads_);
+    sort_and_dedupe();
 
     logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
                   data_.size(), (data_.size() * sizeof(T) >> 20));
