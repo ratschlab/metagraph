@@ -15,23 +15,23 @@ constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
 std::vector<std::string> sources;
 
-std::vector<std::string> create_sources(size_t count) {
+std::vector<std::string> create_sources(size_t num_sources) {
     std::mt19937 rng(123457);
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
-    std::vector<std::string> result;
-    result.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
+    std::vector<std::string> sources;
+    sources.reserve(num_sources);
+    for (uint32_t i = 0; i < num_sources; ++i) {
         std::vector<uint64_t> els(ITEM_COUNT);
         for (uint64_t j = 0; j < ITEM_COUNT; ++j) {
-            els[i] = j + dist10(rng);
+            els[i] = j * 20 + dist10(rng);
         }
-        result.push_back(chunk_prefix + std::to_string(i));
-        std::ofstream f(result.back(), std::ios::binary);
+        sources.push_back(chunk_prefix + std::to_string(i));
+        std::ofstream f(sources.back(), std::ios::binary);
         f.write(reinterpret_cast<char *>(els.data()), els.size() * sizeof(uint64_t));
         f.close();
     }
-    return result;
+    return sources;
 }
 
 static void BM_merge_files(benchmark::State &state) {

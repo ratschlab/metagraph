@@ -1,16 +1,8 @@
 #ifndef __SORTED_SET_DISK_HPP__
 #define __SORTED_SET_DISK_HPP__
 
-#include <cassert>
-#include <functional>
-#include <optional>
-#include <shared_mutex>
-#include <string>
-
-#include <ips4o.hpp>
-
 #include "common/sorted_set_disk_base.hpp"
-#include "common/vector.hpp"
+
 
 namespace mg {
 namespace common {
@@ -50,14 +42,12 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
             size_t num_threads = 1,
             size_t reserved_num_elements = 1e6,
             const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9,
-            size_t num_last_elements_cached = 100)
+            size_t max_disk_space_bytes = 1e9)
         : SortedSetDiskBase<T>(cleanup,
                                num_threads,
                                reserved_num_elements,
                                tmp_dir,
-                               max_disk_space_bytes,
-                               num_last_elements_cached) {}
+                               max_disk_space_bytes) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
@@ -83,17 +73,7 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
     }
 
     virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const override {
-        assert(vector);
-
-        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<value_type>(),
-                              num_threads);
-        // remove duplicates
-        auto unique_end = std::unique(vector->begin(), vector->end());
-        vector->erase(unique_end, vector->end());
-
-        this->cleanup_(vector); // typically removes source dummy k-mers
-    }
+                                            size_t num_threads) const override;
 };
 
 } // namespace common
