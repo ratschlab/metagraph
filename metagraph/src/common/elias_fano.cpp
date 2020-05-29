@@ -393,6 +393,7 @@ T EliasFanoDecoder<T>::next_upper() {
 template <typename T>
 T EliasFanoDecoder<T>::next_lower() {
     assert(position_ < size_);
+    assert(num_lower_bits_ < 8 * sizeof(T));
     const size_t pos_bits = position_ * num_lower_bits_;
     if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
         cur_pos_bits_ += 8 * sizeof(T);
@@ -406,27 +407,55 @@ T EliasFanoDecoder<T>::next_lower() {
         }
     }
     const size_t adjusted_pos = pos_bits - cur_pos_bits_;
-
     const uint8_t *ptr
             = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
-
-    return clear_high_bits(load_unaligned<T>(ptr) >> (adjusted_pos % 8), num_lower_bits_);
+    return (load_unaligned<T>(ptr) >> (adjusted_pos % 8)) & lower_bits_mask_;
 }
 
 template <typename T>
-std::optional<T> EliasFanoDecoder<T>::next() {
-    if (position_ == size_) {
-        if (!init()) { // read the next chunk of compressed data
-            if (remove_source_) {
-                std::filesystem::remove(source_name_);
-                std::filesystem::remove(source_name_ + ".up");
+size_t EliasFanoDecoder<T>::decompress_next_block() {
+    buffer_pos_ = 0;
+    buffer_end_ = 0;
+
+    if (position_ == static_cast<size_t>(-1))
+        return 0;
+
+    size_t block_begin = position_;
+    size_t block_end = std::min(size_, position_ + sizeof(buffer_) / sizeof(T));
+
+    while (true) {
+        if (position_ == block_end) {
+            // rollback #position_ and read the upper bits
+            buffer_end_ -= (block_end - block_begin);
+            position_ = block_begin;
+            while (position_ < block_end) {
+                buffer_[buffer_end_] |= (next_upper() << num_lower_bits_);
+                buffer_[buffer_end_] += offset_;
+                buffer_end_++;
+                position_++;
             }
-            return {};
+            if (buffer_end_ == sizeof(buffer_) / sizeof(T)) {
+                break;
+            }
+            assert(position_ == size_);
+            if (!init()) { // read the next chunk of compressed data
+                if (remove_source_) {
+                    std::filesystem::remove(source_name_);
+                    std::filesystem::remove(source_name_ + ".up");
+                }
+                position_ = static_cast<size_t>(-1);
+                break;
+            }
+            assert(position_ == 0U);
+            block_begin = 0;
+            block_end = std::min(size_, sizeof(buffer_) / sizeof(T) - buffer_end_);
+        } else {
+            buffer_[buffer_end_++] = next_lower();
+            position_++;
         }
     }
-    T result = next_lower() | (next_upper() << num_lower_bits_);
-    position_++;
-    return result + offset_;
+
+    return buffer_end_;
 }
 
 // TODO: make this public and avoid reconstruction
@@ -445,6 +474,8 @@ bool EliasFanoDecoder<T>::init() {
     }
     source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
     source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
+    assert(num_lower_bits_ < 8 * sizeof(T));
+    lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
     source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
     source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
     size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
@@ -458,12 +489,6 @@ bool EliasFanoDecoder<T>::init() {
     assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
 
     return true;
-}
-
-template <typename T>
-T EliasFanoDecoder<T>::clear_high_bits(T value, uint8_t index) {
-    assert(index < 8 * sizeof(T));
-    return value & ((T(1) << index) - 1UL);
 }
 
 // -------------------------- EliasFanoEncoder<std::pair> -------------------------------
@@ -501,22 +526,6 @@ EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source,
         logger->error("Unable to read from {}", source_second_name_);
         std::exit(EXIT_FAILURE);
     }
-}
-
-template <typename T, typename C>
-std::optional<std::pair<T, C>> EliasFanoDecoder<std::pair<T, C>>::next() {
-    std::optional<T> first = source_first_.next();
-    C second;
-    if (!first.has_value()) {
-        assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
-        if (remove_source_) {
-            std::filesystem::remove(source_second_name_);
-        }
-        return {};
-    }
-    source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
-    assert(source_second_);
-    return std::make_pair(first.value(), second);
 }
 
 // ------------------------------ EliasFanoEncoderBuffered ----------------------------
