@@ -208,10 +208,9 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T max_value,
                                       const std::string &out_filename)
     : declared_size_(size), offset_(min_value) {
-    sink_internal_ = std::ofstream(out_filename, std::ios::binary | std::ios::out);
+    sink_internal_ = std::ofstream(out_filename, std::ios::binary);
     sink_ = &sink_internal_;
-    sink_internal_upper_
-            = std::ofstream(out_filename + ".up", std::ios::binary | std::ios::out);
+    sink_internal_upper_ = std::ofstream(out_filename + ".up", std::ios::binary);
     sink_upper_ = &sink_internal_upper_;
     if (!sink_->good() || !sink_upper_->good()) {
         logger->error("Unable to write to {}", out_filename);
@@ -475,7 +474,7 @@ EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     const std::string &sink_name)
     : ef_encoder(size, first_value, last_value, sink_name),
       sink_second_name_(sink_name + ".count"),
-      sink_second_(sink_second_name_, std::ios::binary | std::ios::out) {}
+      sink_second_(sink_second_name_, std::ios::binary) {}
 
 template <typename T, typename C>
 void EliasFanoEncoder<std::pair<T, C>>::add(const std::pair<T, C> &value) {
@@ -525,8 +524,8 @@ template <typename T>
 EliasFanoEncoderBuffered<T>::EliasFanoEncoderBuffered(const std::string &file_name,
                                                       size_t buffer_size)
     : file_name_(file_name) {
-    sink_ = std::ofstream(file_name, std::ios::binary | std::ios::out);
-    sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary | std::ios::out);
+    sink_ = std::ofstream(file_name, std::ios::binary);
+    sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary);
     buffer_.reserve(buffer_size);
 }
 
@@ -555,10 +554,10 @@ void EliasFanoEncoderBuffered<T>::encode_chunk() {
 template <typename T, typename C>
 EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::string &file_name,
                                                                     size_t buffer_size)
-    : file_name_(file_name) {
-    sink_ = std::ofstream(file_name, std::ios::binary | std::ios::out);
-    sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary | std::ios::out);
-    sink_second_ = std::ofstream(file_name + ".count", std::ios::binary | std::ios::out);
+    : sink_(file_name, std::ios::binary),
+      sink_upper_(file_name + ".up", std::ios::binary),
+      sink_second_(file_name + ".count", std::ios::binary),
+      file_name_(file_name) {
     buffer_.reserve(buffer_size);
     buffer_second_.reserve(buffer_size);
 }
