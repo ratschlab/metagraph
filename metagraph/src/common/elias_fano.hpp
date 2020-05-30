@@ -177,12 +177,6 @@ class EliasFanoDecoder {
     /** Decompressed the next block into buffer and returns the number of elements in it */
     size_t decompress_next_block();
 
-    /** Returns the upper part of the next compressed element */
-    T next_upper();
-
-    /** Returns the lower part of the next compressed element */
-    T next_lower();
-
   private:
     /** Index of current element */
     size_t position_ = 0;

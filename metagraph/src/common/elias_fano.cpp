@@ -376,43 +376,6 @@ EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool remov
 }
 
 template <typename T>
-T EliasFanoDecoder<T>::next_upper() {
-    // Skip to the first non-zero block.
-    while (upper_block_ == 0U) {
-        upper_pos_ += sizeof(T);
-        upper_block_ = load_unaligned<T>(upper_.data() + upper_pos_);
-    }
-
-    size_t trailing_zeros = count_trailing_zeros(upper_block_);
-
-    upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
-
-    return static_cast<T>(8 * upper_pos_ + trailing_zeros - position_);
-}
-
-template <typename T>
-T EliasFanoDecoder<T>::next_lower() {
-    assert(position_ < size_);
-    assert(num_lower_bits_ < 8 * sizeof(T));
-    const size_t pos_bits = position_ * num_lower_bits_;
-    if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
-        cur_pos_bits_ += 8 * sizeof(T);
-        lower_idx_++;
-        if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
-            const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
-            lower_[0] = lower_[lower_idx_];
-            source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
-            num_lower_bytes_ -= to_read;
-            lower_idx_ = 0;
-        }
-    }
-    const size_t adjusted_pos = pos_bits - cur_pos_bits_;
-    const uint8_t *ptr
-            = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
-    return (load_unaligned<T>(ptr) >> (adjusted_pos % 8)) & lower_bits_mask_;
-}
-
-template <typename T>
 size_t EliasFanoDecoder<T>::decompress_next_block() {
     buffer_pos_ = 0;
     buffer_end_ = 0;
@@ -429,7 +392,15 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
             buffer_end_ -= (block_end - block_begin);
             position_ = block_begin;
             while (position_ < block_end) {
-                buffer_[buffer_end_] |= (next_upper() << num_lower_bits_);
+                // Skip to the first non-zero block.
+                while (upper_block_ == 0U) {
+                    upper_pos_ += sizeof(T);
+                    upper_block_ = load_unaligned<T>(upper_.data() + upper_pos_);
+                }
+                size_t trailing_zeros = count_trailing_zeros(upper_block_);
+                upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
+                T upper = 8 * upper_pos_ + trailing_zeros - position_;
+                buffer_[buffer_end_] |= (upper << num_lower_bits_);
                 buffer_[buffer_end_] += offset_;
                 buffer_end_++;
                 position_++;
@@ -445,7 +416,25 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
             block_begin = 0;
             block_end = std::min(size_, sizeof(buffer_) / sizeof(T) - buffer_end_);
         } else {
-            buffer_[buffer_end_++] = next_lower();
+            assert(position_ < size_);
+            assert(num_lower_bits_ < 8 * sizeof(T));
+            const size_t pos_bits = position_ * num_lower_bits_;
+            if (pos_bits - cur_pos_bits_ >= 8 * sizeof(T)) {
+                cur_pos_bits_ += 8 * sizeof(T);
+                lower_idx_++;
+                if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
+                    const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
+                    lower_[0] = lower_[lower_idx_];
+                    source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
+                    num_lower_bytes_ -= to_read;
+                    lower_idx_ = 0;
+                }
+            }
+            const size_t adjusted_pos = pos_bits - cur_pos_bits_;
+            const uint8_t *ptr
+                    = reinterpret_cast<uint8_t *>(&lower_[lower_idx_]) + (adjusted_pos / 8);
+            buffer_[buffer_end_++] = (load_unaligned<T>(ptr) >> (adjusted_pos % 8))
+                                        & lower_bits_mask_;
             position_++;
         }
     }
