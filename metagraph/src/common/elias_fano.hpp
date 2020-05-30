@@ -190,7 +190,7 @@ class EliasFanoDecoder {
     /**
      * Buffer with uncompressed elements.
      */
-    T buffer_[READ_BUF_SIZE * sizeof(T) * 8];
+    T buffer_[READ_BUF_SIZE];
     size_t buffer_pos_ = 0;
     size_t buffer_end_ = 0;
 
