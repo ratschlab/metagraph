@@ -417,7 +417,7 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
     buffer_pos_ = 0;
     buffer_end_ = 0;
 
-    if (position_ == static_cast<size_t>(-1))
+    if (size_ == static_cast<size_t>(-1))
         return 0;
 
     size_t block_begin = position_;
@@ -439,11 +439,6 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
             }
             assert(position_ == size_);
             if (!init()) { // read the next chunk of compressed data
-                if (remove_source_) {
-                    std::filesystem::remove(source_name_);
-                    std::filesystem::remove(source_name_ + ".up");
-                }
-                position_ = static_cast<size_t>(-1);
                 break;
             }
             assert(position_ == 0U);
@@ -470,6 +465,11 @@ bool EliasFanoDecoder<T>::init() {
     // #next_upper.
     upper_pos_ = static_cast<uint64_t>(-sizeof(T));
     if (!source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
+        if (remove_source_) {
+            std::filesystem::remove(source_name_);
+            std::filesystem::remove(source_name_ + ".up");
+        }
+        size_ = static_cast<size_t>(-1);
         return false;
     }
     source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
