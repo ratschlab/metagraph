@@ -393,9 +393,10 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
             position_ = block_begin;
             while (position_ < block_end) {
                 // Skip to the first non-zero block.
-                while (upper_block_ == 0U) {
+                if (upper_block_ == 0U) {
                     upper_pos_ += sizeof(T);
                     upper_block_ = load_unaligned<T>(upper_.data() + upper_pos_);
+                    assert(upper_block_);
                 }
                 size_t trailing_zeros = count_trailing_zeros(upper_block_);
                 upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
