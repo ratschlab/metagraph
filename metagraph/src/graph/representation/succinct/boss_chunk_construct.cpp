@@ -278,21 +278,6 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     }
 }
 
-template <typename T_INT, typename KMER, typename INT>
-void handle_dummy_sink(size_t k,
-                       KMER kmer,
-                       common::MergeDecoder<T_INT> &dummy_sink_it,
-                       Encoder<INT> *dummy_sink_enc) {
-    kmer.to_next(k + 1, BOSS::kSentinelCode);
-    INT v = 0;
-    while (!dummy_sink_it.empty() && (v = get_first(dummy_sink_it.top())) < kmer.data()) {
-        dummy_sink_it.pop();
-    }
-    if (!KMER::compare_suffix(reinterpret_cast<const KMER &>(v), kmer)) {
-        dummy_sink_enc->add(kmer.data());
-    }
-}
-
 /**
  * Generates non-redundant dummy-1 source k-mers and dummy sink kmers from #kmers.
  * @return a triplet containing the names of the original k-mer blocks, the dummy-1 source
@@ -329,25 +314,12 @@ generate_dummy_1_kmers(size_t k,
                 original_split_by_F_W.begin() + (F - 1) * (ALPHABET_LEN - 1),
                 original_split_by_F_W.begin() + F * (ALPHABET_LEN - 1));
         common::MergeDecoder<T_INT> it(F_chunks, false);
-        common::MergeDecoder<T_INT> dummy_sink_it(F_chunks, false);
-
-       // TODO: think about this
-       //
-       //   ***F*
-       //  $***F
-       //
-       //  N***F
-       //   ***F$
-       //
-       //   ***FA
-       //
 
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
             W_chunks.push_back(original_split_by_F_W[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
         }
         common::ConcatDecoder<T_INT> sink_gen_it(W_chunks);
-
         while (!it.empty()) {
             KMER dummy_source(get_first(it.pop()));
             // skip k-mers that would generate identical source dummy k-mers
@@ -355,16 +327,23 @@ generate_dummy_1_kmers(size_t k,
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
             while (!sink_gen_it.empty()
-                    && get_first(sink_gen_it.top()) <= dummy_source.data()) {
+                    && get_first(sink_gen_it.top()) < dummy_source.data()) {
                 KMER v(get_first(sink_gen_it.pop()));
-                // check the dummy sink k-mer corresponding to v for redundancy
-                handle_dummy_sink(k, v, dummy_sink_it, &dummy_sink_chunks[F]);
-                // skip k-mers with the same suffix as v, as they generate identical dummy sinks
+                // skip k-mers with the same suffix as v, as they generate identical dummy
+                // sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
+                v.to_next(k + 1, BOSS::kSentinelCode);
+                dummy_sink_chunks[F].add(v.data());
             }
             if (!sink_gen_it.empty()) {
                 KMER top(get_first(sink_gen_it.top()));
                 if (KMER::compare_suffix(top, dummy_source, 1)) {
+                    // The source dummy k-mer #dummy_source generated from #it is
+                    // redundant iff it shares its suffix with another real k-mer (#top).
+                    // In this case, #top generates a dummy sink k-mer redundant with #it.
+                    // So if #dummy_source is redundant, the sink generated from #top is
+                    // also redundant - so it's being skipped
+                    skip_same_suffix(top, sink_gen_it, 1);
                     continue;
                 }
             }
@@ -373,8 +352,9 @@ generate_dummy_1_kmers(size_t k,
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER v(get_first(sink_gen_it.pop()));
-            handle_dummy_sink(k, v, dummy_sink_it, &dummy_sink_chunks[F]);
             skip_same_suffix(v, sink_gen_it, 1);
+            v.to_next(k + 1, BOSS::kSentinelCode);
+            dummy_sink_chunks[F].add(v.data());
         }
     }
 
@@ -475,7 +455,11 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     // add the main dummy source k-mer
-    kmers->push(T());
+    if constexpr (utils::is_pair_v<T>) {
+        kmers->push({KMER(0), 0});
+    } else {
+        kmers->push(KMER(0));
+    }
     // push all other dummy and non-dummy k-mers to |kmers|
     async_worker.enqueue([kmers, real_split_by_W, dummy_chunks]() {
         std::function<void(const T_INT &)> on_new_item
