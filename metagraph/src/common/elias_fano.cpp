@@ -163,38 +163,6 @@ inline uint32_t log2_floor(const sdsl::uint256_t &x) {
     return x.hi();
 }
 
-/** Returns the trailing zeros in the binary representation of a number */
-template <typename T>
-inline uint32_t count_trailing_zeros(T v) {
-    assert(v != 0U);
-    return sdsl::bits::lo(v);
-}
-
-
-template <>
-inline uint32_t count_trailing_zeros(sdsl::uint128_t v) {
-    assert(v != 0U);
-    uint64_t lo = static_cast<uint64_t>(v);
-    if (lo != 0) {
-        return count_trailing_zeros(lo);
-    } else {
-        uint64_t hi = static_cast<uint64_t>(v >> 64);
-        return 64 + count_trailing_zeros(hi);
-    }
-}
-
-template <>
-inline uint32_t count_trailing_zeros(sdsl::uint256_t v) {
-    assert(v != 0U);
-    sdsl::uint128_t lo = static_cast<sdsl::uint128_t>(v);
-    if (lo != 0U) {
-        return count_trailing_zeros(lo);
-    } else {
-        sdsl::uint128_t hi = static_cast<sdsl::uint128_t>(v >> 128);
-        return 128 + count_trailing_zeros(hi);
-    }
-}
-
 static void safe_close(std::ofstream &sink) {
     if (sink.is_open()) {
         sink.close();
