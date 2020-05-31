@@ -453,8 +453,11 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
     kmers->reset();
     // add the main dummy source k-mer
-    T all_dummy;
-    kmers->push(*((T *)memset(&all_dummy, 0, sizeof(T))));
+    if constexpr (utils::is_pair_v<T>) {
+        kmers->push({KMER(0), 0});
+    } else {
+        kmers->push(KMER(0));
+    }
     // push all other dummy and non-dummy k-mers to |kmers|
     async_worker.enqueue([kmers, real_split_by_W, dummy_chunks]() {
         std::function<void(const T_INT &)> on_new_item
