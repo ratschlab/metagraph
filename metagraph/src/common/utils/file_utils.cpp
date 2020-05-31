@@ -90,9 +90,9 @@ bool check_if_writable(const std::string &filename) {
 
 TempFile::TempFile(const std::string &tmp_dir)
       : tmp_file_name_((tmp_dir.size()
-                          ? tmp_dir
-                          : std::filesystem::temp_directory_path().string())
-                                                + std::string("/tmp.XXXXXX")) {
+                          ? std::filesystem::path(tmp_dir)
+                          : std::filesystem::temp_directory_path()
+                        )/"tmp.XXXXXX") {
     // create a file
     int fd = mkstemp(tmp_file_name_.data());
     if (fd == -1)
