@@ -191,9 +191,6 @@ class EliasFanoDecoder {
     /** Current position in the #upper_ vector */
     uint64_t upper_pos_;
 
-    /** The sequence of 8 upper bytes currently being processed */
-    T upper_block_;
-
     /** Number of lower bits that were read from disk. */
     size_t cur_pos_bits_;
 
@@ -211,7 +208,7 @@ class EliasFanoDecoder {
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
      * encoding, with a 1 followed by as many zeros as the value to encode.
      */
-    std::vector<char> upper_;
+    std::vector<uint64_t> upper_;
 
     /** Total number of elements encoded. */
     size_t size_ = 0;

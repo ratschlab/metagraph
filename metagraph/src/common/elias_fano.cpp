@@ -393,13 +393,12 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
             position_ = block_begin;
             while (position_ < block_end) {
                 // Skip to the first non-zero block.
-                while (upper_block_ == 0U) {
-                    upper_pos_ += sizeof(T);
-                    upper_block_ = load_unaligned<T>(upper_.data() + upper_pos_);
+                while (upper_[upper_pos_] == 0U) {
+                    upper_pos_++;
                 }
-                size_t trailing_zeros = count_trailing_zeros(upper_block_);
-                upper_block_ = upper_block_ & (upper_block_ - 1UL); // reset the lowest 1 bit
-                T upper = 8 * upper_pos_ + trailing_zeros - position_;
+                size_t trailing_zeros = sdsl::bits::lo(upper_[upper_pos_]);
+                upper_[upper_pos_] &= (upper_[upper_pos_] - 1UL); // reset the lowest 1 bit
+                T upper = 64 * upper_pos_ + trailing_zeros - position_;
                 buffer_[buffer_end_] |= (upper << num_lower_bits_);
                 buffer_[buffer_end_] += offset_;
                 buffer_end_++;
@@ -447,12 +446,9 @@ template <typename T>
 bool EliasFanoDecoder<T>::init() {
     position_ = 0;
     cur_pos_bits_ = 0;
-    upper_block_ = 0;
     lower_idx_ = 0;
     memset(lower_, 0, sizeof(lower_));
-    // Initialized to a negative number to save on decrement instruction in
-    // #next_upper.
-    upper_pos_ = static_cast<uint64_t>(-sizeof(T));
+    upper_pos_ = 0;
     if (!source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
         if (remove_source_) {
             std::filesystem::remove(source_name_);
@@ -473,8 +469,8 @@ bool EliasFanoDecoder<T>::init() {
 
     // Reserve a bit extra space for unaligned reads and set all to
     // zero to silence Valgrind uninitilized memory warnings
-    upper_.resize(num_upper_bytes_ + sizeof(T) - 1, 0);
-    source_upper_.read(upper_.data(), num_upper_bytes_);
+    upper_.resize((num_upper_bytes_ + 7) / 8, 0);
+    source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
 
     return true;
