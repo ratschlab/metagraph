@@ -16,8 +16,7 @@
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
 
-using mg::common::logger;
-using mg::common::get_verbose;
+using mtg::common::logger;
 
 
 int augment_graph(Config *config) {

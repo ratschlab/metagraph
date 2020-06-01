@@ -12,6 +12,10 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
+
+namespace mtg {
+namespace test {
+
 typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
 
 
@@ -433,3 +437,6 @@ template void test_matrix<RainbowfishBuffer<3>>(const RainbowfishBuffer<3>&, con
 template void test_matrix<RainbowfishBuffer<4>>(const RainbowfishBuffer<4>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<5>>(const RainbowfishBuffer<5>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<6>>(const RainbowfishBuffer<6>&, const BitVectorPtrArray &);
+
+} // namespace test
+} // namespace mtg

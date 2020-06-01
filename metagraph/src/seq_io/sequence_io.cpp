@@ -8,6 +8,10 @@
 #include "common/utils/string_utils.hpp"
 #include "vcf_parser.hpp"
 
+
+namespace mtg {
+namespace seq_io {
+
 const char kDefaultFastQualityChar = 'I';
 
 // Optimal values found from a grid search with the BM_WriteRandomSequences benchmark
@@ -565,3 +569,6 @@ void read_vcf_file_with_annotations_critical(
         vcf.call_annotated_sequences(callback, annots);
     }
 }
+
+} // namespace seq_io
+} // namespace mtg

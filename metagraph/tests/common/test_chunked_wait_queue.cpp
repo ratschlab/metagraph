@@ -8,10 +8,11 @@
 
 #include <cstdint>
 
+
 namespace {
 
-using namespace mg;
-using common::ChunkedWaitQueue;
+using namespace mtg;
+using mtg::common::ChunkedWaitQueue;
 
 TEST(WaitQueue, PushPop) {
     constexpr size_t buffer_size = 4;

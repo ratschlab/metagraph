@@ -5,7 +5,7 @@
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,

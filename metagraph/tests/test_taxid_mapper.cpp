@@ -5,6 +5,9 @@
 
 #include "common/taxid_mapper.hpp"
 
+
+namespace {
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_accession2taxid = test_data_dir + "/nucl_gb_accession2taxid.head.gz";
 const std::string test_nodes = test_data_dir + "/nodes.dmp.head";
@@ -209,3 +212,5 @@ TEST(TaxIDMapper, SerializeLoad) {
     test_id_to_ancestor_labeled(mapper);
     test_id_to_ancestor_with_rank_label(mapper);
 }
+
+} // namespace

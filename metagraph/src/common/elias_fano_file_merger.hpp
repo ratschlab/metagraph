@@ -11,7 +11,7 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -256,4 +256,4 @@ void merge_dummy(const std::vector<std::string> &sources,
 }
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

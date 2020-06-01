@@ -10,6 +10,10 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+
+namespace mtg {
+namespace kmer {
+
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer) that is stored in a BOSS table.
  * Just like #KMer, each character in the k-mer uses L bits of the internal representation
@@ -213,5 +217,8 @@ std::ostream& operator<<(std::ostream &os, const KMerBOSS<G, L> &kmer) {
     kmer.print_hex(os);
     return os;
 }
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_BOSS_HPP__

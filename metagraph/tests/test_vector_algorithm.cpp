@@ -5,6 +5,10 @@
 #include "test_helpers.hpp"
 
 
+namespace {
+
+using namespace mtg;
+
 TEST(IntVector, call_nonzeros_all_zeros) {
     for (size_t w = 1; w <= 64; ++w) {
         sdsl::int_vector<> vector(300, 0, w);
@@ -809,3 +813,5 @@ TEST(select_support_scan_offset, vector_random) {
         }
     }
 }
+
+} // namespace

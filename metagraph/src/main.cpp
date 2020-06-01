@@ -16,13 +16,14 @@
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
 
-using mg::common::logger;
+using namespace mtg;
+using mtg::common::logger;
 
 
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
-    logger->set_level(mg::common::get_verbose()
+    logger->set_level(common::get_verbose()
                             ? spdlog::level::trace
                             : spdlog::level::info);
     //logger->set_pattern("%^date %x....%$  %v");

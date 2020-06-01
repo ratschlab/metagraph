@@ -12,7 +12,11 @@
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 
-using namespace mg::bitmap_graph;
+
+namespace mtg {
+namespace test {
+
+using namespace mtg::bitmap_graph;
 
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {
@@ -104,5 +108,8 @@ typedef ::testing::Types<DBGHashFast,
                          DBGSuccinct,
                          DBGSuccinctIndexed<10>,
                          DBGSuccinctBloomFPR<1, 10>> FewGraphTypes;
+
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_DBG_HELPERS_HPP__

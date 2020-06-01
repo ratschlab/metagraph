@@ -30,6 +30,15 @@
 #include "cli/config/config.hpp"
 #include "method_constructors.hpp"
 
+
+int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double *alpha_est_ptr, double *beta_est_ptr,
+                                 double *false_pos_ptr, double *false_neg_ptr);
+
+
+namespace mtg {
+namespace experiments {
+
 using namespace std::chrono_literals;
 
 using TCLAP::ValueArg;
@@ -281,11 +290,6 @@ void dump_column_slice(const bit_vector &column,
                               [&](auto i) { out << i << "\n"; });
 }
 
-int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
-                                 double *alpha_est_ptr, double *beta_est_ptr,
-                                 double *false_pos_ptr, double *false_neg_ptr);
-
-
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
@@ -358,6 +362,13 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
               << filename << std::endl;
     exit(1);
 }
+
+} // namespace experiments
+} // namespace mtg
+
+
+using namespace mtg;
+using namespace experiments;
 
 
 int main(int argc, char *argv[]) {
@@ -964,7 +975,7 @@ int main(int argc, char *argv[]) {
 
                     std::vector<uint64_t> hist;
 
-                    kmc::read_kmers(file, [&](std::string_view, uint64_t count) {
+                    seq_io::read_kmers(file, [&](std::string_view, uint64_t count) {
                         min_count = std::min(min_count, count);
                         max_count = std::max(max_count, count);
                         sum_counts += count;
@@ -1035,11 +1046,11 @@ int main(int argc, char *argv[]) {
             std::string align_regime = align_regime_arg.getValue();
             std::string cur_alphabet = alphabet_arg.getValue();
             const char *alphabet = cur_alphabet == "dna"
-                ? alphabets::kAlphabetDNA
-                : alphabets::kAlphabetProtein;
+                ? kmer::alphabets::kAlphabetDNA
+                : kmer::alphabets::kAlphabetProtein;
             const uint8_t *alphabet_encoding = cur_alphabet == "dna"
-                ? alphabets::kCharToDNA
-                : alphabets::kCharToProtein;
+                ? kmer::alphabets::kCharToDNA
+                : kmer::alphabets::kCharToProtein;
             std::string mode = mode_arg.getValue();
             std::string file = file_arg.getValue();
             cmd.reset();

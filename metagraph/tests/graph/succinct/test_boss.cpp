@@ -8,7 +8,12 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
 
+
+namespace {
+
 KSEQ_INIT(gzFile, gzread);
+
+using namespace mtg;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -2079,3 +2084,5 @@ TEST(BOSS, map_to_edges) {
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
 }
+
+} // namespace

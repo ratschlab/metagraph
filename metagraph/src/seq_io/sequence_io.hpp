@@ -12,6 +12,10 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 
+
+namespace mtg {
+namespace seq_io {
+
 KSEQ_INIT(gzFile, gzread);
 
 
@@ -210,5 +214,8 @@ FastaParser::begin() const { return iterator(filename_, with_reverse_complement_
 
 FastaParser::iterator
 FastaParser::end() const { return iterator(); }
+
+} // namespace seq_io
+} // namespace mtg
 
 #endif // __SEQUENCE_IO__

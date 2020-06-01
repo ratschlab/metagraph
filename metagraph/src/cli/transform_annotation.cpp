@@ -13,8 +13,8 @@
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
 
-using mg::common::logger;
-using mg::common::get_verbose;
+using mtg::common::logger;
+using mtg::common::get_verbose;
 using namespace annotate;
 
 typedef MultiLabelEncoded<std::string> Annotator;

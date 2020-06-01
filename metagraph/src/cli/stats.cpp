@@ -14,8 +14,9 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 
-using mg::common::logger;
-using mg::common::get_verbose;
+using namespace mtg;
+using mtg::common::logger;
+using mtg::common::get_verbose;
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;
 
@@ -117,7 +118,7 @@ void print_stats(const DeBruijnGraph &graph) {
 }
 
 template <class KmerHasher>
-void print_bloom_filter_stats(const KmerBloomFilter<KmerHasher> *kmer_bloom) {
+void print_bloom_filter_stats(const kmer::KmerBloomFilter<KmerHasher> *kmer_bloom) {
     if (!kmer_bloom)
         return;
 
