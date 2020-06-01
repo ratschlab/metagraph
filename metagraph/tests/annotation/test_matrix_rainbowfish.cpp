@@ -4,6 +4,11 @@
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <int BufferSize>
 void test_rainbowfish_buffer(const uint64_t num_rows) {
     const std::vector<bit_vector_stat> vectors {
@@ -61,3 +66,5 @@ TEST(BinaryMatrixRainbowfishTest, BufferAllSizes) {
 
     test_rainbowfish_buffer<6>(7);
 }
+
+} // namespace

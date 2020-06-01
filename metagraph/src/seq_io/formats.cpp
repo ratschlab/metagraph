@@ -3,6 +3,9 @@
 #include <algorithm>
 
 
+namespace mtg {
+namespace seq_io {
+
 std::string file_format(const std::string &fname) {
     size_t dotind = fname.rfind(".");
     if (dotind == std::string::npos)
@@ -33,3 +36,6 @@ std::string file_format(const std::string &fname) {
         return "FASTA";
     }
 }
+
+} // namespace seq_io
+} // namespace mtg

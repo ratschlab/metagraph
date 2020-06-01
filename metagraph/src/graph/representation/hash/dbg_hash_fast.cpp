@@ -13,7 +13,8 @@
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
+using mtg::kmer::KmerExtractor2Bit;
 
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>

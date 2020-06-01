@@ -7,7 +7,7 @@
 #include "common/elias_fano_file_merger.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 template <typename T>
@@ -240,4 +240,4 @@ template class SortedSetDiskBase<std::pair<sdsl::uint128_t, uint32_t>>;
 template class SortedSetDiskBase<std::pair<sdsl::uint256_t, uint32_t>>;
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

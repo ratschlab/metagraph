@@ -9,7 +9,7 @@
 #include "common/vector.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 // Thread safe data storage for counting
@@ -104,6 +104,6 @@ void SortedMultiset<T, C, Container>::insert(Iterator begin, Iterator end) {
 }
 
 } // namespace common
-} // namespace mg
+} // namespace mtg
 
 #endif // __SORTED_MULTISET_HPP__

@@ -16,7 +16,7 @@
 
 namespace utils {
 
-using mg::common::logger;
+using mtg::common::logger;
 
 std::vector<std::string> TMP_DIRS;
 

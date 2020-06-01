@@ -11,7 +11,7 @@
 #include <common/utils/template_utils.hpp>
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 void concat(const std::vector<std::string> &files, const std::string &result) {
@@ -590,4 +590,4 @@ template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint16_t>>;
 template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint32_t>>;
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

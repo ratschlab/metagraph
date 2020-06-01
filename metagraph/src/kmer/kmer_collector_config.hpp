@@ -1,6 +1,6 @@
 #pragma once
 
-namespace mg {
+namespace mtg {
 namespace kmer {
 
 /**
@@ -16,4 +16,4 @@ enum class ContainerType {
 };
 
 } // namespace kmer
-} // namespace mg
+} // namespace mtg

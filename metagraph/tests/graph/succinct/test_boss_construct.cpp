@@ -19,11 +19,12 @@
 #include "kmer/kmer_collector.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
-namespace {
-using namespace mg;
-using namespace mg::succinct;
 
-KSEQ_INIT(gzFile, gzread);
+namespace {
+
+using namespace mtg;
+using namespace mtg::succinct;
+using mtg::kmer::KmerExtractorBOSS;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -67,9 +68,9 @@ TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
 
 #define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
+typedef ::testing::Types<kmer::KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
+                         kmer::KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
+                         kmer::KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
 
 TYPED_TEST_SUITE(CollectKmers, KmerTypes);
 TYPED_TEST_SUITE(CountKmers, KmerTypes);

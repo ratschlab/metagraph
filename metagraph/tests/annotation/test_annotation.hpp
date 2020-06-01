@@ -11,6 +11,9 @@
 #include "annotation/annotation_converters.hpp"
 
 
+namespace mtg {
+namespace test {
+
 template <typename... Args>
 class RowCompressedParallel : public annotate::RowCompressed<Args...> {
   public:
@@ -166,5 +169,8 @@ TYPED_TEST_SUITE(AnnotatorStaticTest, AnnotatorStaticTypes);
 TYPED_TEST_SUITE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
+
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_ANNOTATION_HPP__

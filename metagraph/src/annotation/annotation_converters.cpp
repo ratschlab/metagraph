@@ -20,8 +20,8 @@
 
 namespace annotate {
 
-using mg::common::logger;
-using mg::common::get_verbose;
+using namespace mtg;
+using mtg::common::logger;
 
 typedef LabelEncoder<std::string> LEncoder;
 
@@ -53,7 +53,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_columns = annotator.num_labels();
 
     ProgressBar progress_bar(num_rows, "Processing rows",
-                             std::cerr, !get_verbose());
+                             std::cerr, !common::get_verbose());
 
     if (const auto *mat = dynamic_cast<const VectorRowBinMat<>*>(&annotator.get_matrix()))
         const_cast<VectorRowBinMat<>*>(mat)->standardize_rows();
@@ -141,7 +141,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 
     constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows",
-                             std::cerr, !get_verbose());
+                             std::cerr, !common::get_verbose());
 
     auto call_rows = [&](BinaryMatrix::RowCallback callback) {
         auto row_streamer = RowCompressed<Label>::get_row_streamer(filename);
@@ -617,7 +617,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
     uint64_t num_rows = annotator.num_objects();
 
     ProgressBar progress_bar(num_rows, "Serialize rows",
-                             std::cerr, !get_verbose());
+                             std::cerr, !common::get_verbose());
 
     RowCompressed<Label>::serialize(
         outfbase,
@@ -670,7 +670,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &source,
     uint64_t num_rows = source.num_objects();
 
     ProgressBar progress_bar(num_rows, "Rows processed",
-                             std::cerr, !get_verbose());
+                             std::cerr, !common::get_verbose());
 
     const_cast<LabelEncoder<Label>&>(annotator->get_label_encoder())
             = source.get_label_encoder();

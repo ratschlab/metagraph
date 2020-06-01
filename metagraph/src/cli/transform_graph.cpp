@@ -9,7 +9,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 int transform_graph(Config *config) {

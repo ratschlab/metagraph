@@ -8,6 +8,12 @@
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
@@ -458,3 +464,5 @@ TYPED_TEST(DeBruijnGraphTest, RankIncomingEdge) {
                                          graph->kmer_to_node(std::string(k, 'G'))));
     }
 }
+
+} // namespace

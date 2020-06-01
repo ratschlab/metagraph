@@ -14,7 +14,7 @@
 #include "common/threads/threading.hpp"
 
 using utils::remove_suffix;
-using mg::common::logger;
+using mtg::common::logger;
 
 size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 

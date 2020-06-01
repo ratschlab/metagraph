@@ -5,6 +5,11 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = TEST_DATA_DIR;
 
 
@@ -457,3 +462,5 @@ TEST(BOSSMerge, ParallelMergeGraphsRandom_15_5_20_39_10) {
 TEST(BOSSMerge, ParallelMergeGraphsRandom_20_10_10_40_9) {
     random_testing_parallel_merge(20, 10, 10, 40, 9);
 }
+
+} // namespace

@@ -9,6 +9,11 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <typename BinMat>
 class BinaryMatrixTest : public ::testing::Test { };
 typedef ::testing::Types<BRWT,
@@ -315,3 +320,5 @@ TYPED_TEST(BinaryMatrixTest, AllMixed6) {
     test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
     test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
 }
+
+} // namespace

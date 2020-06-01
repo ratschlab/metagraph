@@ -6,6 +6,9 @@
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 
 
+namespace mtg {
+namespace test {
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -332,3 +335,6 @@ template bool check_graph<DBGBitmap>(const std::string &, bool, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, bool, bool);
 template bool check_graph<DBGHashFast>(const std::string &, bool, bool);
 template bool check_graph<DBGHashString>(const std::string &, bool, bool);
+
+} // namespace test
+} // namespace mtg

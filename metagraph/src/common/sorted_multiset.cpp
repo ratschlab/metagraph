@@ -5,7 +5,7 @@
 #include <sdsl/uint256_t.hpp>
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 template <typename T, typename C, class Container>
@@ -109,4 +109,4 @@ template class SortedMultiset<sdsl::uint128_t, uint32_t>;
 template class SortedMultiset<sdsl::uint256_t, uint32_t>;
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

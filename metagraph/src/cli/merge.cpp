@@ -10,8 +10,8 @@
 #include "load/load_graph.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
-using mg::common::get_verbose;
+using mtg::common::logger;
+using mtg::common::get_verbose;
 
 
 int merge_graph(Config *config) {

@@ -11,7 +11,8 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 
-using mg::common::logger;
+using namespace mtg::seq_io;
+using mtg::common::logger;
 
 
 void annotate_data(const std::vector<std::string> &files,
@@ -75,7 +76,7 @@ void annotate_data(const std::vector<std::string> &files,
                 forward_and_reverse
             );
         } else if (file_format(file) == "KMC") {
-            kmc::read_kmers(
+            read_kmers(
                 file,
                 [&](std::string_view sequence) {
                     thread_pool.enqueue(
