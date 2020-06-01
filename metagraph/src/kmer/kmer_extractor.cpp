@@ -6,7 +6,7 @@
 #include "common/algorithms.hpp"
 
 
-namespace extractor {
+namespace {
 
 /*
  * Helper functions
@@ -236,8 +236,11 @@ inline void sequence_to_kmers(const TAlphabet *begin,
     }
 }
 
-} // namespace extractor
+} // namespace
 
+
+namespace mtg {
+namespace kmer {
 
 /**
  * KmerExtractorBOSS
@@ -275,25 +278,25 @@ KmerExtractorBOSS::KmerExtractorBOSS() {
 }
 
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::encode(char s) {
-    return extractor::encode(s, kCharToNucleotide);
+    return ::encode(s, kCharToNucleotide);
 }
 
 char KmerExtractorBOSS::decode(TAlphabet c) {
-    return extractor::decode(c, alphabet);
+    return ::decode(c, alphabet);
 }
 
 std::vector<KmerExtractorBOSS::TAlphabet>
 KmerExtractorBOSS::encode(std::string_view sequence) {
-    return extractor::encode(sequence, kCharToNucleotide);
+    return ::encode(sequence, kCharToNucleotide);
 }
 
 std::string KmerExtractorBOSS::decode(const std::vector<TAlphabet> &sequence) {
-    return extractor::decode(sequence, alphabet);
+    return ::decode(sequence, alphabet);
 }
 
 void KmerExtractorBOSS::reverse_complement(std::vector<TAlphabet> *sequence) {
     assert(sequence);
-    return extractor::reverse_complement(sequence->begin(), sequence->end(), kComplementCode);
+    return ::reverse_complement(sequence->begin(), sequence->end(), kComplementCode);
 }
 
 KmerExtractorBOSS::TAlphabet KmerExtractorBOSS::complement(TAlphabet c) {
@@ -367,7 +370,7 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view sequence,
                 std::fill(begin_segm, begin_segm + dummy_prefix_size, 0);
             }
 
-            extractor::sequence_to_kmers<KMER>(begin_segm, end_segm + dummy_suffix_size, k, suffix,
+            ::sequence_to_kmers<KMER>(begin_segm, end_segm + dummy_suffix_size, k, suffix,
                 [&kmers](auto kmer) { kmers->push_back(kmer); },
                 canonical_mode ? kComplementCode : std::vector<uint8_t>(),
                 []() { return false; }
@@ -436,22 +439,22 @@ KmerExtractor2BitTDecl()
 
 KmerExtractor2BitTDecl(typename KmerExtractor2BitT<LogSigma>::TAlphabet)
 ::encode(char s) const {
-    return extractor::encode(s, char_to_code_);
+    return ::encode(s, char_to_code_);
 }
 
 KmerExtractor2BitTDecl(char)
 ::decode(TAlphabet c) const {
-    return extractor::decode(c, alphabet);
+    return ::decode(c, alphabet);
 }
 
 KmerExtractor2BitTDecl(std::vector<typename KmerExtractor2BitT<LogSigma>::TAlphabet>)
 ::encode(std::string_view sequence) const {
-    return extractor::encode(sequence, char_to_code_);
+    return ::encode(sequence, char_to_code_);
 }
 
 KmerExtractor2BitTDecl(std::string)
 ::decode(const std::vector<TAlphabet> &sequence) const {
-    return extractor::decode(sequence, alphabet);
+    return ::decode(sequence, alphabet);
 }
 
 KmerExtractor2BitTDecl(std::vector<std::string>)
@@ -495,7 +498,7 @@ KmerExtractor2BitTDecl(template <typename T> void)
                                          static_cast<TAlphabet>(0));
     size_t i = k - 1;
 
-    extractor::sequence_to_kmers<Kmer<T>>(
+    ::sequence_to_kmers<Kmer<T>>(
         seq.data(), seq.data() + seq.size(), k, suffix,
         [&kmers](auto kmer) { kmers->push_back(kmer); },
         canonical_mode ? complement_code_ : std::vector<uint8_t>(),
@@ -533,7 +536,7 @@ KmerExtractor2BitTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
                                          static_cast<TAlphabet>(0));
     size_t i = k - 1;
 
-    extractor::sequence_to_kmers<KMER>(
+    ::sequence_to_kmers<KMER>(
         seq.data(), seq.data() + seq.size(), k, suffix,
         [&kmers](auto kmer) { kmers.emplace_back(kmer, true); },
         canonical_mode ? complement_code_ : std::vector<uint8_t>(),
@@ -576,3 +579,6 @@ Vector<std::pair<KmerExtractor2Bit::Kmer<T>, bool>> KmerExtractor2Bit \
 ExplicitInstantiation_sequence_to_kmers_vector(uint64_t)
 ExplicitInstantiation_sequence_to_kmers_vector(sdsl::uint128_t)
 ExplicitInstantiation_sequence_to_kmers_vector(sdsl::uint256_t)
+
+} // namespace kmer
+} // namespace mtg

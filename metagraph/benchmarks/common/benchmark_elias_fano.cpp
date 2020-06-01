@@ -9,8 +9,10 @@
 #include "common/vector.hpp"
 #include "common/utils/file_utils.hpp"
 
+
 namespace {
-using namespace mg;
+
+using namespace mtg;
 
 template <typename T>
 class EliasFanoFixture : public benchmark::Fixture {

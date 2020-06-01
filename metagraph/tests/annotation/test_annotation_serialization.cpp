@@ -9,6 +9,11 @@ const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filena
 const std::string test_dump_basename_vec_good = test_dump_basename + "_matrix";
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoad) {
     std::filesystem::remove(test_dump_basename_vec_good);
     std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
@@ -213,3 +218,5 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoad) {
     EXPECT_EQ(convert_to_set({ "Label8" }),
               convert_to_set(this->annotation->get(4)));
 }
+
+} // namespace

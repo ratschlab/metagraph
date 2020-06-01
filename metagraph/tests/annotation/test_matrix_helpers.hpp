@@ -11,6 +11,9 @@
 #include "common/vectors/bit_vector.hpp"
 
 
+namespace mtg {
+namespace test {
+
 class BRWTOptimized : public BRWT {
   public:
     template <typename... Args>
@@ -51,5 +54,7 @@ BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_row
 template <typename TypeParam>
 void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns);
 
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_MATRIX_HELPERS_HPP__

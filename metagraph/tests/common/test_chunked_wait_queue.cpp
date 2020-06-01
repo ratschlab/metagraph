@@ -8,9 +8,10 @@
 
 #include <cstdint>
 
+
 namespace {
 
-using namespace mg;
+using namespace mtg;
 using common::ChunkedWaitQueue;
 
 TEST(WaitQueue, PushPop) {

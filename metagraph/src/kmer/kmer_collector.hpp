@@ -10,7 +10,8 @@
 #include "common/threads/threading.hpp"
 #include "common/batch_accumulator.hpp"
 
-namespace mg {
+
+namespace mtg {
 namespace kmer {
 
 typedef std::function<void(const std::string&)> CallString;
@@ -134,8 +135,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool remove_redundant = true);
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
@@ -146,6 +146,6 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 } // namespace kmer
-} // namespace mg
+} // namespace mtg
 
 #endif // __KMER_COLLECTOR_HPP__

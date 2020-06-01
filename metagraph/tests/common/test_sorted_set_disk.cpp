@@ -14,7 +14,7 @@
 
 
 namespace {
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class SortedSetDiskTest : public ::testing::Test {};
@@ -44,8 +44,7 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8) {
     constexpr size_t max_disk_space = 1e6;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
-    auto nocleanup = [](typename common::SortedSetDisk<T>::storage_type *) {};
-    return common::SortedSetDisk<T>(nocleanup, thread_count, container_size,
+    return common::SortedSetDisk<T>(thread_count, container_size,
                                     "./test_chunk_", max_disk_space);
 }
 
@@ -186,11 +185,9 @@ TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
     constexpr size_t thread_count = 1;
     constexpr size_t reserved_num_elements = 100;
     constexpr size_t max_disk_space = 100;
-    auto nocleanup = [](typename common::SortedSetDisk<TypeParam>::storage_type *) {};
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
-    auto underTest = common::SortedSetDisk<TypeParam>(nocleanup, thread_count,
-                                                      reserved_num_elements,
+    auto underTest = common::SortedSetDisk<TypeParam>(thread_count, reserved_num_elements,
                                                       "./test_chunk_", max_disk_space);
     std::vector<TypeParam> elements(100);
     std::iota(elements.begin(), elements.end(), 0);

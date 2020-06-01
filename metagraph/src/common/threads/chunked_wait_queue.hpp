@@ -13,7 +13,7 @@
 #include "common/logger.hpp"
 #include "threading.hpp"
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -402,4 +402,4 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

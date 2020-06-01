@@ -9,7 +9,7 @@
 #include "common/vector.hpp"
 
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 // Thread safe data storage to extract distinct elements
@@ -23,10 +23,8 @@ class SortedSet {
     typedef Container storage_type;
     typedef Container result_type;
 
-    SortedSet(std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-              size_t num_threads = 1,
-              size_t reserved_num_elements = 0)
-          : num_threads_(num_threads), cleanup_(cleanup) {
+    SortedSet(size_t num_threads = 1, size_t reserved_num_elements = 0)
+          : num_threads_(num_threads) {
         reserve(reserved_num_elements);
     }
 
@@ -41,17 +39,15 @@ class SortedSet {
 
     void clear();
 
-    void sort_and_remove_duplicates(Container *vector, size_t num_threads) const;
-
   private:
     void shrink_data();
+
+    void sort_and_remove_duplicates();
 
     void try_reserve(size_t size, size_t min_size = 0);
 
     storage_type data_;
     size_t num_threads_;
-
-    std::function<void(storage_type *)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;
@@ -95,6 +91,6 @@ void SortedSet<T, Container>::insert(Iterator begin, Iterator end) {
 }
 
 } // namespace common
-} // namespace mg
+} // namespace mtg
 
 #endif // __SORTED_SET_HPP__

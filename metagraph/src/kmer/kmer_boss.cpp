@@ -3,6 +3,9 @@
 #include <sdsl/uint256_t.hpp>
 
 
+namespace mtg {
+namespace kmer {
+
 template <typename G, int L>
 std::string KMerBOSS<G, L>::to_string(size_t k, const std::string &alphabet) const {
     std::string seq(k, '\0');
@@ -33,3 +36,6 @@ template class KMerBOSS<sdsl::uint256_t, 4>;
 template class KMerBOSS<uint64_t, 5>;
 template class KMerBOSS<sdsl::uint128_t, 5>;
 template class KMerBOSS<sdsl::uint256_t, 5>;
+
+} // namespace kmer
+} // namespace mtg

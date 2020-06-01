@@ -20,18 +20,18 @@
 #include "common/sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
 
+
 namespace {
-using namespace mg::bitmap_graph;
-using namespace mg;
 
-
-KSEQ_INIT(gzFile, gzread);
+using namespace mtg;
+using namespace mtg::bitmap_graph;
+using mtg::kmer::KmerExtractor2Bit;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef KMer<uint64_t, KmerExtractor2Bit::bits_per_char> KMER;
+typedef kmer::KMer<uint64_t, KmerExtractor2Bit::bits_per_char> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::bits_per_char - 1;
 
 const KmerExtractor2Bit kmer_extractor;
@@ -203,15 +203,14 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         common::SortedSet<KMER::WordType> *kmers,
                                         const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
-                                        bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     using KMER_INT = typename KMER::WordType ;
     kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER_INT>>(
-        [reads](mg::kmer::CallString callback) {
+        [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix, remove_redundant
+        k, false, kmers, suffix
     );
     delete reads;
 }
@@ -222,43 +221,43 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, false, 100'000
+        2, &result, { 1, }, 100'000
     );
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
     EXPECT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 1, }, false, 100'000
+        2, &result, { 1, }, 100'000
     );
     EXPECT_EQ(2u, result.data().size());
 }
@@ -269,35 +268,35 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
-        2, &result, { 1, }, false, 0
+        2, &result, { 1, }, 0
     );
     ASSERT_EQ(2u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, false, 0
+        2, &result, { 1, }, 0
     );
     // #if _DNA4_GRAPH
         // B->A in 2Bit mode
@@ -305,98 +304,6 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
     // #else
     //     ASSERT_EQ(3u, result.data().size());
     // #endif
-}
-
-TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
-    common::SortedSet<typename KMER::WordType> result;
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, true, 100'000
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, true, 100'000
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, true, 100'000
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, true, 100'000
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, true, 100'000
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, true, 100'000
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, true, 100'000
-    );
-    ASSERT_EQ(1u, result.data().size());
-}
-
-TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
-    common::SortedSet<typename KMER::WordType> result;
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, true, 0
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, true, 0
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, true, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, true, 0
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, true, 0
-    );
-    ASSERT_EQ(1u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, true, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, true, 0
-    );
-    ASSERT_EQ(1u, result.data().size());
 }
 
 TEST(DBGBitmapMergeChunks, DumpedChunked) {

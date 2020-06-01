@@ -14,7 +14,7 @@
 
 
 namespace {
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class SortedMultisetDiskTest : public ::testing::Test {};
@@ -24,9 +24,6 @@ typedef ::testing::Types<uint64_t,
                          sdsl::uint256_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedMultisetDiskTest, SortedDiskElementTypes);
-
-template <typename T>
-static void nocleanup(T *) {}
 
 template <typename TypeParam>
 void expect_equals(common::SortedMultisetDisk<TypeParam, uint8_t> &underTest,
@@ -48,8 +45,7 @@ common::SortedMultisetDisk<T, uint8_t> create_sorted_set_disk(size_t container_s
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     return common::SortedMultisetDisk<T, uint8_t>(
-            nocleanup<typename common::SortedMultisetDisk<T>::storage_type>, thread_count,
-            container_size, "./test_chunk_", max_disk_space);
+            thread_count, container_size, "./test_chunk_", max_disk_space);
 }
 
 TYPED_TEST(SortedMultisetDiskTest, Empty) {
@@ -224,7 +220,6 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
             thread_count, container_size, "./test_chunk_", max_disk_space);
     // make sure we correctly count up to the max value of the counter
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
@@ -257,7 +252,6 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
             thread_count, container_size, "./test_chunk_", max_disk_space);
     std::vector<TypeParam> values(container_size / 1.5);
     std::iota(values.begin(), values.end(), 0);

@@ -4,6 +4,12 @@
 
 #include <set>
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::seq_io;
+
 const std::string test_data_dir = "../tests/data/";
 const std::string ref_file = test_data_dir + "test_vcfparse.fa";
 const std::string vcf_file1 = test_data_dir + "test_vcfparse_1.vcf";
@@ -130,3 +136,5 @@ TEST(VCFParse, TestKmerBGZIP) {
     );
     EXPECT_EQ(ref, obs);
 }
+
+} // namespace
