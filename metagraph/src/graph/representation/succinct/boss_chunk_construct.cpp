@@ -64,14 +64,14 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     // TODO: this is a bit of a waste as we usually have less than 2^bits characters
     // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
-    using INT = typename KMER::WordType;
+    using KMER_INT = typename KMER::WordType;
 
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
     std::vector<const T*> it(ALPHABET_LEN + 1);
     for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
-        std::vector<INT> zeros(k + 1, 0);
+        std::vector<KMER_INT> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
                                  KMER(zeros, k + 1), // the $$...i->$ k-mer
@@ -294,13 +294,13 @@ generate_dummy_1_kmers(size_t k,
                        const std::filesystem::path &dir,
                        ChunkedWaitQueue<T> *kmers) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
-    using INT = typename KMER::WordType; // 64/128/256-bit integer
+    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> original_split_by_F_W = split(k, dir, *kmers);
 
-    std::vector<Encoder<INT>> dummy_l1_chunks;
-    std::vector<Encoder<INT>> dummy_sink_chunks;
+    std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
+    std::vector<Encoder<KMER_INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_l1_names(ALPHABET_LEN);
     std::vector<std::string> dummy_sink_names(ALPHABET_LEN);
     for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
@@ -316,13 +316,13 @@ generate_dummy_1_kmers(size_t k,
         std::vector<std::string> F_chunks(  // chunks with k-mers ***F*
                 original_split_by_F_W.begin() + (F - 1) * (ALPHABET_LEN - 1),
                 original_split_by_F_W.begin() + F * (ALPHABET_LEN - 1));
-        common::MergeDecoder<INT> it(F_chunks, false);
+        common::MergeDecoder<KMER_INT> it(F_chunks, false);
 
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
             W_chunks.push_back(original_split_by_F_W[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
         }
-        common::ConcatDecoder<INT> sink_gen_it(W_chunks);
+        common::ConcatDecoder<KMER_INT> sink_gen_it(W_chunks);
         while (!it.empty()) {
             KMER dummy_source(it.pop());
             // skip k-mers that would generate identical source dummy k-mers
@@ -402,7 +402,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                               ThreadPool &async_worker) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
     using T_INT = get_int_t<T>; // either KMER_INT or <KMER_INT, count>
-    using INT = typename KMER::WordType; // 64/128/256-bit integer
+    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
@@ -424,7 +424,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_chunks.push_back(dummy_chunk);
         }
 
-        std::vector<Encoder<INT>> dummy_next_chunks;
+        std::vector<Encoder<KMER_INT>> dummy_next_chunks;
         for (uint32_t i = 0; i < ALPHABET_LEN; ++i) {
             dummy_next_names[i] = dir/("dummy_source_"
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
@@ -433,7 +433,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
         KMER prev_kmer(0);
         uint64_t num_kmers = 0;
-        const std::function<void(const INT &)> &write_dummy = [&](const INT &v) {
+        const std::function<void(const KMER_INT &)> &write_dummy = [&](const KMER_INT &v) {
             KMER kmer(v);
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
             if (prev_kmer != kmer) {
@@ -451,7 +451,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
                       dummy_pref_len, num_kmers);
     }
     // remove the last chunks with .up and .count
-    const std::function<void(const INT &)> on_merge = [](const INT &) {};
+    const std::function<void(const KMER_INT &)> on_merge = [](const KMER_INT &) {};
     common::merge_files(dummy_names, on_merge);
 
     // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,
