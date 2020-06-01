@@ -17,21 +17,20 @@
 
 namespace {
 
-using namespace mtg::seq_io;
+using namespace mtg;
+using mtg::seq_io::kseq_t;
 
 
 template <class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
     std::vector<std::string> sequences;
     std::vector<std::string> labels;
-    read_fasta_file_critical(filename,
-                             [&](kseq_t *stream) {
-                                 for (const auto &label : utils::split_string(stream->name.s, "|")) {
-                                     sequences.emplace_back(stream->seq.s);
-                                     labels.push_back(label);
-                                 }
-                             },
-                             true);
+    seq_io::read_fasta_file_critical(filename, [&](kseq_t *stream) {
+        for (const auto &label : utils::split_string(stream->name.s, "|")) {
+            sequences.emplace_back(stream->seq.s);
+            labels.push_back(label);
+        }
+    }, true);
 
     size_t k = 12;
 
@@ -60,7 +59,7 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
     return construct_query_graph(
         anno_graph,
         [&](std::function<void(const std::string&)> call_sequence) {
-            read_fasta_file_critical(
+            seq_io::read_fasta_file_critical(
                 query_filename,
                 [&](kseq_t *stream) { call_sequence(stream->seq.s); }
             );
@@ -92,7 +91,7 @@ static void BM_GetTopLabels(benchmark::State& state) {
 
         const auto &graph = fast ? *query_graph : *anno_graph;
 
-        read_fasta_file_critical(
+        seq_io::read_fasta_file_critical(
             queries[state.range(0)],
             [&](kseq_t *stream) { graph.get_top_labels(stream->seq.s, -1); }
         );
@@ -119,7 +118,7 @@ static void BM_GetTopLabelSignatures(benchmark::State& state) {
 
         const auto &graph = fast ? *query_graph : *anno_graph;
 
-        read_fasta_file_critical(
+        seq_io::read_fasta_file_critical(
             queries[state.range(0)],
             [&](kseq_t *stream) { graph.get_top_label_signatures(stream->seq.s, -1); }
         );

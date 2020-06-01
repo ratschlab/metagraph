@@ -351,7 +351,7 @@ Config::Config(int argc, char *argv[]) {
     std::unordered_set<std::string> kmc_file_set;
 
     for (auto it = fnames.begin(); it != fnames.end(); ++it) {
-        if (mtg::seq_io::file_format(*it) == "KMC"
+        if (seq_io::file_format(*it) == "KMC"
                 && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
             fnames.erase(it--);
     }

@@ -76,7 +76,7 @@ void annotate_data(const std::vector<std::string> &files,
                 forward_and_reverse
             );
         } else if (file_format(file) == "KMC") {
-            mtg::seq_io::read_kmers(
+            read_kmers(
                 file,
                 [&](std::string_view sequence) {
                     thread_pool.enqueue(

@@ -13,6 +13,9 @@
 
 namespace {
 
+using namespace mtg;
+
+
 constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
 std::vector<std::string> sources;
@@ -47,7 +50,7 @@ static void BM_merge_files(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mtg::common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
+        common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
@@ -65,7 +68,7 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mtg::common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
+        common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });

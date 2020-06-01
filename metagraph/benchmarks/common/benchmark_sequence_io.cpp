@@ -12,18 +12,18 @@
 
 namespace {
 
-using namespace mtg::seq_io;
+using namespace mtg;
 
 const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
 
 
 std::shared_ptr<DeBruijnGraph> build_graph(const std::string &filename) {
     std::vector<std::string> sequences;
-    read_fasta_file_critical(filename,
-                             [&](kseq_t *stream) {
-                                 sequences.emplace_back(stream->seq.s);
-                             },
-                             true);
+    seq_io::read_fasta_file_critical(filename,
+                                     [&](seq_io::kseq_t *stream) {
+                                         sequences.emplace_back(stream->seq.s);
+                                     },
+                                     true);
 
     size_t k = 12;
 
@@ -55,7 +55,7 @@ static void BM_WriteRandomSequences(benchmark::State& state) {
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        mtg::seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
+        seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &sequence : sequences) {
             writer.write(sequence);
         }
@@ -80,7 +80,7 @@ static void BM_WriteContigs(benchmark::State& state) {
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        mtg::seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
+        seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &contig : contigs) {
             writer.write(contig);
         }

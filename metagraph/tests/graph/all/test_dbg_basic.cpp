@@ -137,15 +137,15 @@ TEST(DBGHashString, SerializeAnyK) {
 }
 
 TEST(DBGHashOrdered, SerializeAnyK) {
-    test_graph_serialization<DBGHashOrdered>(256 / mtg::kmer::KmerExtractor2Bit::bits_per_char);
+    test_graph_serialization<DBGHashOrdered>(256 / kmer::KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGHashFast, SerializeAnyK) {
-    test_graph_serialization<DBGHashFast>(256 / mtg::kmer::KmerExtractor2Bit::bits_per_char);
+    test_graph_serialization<DBGHashFast>(256 / kmer::KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGSuccinct, SerializeAnyK) {
-    test_graph_serialization<DBGSuccinct>(256 / (mtg::kmer::KmerExtractor2Bit::bits_per_char + 1));
+    test_graph_serialization<DBGSuccinct>(256 / (kmer::KmerExtractor2Bit::bits_per_char + 1));
 }
 
 TYPED_TEST(DeBruijnGraphTest, InsertSequence) {

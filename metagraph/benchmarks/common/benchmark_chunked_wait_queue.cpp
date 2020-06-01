@@ -12,12 +12,14 @@
 
 namespace {
 
+using namespace mtg;
+
 const std::string chunk_prefix = "/tmp/chunk_";
 
 
 template <typename T>
 static void BM_queue_push_pop(benchmark::State &state) {
-    mtg::common::ChunkedWaitQueue<T> queue(10000);
+    common::ChunkedWaitQueue<T> queue(10000);
     T sum = 0;
     for (auto _ : state) {
         for (uint32_t i = 0; i < 10000; ++i) {

@@ -14,6 +14,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 
+using namespace mtg;
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
@@ -117,7 +118,7 @@ void print_stats(const DeBruijnGraph &graph) {
 }
 
 template <class KmerHasher>
-void print_bloom_filter_stats(const mtg::kmer::KmerBloomFilter<KmerHasher> *kmer_bloom) {
+void print_bloom_filter_stats(const kmer::KmerBloomFilter<KmerHasher> *kmer_bloom) {
     if (!kmer_bloom)
         return;
 

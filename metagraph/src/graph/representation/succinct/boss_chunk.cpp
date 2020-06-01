@@ -150,7 +150,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 
     weights_.width(bits_per_count);
 
-    if constexpr(utils::is_instance_v<Array, mtg::common::ChunkedWaitQueue>) {
+    if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
         initialize_chunk(alph_size_,
                          &kmers_with_counts.begin(),
                          &kmers_with_counts.end(),
@@ -169,7 +169,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 }
 
 template <typename T>
-using CWQ = mtg::common::ChunkedWaitQueue<T>;
+using CWQ = common::ChunkedWaitQueue<T>;
 
 #define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
     template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<__VA_ARGS__> &, uint8_t); \

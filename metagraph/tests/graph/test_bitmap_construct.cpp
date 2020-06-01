@@ -31,7 +31,7 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef mtg::kmer::KMer<uint64_t, KmerExtractor2Bit::bits_per_char> KMER;
+typedef kmer::KMer<uint64_t, KmerExtractor2Bit::bits_per_char> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::bits_per_char - 1;
 
 const KmerExtractor2Bit kmer_extractor;
@@ -207,7 +207,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     kmers->try_reserve(reserved_capacity);
     using KMER_INT = typename KMER::WordType ;
     kmer::extract_kmers<KMER, KmerExtractor2Bit, common::SortedSet<KMER_INT>>(
-        [reads](mtg::kmer::CallString callback) {
+        [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix

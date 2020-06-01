@@ -11,6 +11,9 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "cli/config/config.hpp"
 
+using namespace mtg;
+using mtg::common::logger;
+
 
 Config::GraphType parse_graph_type(const std::string &filename) {
     if (utils::ends_with(filename, DBGSuccinct::kExtension)) {
@@ -25,7 +28,7 @@ Config::GraphType parse_graph_type(const std::string &filename) {
     } else if (utils::ends_with(filename, DBGHashFast::kExtension)) {
         return Config::GraphType::HASH_FAST;
 
-    } else if (utils::ends_with(filename, mtg::bitmap_graph::DBGBitmap::kExtension)) {
+    } else if (utils::ends_with(filename, bitmap_graph::DBGBitmap::kExtension)) {
         return Config::GraphType::BITMAP;
 
     } else {
@@ -52,12 +55,11 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGHashFast>(filename);
 
         case Config::GraphType::BITMAP:
-            return load_critical_graph_from_file<mtg::bitmap_graph::DBGBitmap>(filename);
+            return load_critical_graph_from_file<bitmap_graph::DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            mtg::common::logger->error(
-                    "Cannot load graph from file '{}', needs a valid file extension",
-                    filename);
+            logger->error("Cannot load graph from file '{}', needs a valid file extension",
+                          filename);
             exit(1);
     }
     assert(false);

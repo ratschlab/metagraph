@@ -13,6 +13,8 @@
 
 namespace {
 
+using namespace mtg;
+
 std::vector<double> get_densities(uint64_t num_cols, std::vector<double> densities) {
     if (densities.size() == 1) {
         densities.assign(num_cols, densities[0]);
@@ -54,7 +56,7 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
         if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
-        matrix = mtg::experiments::generate_brwt_from_rows(
+        matrix = experiments::generate_brwt_from_rows(
             std::move(generated_columns),
             arity_arg,
             greedy_arg,
@@ -92,7 +94,7 @@ static void BM_BRWTQueryRows(benchmark::State& state) {
         std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
     );
 
-    std::unique_ptr<BinaryMatrix> matrix = mtg::experiments::generate_brwt_from_rows(
+    std::unique_ptr<BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
         std::move(generated_columns),
         arity_arg,
         greedy_arg,

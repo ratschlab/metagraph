@@ -2,6 +2,8 @@
 
 #include "kmer/alphabets.hpp"
 
+using namespace mtg;
+
 
 Cigar::Cigar(const std::string &cigar_str) {
     std::string op_count;
@@ -39,17 +41,17 @@ Cigar::OperatorTable Cigar::initialize_opt_table() {
 
     // TODO: fix this when alphabets are no longer set at compile time
     #if _PROTEIN_GRAPH
-        const auto *alphabet = mtg::kmer::alphabets::kAlphabetProtein;
-        const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToProtein;
+        const auto *alphabet = kmer::alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToProtein;
     #elif _DNA_CASE_SENSITIVE_GRAPH
-        const auto *alphabet = mtg::kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToDNA;
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA5_GRAPH
-        const auto *alphabet = mtg::kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToDNA;
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA_GRAPH
-        const auto *alphabet = mtg::kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = mtg::kmer::alphabets::kCharToDNA;
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #else
         static_assert(false,
             "Define an alphabet: either "

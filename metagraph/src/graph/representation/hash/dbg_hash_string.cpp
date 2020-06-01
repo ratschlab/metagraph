@@ -6,15 +6,17 @@
 #include "common/serialization.hpp"
 #include "kmer/alphabets.hpp"
 
+using namespace mtg;
+
 
 #if _PROTEIN_GRAPH
-    const std::string DBGHashString::alphabet_ = mtg::kmer::alphabets::kAlphabetProtein;
+    const std::string DBGHashString::alphabet_ = kmer::alphabets::kAlphabetProtein;
 #elif _DNA_CASE_SENSITIVE_GRAPH
-    const std::string DBGHashString::alphabet_ = mtg::kmer::alphabets::kAlphabetDNACaseSent;
+    const std::string DBGHashString::alphabet_ = kmer::alphabets::kAlphabetDNACaseSent;
 #elif _DNA5_GRAPH
-    const std::string DBGHashString::alphabet_ = mtg::kmer::alphabets::kAlphabetDNA5;
+    const std::string DBGHashString::alphabet_ = kmer::alphabets::kAlphabetDNA5;
 #elif _DNA_GRAPH
-    const std::string DBGHashString::alphabet_ = mtg::kmer::alphabets::kAlphabetDNA;
+    const std::string DBGHashString::alphabet_ = kmer::alphabets::kAlphabetDNA;
 #else
     static_assert(false,
         "Define an alphabet: either "

@@ -975,7 +975,7 @@ int main(int argc, char *argv[]) {
 
                     std::vector<uint64_t> hist;
 
-                    mtg::seq_io::read_kmers(file, [&](std::string_view, uint64_t count) {
+                    seq_io::read_kmers(file, [&](std::string_view, uint64_t count) {
                         min_count = std::min(min_count, count);
                         max_count = std::max(max_count, count);
                         sum_counts += count;
@@ -1046,11 +1046,11 @@ int main(int argc, char *argv[]) {
             std::string align_regime = align_regime_arg.getValue();
             std::string cur_alphabet = alphabet_arg.getValue();
             const char *alphabet = cur_alphabet == "dna"
-                ? mtg::kmer::alphabets::kAlphabetDNA
-                : mtg::kmer::alphabets::kAlphabetProtein;
+                ? kmer::alphabets::kAlphabetDNA
+                : kmer::alphabets::kAlphabetProtein;
             const uint8_t *alphabet_encoding = cur_alphabet == "dna"
-                ? mtg::kmer::alphabets::kCharToDNA
-                : mtg::kmer::alphabets::kCharToProtein;
+                ? kmer::alphabets::kCharToDNA
+                : kmer::alphabets::kCharToProtein;
             std::string mode = mode_arg.getValue();
             std::string file = file_arg.getValue();
             cmd.reset();

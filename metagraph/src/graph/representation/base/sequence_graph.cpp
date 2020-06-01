@@ -9,6 +9,8 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
+using namespace mtg;
+
 typedef DeBruijnGraph::node_index node_index;
 
 static const uint64_t kBlockSize = 9'999'872;
@@ -274,7 +276,7 @@ void call_sequences(const DeBruijnGraph &graph,
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
-                             std::cerr, !mtg::common::get_verbose());
+                             std::cerr, !common::get_verbose());
 
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,

@@ -8,6 +8,8 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/config/config.hpp"
 
+using mtg::common::logger;
+
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
@@ -32,7 +34,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::RBFish;
 
     } else {
-        mtg::common::logger->error("Unknown annotation format in '{}'", filename);
+        logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
     }
 }
