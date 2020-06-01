@@ -274,7 +274,7 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
 template <typename Decoder, typename KMER>
 void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     while (!decoder.empty()) {
-        KMER kmer(get_first(decoder.top()));
+        KMER kmer(decoder.top());
         if (!KMER::compare_suffix(kmer, el, suf)) {
             break;
         }
@@ -294,7 +294,6 @@ generate_dummy_1_kmers(size_t k,
                        const std::filesystem::path &dir,
                        ChunkedWaitQueue<T> *kmers) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
-    using T_INT = get_int_t<T>; // either KMER::WordType or <KMER::WordType, count>
     using INT = typename KMER::WordType; // 64/128/256-bit integer
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
@@ -317,22 +316,22 @@ generate_dummy_1_kmers(size_t k,
         std::vector<std::string> F_chunks(  // chunks with k-mers ***F*
                 original_split_by_F_W.begin() + (F - 1) * (ALPHABET_LEN - 1),
                 original_split_by_F_W.begin() + F * (ALPHABET_LEN - 1));
-        common::MergeDecoder<T_INT> it(F_chunks, false);
+        common::MergeDecoder<INT> it(F_chunks, false);
 
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 1; c < ALPHABET_LEN; ++c) {
             W_chunks.push_back(original_split_by_F_W[(c - 1) * (ALPHABET_LEN - 1) + (F - 1)]);
         }
-        common::ConcatDecoder<T_INT> sink_gen_it(W_chunks);
+        common::ConcatDecoder<INT> sink_gen_it(W_chunks);
         while (!it.empty()) {
-            KMER dummy_source(get_first(it.pop()));
+            KMER dummy_source(it.pop());
             // skip k-mers that would generate identical source dummy k-mers
             skip_same_suffix(dummy_source, it, 0);
             dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
             // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
             while (!sink_gen_it.empty()
-                    && get_first(sink_gen_it.top()) < dummy_source.data()) {
-                KMER v(get_first(sink_gen_it.pop()));
+                    && sink_gen_it.top() < dummy_source.data()) {
+                KMER v(sink_gen_it.pop());
                 // skip k-mers with the same suffix as v, as they generate identical dummy
                 // sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
@@ -340,7 +339,7 @@ generate_dummy_1_kmers(size_t k,
                 dummy_sink_chunks[F].add(v.data());
             }
             if (!sink_gen_it.empty()) {
-                KMER top(get_first(sink_gen_it.top()));
+                KMER top(sink_gen_it.top());
                 if (KMER::compare_suffix(top, dummy_source, 1)) {
                     // The source dummy k-mer #dummy_source generated from #it is
                     // redundant iff it shares its suffix with another real k-mer (#top).
@@ -355,7 +354,7 @@ generate_dummy_1_kmers(size_t k,
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
-            KMER v(get_first(sink_gen_it.pop()));
+            KMER v(sink_gen_it.pop());
             skip_same_suffix(v, sink_gen_it, 1);
             v.to_next(k + 1, BOSS::kSentinelCode);
             dummy_sink_chunks[F].add(v.data());
