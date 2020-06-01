@@ -19,8 +19,6 @@
 namespace mtg {
 namespace kmer {
 
-using namespace mtg;
-
 const size_t kLargeBufferSize = 1'000'000;
 const size_t kBufferSize = 100'000;
 

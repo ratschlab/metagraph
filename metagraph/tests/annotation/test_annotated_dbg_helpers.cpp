@@ -9,7 +9,6 @@
 namespace mtg {
 namespace test {
 
-using namespace mtg;
 using namespace mtg::bitmap_graph;
 
 template <class Graph, class Annotation>
