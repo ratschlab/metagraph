@@ -13,6 +13,7 @@
 
 #include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
+#include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -1830,7 +1831,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     // start traversal from the source dummy edges first
     //

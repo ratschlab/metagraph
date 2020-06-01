@@ -1,6 +1,5 @@
 #include "eigen_spmat.hpp"
 
-#include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
 

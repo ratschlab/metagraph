@@ -2,7 +2,6 @@
 
 #include <cassert>
 
-#include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
 

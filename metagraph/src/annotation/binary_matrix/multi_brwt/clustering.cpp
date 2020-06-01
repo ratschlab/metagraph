@@ -24,7 +24,7 @@ get_submatrix(const VectorPtrs &columns,
     std::vector<sdsl::bit_vector> submatrix(columns.size());
 
     ProgressBar progress_bar(columns.size(), "Subsampling",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
@@ -101,7 +101,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
             similarities(cols.size() * (cols.size() - 1) / 2);
 
     ProgressBar progress_bar(similarities.size(), "Correlations",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (uint64_t j = 1; j < cols.size(); ++j) {
@@ -133,7 +133,7 @@ jaccard_similarity(const std::vector<sdsl::bit_vector> &cols, size_t num_threads
     }
 
     ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Jaccard",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2) schedule(static, 5)
     for (size_t j = 0; j < cols.size(); ++j) {
@@ -183,7 +183,7 @@ Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
     auto similarities = correlation_similarity(columns, num_threads);
 
     ProgressBar progress_bar(similarities.size(), "Matching",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     // pick either a pair of the most similar columns,
     // or pair closest in the initial arrangement
@@ -242,7 +242,7 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
         std::vector<uint64_t> cluster_ids(groups.size());
 
         ProgressBar progress_bar(groups.size(), "Merging clusters",
-                                 std::cerr, !utils::get_verbose());
+                                 std::cerr, !mtg::common::get_verbose());
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {

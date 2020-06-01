@@ -1,7 +1,6 @@
 #include "stats.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
@@ -16,7 +15,7 @@
 #include "load/load_annotation.hpp"
 
 using mtg::common::logger;
-using utils::get_verbose;
+using mtg::common::get_verbose;
 
 typedef annotate::MultiLabelEncoded<std::string> Annotator;
 

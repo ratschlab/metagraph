@@ -7,7 +7,6 @@
 
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
-#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"

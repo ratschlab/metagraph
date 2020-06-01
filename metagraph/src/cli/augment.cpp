@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/template_utils.hpp"
@@ -18,7 +17,6 @@
 #include "parse_sequences.hpp"
 
 using mtg::common::logger;
-using utils::get_verbose;
 
 
 int augment_graph(Config *config) {

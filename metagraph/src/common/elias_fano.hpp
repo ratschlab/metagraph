@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -159,29 +161,35 @@ class EliasFanoDecoder {
     EliasFanoDecoder(const std::string &source_name, bool remove_source = true);
 
     /** Returns the next compressed element or empty if all elements were read */
-    std::optional<T> next();
+    inline std::optional<T> next() {
+        if (buffer_pos_ == buffer_end_) {
+            if (!decompress_next_block()) {
+                std::optional<T> no_value;
+                return no_value;
+            }
+        }
+        return buffer_[buffer_pos_++];
+    }
 
   private:
     bool init();
 
-    /** Returns the upper part of the next compressed element */
-    T next_upper();
-
-    /** Returns the lower part of the next compressed element */
-    T next_lower();
-
-    /** Clear the high bits of #value starting at position #index. */
-    static T clear_high_bits(T value, uint8_t index);
+    /** Decompressed the next block into buffer and returns the number of elements in it */
+    size_t decompress_next_block();
 
   private:
     /** Index of current element */
     size_t position_ = 0;
 
+    /**
+     * Buffer with uncompressed elements.
+     */
+    T buffer_[READ_BUF_SIZE];
+    size_t buffer_pos_ = 0;
+    size_t buffer_end_ = 0;
+
     /** Current position in the #upper_ vector */
     uint64_t upper_pos_;
-
-    /** The sequence of 8 upper bytes currently being processed */
-    T upper_block_;
 
     /** Number of lower bits that were read from disk. */
     size_t cur_pos_bits_;
@@ -200,7 +208,7 @@ class EliasFanoDecoder {
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
      * encoding, with a 1 followed by as many zeros as the value to encode.
      */
-    std::vector<char> upper_;
+    std::vector<uint64_t> upper_;
 
     /** Total number of elements encoded. */
     size_t size_ = 0;
@@ -210,6 +218,7 @@ class EliasFanoDecoder {
      * number of bits used for the "lower" part of the Elias-Fano encoding.
      */
     uint8_t num_lower_bits_;
+    T lower_bits_mask_;
 
     /** The size in bytes of lower_ */
     size_t num_lower_bytes_;
@@ -266,7 +275,20 @@ class EliasFanoDecoder<std::pair<T, C>> {
   public:
     EliasFanoDecoder(const std::string &source, bool remove_source = true);
 
-    std::optional<std::pair<T, C>> next();
+    inline std::optional<std::pair<T, C>> next() {
+        std::optional<T> first = source_first_.next();
+        C second;
+        if (!first.has_value()) {
+            assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
+            if (remove_source_) {
+                std::filesystem::remove(source_second_name_);
+            }
+            return {};
+        }
+        source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
+        assert(source_second_);
+        return std::make_pair(first.value(), second);
+    }
 
   private:
     EliasFanoDecoder<T> source_first_;

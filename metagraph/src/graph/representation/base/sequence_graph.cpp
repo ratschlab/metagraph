@@ -4,13 +4,10 @@
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
 
+#include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-
-namespace utils {
-    bool get_verbose();
-}
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -277,7 +274,7 @@ void call_sequences(const DeBruijnGraph &graph,
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !mtg::common::get_verbose());
 
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
