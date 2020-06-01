@@ -21,15 +21,15 @@ namespace mtg {
 namespace succinct {
 
 using namespace mtg;
-using common::logger;
-using common::ChunkedWaitQueue;
-using kmer::get_int_t;
-using kmer::get_kmer_t;
-using kmer::KmerCollector;
-using kmer::KmerExtractorBOSS;
-using TAlphabet = KmerExtractorBOSS::TAlphabet;
+using mtg::common::logger;
+using mtg::common::ChunkedWaitQueue;
+using mtg::kmer::get_int_t;
+using mtg::kmer::get_kmer_t;
+using mtg::kmer::KmerCollector;
+using mtg::kmer::KmerExtractorBOSS;
 using utils::get_first;
 using utils::get_first_type_t;
+using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
 const uint8_t ALPHABET_LEN = KmerExtractorBOSS::alphabet.size();
 constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;

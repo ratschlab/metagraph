@@ -8,7 +8,7 @@
 
 using namespace mtg;
 using utils::get_first;
-using kmer::KmerExtractorBOSS;
+using mtg::kmer::KmerExtractorBOSS;
 
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
