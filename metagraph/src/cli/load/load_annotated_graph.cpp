@@ -125,7 +125,8 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
 
                 return num_total_labels - num_in_labels - num_out_labels
                             <= config->label_other_fraction * num_total_labels;
-            }
+            },
+            config->identity == Config::ASSEMBLE ? 1.0 : 0.05
         )
     );
 }
