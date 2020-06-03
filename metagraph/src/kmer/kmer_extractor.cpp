@@ -420,14 +420,14 @@ std::vector<std::string> KmerExtractorBOSS::generate_suffixes(size_t len) {
  * KmerExtractor2Bit
  */
 
-#define KmerExtractor2BitTDecl(...) \
+#define KmerExtractorTDecl(...) \
 template <const uint8_t LogSigma> \
-__VA_ARGS__ KmerExtractor2BitT<LogSigma>
+__VA_ARGS__ KmerExtractorT<LogSigma>
 
-KmerExtractor2BitTDecl()
-::KmerExtractor2BitT(const char alph[],
-                     const uint8_t char_to_code[128],
-                     const std::vector<uint8_t> &complement_code)
+KmerExtractorTDecl()
+::KmerExtractorT(const char alph[],
+                 const uint8_t char_to_code[128],
+                 const std::vector<uint8_t> &complement_code)
       : alphabet(alph),
         char_to_code_(char_to_code),
         complement_code_(complement_code) {
@@ -437,27 +437,27 @@ KmerExtractor2BitTDecl()
     assert(alphabet.size() <= (1llu << bits_per_char));
 }
 
-KmerExtractor2BitTDecl(typename KmerExtractor2BitT<LogSigma>::TAlphabet)
+KmerExtractorTDecl(typename KmerExtractorT<LogSigma>::TAlphabet)
 ::encode(char s) const {
     return ::encode(s, char_to_code_);
 }
 
-KmerExtractor2BitTDecl(char)
+KmerExtractorTDecl(char)
 ::decode(TAlphabet c) const {
     return ::decode(c, alphabet);
 }
 
-KmerExtractor2BitTDecl(std::vector<typename KmerExtractor2BitT<LogSigma>::TAlphabet>)
+KmerExtractorTDecl(std::vector<typename KmerExtractorT<LogSigma>::TAlphabet>)
 ::encode(std::string_view sequence) const {
     return ::encode(sequence, char_to_code_);
 }
 
-KmerExtractor2BitTDecl(std::string)
+KmerExtractorTDecl(std::string)
 ::decode(const std::vector<TAlphabet> &sequence) const {
     return ::decode(sequence, alphabet);
 }
 
-KmerExtractor2BitTDecl(std::vector<std::string>)
+KmerExtractorTDecl(std::vector<std::string>)
 ::generate_suffixes(size_t len) const {
     std::vector<std::string> result;
     for (auto&& suffix : utils::generate_strings(alphabet, len)) {
@@ -469,7 +469,7 @@ KmerExtractor2BitTDecl(std::vector<std::string>)
 /**
  * Break the sequence into kmers and add them to the kmer storage.
  */
-KmerExtractor2BitTDecl(template <typename T> void)
+KmerExtractorTDecl(template <typename T> void)
 ::sequence_to_kmers(std::string_view sequence,
                     size_t k,
                     const std::vector<TAlphabet> &suffix,
@@ -506,7 +506,7 @@ KmerExtractor2BitTDecl(template <typename T> void)
     );
 }
 
-KmerExtractor2BitTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
+KmerExtractorTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
 ::sequence_to_kmers(std::string_view sequence,
                     size_t k,
                     bool canonical_mode,
@@ -552,7 +552,7 @@ KmerExtractor2BitTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
     return kmers;
 }
 
-template class KmerExtractor2BitT<alphabets::kBitsPerCharDNA>;
+template class KmerExtractorT<alphabets::kBitsPerCharDNA>;
 
 
 #define ExplicitInstantiation_sequence_to_kmers(T) \

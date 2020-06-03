@@ -95,7 +95,7 @@ class KmerExtractorBOSS {
 
 
 template <const uint8_t BitsPerChar>
-class KmerExtractor2BitT {
+class KmerExtractorT {
   public:
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
@@ -111,9 +111,9 @@ class KmerExtractor2BitT {
     typedef Kmer<sdsl::uint128_t> Kmer128;
     typedef Kmer<sdsl::uint256_t> Kmer256;
 
-    KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA,
-                       const uint8_t CharToCode[128] = alphabets::kCharToDNA,
-                       const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
 
     /**
      * Break the sequence into kmers and add them to the kmer collector. If suffix is
@@ -157,7 +157,7 @@ class KmerExtractor2BitT {
     const std::vector<TAlphabet> complement_code_;
 };
 
-typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
+typedef KmerExtractorT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
 
 } // namespace kmer
 } // namespace mtg
