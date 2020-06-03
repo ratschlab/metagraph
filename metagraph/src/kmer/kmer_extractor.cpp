@@ -71,8 +71,8 @@ inline void __sequence_to_kmers(const TAlphabet *begin,
                                 const TAlphabet *end,
                                 size_t k,
                                 const std::vector<TAlphabet> &suffix,
-                                Callback callback,
-                                Call skip) {
+                                const Callback &callback,
+                                const Call &skip) {
     assert(end >= begin);
     // done to ensure that begin + k doesn't overflow
     assert(k <= static_cast<size_t>(end - begin));
@@ -88,8 +88,8 @@ inline void __sequence_to_kmers_slide(const TAlphabet *begin,
                                       const TAlphabet *end,
                                       size_t k,
                                       const std::vector<TAlphabet> &suffix,
-                                      Callback callback,
-                                      Call skip) {
+                                      const Callback &callback,
+                                      const Call &skip) {
     assert(end >= begin);
     // done to ensure that begin + k doesn't overflow
     assert(k <= static_cast<size_t>(end - begin));
@@ -113,8 +113,8 @@ inline void __sequence_to_kmers_canonical(const TAlphabet *seq,
                                           const std::vector<TAlphabet> &rev_comp,
                                           size_t k,
                                           const std::vector<TAlphabet> &suffix,
-                                          Callback callback,
-                                          Call skip) {
+                                          const Callback &callback,
+                                          const Call &skip) {
     assert(rev_comp.size() >= k);
 
     for (size_t i = 0; i + k <= rev_comp.size(); ++i) {
@@ -147,8 +147,8 @@ inline void __call_smallest(const KMER &kmer_first,
                             const TAlphabet *second,
                             size_t k,
                             const std::vector<TAlphabet> &suffix,
-                            Callback callback,
-                            Call skip) {
+                            const Callback &callback,
+                            const Call &skip) {
     if (skip())
         return;
 
@@ -167,8 +167,8 @@ inline void __sequence_to_kmers_canonical_slide(const TAlphabet *seq,
                                                 const std::vector<TAlphabet> &rev_comp,
                                                 size_t k,
                                                 const std::vector<TAlphabet> &suffix,
-                                                Callback callback,
-                                                Call skip) {
+                                                const Callback &callback,
+                                                const Call &skip) {
     assert(rev_comp.size() >= k);
 
     // initialize and call the first kmer from sequence
@@ -204,9 +204,9 @@ inline void sequence_to_kmers(const TAlphabet *begin,
                               const TAlphabet *end,
                               size_t k,
                               const std::vector<TAlphabet> &suffix,
-                              Callback callback,
+                              const Callback &callback,
                               const std::vector<uint8_t> &complement_code,
-                              Call skip) {
+                              const Call &skip) {
     assert(k);
     assert(suffix.size() <= k);
     assert(end >= begin);
