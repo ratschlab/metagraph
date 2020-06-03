@@ -552,7 +552,20 @@ KmerExtractorTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
     return kmers;
 }
 
+#if _PROTEIN_GRAPH
+template class KmerExtractorT<alphabets::kBitsPerCharProtein>;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+template class KmerExtractorT<alphabets::kBitsPerCharDNACaseSent>;
+#elif _DNA5_GRAPH
+template class KmerExtractorT<alphabets::kBitsPerCharDNA5>;
+#elif _DNA_GRAPH
 template class KmerExtractorT<alphabets::kBitsPerCharDNA>;
+#else
+static_assert(false,
+    "Define an alphabet: either "
+    "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+);
+#endif
 
 
 #define ExplicitInstantiation_sequence_to_kmers(T) \

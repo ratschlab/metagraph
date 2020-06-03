@@ -111,9 +111,28 @@ class KmerExtractorT {
     typedef Kmer<sdsl::uint128_t> Kmer128;
     typedef Kmer<sdsl::uint256_t> Kmer256;
 
+    #if _PROTEIN_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetProtein,
+                   const uint8_t CharToCode[128] = alphabets::kCharToProtein,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapProtein);
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNACaseSent,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNACaseSent,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNACaseSent);
+    #elif _DNA5_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA5,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNA5,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA5);
+    #elif _DNA_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA,
                    const uint8_t CharToCode[128] = alphabets::kCharToDNA,
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
+    #else
+    static_assert(false,
+        "Define an alphabet: either "
+        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+    );
+    #endif
 
     /**
      * Break the sequence into kmers and add them to the kmer collector. If suffix is
@@ -157,7 +176,20 @@ class KmerExtractorT {
     const std::vector<TAlphabet> complement_code_;
 };
 
+#if _PROTEIN_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharProtein> KmerExtractor2Bit;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharDNACaseSent> KmerExtractor2Bit;
+#elif _DNA5_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharDNA5> KmerExtractor2Bit;
+#elif _DNA_GRAPH
 typedef KmerExtractorT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
+#else
+static_assert(false,
+    "Define an alphabet: either "
+    "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+);
+#endif
 
 } // namespace kmer
 } // namespace mtg

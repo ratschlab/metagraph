@@ -31,6 +31,10 @@ template class KMer<uint64_t, 3>;
 template class KMer<sdsl::uint128_t, 3>;
 template class KMer<sdsl::uint256_t, 3>;
 
+template class KMer<uint64_t, 4>;
+template class KMer<sdsl::uint128_t, 4>;
+template class KMer<sdsl::uint256_t, 4>;
+
 template class KMer<uint64_t, 5>;
 template class KMer<sdsl::uint128_t, 5>;
 template class KMer<sdsl::uint256_t, 5>;
