@@ -103,13 +103,14 @@ class KmerExtractorT {
     static constexpr uint8_t bits_per_char = BitsPerChar;
     const std::string alphabet;
 
-    // k-mer
-    template <class T>
-    using Kmer = KMer<T, bits_per_char>;
-
-    typedef Kmer<uint64_t> Kmer64;
-    typedef Kmer<sdsl::uint128_t> Kmer128;
-    typedef Kmer<sdsl::uint256_t> Kmer256;
+    // k-mers
+    typedef KMer<uint64_t, bits_per_char> Kmer64;
+    typedef KMer<sdsl::uint128_t, bits_per_char> Kmer128;
+    typedef KMer<sdsl::uint256_t, bits_per_char> Kmer256;
+    // k-mers with the BOSS layout
+    typedef KMerBOSS<uint64_t, bits_per_char> KmerBOSS64;
+    typedef KMerBOSS<sdsl::uint128_t, bits_per_char> KmerBOSS128;
+    typedef KMerBOSS<sdsl::uint256_t, bits_per_char> KmerBOSS256;
 
     #if _PROTEIN_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetProtein,
@@ -138,11 +139,11 @@ class KmerExtractorT {
      * Break the sequence into kmers and add them to the kmer collector. If suffix is
      * not empty, only kmers with the given suffix are added.
      */
-    template <class T>
+    template <class KMER>
     void sequence_to_kmers(std::string_view sequence,
                            size_t k,
                            const std::vector<TAlphabet> &suffix,
-                           Vector<Kmer<T>> *kmers,
+                           Vector<KMER> *kmers,
                            bool canonical_mode = false) const;
 
     /**
@@ -157,8 +158,8 @@ class KmerExtractorT {
                       bool canonical_mode = false,
                       const std::vector<TAlphabet> &suffix = {}) const;
 
-    template <class T>
-    std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {
+    template <class KMER>
+    std::string kmer_to_sequence(const KMER &kmer, size_t k) const {
         return kmer.to_string(k, alphabet);
     }
 

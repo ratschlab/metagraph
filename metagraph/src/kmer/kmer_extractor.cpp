@@ -469,11 +469,11 @@ KmerExtractorTDecl(std::vector<std::string>)
 /**
  * Break the sequence into kmers and add them to the kmer storage.
  */
-KmerExtractorTDecl(template <typename T> void)
+KmerExtractorTDecl(template <typename KMER> void)
 ::sequence_to_kmers(std::string_view sequence,
                     size_t k,
                     const std::vector<TAlphabet> &suffix,
-                    Vector<Kmer<T>> *kmers,
+                    Vector<KMER> *kmers,
                     bool canonical_mode) const {
     assert(kmers);
     assert(k);
@@ -498,7 +498,7 @@ KmerExtractorTDecl(template <typename T> void)
                                          static_cast<TAlphabet>(0));
     size_t i = k - 1;
 
-    ::sequence_to_kmers<Kmer<T>>(
+    ::sequence_to_kmers<KMER>(
         seq.data(), seq.data() + seq.size(), k, suffix,
         [&kmers](auto kmer) { kmers->push_back(kmer); },
         canonical_mode ? complement_code_ : std::vector<uint8_t>(),
@@ -568,30 +568,23 @@ static_assert(false,
 #endif
 
 
-#define ExplicitInstantiation_sequence_to_kmers(T) \
+#define ExplicitInstantiation_sequence_to_kmers(KMER) \
 template \
 void KmerExtractor2Bit \
-::sequence_to_kmers<T>(std::string_view, \
-                       size_t, \
-                       const std::vector<TAlphabet>&, \
-                       Vector<Kmer<T>>*, \
-                       bool) const;
-
-ExplicitInstantiation_sequence_to_kmers(uint64_t)
-ExplicitInstantiation_sequence_to_kmers(sdsl::uint128_t)
-ExplicitInstantiation_sequence_to_kmers(sdsl::uint256_t)
-
-#define ExplicitInstantiation_sequence_to_kmers_vector(T) \
+::sequence_to_kmers<KMER>(std::string_view, size_t, \
+                          const std::vector<TAlphabet>&, Vector<KMER>*, bool) const; \
 template \
-Vector<std::pair<KmerExtractor2Bit::Kmer<T>, bool>> KmerExtractor2Bit \
-::sequence_to_kmers<KmerExtractor2Bit::Kmer<T>>(std::string_view, \
-                                                size_t, \
-                                                bool, \
-                                                const std::vector<TAlphabet>&) const;
+Vector<std::pair<KMER, bool>> KmerExtractor2Bit \
+::sequence_to_kmers<KMER>(std::string_view, size_t, \
+                          bool, const std::vector<TAlphabet>&) const;
 
-ExplicitInstantiation_sequence_to_kmers_vector(uint64_t)
-ExplicitInstantiation_sequence_to_kmers_vector(sdsl::uint128_t)
-ExplicitInstantiation_sequence_to_kmers_vector(sdsl::uint256_t)
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::Kmer64)
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::Kmer128)
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::Kmer256)
+
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::KmerBOSS64)
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::KmerBOSS128)
+ExplicitInstantiation_sequence_to_kmers(KmerExtractor2Bit::KmerBOSS256)
 
 } // namespace kmer
 } // namespace mtg
