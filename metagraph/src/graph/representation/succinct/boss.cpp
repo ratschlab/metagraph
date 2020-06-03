@@ -2124,18 +2124,18 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
             }
 
-            thread_pool->enqueue([&](std::vector<edge_index> indices) {
-                std::for_each(indices.begin(), indices.end(), start_cycle);
-            }, index_buffer);
+            thread_pool->enqueue([&,index_buffer]() {
+                std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
+            });
 
             index_buffer.clear();
 
         }, async);
 
         if (index_buffer.size()) {
-            thread_pool->enqueue([&](std::vector<edge_index> indices) {
-                std::for_each(indices.begin(), indices.end(), start_cycle);
-            }, index_buffer);
+            thread_pool->enqueue([&,index_buffer]() {
+                std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
+            });
         }
 
         thread_pool->join();
@@ -2584,7 +2584,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
 
         edge_index last_fwd = 0;
 
-        // if the last node has multiple outgoing edges,pick_sing
+        // if the last node has multiple outgoing edges,
         // it is clearly neither a sink tip nor a source tip.
         if (path.back() != kSentinelCode
                 && !masked_pick_single_outgoing(*this,
