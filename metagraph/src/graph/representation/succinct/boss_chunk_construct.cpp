@@ -31,7 +31,7 @@ using utils::get_first;
 using utils::get_first_type_t;
 using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
-constexpr uint32_t ENCODER_BUFFER_SIZE = 100'000;
+constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
 
 template <class Container, typename KMER>
@@ -239,13 +239,13 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
 
     const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
 
-    uint32_t chunk_count = std::pow(alphabet_size - 1, 2);
+    size_t chunk_count = std::pow(alphabet_size - 1, 2);
 
     logger->trace("Splitting k-mers into {} chunks...", chunk_count);
 
     std::vector<Encoder<T_INT>> sinks;
     std::vector<std::string> names(chunk_count);
-    for (uint32_t i = 0; i < names.size(); ++i) {
+    for (size_t i = 0; i < names.size(); ++i) {
         names[i] = dir/("original_split_by_F_W_" + std::to_string(i));
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
@@ -265,7 +265,7 @@ split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T> &kme
         assert(F != 0);
 
         // subtract 1 -- the sentinel with code 0
-        uint32_t idx = (F - 1) * (alphabet_size - 1) + (W - 1);
+        size_t idx = (F - 1) * (alphabet_size - 1) + (W - 1);
         sinks[idx].add(reinterpret_cast<const T_INT&>(kmer));
         num_parent_kmers++;
     }
@@ -308,7 +308,7 @@ generate_dummy_1_kmers(size_t k,
     std::vector<Encoder<KMER_INT>> dummy_sink_chunks;
     std::vector<std::string> dummy_l1_names(alphabet_size);
     std::vector<std::string> dummy_sink_names(alphabet_size);
-    for (uint32_t i = 0; i < alphabet_size; ++i) {
+    for (TAlphabet i = 0; i < alphabet_size; ++i) {
         dummy_l1_names[i] = dir/("dummy_source_1_" + std::to_string(i));
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
         dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
@@ -366,7 +366,7 @@ generate_dummy_1_kmers(size_t k,
         }
     }
 
-    for (uint32_t i = 0; i < alphabet_size; ++i) {
+    for (TAlphabet i = 0; i < alphabet_size; ++i) {
         dummy_sink_chunks[i].finish();
         dummy_l1_chunks[i].finish();
     }
@@ -432,7 +432,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         }
 
         std::vector<Encoder<KMER_INT>> dummy_next_chunks;
-        for (uint32_t i = 0; i < alphabet_size; ++i) {
+        for (TAlphabet i = 0; i < alphabet_size; ++i) {
             dummy_next_names[i] = dir/("dummy_source_"
                     + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
