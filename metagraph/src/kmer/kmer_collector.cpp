@@ -240,6 +240,10 @@ INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256)
 
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS64)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS128)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS256)
+
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer256)
