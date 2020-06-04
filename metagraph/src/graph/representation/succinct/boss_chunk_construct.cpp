@@ -450,7 +450,6 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> dummy_chunks = { dummy_sink_name };
-    std::vector<std::string> dummy_next_names(alphabet_size);
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
@@ -459,6 +458,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_chunks.push_back(f);
         }
 
+        std::vector<std::string> dummy_next_names(alphabet_size);
         std::vector<Encoder<KMER_INT>> dummy_next_chunks;
         for (TAlphabet i = 0; i < alphabet_size; ++i) {
             dummy_next_names[i] = dir/("dummy_source_"
@@ -481,7 +481,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
         std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
                       [](auto &v) { v.finish(); });
-        std::swap(dummy_names, dummy_next_names);
+        dummy_names = std::move(dummy_next_names);
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
                       dummy_pref_len, num_kmers);
     }
