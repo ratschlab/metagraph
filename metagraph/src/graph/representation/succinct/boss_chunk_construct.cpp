@@ -61,8 +61,6 @@ inline void push_back(Container &kmers, const KMER &kmer) {
 template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
-    // TODO: this is a bit of a waste as we usually have less than 2^bits characters
-    // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
     using KMER_INT = typename KMER::WordType;
 
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
