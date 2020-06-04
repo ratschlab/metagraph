@@ -666,7 +666,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
     recover_dummy_nodes_disk(kmer_collector_, kmers, &queue, async_worker_); \
     logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
-    result = new BOSS::Chunk(kmer_collector_.alphabet_size(), \
+    result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
                              kmer_collector_.get_k() - 1, \
                              kmer_collector_.is_both_strands_mode(), \
                              queue, \
