@@ -1837,6 +1837,7 @@ void call_paths_from_queue(const BOSS &boss,
                            sdsl::bit_vector &written,
                            bool async,
                            std::mutex &vector_mutex,
+                           std::mutex &edge_mutex,
                            ProgressBar &progress_bar,
                            const bitmap *subgraph_mask);
 
@@ -1883,8 +1884,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              std::cerr, !utils::get_verbose());
 
     std::vector<Edge> edges;
-    std::list<std::future<std::vector<Edge>>> edges_async;
+    std::deque<std::future<std::vector<Edge>>> edges_async;
     std::mutex vector_mutex;
+    std::mutex edge_mutex;
     std::unique_ptr<ThreadPool> thread_pool;
     bool async = num_threads > 1;
 
@@ -1894,7 +1896,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto call_paths_from_queue = [&]() {
         ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
                                 split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, written, async, vector_mutex,
+                                discovered, written, async, vector_mutex, edge_mutex,
                                 progress_bar, subgraph_mask);
     };
 
@@ -1914,6 +1916,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             // pool, force needs to be true to force a job to be queued when
             // the the maximum number of tasks is reached. Otherwise, it will
             // deadlock at that point.
+            std::lock_guard<std::mutex> lock(edge_mutex);
             edges_async.emplace_back(force ? thread_pool->force_enqueue(start_path)
                                            : thread_pool->enqueue(start_path));
         } else {
@@ -1927,50 +1930,75 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     //  .____
     //
-    if (!subgraph_mask) {
-        // used to indicate if an edge from a source node has been taken
-        for (edge_index i = succ_last(1); i >= 1; --i) {
-            if (!atomic_fetch_bit(discovered, i, async))
-                enqueue_start(i);
+    // used to indicate if an edge from a source node has been taken
+    for (edge_index i = succ_last(1); i >= 1; --i) {
+        if ((!subgraph_mask || (*subgraph_mask)[i])
+                && !atomic_fetch_bit(discovered, i, async)) {
+            enqueue_start(i);
         }
+    }
 
-    } else {
+    call_paths_from_queue();
+
+    if (subgraph_mask) {
         // find all edges in a block with no incoming edge and enqueue a traversal
         // task from each one
         auto enqueue_starts_in_range = [&](size_t begin, size_t end) {
+            edge_index last_i = 0;
             call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
-                edge_index j = bwd(i);
+                edge_index end = succ_last(i);
+                if (end == last_i)
+                    return;
+
+                edge_index j = bwd(end);
                 bool check = masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
                 if (j)
                     return;
 
+                last_i = end;
+
                 std::ignore = check;
                 assert(!check);
 
-                i = succ_last(i);
-
                 do {
-                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
-                            || !atomic_fetch_bit(discovered, i, async))) {
-                        enqueue_start(i, thread_pool.get());
+                    if ((*subgraph_mask)[end] && (!kmers_in_single_form
+                            || !atomic_fetch_bit(discovered, end, async))) {
+                        enqueue_start(end, thread_pool.get());
                     }
 
-                } while (--i > 0 && !get_last(i));
+                } while (--end > 0 && !get_last(end));
             });
         };
 
         // check each block in a separate thread
-        for (size_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
-            size_t end = std::min(begin + kBlockSize, discovered.size());
+        size_t begin = 0;
+        size_t end;
+        while (begin < discovered.size()) {
+            if (begin + kBlockSize < discovered.size()) {
+                end = std::min(succ_last(begin + kBlockSize) + 1, discovered.size());
+            } else {
+                end = discovered.size();
+            }
             if (thread_pool) {
                 thread_pool->enqueue(enqueue_starts_in_range, begin, end);
             } else {
                 enqueue_starts_in_range(begin, end);
             }
+            begin = end;
         }
+
+        call_paths_from_queue();
     }
 
-    call_paths_from_queue();
+#ifndef NDEBUG
+    call_zeros(discovered, [&](edge_index edge) {
+        assert(!subgraph_mask || (*subgraph_mask)[edge]);
+        edge_index t = bwd(edge);
+        masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+        assert(t);
+    }, async);
+#endif
+
 
     // then all forks
     //  ____.____
@@ -2017,8 +2045,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     call_paths_from_queue();
 
     if (kmers_in_single_form) {
-        // check for edges whose predecesors have already been traversed
-        // (this should only happen when outputting simplitigs)
+        // // check for edges whose predecesors have already been traversed
+        // // (this should only happen when outputting simplitigs)
         call_zeros(discovered, [&](edge_index edge) {
             edge_index t = bwd(edge);
             if (!masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask)
@@ -2170,27 +2198,20 @@ void call_paths_from_queue(const BOSS &boss,
                            sdsl::bit_vector &written,
                            bool async,
                            std::mutex &vector_mutex,
+                           std::mutex &edge_mutex,
                            ProgressBar &progress_bar,
                            const bitmap *subgraph_mask) {
     if (async) {
+        std::unique_lock<std::mutex> lock(edge_mutex);
         while (edges_async.size()) {
-            // iterate through the tasks and take the first one that's ready
-            auto it = edges_async.begin();
-            while (it != edges_async.end()
-                    && it->wait_for(std::chrono::microseconds(100))
-                        != std::future_status::ready) {
-                ++it;
-            }
-
-            if (it == edges_async.end())
-                continue;
-
-            auto next_edges = it->get();
-            edges_async.erase(it);
-            for (Edge next_edge : next_edges) {
+            auto next_edges_future = std::move(edges_async.front());
+            edges_async.pop_front();
+            lock.unlock();
+            for (const Edge &next_edge : next_edges_future.get()) {
                 if (atomic_fetch_bit(discovered, next_edge.first, async))
                     continue;
 
+                lock.lock();
                 edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
                     std::vector<Edge> edges;
                     edges.reserve(TRAVERSAL_START_BATCH_SIZE);
@@ -2199,9 +2220,14 @@ void call_paths_from_queue(const BOSS &boss,
                                  trim_sentinels, &discovered, &written,
                                  async, vector_mutex, progress_bar, subgraph_mask);
                     return edges;
-                }, std::move(next_edge)));
+                }, Edge(next_edge)));
+                lock.unlock();
             }
+            lock.lock();
         }
+
+        lock.unlock();
+        thread_pool->join();
 
     } else {
         while (edges.size()) {
