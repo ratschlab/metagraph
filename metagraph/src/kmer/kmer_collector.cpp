@@ -125,7 +125,7 @@ template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
                 bool both_strands_mode,
-                Sequence&& filter_suffix_encoded,
+                std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
                 const std::filesystem::path &tmp_dir,

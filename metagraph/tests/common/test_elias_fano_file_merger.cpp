@@ -99,19 +99,6 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeEmpty) {
     common::merge_files(file_names, on_new_item, false);
 }
 
-TYPED_TEST(EliasFanoFileMergerTest, DummyMergeEmpty) {
-    constexpr uint32_t FILE_COUNT = 4;
-    std::vector<utils::TempFile> files(FILE_COUNT);
-    std::vector<std::string> file_names;
-    for (uint32_t i = 0; i < FILE_COUNT; ++i) {
-        file_names.push_back(files[i].name());
-        do_encode(std::vector<TypeParam>(), file_names.back());
-    }
-    std::function<void(const TypeParam &v)> on_new_item
-            = [](const TypeParam &) { FAIL() << "Should not be called."; };
-    common::merge_dummy({ file_names[0] }, file_names, on_new_item, false);
-}
-
 TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
     constexpr uint32_t FILE_COUNT = 4;
     std::vector<utils::TempFile> files(FILE_COUNT);
@@ -130,67 +117,6 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
         i++;
     };
     common::merge_files(file_names, on_new_item);
-}
-
-TYPED_TEST(EliasFanoFileMergerTest, DummyMergeIdentical) {
-    constexpr uint32_t FILE_COUNT = 4;
-    std::vector<utils::TempFile> files(FILE_COUNT);
-    std::vector<std::string> file_names;
-    using T = utils::get_first_type_t<TypeParam>;
-    std::vector<T> expected;
-    for (uint32_t i = 0; i < FILE_COUNT; ++i) {
-        file_names.push_back(files[i].name());
-        std::vector<T> values;
-        for (uint32_t j = 0; j < 10; j = j + 1) {
-            values.push_back(T(2*j));
-            expected.push_back(values.back());
-        }
-        do_encode(values, file_names.back());
-    }
-    utils::TempFile file;
-    std::vector<TypeParam> values;
-    for (uint32_t j = 0; j < 10; j = j + 1) {
-        push_back(values, static_cast<utils::get_first_type_t<TypeParam>>(2*j+1));
-        expected.push_back(utils::get_first(values.back()));
-    }
-    std::sort(expected.begin(), expected.end());
-    do_encode(values, file.name());
-    std::function<void(const TypeParam &v)> on_new_item = [&expected](const TypeParam &v) {
-        static uint32_t i = 0;
-        EXPECT_EQ(expected[i], utils::get_first(v)) << i;
-        i++;
-    };
-
-    common::merge_dummy({ file.name() }, file_names, on_new_item);
-}
-
-TYPED_TEST(EliasFanoFileMergerTest, DummyMergeDistinct) {
-    constexpr uint32_t FILE_COUNT = 4;
-    std::vector<utils::TempFile> files(FILE_COUNT);
-    std::vector<std::string> file_names;
-    using T = utils::get_first_type_t<TypeParam>;
-    for (uint32_t i = 0; i < FILE_COUNT; ++i) {
-        file_names.push_back(files[i].name());
-        std::vector<T> values;
-        for (T j = 10 * i; j < 10 * (i + 1); j = j + 1) {
-            values.push_back(j);
-        }
-        do_encode(values, file_names.back());
-    }
-    utils::TempFile file;
-    std::vector<TypeParam> values;
-    for (uint32_t j = 10 * FILE_COUNT; j < 11 * FILE_COUNT;
-         j = j + 1) {
-        push_back(values, static_cast<utils::get_first_type_t<TypeParam>>(j));
-    }
-    do_encode(values, file.name());
-    std::function<void(const TypeParam &v)> on_new_item = [](const TypeParam &v) {
-        static uint32_t i = 0;
-        EXPECT_EQ(i, utils::get_first(v));
-        i++;
-    };
-
-    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
@@ -224,49 +150,6 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
         i++;
     };
     common::merge_files(file_names, on_new_item);
-}
-
-TYPED_TEST(EliasFanoFileMergerTest, DummyMergeRandom) {
-    std::mt19937 rng(123457);
-    std::uniform_int_distribution<std::mt19937::result_type> dist10(4, 10);
-    std::uniform_int_distribution<std::mt19937::result_type> dist100(0, 100);
-
-    const uint32_t file_count = dist10(rng);
-    std::vector<utils::TempFile> files(file_count);
-    std::vector<std::string> file_names;
-    using T = utils::get_first_type_t<TypeParam>;
-    std::vector<TypeParam> expected;
-    for (uint32_t i = 0; i < file_count; ++i) {
-        file_names.push_back(files[i].name());
-        std::vector<T> values = get_random_values<T>(dist100(rng), rng, dist10);
-        do_encode(values, files[i].name());
-        std::for_each(values.begin(), values.end(), [&expected](const T &v) {
-            if constexpr (utils::is_pair_v<TypeParam>) {
-                expected.push_back({ v, 0 });
-            } else {
-                expected.push_back(v);
-            }
-        });
-    }
-    std::sort(expected.begin(), expected.end(), [](const TypeParam &a, const TypeParam &b) {
-        return utils::get_first(a) < utils::get_first(b);
-    });
-
-    utils::TempFile file;
-    std::vector<TypeParam> values = get_random_values<TypeParam>(dist100(rng), rng, dist10);
-    std::for_each(values.begin(), values.end(), [&expected](TypeParam &v) {
-        utils::get_first(v) += utils::get_first(expected.back()) + 1;
-    });
-    do_encode(values, file.name());
-    expected.insert(expected.end(), values.begin(), values.end());
-
-    std::function<void(const TypeParam &v)> on_new_item = [expected](const TypeParam &v) {
-        static uint32_t i = 0;
-        ASSERT_LT(i, expected.size());
-        ASSERT_EQ(expected[i], v);
-        i++;
-    };
-    common::merge_dummy({ file.name() }, file_names, on_new_item);
 }
 
 } // namespace
