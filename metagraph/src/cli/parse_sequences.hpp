@@ -19,6 +19,10 @@
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using namespace mtg::seq_io;
 
 
@@ -144,5 +148,8 @@ void parse_sequences(const std::string &file,
         exit(1);
     }
 }
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __SEQUENCE_READER_HPP__

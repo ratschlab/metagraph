@@ -16,6 +16,10 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 using mtg::seq_io::FastaWriter;
 using mtg::seq_io::ExtendedFastaWriter;
@@ -263,3 +267,6 @@ int clean_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

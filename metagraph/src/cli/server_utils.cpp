@@ -5,6 +5,10 @@
 #include "common/logger.hpp"
 #include "server_utils.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 /**
@@ -114,3 +118,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                         json_str_with_error_msg("Internal server error"));
     }
 }
+
+} // namespace cli
+} // namespace mtg

@@ -5,6 +5,10 @@
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
@@ -119,3 +123,6 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         )
     );
 }
+
+} // namespace cli
+} // namespace mtg

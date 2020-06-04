@@ -14,7 +14,10 @@
 #include "align.hpp"
 #include "server_utils.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
@@ -289,3 +292,6 @@ int run_server(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

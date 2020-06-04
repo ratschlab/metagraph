@@ -47,6 +47,8 @@ using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
+using mtg::cli::Config;
+
 
 // THINGS REPORTED:
 //  - query time
