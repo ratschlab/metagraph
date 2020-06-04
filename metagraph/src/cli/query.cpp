@@ -18,11 +18,14 @@
 #include "load/load_annotated_graph.hpp"
 #include "align.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
-using namespace mtg;
 using mtg::common::logger;
 
 
@@ -578,3 +581,6 @@ void QueryExecutor
                       fasta_parser.get_filename(), batch_timer.elapsed());
     }
 }
+
+} // namespace cli
+} // namespace mtg

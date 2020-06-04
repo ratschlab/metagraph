@@ -11,7 +11,10 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "cli/config/config.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
@@ -65,3 +68,6 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     assert(false);
     exit(1);
 }
+
+} // namespace cli
+} // namespace mtg

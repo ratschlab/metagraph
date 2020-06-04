@@ -7,7 +7,10 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
@@ -80,3 +83,6 @@ int assemble(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

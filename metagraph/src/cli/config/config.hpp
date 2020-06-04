@@ -9,6 +9,9 @@
 #include "graph/representation/succinct/boss.hpp"
 
 
+namespace mtg {
+namespace cli {
+
 class Config {
   public:
     Config(int argc, char *argv[]);
@@ -200,5 +203,8 @@ class Config {
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);
 };
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __CONFIG_HPP__

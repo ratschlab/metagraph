@@ -8,6 +8,10 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/config/config.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
@@ -80,3 +84,6 @@ initialize_annotation(Config::AnnotationType anno_type,
 
     return annotation;
 }
+
+} // namespace cli
+} // namespace mtg

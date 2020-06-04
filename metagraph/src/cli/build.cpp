@@ -16,7 +16,10 @@
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::succinct::IBOSSChunkConstructor;
 using mtg::bitmap_graph::DBGBitmap;
 using mtg::bitmap_graph::DBGBitmapConstructor;
@@ -440,3 +443,6 @@ int concatenate_graph_chunks(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

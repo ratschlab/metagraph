@@ -10,8 +10,9 @@
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace cli {
 
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
@@ -1045,3 +1046,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
     fprintf(stderr, "\n");
 }
+
+} // namespace cli
+} // namespace mtg

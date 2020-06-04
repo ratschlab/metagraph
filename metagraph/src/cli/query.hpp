@@ -8,14 +8,18 @@
 
 class AnnotatedDBG;
 class IDBGAligner;
-class Config;
 class ThreadPool;
 
 namespace mtg {
+
 namespace seq_io {
 class FastaParser;
 } // namespace seq_io
-} // namespace mtg
+
+
+namespace cli {
+
+class Config;
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
@@ -62,5 +66,8 @@ class QueryExecutor {
 
 
 int query_graph(Config *config);
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __QUERY_GRAPH_HPP__

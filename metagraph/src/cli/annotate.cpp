@@ -11,6 +11,10 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using namespace mtg::seq_io;
 using mtg::common::logger;
 
@@ -341,3 +345,6 @@ int annotate_graph_with_genome_coordinates(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

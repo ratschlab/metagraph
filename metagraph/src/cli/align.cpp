@@ -10,7 +10,10 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
@@ -342,3 +345,6 @@ int align_to_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg
