@@ -8,7 +8,12 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
 
+
+namespace {
+
 KSEQ_INIT(gzFile, gzread);
+
+using namespace mtg;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -99,19 +104,27 @@ TEST(BOSS, GraphDefaultConstructor) {
     });
 }
 
-#if _DNA5_GRAPH
 TEST(BOSS, EmptyGraph) {
     BOSS *graph = new BOSS(3);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
+    std::string F_str = "0 ";
+    for (size_t i = 1; i < graph->alphabet.size(); ++i) {
+        F_str += "1 ";
+    }
+    test_graph(graph, "01", { 0, 0 }, F_str, graph->get_state());
     delete graph;
 }
 
 TEST(BOSS, SwitchState) {
     BOSS *graph = new BOSS(3);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
+    std::string F_str = "0 ";
+    for (size_t i = 1; i < graph->alphabet.size(); ++i) {
+        F_str += "1 ";
+    }
+    test_graph(graph, "01", { 0, 0 }, F_str);
     delete graph;
 }
 
+#if _DNA5_GRAPH
 TEST(BOSS, AddSequenceFast) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
@@ -2201,3 +2214,5 @@ TEST(BOSS, map_to_edges) {
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
 }
+
+} // namespace

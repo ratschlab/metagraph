@@ -5,6 +5,12 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
@@ -1365,3 +1371,5 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
         }
     }
 }
+
+} // namespace

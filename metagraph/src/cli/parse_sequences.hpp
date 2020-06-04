@@ -20,12 +20,18 @@
 #include "config/config.hpp"
 
 
+namespace mtg {
+namespace cli {
+
+using namespace mtg::seq_io;
+
+
 template <class Callback, class CallWeighted>
 void parse_sequences(const std::string &file,
                      const Config &config,
                      Callback call_sequence,
                      CallWeighted call_weighted_sequence) {
-    mg::common::logger->trace("Parsing '{}'", file);
+    mtg::common::logger->trace("Parsing '{}'", file);
 
     if (file_format(file) == "VCF") {
         read_vcf_file_critical(file,
@@ -42,7 +48,7 @@ void parse_sequences(const std::string &file,
 
         if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
             std::unordered_map<uint64_t, uint64_t> count_hist;
-            kmc::read_kmers(
+            read_kmers(
                 file,
                 [&](std::string_view, uint32_t count) {
                     count_hist[count] += (1 + config.forward_and_reverse);
@@ -62,17 +68,17 @@ void parse_sequences(const std::string &file,
                 if (config.max_count_quantile < 1)
                     max_count = utils::get_quantile(count_hist_v, config.max_count_quantile);
 
-                mg::common::logger->info("Used k-mer count thresholds:\n"
+                mtg::common::logger->info("Used k-mer count thresholds:\n"
                                          "min (including): {}\n"
                                          "max (excluding): {}", min_count, max_count);
             }
         }
 
-        kmc::read_kmers(
+        read_kmers(
             file,
             [&](std::string_view sequence, uint32_t count) {
                 if (!warning_different_k && sequence.size() != config.k) {
-                    mg::common::logger->warn("k-mers parsed from KMC database '{}' have "
+                    mtg::common::logger->warn("k-mers parsed from KMC database '{}' have "
                                              "length {} but graph is constructed for k={}",
                                              file, sequence.size(), config.k);
                     warning_different_k = true;
@@ -94,13 +100,13 @@ void parse_sequences(const std::string &file,
 
         if (std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
 
-            mg::common::logger->trace("Parsing k-mer counts from '{}'",
+            mtg::common::logger->trace("Parsing k-mer counts from '{}'",
                 utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
             );
             read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
                 [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
                     if (k != config.k) {
-                        mg::common::logger->error("File '{}' contains counts for k-mers of "
+                        mtg::common::logger->error("File '{}' contains counts for k-mers of "
                                                   "length {} but graph is constructed with k={}",
                                                   file, k, config.k);
                         exit(1);
@@ -138,9 +144,12 @@ void parse_sequences(const std::string &file,
             }, config.forward_and_reverse);
         }
     } else {
-        mg::common::logger->error("File type unknown for '{}'", file);
+        mtg::common::logger->error("File type unknown for '{}'", file);
         exit(1);
     }
 }
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __SEQUENCE_READER_HPP__

@@ -5,7 +5,11 @@
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
 
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
@@ -119,3 +123,6 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         )
     );
 }
+
+} // namespace cli
+} // namespace mtg

@@ -8,6 +8,10 @@
 #include <vector>
 
 
+namespace {
+
+using namespace mtg;
+
 // Note: std::hash<uint64_t> is not required by the specification to be a
 //       cryographic hash, so use this to generate random numbers as hashes
 const struct {
@@ -267,3 +271,5 @@ TEST(BloomFilter, batch_insert_and_batch_check_callback) {
         }
     }
 }
+
+} // namespace

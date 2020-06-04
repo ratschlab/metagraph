@@ -9,6 +9,12 @@
 #include "test_dbg_helpers.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
@@ -131,15 +137,15 @@ TEST(DBGHashString, SerializeAnyK) {
 }
 
 TEST(DBGHashOrdered, SerializeAnyK) {
-    test_graph_serialization<DBGHashOrdered>(256 / KmerExtractor2Bit::bits_per_char);
+    test_graph_serialization<DBGHashOrdered>(256 / kmer::KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGHashFast, SerializeAnyK) {
-    test_graph_serialization<DBGHashFast>(256 / KmerExtractor2Bit::bits_per_char);
+    test_graph_serialization<DBGHashFast>(256 / kmer::KmerExtractor2Bit::bits_per_char);
 }
 
 TEST(DBGSuccinct, SerializeAnyK) {
-    test_graph_serialization<DBGSuccinct>(256 / (KmerExtractor2Bit::bits_per_char + 1));
+    test_graph_serialization<DBGSuccinct>(256 / (kmer::KmerExtractor2Bit::bits_per_char + 1));
 }
 
 TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
@@ -656,3 +662,5 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
 
     }
 }
+
+} // namespace

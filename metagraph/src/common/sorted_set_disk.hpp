@@ -1,18 +1,10 @@
 #ifndef __SORTED_SET_DISK_HPP__
 #define __SORTED_SET_DISK_HPP__
 
-#include <cassert>
-#include <functional>
-#include <optional>
-#include <shared_mutex>
-#include <string>
-
-#include <ips4o.hpp>
-
 #include "common/sorted_set_disk_base.hpp"
-#include "common/vector.hpp"
 
-namespace mg {
+
+namespace mtg {
 namespace common {
 
 /**
@@ -37,27 +29,20 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
     /**
      * Constructs a SortedSetDisk instance and initializes its buffers to the value
      * specified in #reserved_num_elements.
-     * @param cleanup function to run each time a chunk is written to disk; typically
-     * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param tmp_dir the prefix of the temporary files where chunks are
      * written before being merged
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
-    SortedSetDisk(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            size_t reserved_num_elements = 1e6,
-            const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9,
-            size_t num_last_elements_cached = 100)
-        : SortedSetDiskBase<T>(cleanup,
-                               num_threads,
+    SortedSetDisk(size_t num_threads = 1,
+                  size_t reserved_num_elements = 1e6,
+                  const std::filesystem::path &tmp_dir = "/tmp/",
+                  size_t max_disk_space_bytes = 1e9)
+        : SortedSetDiskBase<T>(num_threads,
                                reserved_num_elements,
                                tmp_dir,
-                               max_disk_space_bytes,
-                               num_last_elements_cached) {}
+                               max_disk_space_bytes) {}
 
     /**
      * Insert the data between #begin and #end into the buffer. If the buffer is
@@ -82,21 +67,11 @@ class SortedSetDisk : public SortedSetDiskBase<T> {
         }
     }
 
-    virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const override {
-        assert(vector);
-
-        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<value_type>(),
-                              num_threads);
-        // remove duplicates
-        auto unique_end = std::unique(vector->begin(), vector->end());
-        vector->erase(unique_end, vector->end());
-
-        this->cleanup_(vector); // typically removes source dummy k-mers
-    }
+  private:
+    virtual void sort_and_dedupe() override;
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg
 
 #endif // __SORTED_SET_DISK_HPP__

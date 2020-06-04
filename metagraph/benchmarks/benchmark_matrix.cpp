@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 
-#include "benchmark_graph_helpers.hpp"
 #include "method_constructors.hpp"
 
 #include "annotation/annotation_converters.hpp"
@@ -12,8 +11,9 @@
 #include "common/vectors/vector_algorithm.hpp"
 
 
-namespace mg {
-namespace bm {
+namespace {
+
+using namespace mtg;
 
 std::vector<double> get_densities(uint64_t num_cols, std::vector<double> densities) {
     if (densities.size() == 1) {
@@ -56,7 +56,7 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
         if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
-        matrix = generate_brwt_from_rows(
+        matrix = experiments::generate_brwt_from_rows(
             std::move(generated_columns),
             arity_arg,
             greedy_arg,
@@ -74,43 +74,6 @@ BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 100)
 BENCHMARK_TEMPLATE(BM_BRWTCompressSparse, 1, 1000)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1);
-
-
-std::vector<std::string> files {
-    "../tests/data/transcripts_100.fa"
-};
-
-template <size_t file_index>
-static void BM_BRWTCompressTranscripts(benchmark::State& state) {
-    auto anno_graph = build_anno_graph(files[file_index]);
-
-    std::unique_ptr<annotate::MultiBRWTAnnotator> annotator;
-
-    size_t i = 0;
-    for (auto _ : state) {
-        if (i++)
-            throw std::runtime_error("This benchmark will fail on the second iteration");
-
-        const auto *column = dynamic_cast<const annotate::ColumnCompressed<>*>(
-            &anno_graph->get_annotation()
-        );
-
-        if (!column)
-            throw std::runtime_error("This shouldn't happen");
-
-        annotator = annotate::convert_to_greedy_BRWT<annotate::MultiBRWTAnnotator>(
-            const_cast<annotate::ColumnCompressed<>&&>(*column),
-            state.range(0),
-            state.range(0)
-        );
-    }
-}
-
-BENCHMARK_TEMPLATE(BM_BRWTCompressTranscripts, 0)
-    ->Unit(benchmark::kMillisecond)
-    ->Iterations(1)
-    ->Arg(1)
-    ->Arg(4);
 
 
 template <size_t rows_arg = 300000,
@@ -131,7 +94,7 @@ static void BM_BRWTQueryRows(benchmark::State& state) {
         std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
     );
 
-    std::unique_ptr<BinaryMatrix> matrix = generate_brwt_from_rows(
+    std::unique_ptr<BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
         std::move(generated_columns),
         arity_arg,
         greedy_arg,
@@ -152,5 +115,4 @@ BENCHMARK_TEMPLATE(BM_BRWTQueryRows, 3000000, 100, 30, 2, false, 0)
     ->Unit(benchmark::kMillisecond)
     ->DenseRange(0, 10, 1);
 
-} // namespace bm
-} // namespace mg
+} // namespace

@@ -1,15 +1,14 @@
 #include "boss_chunk.hpp"
 
 #include "common/threads/chunked_wait_queue.hpp"
-#include "common/circular_buffer.hpp"
-#include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/utils/template_utils.hpp"
 
-using namespace mg;
+using namespace mtg;
 using utils::get_first;
+using mtg::kmer::KmerExtractorBOSS;
 
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
@@ -151,7 +150,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 
     weights_.width(bits_per_count);
 
-    if constexpr(utils::is_instance_v<Array, mg::common::ChunkedWaitQueue>) {
+    if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
         initialize_chunk(alph_size_,
                          &kmers_with_counts.begin(),
                          &kmers_with_counts.end(),
@@ -170,7 +169,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 }
 
 template <typename T>
-using CWQ = mg::common::ChunkedWaitQueue<T>;
+using CWQ = common::ChunkedWaitQueue<T>;
 
 #define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
     template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<__VA_ARGS__> &, uint8_t); \

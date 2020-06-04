@@ -1,5 +1,7 @@
 #include "clean.hpp"
 
+#include <ips4o.hpp>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -14,7 +16,13 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
+using mtg::seq_io::FastaWriter;
+using mtg::seq_io::ExtendedFastaWriter;
 
 
 int clean_graph(Config *config) {
@@ -266,3 +274,6 @@ int clean_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

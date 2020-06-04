@@ -8,13 +8,13 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/algorithms.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
+using mtg::kmer::KmerExtractor2Bit;
 
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>

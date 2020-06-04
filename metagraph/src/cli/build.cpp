@@ -1,7 +1,6 @@
 #include "build.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
@@ -17,10 +16,15 @@
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
-using utils::get_verbose;
-using namespace mg::bitmap_graph;
-using namespace mg::succinct;
+
+namespace mtg {
+namespace cli {
+
+using mtg::succinct::IBOSSChunkConstructor;
+using mtg::bitmap_graph::DBGBitmap;
+using mtg::bitmap_graph::DBGBitmapConstructor;
+using mtg::common::logger;
+using mtg::common::get_verbose;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
@@ -95,10 +99,10 @@ int build_graph(Config *config) {
         if (config->suffix.size()) {
             suffixes = { config->suffix };
         } else {
-            suffixes = KmerExtractorBOSS::generate_suffixes(config->suffix_len);
+            suffixes = kmer::KmerExtractorBOSS::generate_suffixes(config->suffix_len);
         }
 
-        BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(),
+        BOSS::Chunk graph_data(kmer::KmerExtractorBOSS::alphabet.size(),
                                boss_graph->get_k(),
                                config->canonical);
 
@@ -117,8 +121,8 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                config->tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
-                                        : mg::kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir.empty() ? kmer::ContainerType::VECTOR
+                                        : kmer::ContainerType::VECTOR_DISK,
                 config->tmp_dir,
                 config->disk_cap_bytes
             );
@@ -162,7 +166,7 @@ int build_graph(Config *config) {
         if (config->suffix.size()) {
             suffixes = { config->suffix };
         } else {
-            suffixes = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+            suffixes = kmer::KmerExtractor2Bit().generate_suffixes(config->suffix_len);
         }
 
         std::unique_ptr<DBGBitmapConstructor> constructor;
@@ -354,8 +358,8 @@ int concatenate_graph_chunks(Config *config) {
         assert(config->infbase.size());
 
         const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
-                ? KmerExtractorBOSS().generate_suffixes(config->suffix_len)
-                : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+                ? kmer::KmerExtractorBOSS().generate_suffixes(config->suffix_len)
+                : kmer::KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
         for (const std::string &suffix : sorted_suffixes) {
             assert(suffix.size() == config->suffix_len);
@@ -439,3 +443,6 @@ int concatenate_graph_chunks(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

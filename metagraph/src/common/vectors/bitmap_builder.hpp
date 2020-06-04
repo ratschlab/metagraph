@@ -44,7 +44,7 @@ class bitmap_builder_set : public bitmap_builder {
      * @param[in]  reserved     number of elements in buffer (grows automatically)
      */
     bitmap_builder_set(uint64_t size, size_t num_threads = 0, uint64_t reserved = 0)
-          : size_(size), set_bit_positions_([](const auto &) {}, num_threads) {
+          : size_(size), set_bit_positions_(num_threads) {
         set_bit_positions_.reserve(reserved);
     }
 
@@ -61,17 +61,17 @@ class bitmap_builder_set : public bitmap_builder {
   private:
     virtual uint64_t size() const { return size_; }
     virtual uint64_t num_set_bits() const {
-        return const_cast<mg::common::SortedSet<uint64_t>&>(set_bit_positions_).data().size();
+        return const_cast<mtg::common::SortedSet<uint64_t>&>(set_bit_positions_).data().size();
     }
     virtual void call_ones(const std::function<void(uint64_t)> &callback) const {
-        for (uint64_t pos : const_cast<mg::common::SortedSet<uint64_t>&>(set_bit_positions_).data()) {
+        for (uint64_t pos : const_cast<mtg::common::SortedSet<uint64_t>&>(set_bit_positions_).data()) {
             assert(pos < size_ && "Indexes cannot be greater than bitmap's size");
             callback(pos);
         }
     }
 
     const uint64_t size_;
-    mg::common::SortedSet<uint64_t> set_bit_positions_;
+    mtg::common::SortedSet<uint64_t> set_bit_positions_;
 };
 
 

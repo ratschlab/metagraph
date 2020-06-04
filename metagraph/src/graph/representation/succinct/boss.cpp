@@ -13,6 +13,7 @@
 
 #include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
+#include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -21,6 +22,7 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "boss_construct.hpp"
 
+using namespace mtg;
 using utils::remove_suffix;
 
 #define CHECK_INDEX(idx) \
@@ -1881,7 +1883,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
                              "Traverse BOSS",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !common::get_verbose());
 
     std::vector<Edge> edges;
     std::deque<std::future<std::vector<Edge>>> edges_async;
@@ -2451,9 +2453,8 @@ void call_path(const BOSS &boss,
     }
 
     // get dual path (mapping of the reverse complement sequence)
-    std::vector<TAlphabet> rev_comp_seq(sequence.size(), boss.kSentinelCode);
-    std::copy(sequence.begin(), sequence.end(), rev_comp_seq.begin());
-    KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+    auto rev_comp_seq = sequence;
+    kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
 

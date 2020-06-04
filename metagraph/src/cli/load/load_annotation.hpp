@@ -7,6 +7,9 @@
 #include "cli/config/config.hpp"
 
 
+namespace mtg {
+namespace cli {
+
 Config::AnnotationType parse_annotation_type(const std::string &filename);
 
 std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
@@ -18,5 +21,8 @@ inline auto initialize_annotation(const std::string &filename,
                                   const Config &config) {
     return initialize_annotation(parse_annotation_type(filename), config, 0);
 }
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __LOAD_ANNOTATION_HPP__

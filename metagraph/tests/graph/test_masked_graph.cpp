@@ -9,6 +9,11 @@
 #include "common/seq_tools/reverse_complement.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <typename Graph>
 class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
 TYPED_TEST_SUITE(MaskedDeBruijnGraphTest, GraphTypes);
@@ -826,3 +831,5 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
         }
     }
 }
+
+} // namespace

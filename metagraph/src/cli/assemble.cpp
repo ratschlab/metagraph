@@ -7,7 +7,11 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
 
 
 int assemble(Config *config) {
@@ -66,9 +70,9 @@ int assemble(Config *config) {
         );
     }
 
-    FastaWriter writer(config->outfbase, config->header,
-                       config->enumerate_out_sequences,
-                       get_num_threads() > 1);
+    seq_io::FastaWriter writer(config->outfbase, config->header,
+                               config->enumerate_out_sequences,
+                               get_num_threads() > 1);
     std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
@@ -98,3 +102,6 @@ int assemble(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

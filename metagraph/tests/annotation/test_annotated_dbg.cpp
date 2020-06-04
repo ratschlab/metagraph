@@ -12,6 +12,11 @@
 #include "annotation/annotation_converters.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 void check_labels(const AnnotatedDBG &anno_graph,
                   const std::string &sequence,
                   const std::vector<std::string> labels_present,
@@ -1986,3 +1991,5 @@ TEST(AnnotatedDBG, score_kmer_presence_mask) {
         ++i;
     }
 }
+
+} // namespace

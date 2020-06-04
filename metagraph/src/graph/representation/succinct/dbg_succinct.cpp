@@ -14,8 +14,9 @@
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
+using namespace mtg;
 using utils::remove_suffix;
-using mg::common::logger;
+using mtg::common::logger;
 
 typedef DBGSuccinct::node_index node_index;
 
@@ -720,7 +721,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
         std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
         if (!bloom_filter_)
-            bloom_filter_ = std::make_unique<KmerBloomFilter<>>(get_k(), canonical_mode_);
+            bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), canonical_mode_);
 
         if (!bloom_filter_->load(bloom_instream)) {
             std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
@@ -911,7 +912,7 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
 void DBGSuccinct
 ::initialize_bloom_filter_from_fpr(double false_positive_rate,
                                    uint32_t max_num_hash_functions) {
-    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+    bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
         canonical_mode_,
         BloomFilter::optim_size(false_positive_rate, num_nodes()),
@@ -928,7 +929,7 @@ void DBGSuccinct
 void DBGSuccinct
 ::initialize_bloom_filter(double bits_per_kmer,
                           uint32_t max_num_hash_functions) {
-    bloom_filter_ = std::make_unique<KmerBloomFilter<>>(
+    bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
         canonical_mode_,
         bits_per_kmer * num_nodes(),

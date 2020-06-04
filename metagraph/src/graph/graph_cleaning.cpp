@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "common/algorithms.hpp"
+#include "common/logger.hpp"
 
 
 bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
@@ -218,7 +218,7 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
   double r1, r2, rr, min_a_est = std::numeric_limits<double>::max(), tmp;
   double aa, faa, a_est, b_est, c0;
 
-  if (utils::get_verbose())
+  if (mtg::common::get_verbose())
   {
     std::cout << "k-mer count histogram:\n";
     for(i = 1; i < arrlen; i++)

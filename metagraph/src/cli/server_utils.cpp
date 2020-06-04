@@ -5,7 +5,11 @@
 #include "common/logger.hpp"
 #include "server_utils.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
 
 /**
  * Compress a STL string using zlib with given compression level and return
@@ -114,3 +118,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                         json_str_with_error_msg("Internal server error"));
     }
 }
+
+} // namespace cli
+} // namespace mtg

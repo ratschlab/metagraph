@@ -308,10 +308,21 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 sdsl::bit_vector *result,
                 ThreadPool &thread_pool);
 
-// assumes that all bits that are set in |column| are set in |reference| too.
+// Call this version only for sparse vectors (with the density about 1% or less).
+// The buffer must have capacity to store 3 x (number of set bits in all columns)
+// 64-bit integers.
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       uint64_t *buffer,
+                                       ThreadPool &thread_pool);
+
+// Assumes that all bits that are set in |column| are set in |reference| too
 sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    const sdsl::bit_vector &reference,
                                    uint64_t reference_num_set_bits,
+                                   ThreadPool &thread_pool);
+// Assumes that all bits that are set in |column| are set in |reference| too
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector &reference,
                                    ThreadPool &thread_pool);
 
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for

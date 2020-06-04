@@ -438,7 +438,7 @@ class BOSS {
     // file dump extension
     static constexpr auto kExtension = ".dbg";
 
-    const KmerExtractorBOSS kmer_extractor_;
+    const mtg::kmer::KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size

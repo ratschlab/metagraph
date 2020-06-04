@@ -136,7 +136,7 @@ class DBGSuccinct : public DeBruijnGraph {
     void initialize_bloom_filter(double bits_per_kmer,
                                  uint32_t max_num_hash_functions = -1);
 
-    const KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
+    const mtg::kmer::KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";
@@ -149,7 +149,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     bool canonical_mode_;
 
-    std::unique_ptr<KmerBloomFilter<>> bloom_filter_;
+    std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 };
 
 

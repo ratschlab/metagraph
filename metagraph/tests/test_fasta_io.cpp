@@ -5,6 +5,12 @@
 
 #include "seq_io/sequence_io.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::seq_io;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
 const std::string dump_filename = test_data_dir + "/dump.fasta.gz";
@@ -772,3 +778,5 @@ TEST(FastaFromString, read_fasta_from_string) {
 
     EXPECT_EQ(seqs_cnt, nr_seqs);
 }
+
+} // namespace

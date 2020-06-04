@@ -5,6 +5,8 @@
 #include <vector>
 
 
+namespace mtg {
+namespace kmer {
 namespace alphabets {
 
 template <size_t n>
@@ -147,5 +149,7 @@ static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
 static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
 
 } // namespace alphabets
+} // namespace kmer
+} // namespace mtg
 
 #endif // __ALPHABETS_HPP__

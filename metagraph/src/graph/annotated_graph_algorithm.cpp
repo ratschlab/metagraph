@@ -4,7 +4,6 @@
 
 #include <tsl/ordered_map.h>
 
-#include "common/algorithms.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"

@@ -9,6 +9,11 @@
 #include "annotation/annotation_converters.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
@@ -710,3 +715,5 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         }
     }
 }
+
+} // namespace

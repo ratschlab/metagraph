@@ -14,7 +14,11 @@
 #include "align.hpp"
 #include "server_utils.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
@@ -168,7 +172,8 @@ std::string process_align_request(const std::string &received_message,
 
     Json::Value root = Json::Value(Json::arrayValue);
 
-    read_fasta_from_string(fasta.asString(), [&](kseq_t *read_stream) {
+    seq_io::read_fasta_from_string(fasta.asString(),
+                                   [&](seq_io::kseq_t *read_stream) {
         const auto paths = aligner.align(read_stream->seq.s);
 
         Json::Value align_entry;
@@ -287,3 +292,6 @@ int run_server(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

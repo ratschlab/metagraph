@@ -11,7 +11,8 @@
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
+using mtg::kmer::KmerExtractor2Bit;
 
 #define _DBGHash_LINEAR_PATH_OPTIMIZATIONS 1
 

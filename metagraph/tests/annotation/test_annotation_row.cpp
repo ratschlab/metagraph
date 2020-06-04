@@ -7,6 +7,11 @@
 #define private public
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
@@ -160,3 +165,5 @@ TEST(RowCompressed, RenameColumnsMergeAll) {
     // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
     // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
 }
+
+} // namespace

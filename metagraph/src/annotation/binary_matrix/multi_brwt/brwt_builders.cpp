@@ -8,7 +8,8 @@
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-using mg::common::logger;
+using namespace mtg;
+using mtg::common::logger;
 
 
 BRWTBottomUpBuilder::Partitioner
@@ -38,9 +39,18 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     BRWT parent;
 
     VectorPtrs index_columns(submatrices.size());
+    uint64_t sum_num_set_bits = 0;
     for (size_t i = 0; i < submatrices.size(); ++i) {
         index_columns[i] = submatrices[i].nonzero_rows_.get();
+        sum_num_set_bits += submatrices[i].nonzero_rows_->num_set_bits();
     }
+
+    // build an aggregated parent index column
+    if (sum_num_set_bits * 64 * 3 < buffer->size()) {
+        // work with bits
+        return concatenate_sparse(std::move(submatrices), buffer, thread_pool);
+    }
+    // work with uncompressed bitmap stored in buffer
 
     // build an aggregated parent index column
     compute_or(index_columns, buffer, thread_pool);
@@ -92,6 +102,60 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     return parent;
 }
 
+BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
+                                             sdsl::bit_vector *buffer,
+                                             ThreadPool &thread_pool) {
+    assert(submatrices.size());
+
+    if (submatrices.size() == 1)
+        return std::move(submatrices[0]);
+
+    BRWT parent;
+
+    VectorPtrs index_columns(submatrices.size());
+    for (size_t i = 0; i < submatrices.size(); ++i) {
+        index_columns[i] = submatrices[i].nonzero_rows_.get();
+    }
+
+    // work with bits
+
+    // build an aggregated parent index column
+    parent.nonzero_rows_ = compute_or(index_columns, buffer->data(), thread_pool);
+
+    // set column assignments
+    uint64_t num_columns = 0;
+    Partition partition;
+    for (const BRWT &submatrix : submatrices) {
+        partition.push_back(utils::arange(num_columns, submatrix.num_columns()));
+        num_columns += submatrix.num_columns();
+    }
+    parent.assignments_ = RangePartition(std::move(partition));
+
+    // set child nodes
+    parent.child_nodes_.resize(submatrices.size());
+
+    std::vector<std::future<void>> results;
+
+    for (size_t i = 0; i < submatrices.size(); ++i) {
+        // generate an index column for the child node
+        sdsl::bit_vector subindex
+            = generate_subindex(*submatrices[i].nonzero_rows_,
+                                *parent.nonzero_rows_, thread_pool);
+
+        // the full index vector is not needed anymore, the subindex
+        // will be used instead
+        submatrices[i].nonzero_rows_.reset();
+
+        // compress the subindex vector and set it to the child node
+        // all in a single thread
+        submatrices[i].nonzero_rows_
+            = std::make_unique<bit_vector_smallrank>(std::move(subindex));
+        parent.child_nodes_[i].reset(new BRWT(std::move(submatrices[i])));
+    }
+
+    return parent;
+}
+
 template <typename T>
 std::vector<T> subset(std::vector<T> *vector,
                       const std::vector<uint64_t> indexes) {
@@ -139,7 +203,7 @@ BRWT BRWTBottomUpBuilder::build(
     std::mutex done_mu;
 
     ProgressBar progress_bar(linkage.size(), "Building BRWT",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !common::get_verbose());
 
     uint64_t num_leaves = 0;
     uint64_t num_rows = 0;
@@ -330,7 +394,7 @@ BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,
         current_partition.assign(groups.size(), {});
 
         ProgressBar progress_bar(groups.size(), "Building BRWT level",
-                                 std::cerr, !utils::get_verbose());
+                                 std::cerr, !common::get_verbose());
 
         #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {
@@ -385,7 +449,7 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix, uint64_t max_arity, size_t num_thre
     });
 
     ProgressBar progress_bar(parents.size(), "Relax Multi-BRWT",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !common::get_verbose());
 
     for (BRWT *parent : parents) {
         assert(parent->child_nodes_.size());

@@ -5,13 +5,12 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
+namespace {
+
 const std::string filename = "./benchmark_graph.dbg";
 
 constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 
-
-namespace mg {
-namespace bm {
 
 std::unique_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
     auto graph = std::make_unique<DBGSuccinct>(2);
@@ -219,5 +218,4 @@ BENCHMARK(BM_BOSS_num_incoming_to_target) -> Unit(benchmark::kMicrosecond);
 
 DEFINE_BOSS_BENCHMARK(get_node_seq,  get_node_seq,              get_W,    size);
 
-} // namespace bm
-} // namespace mg
+} // namespace

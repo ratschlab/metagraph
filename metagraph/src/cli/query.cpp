@@ -18,11 +18,15 @@
 #include "load/load_annotated_graph.hpp"
 #include "align.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
@@ -435,7 +439,7 @@ void QueryExecutor::query_fasta(const string &file,
                                 const std::function<void(const std::string &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
-    FastaParser fasta_parser(file, config_.forward_and_reverse);
+    seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
     if (config_.fast) {
         // Construct a query graph and query against it
@@ -447,7 +451,7 @@ void QueryExecutor::query_fasta(const string &file,
 
     size_t seq_count = 0;
 
-    for (const auto &kseq : fasta_parser) {
+    for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue(
             [&](size_t id, const std::string &name, std::string &seq) {
                 if (!aligner_) {
@@ -474,13 +478,13 @@ void QueryExecutor::query_fasta(const string &file,
 }
 
 void QueryExecutor
-::batched_query_fasta(FastaParser &fasta_parser,
+::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                       const std::function<void(const std::string &)> &callback) {
     auto begin = fasta_parser.begin();
     auto end = fasta_parser.end();
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
-    FastaParser::iterator it;
+    seq_io::FastaParser::iterator it;
 
     size_t seq_count = 0;
     while (begin != end) {
@@ -581,3 +585,6 @@ void QueryExecutor
                       fasta_parser.get_filename(), batch_timer.elapsed());
     }
 }
+
+} // namespace cli
+} // namespace mtg
