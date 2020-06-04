@@ -15,7 +15,7 @@ TYPED_TEST_SUITE(StableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k);
             std::vector<std::string> sequences;
@@ -34,7 +34,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k);
             std::vector<std::string> sequences;
@@ -53,7 +53,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences);
@@ -80,7 +80,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences);
@@ -107,7 +107,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
@@ -136,7 +136,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 4; k < 14; ++k) {
             std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
@@ -158,7 +158,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 4; k < 14; ++k) {
             std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                                  "ATGCAGTACTGAG",
@@ -179,7 +179,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::string sequence = "GCAAATAAC";
         auto graph = build_graph<TypeParam>(3, { sequence });
 
@@ -194,7 +194,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsUniqueKmersCycle) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 4;
         std::string sequence = "AAACCCGGGTTTAA";
         auto graph = build_graph<TypeParam>(k, { sequence });
@@ -213,7 +213,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsUniqueKmersCycle) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 4;
         std::string sequence = "AAACCCGGGTTTAAA";
         auto graph = build_graph<TypeParam>(k, { sequence });
@@ -232,7 +232,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
@@ -261,7 +261,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallPaths) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -289,7 +289,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPaths) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -317,7 +317,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonical) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -345,7 +345,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonical) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonicalSingleKmerForm) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -373,7 +373,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonicalSingleKmerForm) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonical) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -401,7 +401,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonical) {
 }
 
 TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonicalSingleKmerForm) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -430,7 +430,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonicalSingleKmerForm) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallPaths) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -465,7 +465,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -500,7 +500,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 3;
         auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
                                                  "TCTAAGC" });
@@ -722,7 +722,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         auto graph = build_graph<TypeParam>(k, { "ACTATAGCTAGTCTATGCGA",
                                                  "ACTATAGCTAGTCTAA",
@@ -766,7 +766,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::vector<std::string> sequences {
             "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
             "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
@@ -810,7 +810,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::vector<std::string> sequences {
             "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
             "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
@@ -838,7 +838,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
-    for (size_t num_threads = 0; num_threads < 5; ++num_threads) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         // AATTT - ATTTT           TTTAA - TTAAA
         //               > TTTTA <
         // GGTTT - GTTTT           TTTAG - TTAGG
