@@ -276,7 +276,7 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
 
 // add +1 to each character of the k-mer
 template <typename KMER_TO, typename KMER_FROM>
-KMER_TO lift(const KMER_FROM &kmer) {
+KMER_TO lift(const KMER_FROM &kmer, size_t k) {
     constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
@@ -286,7 +286,7 @@ KMER_TO lift(const KMER_FROM &kmer) {
 
     typename KMER_TO::WordType word = 0;
 
-    for (int i = sizeof(KMER_FROM) * 8 / L1 - 1; i >= 0; --i) {
+    for (int i = k - 1; i >= 0; --i) {
         word <<= L2;
         assert(kmer[i] + 1 <= sdsl::bits::lo_set[L2]);
         word |= kmer[i] + 1;
@@ -329,11 +329,14 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
+    uint64_t num_sink = 0;
+    uint64_t num_source = 0;
+
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
 
-        std::function<KMER_INT(const KMER_INT_REAL &)> transform_kmer = [](const KMER_INT_REAL &v) {
-            return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v)).data();
+        std::function<KMER_INT(const KMER_INT_REAL &)> transform_kmer = [k](const KMER_INT_REAL &v) {
+            return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1).data();
         };
 
         // stream k-mers of pattern ***F*
@@ -363,6 +366,7 @@ generate_dummy_1_kmers(size_t k,
                 skip_same_suffix(v, sink_gen_it, 1);
                 v.to_next(k + 1, BOSS::kSentinelCode);
                 dummy_sink_chunks[F].add(v.data());
+                num_sink++;
             }
             if (!sink_gen_it.empty()) {
                 KMER top(sink_gen_it.top());
@@ -377,6 +381,7 @@ generate_dummy_1_kmers(size_t k,
                 }
             }
             dummy_l1_chunks[F].add(dummy_source.data());
+            num_source++;
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
@@ -384,6 +389,7 @@ generate_dummy_1_kmers(size_t k,
             skip_same_suffix(v, sink_gen_it, 1);
             v.to_next(k + 1, BOSS::kSentinelCode);
             dummy_sink_chunks[F].add(v.data());
+            num_sink++;
         }
     }
 
@@ -391,6 +397,9 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks[i].finish();
         dummy_l1_chunks[i].finish();
     }
+
+    logger->trace("Generated {} dummy sink and {} dummy source k-mers",
+                  num_sink, num_source);
 
     // dummy sink k-mers are partitioned into blocks by F (kmer[1]), so simply
     // concatenating the blocks will result in a single ordered block
@@ -501,13 +510,13 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     }
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
-    async_worker.enqueue([kmers_out, real_split_by_W, dummy_chunks]() {
+    async_worker.enqueue([k, kmers_out, real_split_by_W, dummy_chunks]() {
         common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
-            [](const T_INT_REAL &v) {
+            [k](const T_INT_REAL &v) {
                 if constexpr (utils::is_pair_v<T>) {
-                    return T(lift<KMER>(reinterpret_cast<const KMER_REAL &>(v.first)), v.second);
+                    return T(lift<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1), v.second);
                 } else {
-                    return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v));
+                    return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1);
                 }
             },
             real_split_by_W, true
