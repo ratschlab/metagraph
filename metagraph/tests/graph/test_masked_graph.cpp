@@ -608,22 +608,32 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                 auto stable_graph = build_graph_iterative<DBGSuccinct>(
                     k,
                     [&](const auto &callback) {
-                        stable_masked_graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(stable_masked_graph, sequence));
-                            std::unique_lock<std::mutex> lock(seq_mutex);
-                            callback(sequence);
-                        }, num_threads, 1, true);
+                        stable_masked_graph.call_unitigs(
+                            [&](const auto &sequence, const auto &path) {
+                                ASSERT_EQ(path, map_sequence_to_nodes(stable_masked_graph, sequence));
+                                std::unique_lock<std::mutex> lock(seq_mutex);
+                                callback(sequence);
+                            },
+                            num_threads,
+                            1, // min_tip_size
+                            true // kmers_in_single_form
+                        );
                     },
                     true
                 );
                 auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
                     k,
                     [&](const auto &callback) {
-                        graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
-                            std::unique_lock<std::mutex> lock(seq_mutex);
-                            callback(sequence);
-                        }, num_threads, 1, true);
+                        graph.call_unitigs(
+                            [&](const auto &sequence, const auto &path) {
+                                ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
+                                std::unique_lock<std::mutex> lock(seq_mutex);
+                                callback(sequence);
+                            },
+                            num_threads,
+                            1, // min_tip_size
+                            true // kmers_in_single_form
+                        );
                     },
                     true
                 );
@@ -654,10 +664,15 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsCheckHalfSingleKmerFormCano
                 }, num_threads);
 
                 std::atomic<size_t> num_kmers = 0;
-                graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
-                    num_kmers += path.size();
-                }, num_threads, 1, true);
+                graph->call_unitigs(
+                    [&](const auto &sequence, const auto &path) {
+                        ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                        num_kmers += path.size();
+                    },
+                    num_threads,
+                    1, // min_tip_size
+                    true // kmers_in_single_form
+                );
 
                 EXPECT_EQ(num_kmers_both, num_kmers * 2);
             }
