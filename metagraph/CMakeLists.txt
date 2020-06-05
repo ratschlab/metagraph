@@ -88,7 +88,7 @@ endif()
 
 
 string(APPEND CMAKE_CXX_FLAGS
-  " -Wall -Wextra -Werror -Wno-class-memaccess"
+  " -Wall -Wextra -Werror"
   " -D_THREAD_SAFE -pthread"
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
@@ -234,14 +234,11 @@ link_directories(
   external-libraries/sdsl-lite/lib
 )
 
-include_directories(SYSTEM
-  external-libraries/DYNAMIC/include
-  external-libraries/sdsl-lite/include
-)
-
 include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
+  external-libraries/DYNAMIC/include
+  external-libraries/sdsl-lite/include
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
