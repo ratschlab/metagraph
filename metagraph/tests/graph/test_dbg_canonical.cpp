@@ -858,7 +858,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         size_t k = 3;
         std::mutex seq_mutex;
         std::set<std::string> unitigs;
-        {
+
         auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
                                                  "TCTAAGC" }, true);
         ASSERT_EQ(12u, graph->num_nodes());
@@ -897,11 +897,9 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         }, 10, false, num_threads);
         EXPECT_EQ(std::set<std::string>({ "ACT", "AGA", "AGCT", "AGT", "CTA", "CTTA",
                                           "TAAG", "TAG", "TCT" }), unitigs);
-        }
 
-        {
-        auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
-                                                 "ACTAAGT" }, true);
+        graph = build_graph<TypeParam>(k, { "ACTAAGC",
+                                            "ACTAAGT" }, true);
         ASSERT_EQ(10u, graph->num_nodes());
 
         unitigs.clear();
@@ -935,12 +933,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
             unitigs.insert(unitig);
         }, 10, false, num_threads);
         EXPECT_EQ(std::set<std::string>({ "ACT", "AGCT", "AGT", "CTA", "CTTA", "TAAG", "TAG" }), unitigs);
-        }
 
-        {
-        auto graph = build_graph<TypeParam>(k, { "ACTAAGCCC",
-                                                 "AAAGC",
-                                                 "TAAGCA" }, true);
+        graph = build_graph<TypeParam>(k, { "ACTAAGCCC",
+                                            "AAAGC",
+                                            "TAAGCA" }, true);
         ASSERT_EQ(18u, graph->num_nodes());
 
         unitigs.clear();
@@ -997,12 +993,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         EXPECT_EQ(std::set<std::string>({ "AAA", "AAG", "ACT", "AGC", "AGT", "CCC",
                                           "CTA", "CTT", "GCA", "GCC", "GCT", "GGC",
                                           "GGG", "TAA", "TAG", "TGC", "TTA", "TTT" }), unitigs);
-        }
 
-        {
-        auto graph = build_graph<TypeParam>(k, { "ACGAAGCCT",
-                                                 "AAGC",
-                                                 "TAAGCA" }, true);
+        graph = build_graph<TypeParam>(k, { "ACGAAGCCT",
+                                            "AAGC",
+                                            "TAAGCA" }, true);
         ASSERT_EQ(18u, graph->num_nodes());
 
         // TODO: make DBGSuccinct work properly even if it has redundant source dummy edges
@@ -1018,8 +1012,6 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         EXPECT_EQ(std::set<std::string>({ "AAG", "ACG", "AGC", "AGGC", "CGAA",
                                           "CGT", "CTT", "GCA", "GCCT", "GCT",
                                           "TGC", "TTAA", "TTCG" }), unitigs) << *graph;
-
-        continue;
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
@@ -1060,12 +1052,10 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         EXPECT_EQ(std::set<std::string>({ "AAG", "ACG", "AGC", "AGGC", "CGAA",
                                           "CGT", "CTT", "GCA", "GCCT", "GCT",
                                           "TGC", "TTAA", "TTCG" }), unitigs);
-        }
 
-        {
-        auto graph = build_graph<TypeParam>(k, { "TCTAAGCCG",
-                                                 "CATAAGCCG",
-                                                 "CATAACCGA" }, true);
+        graph = build_graph<TypeParam>(k, { "TCTAAGCCG",
+                                            "CATAAGCCG",
+                                            "CATAACCGA" }, true);
         ASSERT_EQ(24u, graph->num_nodes());
 
         unitigs.clear();
@@ -1122,7 +1112,6 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
                                           "CAT", "CCG", "CGA", "CGG", "CTA", "CTT",
                                           "GCC", "GCT", "GGC", "GGTT", "TAA", "TAG",
                                           "TAT", "TCG", "TCT", "TTA" }), unitigs);
-        }
     }
 }
 

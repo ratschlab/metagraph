@@ -2047,8 +2047,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     call_paths_from_queue();
 
     if (kmers_in_single_form) {
-        // // check for edges whose predecesors have already been traversed
-        // // (this should only happen when outputting simplitigs)
+        // check for edges whose predecesors have already been traversed
+        // (this should only happen when outputting simplitigs)
         call_zeros(discovered, [&](edge_index edge) {
             edge_index t = bwd(edge);
             if (!masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask)
