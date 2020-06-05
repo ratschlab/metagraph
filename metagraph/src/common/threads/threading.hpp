@@ -69,7 +69,7 @@ class ThreadPool {
             return task->get_future();
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
-            full_condition.wait(lock, [this]() {
+            full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
             tasks.emplace([task](){ (*task)(); });
