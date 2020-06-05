@@ -267,10 +267,10 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
 void call_sequences(const DeBruijnGraph &graph,
                     const DeBruijnGraph::CallPath &callback,
+                    size_t num_threads,
                     bool call_unitigs,
                     uint64_t min_tip_size,
-                    bool kmers_in_single_form,
-                    size_t num_threads) {
+                    bool kmers_in_single_form) {
     // TODO: port over the implementation from BOSS once it's finalized
     std::ignore = num_threads;
 
@@ -347,7 +347,7 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
                                    bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, false, 0, kmers_in_single_form, num_threads);
+    ::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
@@ -356,10 +356,10 @@ void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  bool kmers_in_single_form) const {
     ::call_sequences(*this,
                      callback,
+                     num_threads,
                      true,
                      min_tip_size,
-                     kmers_in_single_form,
-                     num_threads);
+                     kmers_in_single_form);
 }
 
 /**
