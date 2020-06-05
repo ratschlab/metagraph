@@ -118,28 +118,28 @@ class BOSS {
      */
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
+                    size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
-                    bool trim_sentinels = false,
-                    size_t num_threads = 1) const;
+                    bool trim_sentinels = false) const;
 
     /**
      * Call contigs (dummy edges are skipped).
      */
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
+                        size_t num_threads = 1,
                         bool kmers_in_single_form = false,
-                        const bitmap *subgraph_mask = NULL,
-                        size_t num_threads = 1) const;
+                        const bitmap *subgraph_mask = NULL) const;
 
     /**
      * Call unitigs (dummy edges are skipped).
      */
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
+                      size_t num_threads = 1,
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
-                      const bitmap *subgraph_mask = NULL,
-                      size_t num_threads = 1) const;
+                      const bitmap *subgraph_mask = NULL) const;
 
     // |edge| must be the first incoming edge
     void call_incoming_to_target(edge_index edge, TAlphabet w,

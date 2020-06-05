@@ -937,7 +937,7 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
                 ASSERT_EQ(path, empty.map_to_edges(sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 reconstructed.add_sequence(sequence);
-            }, 0, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(empty, reconstructed);
         }
@@ -955,15 +955,11 @@ TEST(BOSS, CallPathsOneLoop) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             false,
-                             false,
-                             NULL,
-                             false,
                              num_threads);
             graph.call_sequences([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -982,15 +978,12 @@ TEST(BOSS, CallUnitigsOneLoop) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             true,
-                             false,
-                             NULL,
-                             false,
-                             num_threads);
+                             num_threads,
+                             true /* unitigs */);
             graph.call_unitigs([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, 0, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1011,15 +1004,11 @@ TEST(BOSS, CallPathsTwoLoops) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             false,
-                             false,
-                             NULL,
-                             false,
                              num_threads);
             graph.call_sequences([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1040,15 +1029,12 @@ TEST(BOSS, CallUnitigsTwoLoops) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             true,
-                             false,
-                             NULL,
-                             false,
-                             num_threads);
+                             num_threads,
+                             true /* unitigs */);
             graph.call_unitigs([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, 0, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1071,15 +1057,11 @@ TEST(BOSS, CallPathsFourLoops) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             false,
-                             false,
-                             NULL,
-                             false,
                              num_threads);
             graph.call_sequences([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1102,15 +1084,12 @@ TEST(BOSS, CallUnitigsFourLoops) {
             std::atomic<size_t> num_sequences = 0;
 
             graph.call_paths([&](const auto &, const auto &) { num_paths++; },
-                             true,
-                             false,
-                             NULL,
-                             false,
-                             num_threads);
+                             num_threads,
+                             true /* unitigs */);
             graph.call_unitigs([&](const auto &seq, const auto &path) {
                 ASSERT_EQ(path, graph.map_to_edges(seq));
                 num_sequences++;
-            }, 0, false, NULL, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1134,7 +1113,7 @@ TEST(BOSS, CallPaths) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1151,7 +1130,7 @@ TEST(BOSS, CallPaths) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1168,7 +1147,7 @@ TEST(BOSS, CallPaths) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1184,7 +1163,7 @@ TEST(BOSS, CallPaths) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1200,7 +1179,7 @@ TEST(BOSS, CallPaths) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1224,7 +1203,7 @@ TEST(BOSS, CallUnitigs) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, 0, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1241,7 +1220,7 @@ TEST(BOSS, CallUnitigs) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, 0, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1258,7 +1237,7 @@ TEST(BOSS, CallUnitigs) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, 0, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1274,7 +1253,7 @@ TEST(BOSS, CallUnitigs) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, 0, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1290,7 +1269,7 @@ TEST(BOSS, CallUnitigs) {
                     EXPECT_EQ(path, graph.map_to_edges(sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconstructed.add_sequence(sequence);
-                }, 0, false, NULL, num_threads);
+                }, num_threads);
 
                 EXPECT_EQ(graph, reconstructed);
             }
@@ -1320,11 +1299,8 @@ TEST(BOSS, CallUnitigs1) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_contigs.insert(graph.decode(seq));
             },
-            true,
-            false,
-            NULL,
-            false,
-            num_threads
+            num_threads,
+            true // unitigs
         );
 
         EXPECT_EQ(contigs, obs_contigs) << graph;
@@ -1356,11 +1332,8 @@ TEST(BOSS, CallUnitigsDisconnected1) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_contigs.insert(graph.decode(seq));
             },
-            true,
-            false,
-            NULL,
-            false,
-            num_threads
+            num_threads,
+            true // unitigs
         );
 
         EXPECT_EQ(contigs, obs_contigs);
@@ -1395,11 +1368,8 @@ TEST(BOSS, CallUnitigsDisconnected2) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_contigs.insert(graph.decode(seq));
             },
-            true,
-            false,
-            NULL,
-            false,
-            num_threads
+            num_threads,
+            true // unitigs
         );
 
         EXPECT_EQ(contigs, obs_contigs);
@@ -1436,11 +1406,8 @@ TEST(BOSS, CallUnitigsTwoComponents) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_contigs.insert(graph.decode(seq));
             },
-            true,
-            false,
-            NULL,
-            false,
-            num_threads
+            num_threads,
+            true // unitigs
         );
 
         EXPECT_EQ(contigs, obs_contigs);
@@ -1473,7 +1440,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 0, false, NULL, num_threads);
+            , num_threads);
             EXPECT_EQ(contigs.size(), num_contigs);
             num_contigs = 0;
             graph.call_unitigs(
@@ -1482,7 +1449,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 1, false, NULL, num_threads);
+            , num_threads, 1 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
         {
@@ -1496,7 +1463,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 2, false, NULL, num_threads);
+            , num_threads, 2 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
         {
@@ -1510,7 +1477,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 3, false, NULL, num_threads);
+            , num_threads, 3 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
         {
@@ -1524,7 +1491,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 4, false, NULL, num_threads);
+            , num_threads, 4 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
         {
@@ -1538,7 +1505,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 5, false, NULL, num_threads);
+            , num_threads, 5 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
         {
@@ -1552,7 +1519,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
                     EXPECT_TRUE(contigs.count(str)) << str;
                     num_contigs++;
                 }
-            , 6, false, NULL, num_threads);
+            , num_threads, 6 /* max_pruned_dead_end_size */);
             EXPECT_EQ(contigs.size(), num_contigs);
         }
     }
@@ -1599,10 +1566,8 @@ TEST(BOSS, CallUnitigsCheckDegree) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
-            2,
-            false,
-            NULL,
-            num_threads
+            num_threads,
+            2 // max_pruned_dead_end_size
         );
 
         EXPECT_EQ(unitigs, obs_unitigs) << num_threads;
@@ -1650,10 +1615,8 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
-            2,
-            false,
-            NULL,
-            num_threads
+            num_threads,
+            2 // max_pruned_dead_end_size
         );
 
         EXPECT_EQ(unitigs, obs_unitigs);
@@ -1685,10 +1648,8 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
-            2,
-            false,
-            NULL,
-            num_threads
+            num_threads,
+            2 // max_pruned_dead_end_size
         );
 
         EXPECT_EQ(unitigs, obs_unitigs);
@@ -1720,10 +1681,8 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs_unitigs.insert(unitig);
             },
-            2,
-            false,
-            NULL,
-            num_threads
+            num_threads,
+            2 // max_pruned_dead_end_size
         );
 
         EXPECT_EQ(unitigs, obs_unitigs);
@@ -1759,10 +1718,10 @@ TEST(BOSS, CallUnitigsMasked) {
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 obs.insert(unitig);
             },
-            0,
-            false,
-            &mask,
-            num_threads
+            num_threads,
+            0, // max_pruned_dead_end_size
+            false, // kmers_in_single_form
+            &mask // subgraph_mask
         );
 
         EXPECT_EQ(obs, ref);

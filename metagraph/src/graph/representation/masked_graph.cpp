@@ -148,7 +148,7 @@ void MaskedDeBruijnGraph
             }
             callback(sequence, path);
 
-        }, kmers_in_single_form, &mask, num_threads);
+        }, num_threads, kmers_in_single_form, &mask);
 
     } else {
         DeBruijnGraph::call_sequences(callback, num_threads, kmers_in_single_form);
@@ -170,7 +170,7 @@ void MaskedDeBruijnGraph
             }
             callback(sequence, path);
 
-        }, min_tip_size, kmers_in_single_form, &mask, num_threads);
+        }, num_threads, min_tip_size, kmers_in_single_form, &mask);
 
     } else {
         DeBruijnGraph::call_unitigs(callback,

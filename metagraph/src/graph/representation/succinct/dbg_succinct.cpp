@@ -479,9 +479,8 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
             }
             callback(std::move(seq), std::move(path));
         },
-        kmers_in_single_form,
-        nullptr,
-        num_threads
+        num_threads,
+        kmers_in_single_form
     );
 }
 
@@ -497,10 +496,9 @@ void DBGSuccinct::call_unitigs(const CallPath &callback,
             }
             callback(std::move(seq), std::move(path));
         },
+        num_threads,
         min_tip_size,
-        kmers_in_single_form,
-        nullptr,
-        num_threads
+        kmers_in_single_form
     );
 }
 
@@ -920,8 +918,10 @@ void DBGSuccinct
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
     );
 
+    // TODO: multithreaded
     bloom_filter_->add_sequences([&](const auto &callback) {
         call_sequences([&](const auto &sequence, const auto &) { callback(sequence); },
+                       1, // num_threads
                        canonical_mode_);
     });
 }
@@ -937,8 +937,10 @@ void DBGSuccinct
         max_num_hash_functions
     );
 
+    // TODO: multithreaded
     bloom_filter_->add_sequences([&](const auto &callback) {
         call_sequences([&](const auto &sequence, const auto &) { callback(sequence); },
+                       1, // num_threads
                        canonical_mode_);
     });
 }
