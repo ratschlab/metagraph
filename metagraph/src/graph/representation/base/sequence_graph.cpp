@@ -108,9 +108,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
                          ProgressBar &progress_bar,
-                         bool call_unitigs = false,
-                         uint64_t min_tip_size = 0,
-                         bool kmers_in_single_form = false) {
+                         bool call_unitigs,
+                         uint64_t min_tip_size,
+                         bool kmers_in_single_form) {
     assert(start >= 1 && start <= graph.max_index());
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
@@ -268,9 +268,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
 void call_sequences(const DeBruijnGraph &graph,
                     const DeBruijnGraph::CallPath &callback,
                     bool call_unitigs,
-                    uint64_t min_tip_size = 0,
-                    bool kmers_in_single_form = false,
-                    size_t num_threads = 1) {
+                    uint64_t min_tip_size,
+                    bool kmers_in_single_form,
+                    size_t num_threads) {
     // TODO: port over the implementation from BOSS once it's finalized
     std::ignore = num_threads;
 
@@ -345,15 +345,15 @@ void call_sequences(const DeBruijnGraph &graph,
 }
 
 void DeBruijnGraph::call_sequences(const CallPath &callback,
-                                   bool kmers_in_single_form,
-                                   size_t num_threads) const {
+                                   size_t num_threads,
+                                   bool kmers_in_single_form) const {
     ::call_sequences(*this, callback, false, 0, kmers_in_single_form, num_threads);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
+                                 size_t num_threads,
                                  size_t min_tip_size,
-                                 bool kmers_in_single_form,
-                                 size_t num_threads) const {
+                                 bool kmers_in_single_form) const {
     ::call_sequences(*this,
                      callback,
                      true,

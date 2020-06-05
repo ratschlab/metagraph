@@ -29,7 +29,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 sequences.push_back(sequence);
-            }, false, num_threads);
+            }, num_threads);
             ASSERT_EQ(0u, sequences.size());
 
             EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences));
@@ -48,7 +48,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 sequences.push_back(sequence);
-            }, 1, false, num_threads);
+            }, num_threads);
             ASSERT_EQ(0u, sequences.size());
 
             EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences));
@@ -70,12 +70,12 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
             graph->call_sequences([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, false, num_threads);
+            }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_sequences([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -97,12 +97,12 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, 1, false, num_threads);
+            }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, 1, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -126,12 +126,12 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
             graph->call_sequences([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, false, num_threads);
+            }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_sequences([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -153,7 +153,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 contigs.push_back(sequence);
-            }, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(2u, contigs.size());
             EXPECT_EQ(convert_to_set({ "ATGCAGTACTCAG", std::string(k, 'G') }),
@@ -176,7 +176,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 contigs.push_back(sequence);
-            }, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(3u, contigs.size());
         }
@@ -192,7 +192,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmers) {
         graph->call_sequences([&](const auto &sequence, const auto &path) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             num_kmers += sequence.size() - 2;
-        }, false, num_threads);
+        }, num_threads);
 
         EXPECT_EQ(sequence.size() - 2, num_kmers);
     }
@@ -210,7 +210,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsUniqueKmersCycle) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             num_unitigs++;
             num_kmers += sequence.size() - k + 1;
-        }, 1, false, num_threads);
+        }, num_threads);
 
         EXPECT_EQ(1u, num_unitigs);
         EXPECT_EQ(sequence.size() - k + 1, num_kmers);
@@ -229,7 +229,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             num_contigs++;
             num_kmers += sequence.size() - k + 1;
-        }, false, num_threads);
+        }, num_threads);
 
         EXPECT_EQ(1u, num_contigs);
         EXPECT_EQ(sequence.size() - k + 1, num_kmers);
@@ -251,12 +251,12 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                 num_sequences++;
-            }, 1, false, num_threads);
+            }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
                 ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
                 num_sequences_batch++;
-            }, 1, false, num_threads);
+            }, num_threads);
 
             EXPECT_EQ(graph->num_nodes(), num_sequences);
             EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -284,7 +284,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPaths) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, false, num_threads);
+                }, num_threads);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -312,7 +312,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigs) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, 1, false, num_threads);
+                }, num_threads);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -340,7 +340,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonical) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, false, num_threads);
+                }, num_threads);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -368,7 +368,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallPathsFromCanonicalSingleKmerForm) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, true, num_threads);
+                }, num_threads, true);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -396,7 +396,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonical) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, 1, false, num_threads);
+                }, num_threads);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -425,7 +425,7 @@ TYPED_TEST(StableDeBruijnGraphTest, CallUnitigsFromCanonicalSingleKmerForm) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     reconst.push_back(sequence);
-                }, 0, true, num_threads);
+                }, num_threads, 0, true);
                 auto reconstructed_graph = build_graph_batch<TypeParam>(k, reconst, true);
 
                 EXPECT_EQ(*graph, *reconstructed_graph);
@@ -459,7 +459,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
                             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
-                        }, false, num_threads);
+                        }, num_threads);
                     }
                 );
 
@@ -494,7 +494,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
                             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
-                        }, 1, false, num_threads);
+                        }, num_threads, 1, false);
                     }
                 );
 
@@ -517,7 +517,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         EXPECT_EQ(std::set<std::string>({ "ACT", "TCT", "CTAAGC" }), unitigs);
 
         unitigs.clear();
@@ -525,7 +525,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         EXPECT_EQ(std::set<std::string>({ "ACT", "TCT", "CTAAGC" }), unitigs);
 
         unitigs.clear();
@@ -533,7 +533,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         EXPECT_EQ(std::set<std::string>({ "CTAAGC" }), unitigs);
 
         unitigs.clear();
@@ -541,7 +541,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         EXPECT_EQ(std::set<std::string>({ "CTAAGC" }), unitigs);
 
 
@@ -554,7 +554,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAAG", "AGC", "AGT" }), unitigs);
 
         unitigs.clear();
@@ -562,7 +562,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAAG", "AGC", "AGT" }), unitigs);
 
         unitigs.clear();
@@ -570,7 +570,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAAG" }), unitigs);
 
         unitigs.clear();
@@ -578,7 +578,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAAG" }), unitigs);
 
 
@@ -592,7 +592,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCCC" }), unitigs);
         EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCC", "CCC" }), unitigs);
 
@@ -601,7 +601,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCCC" }), unitigs);
         EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCA", "GCC", "CCC" }), unitigs);
 
@@ -610,7 +610,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAGC", "GCC", "CCC" }), unitigs);
         EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCC", "CCC" }), unitigs);
 
@@ -619,7 +619,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 3, false, num_threads);
+        }, num_threads, 3, false);
         // EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAGC" }), unitigs);
         EXPECT_EQ(std::set<std::string>({ "ACTAA", "AAA", "AAGC", "GCC", "CCC" }), unitigs);
 
@@ -628,7 +628,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         // EXPECT_EQ(std::set<std::string>({ "AAGC" }), unitigs);
         EXPECT_EQ(std::set<std::string>({ "AAGC", "AAA", "ACTAA", "GCC", "CCC" }), unitigs);
 
@@ -643,7 +643,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         EXPECT_EQ(std::set<std::string>({ "ACGAA", "TAA", "AAGC", "GCA", "GCCT" }), unitigs);
 
         unitigs.clear();
@@ -651,7 +651,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         EXPECT_EQ(std::set<std::string>({ "ACGAA", "TAA", "AAGC", "GCA", "GCCT" }), unitigs);
 
         unitigs.clear();
@@ -659,7 +659,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         EXPECT_EQ(std::set<std::string>({ "ACGAA", "AAGC", "GCCT" }), unitigs);
 
         unitigs.clear();
@@ -667,7 +667,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 3, false, num_threads);
+        }, num_threads, 3, false);
         EXPECT_EQ(std::set<std::string>({ "ACGAA", "AAGC" }), unitigs);
 
         unitigs.clear();
@@ -675,7 +675,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         EXPECT_EQ(std::set<std::string>({ "AAGC" }), unitigs);
 
 
@@ -689,7 +689,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
 
         unitigs.clear();
@@ -697,7 +697,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
 
         unitigs.clear();
@@ -705,7 +705,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         EXPECT_EQ(std::set<std::string>({ "CATA", "TCTA", "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
 
         unitigs.clear();
@@ -713,7 +713,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 3, false, num_threads);
+        }, num_threads, 3, false);
         EXPECT_EQ(std::set<std::string>({ "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
 
         unitigs.clear();
@@ -721,7 +721,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         EXPECT_EQ(std::set<std::string>({ "TAA", "AAGCC", "AACC", "CCGA" }), unitigs);
     }
 }
@@ -741,7 +741,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 0, false, num_threads);
+        }, num_threads, 0, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT" }), unitigs);
 
         unitigs.clear();
@@ -749,7 +749,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 1, false, num_threads);
+        }, num_threads, 1, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT" }), unitigs);
 
         unitigs.clear();
@@ -757,7 +757,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT" }), unitigs);
 
         unitigs.clear();
@@ -765,7 +765,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsWithoutTips2) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
-        }, 10, false, num_threads);
+        }, num_threads, 10, false);
         EXPECT_EQ(std::set<std::string>({ "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT" }), unitigs);
     }
 }
@@ -808,7 +808,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             std::unique_lock<std::mutex> lock(seq_mutex);
             obs_unitigs.insert(sequence);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
 
         EXPECT_EQ(unitigs, obs_unitigs);
     }
@@ -836,7 +836,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
             std::unique_lock<std::mutex> lock(seq_mutex);
             obs_unitigs.insert(sequence);
-        }, 2, false, num_threads);
+        }, num_threads, 2, false);
 
         EXPECT_EQ(unitigs, obs_unitigs);
     }
@@ -880,7 +880,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     obs_unitigs.insert(sequence);
-                }, t, false, num_threads);
+                }, num_threads, t, false);
                 EXPECT_EQ(unitigs, obs_unitigs) << t;
             }
 
@@ -894,7 +894,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
                     ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     obs_long_unitigs.insert(sequence);
-                }, 3, false, num_threads);
+                }, num_threads, 3, false);
                 EXPECT_EQ(long_unitigs, obs_long_unitigs);
             }
         }

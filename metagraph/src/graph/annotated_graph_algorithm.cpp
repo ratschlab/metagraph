@@ -38,7 +38,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
                 set_bit(unitig_mask, node, atomic);
             }
         }
-    }, 1, false, get_num_threads());
+    }, get_num_threads());
 
     return std::make_unique<bitmap_vector>(std::move(unitig_mask));
 }

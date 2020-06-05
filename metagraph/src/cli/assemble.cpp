@@ -66,9 +66,8 @@ int assemble(Config *config) {
                 std::lock_guard<std::mutex> lock(str_mutex);
                 gfa_file << ostr.str();
             },
-            config->min_tip_size,
-            false,
-            get_num_threads()
+            get_num_threads(),
+            config->min_tip_size
         );
     }
 
@@ -82,16 +81,16 @@ int assemble(Config *config) {
                                 std::lock_guard<std::mutex> lock(write_mutex);
                                 writer.write(unitig);
                             },
+                            get_num_threads(),
                             config->min_tip_size,
-                            config->kmers_in_single_form,
-                            get_num_threads());
+                            config->kmers_in_single_form);
     } else {
         graph->call_sequences([&](const auto &contig, auto&&) {
                                   std::lock_guard<std::mutex> lock(write_mutex);
                                   writer.write(contig);
                               },
-                              config->kmers_in_single_form,
-                              get_num_threads());
+                              get_num_threads(),
+                              config->kmers_in_single_form);
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());

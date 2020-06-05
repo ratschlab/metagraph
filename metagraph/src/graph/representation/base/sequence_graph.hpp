@@ -172,8 +172,8 @@ class DeBruijnGraph : public SequenceGraph {
      * reverse-complement has been extracted.
      */
     virtual void call_sequences(const CallPath &callback,
-                                bool kmers_in_single_form = false,
-                                size_t num_threads = 1) const;
+                                size_t num_threads = 1,
+                                bool kmers_in_single_form = false) const;
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
@@ -182,9 +182,9 @@ class DeBruijnGraph : public SequenceGraph {
      * reverse-complement has been extracted.
      */
     virtual void call_unitigs(const CallPath &callback,
+                              size_t num_threads = 1,
                               size_t min_tip_size = 1,
-                              bool kmers_in_single_form = false,
-                              size_t num_threads = 1) const;
+                              bool kmers_in_single_form = false) const;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
 

@@ -123,16 +123,16 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, config->min_tip_size, graph->is_canonical_mode(), num_threads);
+            }, num_threads, config->min_tip_size, graph->is_canonical_mode());
 
         } else if (config->unitigs || config->min_tip_size > 1) {
             graph->call_unitigs(callback,
+                                num_threads,
                                 config->min_tip_size,
-                                graph->is_canonical_mode(),
-                                num_threads);
+                                graph->is_canonical_mode());
 
         } else {
-            graph->call_sequences(callback, graph->is_canonical_mode(), num_threads);
+            graph->call_sequences(callback, num_threads, graph->is_canonical_mode());
         }
     };
 
@@ -266,7 +266,7 @@ int clean_graph(Config *config) {
             // the outer for loop is parallelized, so don't start another thread
             // pool here
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
-                graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
+                graph_slice.call_sequences(dump_sequence, 1, graph_slice.is_canonical_mode());
             });
         }
     }

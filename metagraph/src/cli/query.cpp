@@ -166,8 +166,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                               std::lock_guard<std::mutex> lock(seq_mutex);
                               contigs.emplace_back(std::move(contig_args)...);
                           },
-                          full_dbg.is_canonical_mode(),
-                          get_num_threads());
+                          get_num_threads(),
+                          full_dbg.is_canonical_mode());
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();

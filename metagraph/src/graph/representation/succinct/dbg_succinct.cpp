@@ -469,8 +469,8 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
 }
 
 void DBGSuccinct::call_sequences(const CallPath &callback,
-                                 bool kmers_in_single_form,
-                                 size_t num_threads) const {
+                                 size_t num_threads,
+                                 bool kmers_in_single_form) const {
     assert(boss_graph_.get());
     boss_graph_->call_sequences(
         [&](std::string&& seq, auto&& path) {
@@ -486,9 +486,9 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
 }
 
 void DBGSuccinct::call_unitigs(const CallPath &callback,
+                               size_t num_threads,
                                size_t min_tip_size,
-                               bool kmers_in_single_form,
-                               size_t num_threads) const {
+                               bool kmers_in_single_form) const {
     assert(boss_graph_.get());
     boss_graph_->call_unitigs(
         [&](std::string&& seq, auto&& path) {
