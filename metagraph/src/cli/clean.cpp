@@ -152,13 +152,14 @@ int clean_graph(Config *config) {
                                                  get_num_threads() > 1);
             call_contigs([&](const std::string &contig, const auto &path) {
                 std::vector<uint32_t> kmer_counts;
+                kmer_counts.reserve(path.size());
                 for (auto node : path) {
                     kmer_counts.push_back((*node_weights)[node]);
                 }
 
-                auto lock = conditional_unique_lock(seq_mutex, get_num_threads() >= 2);
+                std::lock_guard<std::mutex> lock(seq_mutex);
                 writer.write(contig, kmer_counts);
-            }, get_num_threads() - 1);
+            }, get_num_threads());
 
         } else {
             FastaWriter writer(outfbase, config->header,
@@ -166,9 +167,9 @@ int clean_graph(Config *config) {
                                get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
-                auto lock = conditional_unique_lock(seq_mutex, get_num_threads() >= 2);
+                std::lock_guard<std::mutex> lock(seq_mutex);
                 writer.write(contig);
-            }, get_num_threads() - 1);
+            }, get_num_threads());
         }
     };
 
@@ -202,7 +203,7 @@ int clean_graph(Config *config) {
                     count_hist[weights[i]]++;
                     removed_nodes[i] = 0;
                 }
-            }, get_num_threads() - 1);
+            }, get_num_threads());
 
             call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
 

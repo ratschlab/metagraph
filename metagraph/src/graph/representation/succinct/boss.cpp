@@ -1678,7 +1678,7 @@ sdsl::bit_vector BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
 void BOSS::merge(const BOSS &other, size_t num_threads) {
     std::mutex seq_mutex;
     other.call_sequences([&](const std::string &sequence, auto&&) {
-        auto lock = conditional_unique_lock(seq_mutex, num_threads >= 2);
+        std::lock_guard<std::mutex> lock(seq_mutex);
         add_sequence(sequence, true);
     }, false, NULL, num_threads);
 }
@@ -2474,10 +2474,14 @@ void call_path(const BOSS &boss,
 
     {
         // then lock all threads
-        auto lock = conditional_unique_lock(vector_mutex, async);
+        std::unique_lock<std::mutex> lock(vector_mutex, std::defer_lock);
         bool safe_to_unlock = false;
 
         if (async) {
+            // if two threads are trying to write the same contig, lock here to
+            // make sure that one of them starts writing and the other exits
+            lock.lock();
+
             // If extracting unitigs, only the start of the unitig needs to be
             // checked while locked. Afterwards, it's safe to unlock the mutex
             if (split_to_unitigs && std::all_of(

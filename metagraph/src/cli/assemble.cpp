@@ -63,10 +63,12 @@ int assemble(Config *config) {
                 graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
                     ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M\n";
                 });
-                auto lock = conditional_unique_lock(str_mutex, get_num_threads() >= 2);
+                std::lock_guard<std::mutex> lock(str_mutex);
                 gfa_file << ostr.str();
             },
-            config->min_tip_size
+            config->min_tip_size,
+            false,
+            get_num_threads()
         );
     }
 
@@ -77,25 +79,19 @@ int assemble(Config *config) {
 
     if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) {
-                                auto lock = conditional_unique_lock(
-                                    write_mutex,
-                                    get_num_threads() >= 2
-                                );
+                                std::lock_guard<std::mutex> lock(write_mutex);
                                 writer.write(unitig);
                             },
                             config->min_tip_size,
                             config->kmers_in_single_form,
-                            get_num_threads() - 1);
+                            get_num_threads());
     } else {
         graph->call_sequences([&](const auto &contig, auto&&) {
-                                  auto lock = conditional_unique_lock(
-                                      write_mutex,
-                                      get_num_threads() >= 2
-                                  );
+                                  std::lock_guard<std::mutex> lock(write_mutex);
                                   writer.write(contig);
                               },
                               config->kmers_in_single_form,
-                              get_num_threads() - 1);
+                              get_num_threads());
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());
