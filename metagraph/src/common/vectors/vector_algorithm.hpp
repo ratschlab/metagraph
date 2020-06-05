@@ -45,6 +45,7 @@ inline bool fetch_and_set_bit(t_int_vec &v, size_t i,
                               bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
+    assert(i < v.size());
 
     uint8_t lo = i & 0x3F;
     uint64_t mask = (1llu << lo);
