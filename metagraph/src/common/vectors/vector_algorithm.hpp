@@ -48,17 +48,18 @@ inline bool atomic_fetch_and_set_bit(t_int_vec &v,
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
+    uint8_t lo = i & 0x3F;
+    uint64_t mask = (1llu << lo);
+
     if (atomic) {
-        return (__atomic_fetch_or(&v.data()[i >> 6],
-                                  1llu << (i & 0x3F),
-                                  memorder) >> (i & 0x3F)) & 1;
+        return (__atomic_fetch_or(&v.data()[i >> 6], mask, memorder) >> lo) & 1;
     } else {
         uint64_t *word = &v.data()[i >> 6];
-        if (!((*word >> (i & 0x3F)) & 1)) {
-            *word |= (1llu << (i & 0x3F));
-            return false;
-        } else {
+        if (*word & mask) {
             return true;
+        } else {
+            *word |= mask;
+            return false;
         }
     }
 }
@@ -71,14 +72,15 @@ inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
+    uint8_t lo = i & 0x3F;
+    uint64_t mask = (1llu << lo);
+
     if (atomic) {
-        return (__atomic_fetch_and(&v.data()[i >> 6],
-                                   ~(1llu << (i & 0x3F)),
-                                   memorder) >> (i & 0x3F)) & 1;
+        return (__atomic_fetch_and(&v.data()[i >> 6], ~mask, memorder) >> lo) & 1;
     } else {
         uint64_t *word = &v.data()[i >> 6];
-        if ((*word >> (i & 0x3F)) & 1) {
-            *word &= ~(1llu << (i & 0x3F));
+        if (*word & mask) {
+            *word &= ~mask;
             return true;
         } else {
             return false;
@@ -133,19 +135,12 @@ inline void atomic_unset_bit(t_int_vec &v,
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
-               Callback callback,
-               bool atomic = false,
-               int memorder = __ATOMIC_SEQ_CST) {
-    if (atomic) {
-        std::ignore = memorder;
-        throw std::runtime_error("Atomic call_ones not implemented");
-    }
-
+               Callback callback) {
     assert(begin <= end);
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
+    for ( ; i < end && (i & 0x3F); ++i) {
         if (vector[i])
             callback(i);
     }
@@ -160,12 +155,12 @@ void call_ones(const Bitmap &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
+        for ( ; i < j; ++i) {
             if (vector[i])
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
+    for ( ; i < end; ++i) {
         if (vector[i])
             callback(i);
     }
@@ -175,21 +170,24 @@ template <class Callback>
 void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                Callback callback,
-               bool atomic = false,
+               bool atomic,
                int memorder = __ATOMIC_SEQ_CST) {
+    if (!atomic) {
+        call_ones(vector, begin, end, callback);
+        return;
+    }
+
     assert(begin <= end);
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
-        if (atomic_fetch_bit(vector, i, atomic, memorder))
+    for ( ; i < end && (i & 0x3F); ++i) {
+        if (atomic_fetch_bit(vector, i, true, memorder))
             callback(i);
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = atomic
-            ? __atomic_load_n(&vector.data()[i >> 6], memorder)
-            : vector.get_int(i, 64);
+        word = __atomic_load_n(&vector.data()[i >> 6], memorder);
         if (!word) {
             i += 64;
             continue;
@@ -198,39 +196,37 @@ void call_ones(const sdsl::bit_vector &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
-            if (atomic_fetch_bit(vector, i, atomic, memorder))
+        for ( ; i < j; ++i) {
+            if (atomic_fetch_bit(vector, i, true, memorder))
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
-        if (atomic_fetch_bit(vector, i, atomic, memorder))
+    for ( ; i < end; ++i) {
+        if (atomic_fetch_bit(vector, i, true, memorder))
             callback(i);
     }
 }
 
 template <class Bitmap, class Callback>
-void call_ones(const Bitmap &vector, Callback callback,
-               bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+void call_ones(const Bitmap &vector, Callback callback) {
+    call_ones(vector, 0, vector.size(), callback);
+}
+
+template <class Callback>
+void call_ones(const sdsl::bit_vector &vector, Callback callback,
+               bool atomic, int memorder = __ATOMIC_SEQ_CST) {
     call_ones(vector, 0, vector.size(), callback, atomic, memorder);
 }
 
 template <class Bitmap, class Callback>
 void call_zeros(const Bitmap &vector,
                 uint64_t begin, uint64_t end,
-                Callback callback,
-                bool atomic = false,
-                int memorder = __ATOMIC_SEQ_CST) {
-    if (atomic) {
-        std::ignore = memorder;
-        throw std::runtime_error("Atomic call_zeros not implemented");
-    }
-
+                Callback callback) {
     assert(begin <= end);
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
+    for ( ; i < end && (i & 0x3F); ++i) {
         if (!vector[i])
             callback(i);
     }
@@ -245,12 +241,12 @@ void call_zeros(const Bitmap &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
+        for ( ; i < j; ++i) {
             if (!vector[i])
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
+    for ( ; i < end; ++i) {
         if (!vector[i])
             callback(i);
     }
@@ -260,21 +256,24 @@ template <class Callback>
 void call_zeros(const sdsl::bit_vector &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback,
-                bool atomic = false,
+                bool atomic,
                 int memorder = __ATOMIC_SEQ_CST) {
+    if (!atomic) {
+        call_zeros(vector, begin, end, callback);
+        return;
+    }
+
     assert(begin <= end);
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
-        if (!atomic_fetch_bit(vector, i, atomic, memorder))
+    for ( ; i < end && (i & 0x3F); ++i) {
+        if (!atomic_fetch_bit(vector, i, true, memorder))
             callback(i);
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = atomic
-            ? ~__atomic_load_n(&vector.data()[i >> 6], memorder)
-            : ~vector.get_int(i, 64);
+        word = ~__atomic_load_n(&vector.data()[i >> 6], memorder);
         if (!word) {
             i += 64;
             continue;
@@ -283,20 +282,25 @@ void call_zeros(const sdsl::bit_vector &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
-            if (!atomic_fetch_bit(vector, i, atomic, memorder))
+        for ( ; i < j; ++i) {
+            if (!atomic_fetch_bit(vector, i, true, memorder))
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
-        if (!atomic_fetch_bit(vector, i, atomic, memorder))
+    for ( ; i < end; ++i) {
+        if (!atomic_fetch_bit(vector, i, true, memorder))
             callback(i);
     }
 }
 
 template <class Bitmap, class Callback>
-void call_zeros(const Bitmap &vector, Callback callback,
-                bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+void call_zeros(const Bitmap &vector, Callback callback) {
+    call_zeros(vector, 0, vector.size(), callback);
+}
+
+template <class Callback>
+void call_zeros(const sdsl::bit_vector &vector, Callback callback,
+                bool atomic, int memorder = __ATOMIC_SEQ_CST) {
     call_zeros(vector, 0, vector.size(), callback, atomic, memorder);
 }
 
