@@ -47,6 +47,7 @@ inline bool atomic_fetch_and_set_bit(t_int_vec &v,
                                      int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
+    assert(i < v.size());
 
     if (atomic) {
         return (__atomic_fetch_or(&v.data()[i >> 6],
