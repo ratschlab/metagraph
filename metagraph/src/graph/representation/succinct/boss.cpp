@@ -1728,7 +1728,12 @@ inline bool masked_pick_single_outgoing(const BOSS &boss,
 
     // in boss, at least one outgoing edge always exists
     if (!subgraph_mask) {
-        return boss.is_single_outgoing(*i);
+        if (*i == 1 || boss.get_W(*i) == boss.kSentinelCode) {
+            *i = 0;
+            return false;
+        } else {
+            return boss.get_last(*i - 1) || boss.get_W(*i - 1) == boss.kSentinelCode;
+        }
     }
 
     edge_index j = *i;
@@ -2033,13 +2038,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edge_index begin = pred_last(i - 1) + 1;
 
             // check if the fork involved a dummy edge
-            if (get_W(begin) == kSentinelCode) {
-                progress_bar += !fetch_and_set_bit(discovered, begin, async);
+            if (get_W(begin) == kSentinelCode)
                 ++begin;
-            }
 
-            if (begin == i)
-                return;
+            assert(begin != i);
 
             for (size_t j = begin; j <= i; ++j) {
                 if (!fetch_bit(discovered, j, async))
@@ -2106,26 +2108,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     // dummy k-mers have been handled
     call_zeros(discovered, [&](edge_index edge) {
         edge_index t = succ_last(edge);
-        bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
         assert(t == edge);
-        if (!check) {
-            assert(!subgraph_mask);
-            assert(!get_last(edge - 1));
-            assert(fetch_bit(discovered, edge - 1, async));
-            assert(get_W(edge - 1) == kSentinelCode);
-        } else {
-            assert(get_W(edge) != kSentinelCode);
-        }
+        assert(get_W(edge) != kSentinelCode);
         t = fwd(t, get_W(t) % alph_size);
-        check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
         assert(t);
-        assert(!fetch_bit(discovered, t, async) || kmers_in_single_form);
-        if (!check) {
-            assert(!subgraph_mask);
-            assert(!get_last(t - 1));
-            assert(fetch_bit(discovered, t - 1, async));
-            assert(get_W(t - 1) == kSentinelCode);
-        }
+        assert(!fetch_bit(discovered, t, async));
     }, async);
 #endif
 
@@ -2346,20 +2335,6 @@ void call_paths(const BOSS &boss,
             // stop the traversal if there are no edges outgoing from the target
             if (!edge)
                 break;
-
-            if (!single_outgoing && !subgraph_mask) {
-                // check if the extra edge is a dummy
-                assert(boss.get_last(edge));
-                assert(!boss.get_last(edge - 1));
-                edge_index t = boss.pred_last(edge - 1) + 1;
-                if (boss.get_W(t) == boss.kSentinelCode) {
-                    progress_bar += !fetch_and_set_bit(discovered, t, async);
-                    ++t;
-                }
-
-                if (t == edge)
-                    single_outgoing = true;
-            }
 
             // continue the non-branching traversal further if
             //      1. there is only one edge outgoing from the target
