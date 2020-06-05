@@ -14,15 +14,6 @@
 void set_num_threads(unsigned int num_threads);
 unsigned int get_num_threads();
 
-inline std::unique_lock<std::mutex>
-conditional_unique_lock(std::mutex &mutex, bool condition) {
-    std::unique_lock<std::mutex> lock(mutex, std::defer_lock);
-    if (condition)
-        lock.lock();
-
-    return lock;
-}
-
 
 /**
  * A Thread Pool for parallel execution of tasks with arbitrary parameters
