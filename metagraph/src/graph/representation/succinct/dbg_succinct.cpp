@@ -9,6 +9,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
+#include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -918,11 +919,16 @@ void DBGSuccinct
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
     );
 
-    // TODO: multithreaded
+    std::mutex seq_mutex;
     bloom_filter_->add_sequences([&](const auto &callback) {
-        call_sequences([&](const auto &sequence, const auto &) { callback(sequence); },
-                       1, // num_threads
-                       canonical_mode_);
+        call_sequences(
+            [&](const auto &sequence, const auto &) {
+                std::lock_guard<std::mutex> lock(seq_mutex);
+                callback(sequence);
+            },
+            get_num_threads(),
+            canonical_mode_
+        );
     });
 }
 
@@ -937,11 +943,16 @@ void DBGSuccinct
         max_num_hash_functions
     );
 
-    // TODO: multithreaded
+    std::mutex seq_mutex;
     bloom_filter_->add_sequences([&](const auto &callback) {
-        call_sequences([&](const auto &sequence, const auto &) { callback(sequence); },
-                       1, // num_threads
-                       canonical_mode_);
+        call_sequences(
+            [&](const auto &sequence, const auto &) {
+                std::lock_guard<std::mutex> lock(seq_mutex);
+                callback(sequence);
+            },
+            get_num_threads(),
+            canonical_mode_
+        );
     });
 }
 
