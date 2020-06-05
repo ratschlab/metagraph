@@ -1819,7 +1819,7 @@ void call_paths(const BOSS &boss,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 sdsl::bit_vector *discovered_ptr,
-                sdsl::bit_vector *written_ptr,
+                sdsl::bit_vector *visited_ptr,
                 bool async,
                 std::mutex &vector_mutex,
                 ProgressBar &progress_bar,
@@ -1836,7 +1836,7 @@ void call_paths_from_queue(const BOSS &boss,
                            bool kmers_in_single_form,
                            bool trim_sentinels,
                            sdsl::bit_vector &discovered,
-                           sdsl::bit_vector &written,
+                           sdsl::bit_vector &visited,
                            bool async,
                            std::mutex &vector_mutex,
                            std::mutex &edge_mutex,
@@ -1848,12 +1848,11 @@ void call_path(const BOSS &boss,
                                 std::vector<TAlphabet>&&> &callback,
                std::vector<edge_index> &path,
                std::vector<TAlphabet> &sequence,
-               bool split_to_unitigs,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector &written,
-               bool async,
+               sdsl::bit_vector &visited,
+               bool concurrent,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask);
@@ -1879,7 +1878,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
     discovered[0] = true;
 
-    sdsl::bit_vector written = kmers_in_single_form ? discovered : sdsl::bit_vector();
+    if (trim_sentinels) {
+        // TODO: make parallel
+        for (uint64_t i = 1; i < W_->size(); ++i) {
+            if (get_W(i) == kSentinelCode)
+                discovered[i] = true;
+        }
+    }
+
+    sdsl::bit_vector visited = kmers_in_single_form ? discovered : sdsl::bit_vector();
 
     ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
                              "Traverse BOSS",
@@ -1898,7 +1905,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto call_paths_from_queue = [&]() {
         ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
                                 split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, written, async, vector_mutex, edge_mutex,
+                                discovered, visited, async, vector_mutex, edge_mutex,
                                 progress_bar, subgraph_mask);
     };
 
@@ -1909,7 +1916,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 edges.reserve(TRAVERSAL_START_BATCH_SIZE);
                 ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
                              split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, &written,
+                             trim_sentinels, &discovered, &visited,
                              async, vector_mutex, progress_bar, subgraph_mask);
                 return edges;
             };
@@ -2073,7 +2080,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
         assert(t);
         assert(get_node_seq(t)[0] != kSentinelCode);
-        assert(!fetch_bit(discovered, t, async));
+        assert(!discovered[t] || kmers_in_single_form);
     }, async);
 
     // make sure that all edges have a single outgoing edge and that all sink
@@ -2085,7 +2092,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         if (!check) {
             assert(!subgraph_mask);
             assert(!get_last(edge - 1));
-            assert(fetch_bit(discovered, edge - 1));
+            assert(fetch_bit(discovered, edge - 1) || kmers_in_single_form);
             assert(get_W(edge - 1) == kSentinelCode);
         } else {
             assert(get_W(edge) != kSentinelCode);
@@ -2093,11 +2100,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         t = fwd(t, get_W(t) % alph_size);
         check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
         assert(t);
-        assert(!fetch_bit(discovered, t, async));
+        assert(!fetch_bit(discovered, t, async) || kmers_in_single_form);
         if (!check) {
             assert(!subgraph_mask);
             assert(!get_last(t - 1));
-            assert(fetch_bit(discovered, t - 1));
+            assert(fetch_bit(discovered, t - 1) || kmers_in_single_form);
             assert(get_W(t - 1) == kSentinelCode);
         }
     }, async);
@@ -2134,8 +2141,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             }
 
             progress_bar += path.size();
-            call_path(*this, callback, path, sequence, split_to_unitigs,
-                      kmers_in_single_form, trim_sentinels, discovered, written,
+            call_path(*this, callback, path, sequence,
+                      kmers_in_single_form, trim_sentinels, discovered, visited,
                       async, vector_mutex, progress_bar, subgraph_mask);
         }
     };
@@ -2195,7 +2202,7 @@ void call_paths_from_queue(const BOSS &boss,
                            bool kmers_in_single_form,
                            bool trim_sentinels,
                            sdsl::bit_vector &discovered,
-                           sdsl::bit_vector &written,
+                           sdsl::bit_vector &visited,
                            bool async,
                            std::mutex &vector_mutex,
                            std::mutex &edge_mutex,
@@ -2217,7 +2224,7 @@ void call_paths_from_queue(const BOSS &boss,
                     edges.reserve(TRAVERSAL_START_BATCH_SIZE);
                     ::call_paths(boss, std::move(next_edge), edges, callback,
                                  split_to_unitigs, kmers_in_single_form,
-                                 trim_sentinels, &discovered, &written,
+                                 trim_sentinels, &discovered, &visited,
                                  async, vector_mutex, progress_bar, subgraph_mask);
                     return edges;
                 }, Edge(next_edge)));
@@ -2235,26 +2242,11 @@ void call_paths_from_queue(const BOSS &boss,
             edges.pop_back();
             ::call_paths(boss, std::move(next_edge), edges, callback,
                          split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, &discovered, &written,
+                         trim_sentinels, &discovered, &visited,
                          async, vector_mutex, progress_bar, subgraph_mask);
         }
     }
 }
-
-void call_path(const BOSS &boss,
-               const BOSS::Call<std::vector<edge_index>&&,
-                                std::vector<TAlphabet>&&> &callback,
-               std::vector<edge_index> &path,
-               std::vector<TAlphabet> &sequence,
-               bool split_to_unitigs,
-               bool kmers_in_single_form,
-               bool trim_sentinels,
-               sdsl::bit_vector &discovered,
-               sdsl::bit_vector &written,
-               bool async,
-               std::mutex &vector_mutex,
-               ProgressBar &progress_bar,
-               const bitmap *subgraph_mask);
 
 template <class EdgeStorage>
 void call_paths(const BOSS &boss,
@@ -2266,7 +2258,7 @@ void call_paths(const BOSS &boss,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 sdsl::bit_vector *discovered_ptr,
-                sdsl::bit_vector *written_ptr,
+                sdsl::bit_vector *visited_ptr,
                 bool async,
                 std::mutex &vector_mutex,
                 ProgressBar &progress_bar,
@@ -2387,8 +2379,8 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
         }
 
-        call_path(boss, callback, path, sequence, split_to_unitigs,
-                  kmers_in_single_form, trim_sentinels, discovered, *written_ptr,
+        call_path(boss, callback, path, sequence,
+                  kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
                   async, vector_mutex, progress_bar, subgraph_mask);
 
         if (edges.empty())
@@ -2413,16 +2405,15 @@ void call_path(const BOSS &boss,
                                 std::vector<TAlphabet>&&> &callback,
                std::vector<edge_index> &path,
                std::vector<TAlphabet> &sequence,
-               bool split_to_unitigs,
                bool kmers_in_single_form,
                bool trim_sentinels,
                sdsl::bit_vector &discovered,
-               sdsl::bit_vector &written,
-               bool async,
+               sdsl::bit_vector &visited,
+               bool concurrent,
                std::mutex &vector_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
-    if (!kmers_in_single_form && !trim_sentinels) {
+    if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
         return;
     }
@@ -2436,14 +2427,13 @@ void call_path(const BOSS &boss,
     auto first_valid_it
         = std::find_if(sequence.begin(), sequence.end(),
                        [&boss](auto c) { return c != boss.kSentinelCode; });
-    size_t front_trim = first_valid_it - sequence.begin();
 
     if (first_valid_it + boss.get_k() >= sequence.end())
         return;
 
     sequence.erase(sequence.begin(), first_valid_it);
-
-    path.erase(path.begin(), path.begin() + front_trim);
+    path.erase(path.begin(),
+               path.begin() + (first_valid_it - sequence.begin()));
 
     if (!kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
@@ -2455,61 +2445,18 @@ void call_path(const BOSS &boss,
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
-
-    if (front_trim) {
-        edge_index t = dual_path.back();
-        TAlphabet w = boss.get_W(t);
-        TAlphabet d = w % boss.alph_size;
-        t = boss.fwd(t, d);
-        if (boss.get_W(t) != boss.kSentinelCode) {
-            // this should only happen if there are redundant dummy edges
-            t = boss.pred_W(t, boss.kSentinelCode);
-        }
-        progress_bar += !fetch_and_set_bit(discovered, t, async);
-    }
-
     std::reverse(dual_path.begin(), dual_path.end());
 
+    // then lock all threads
+    std::unique_lock<std::mutex> lock(vector_mutex);
+
+    // traverse the path with its dual and visit the nodes
     size_t begin = 0;
+    for (size_t i = 0; i < path.size(); ++i) {
+        assert(path[i]);
 
-    {
-        // then lock all threads
-        std::unique_lock<std::mutex> lock(vector_mutex, std::defer_lock);
-        bool safe_to_unlock = false;
-
-        if (async) {
-            // if two threads are trying to write the same contig, lock here to
-            // make sure that one of them starts writing and the other exits
-            lock.lock();
-
-            // If extracting unitigs, only the start of the unitig needs to be
-            // checked while locked. Afterwards, it's safe to unlock the mutex
-            if (split_to_unitigs && std::all_of(
-                    dual_path.begin(), dual_path.end(),
-                    [&](edge_index edge) {
-                        return edge && (!subgraph_mask || (*subgraph_mask)[edge]);
-                    })) {
-                // if this unitig or its dual path has been printed already,
-                // exit early
-                if (fetch_bit(written, path.front(), async)
-                        || (path.back() != dual_path.back()
-                            && fetch_bit(written, dual_path.back(), async))) {
-                    return;
-                }
-
-                safe_to_unlock = true;
-            }
-        }
-
-        // traverse the path with its dual and discover them
-        for (size_t i = 0; i < path.size(); ++i) {
-            assert(path[i]);
-            set_bit(written, path[i], async);
-            if (safe_to_unlock) {
-                assert(async);
-                safe_to_unlock = false;
-                lock.unlock();
-            }
+        if (!visited[path[i]]) {
+            visited[path[i]] = true;
 
             // Extend the path if the reverse-complement k-mer does not belong
             // to the graph (subgraph) or if it matches the current k-mer and
@@ -2519,22 +2466,28 @@ void call_path(const BOSS &boss,
                 continue;
             }
 
-            // check if another thread has written the reverse-complement k-mer
-            if (!fetch_and_set_bit(written, dual_path[i], async)) {
-                progress_bar += !fetch_and_set_bit(discovered, dual_path[i], async);
+            // Check if the reverse-complement k-mer has not been traversed
+            // and thus, if the current edge path[i] is to be traversed first.
+            if (!visited[dual_path[i]]) {
+                visited[dual_path[i]] = true;
+                progress_bar += !fetch_and_set_bit(discovered, dual_path[i], concurrent);
                 continue;
             }
-
-            // The reverse-complement k-mer had been discovered or written
-            // -> Skip this k-mer and call the traversed path segment.
-            if (begin < i) {
-                callback({ path.begin() + begin, path.begin() + i },
-                         { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-            }
-
-            begin = i + 1;
         }
+
+        // The k-mer or its reverse-complement k-mer had been visited
+        // -> Skip this k-mer and call the traversed path segment.
+        if (begin < i) {
+            lock.unlock();
+            callback({ path.begin() + begin, path.begin() + i },
+                     { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
+            lock.lock();
+        }
+
+        begin = i + 1;
     }
+
+    lock.unlock();
 
     // Call the path traversed
     if (!begin) {
