@@ -216,7 +216,7 @@ class BOSS {
     * The edges of `other` are fully traversed and nodes are added if not existing yet.
     * This function is well suited to merge small graphs into large ones.
     */
-    void merge(const BOSS &other, size_t num_threads = 0);
+    void merge(const BOSS &other, size_t num_threads = 1);
 
     /**
      * Using the offset structure F this function returns the value of the last
