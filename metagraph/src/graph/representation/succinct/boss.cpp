@@ -1934,10 +1934,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     // used to indicate if an edge from a source node has been taken
     for (edge_index i = succ_last(1); i >= 1; --i) {
-        if ((!subgraph_mask || (*subgraph_mask)[i])
-                && !atomic_fetch_bit(discovered, i, async)) {
+        if ((!subgraph_mask || (*subgraph_mask)[i]) && !fetch_bit(discovered, i, async))
             enqueue_start(i);
-        }
     }
 
     call_paths_from_queue();
@@ -1964,7 +1962,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
                 do {
                     if ((*subgraph_mask)[end] && (!kmers_in_single_form
-                            || !atomic_fetch_bit(discovered, end, async))) {
+                            || !fetch_bit(discovered, end, async))) {
                         enqueue_start(end, thread_pool.get());
                     }
 
@@ -2015,7 +2013,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         if (subgraph_mask) {
             do {
-                if (!atomic_fetch_bit(discovered, i, async)) {
+                if (!fetch_bit(discovered, i, async)) {
                     assert((*subgraph_mask)[i]);
                     assert(get_W(i) != kSentinelCode);
                     enqueue_start(i);
@@ -2029,7 +2027,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
             // check if the fork involved a dummy edge
             if (get_W(begin) == kSentinelCode) {
-                progress_bar += !atomic_fetch_and_set_bit(discovered, begin, async);
+                progress_bar += !fetch_and_set_bit(discovered, begin, async);
                 ++begin;
             }
 
@@ -2037,7 +2035,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
 
             for (size_t j = begin; j <= i; ++j) {
-                if (!atomic_fetch_bit(discovered, j, async))
+                if (!fetch_bit(discovered, j, async))
                     enqueue_start(j);
             }
         }
@@ -2052,7 +2050,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         call_zeros(discovered, [&](edge_index edge) {
             edge_index t = bwd(edge);
             if (!masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask)
-                    || atomic_fetch_bit(discovered, t, async)) {
+                    || fetch_bit(discovered, t, async)) {
                 // there are either multiple incoming edges (which should not
                 // exist unless outputting simplitigs), or the predecessor edge
                 // was already traversed
@@ -2075,7 +2073,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(masked_pick_single_incoming(*this, &t, d, subgraph_mask));
         assert(t);
         assert(get_node_seq(t)[0] != kSentinelCode);
-        assert(!atomic_fetch_bit(discovered, t, async));
+        assert(!fetch_bit(discovered, t, async));
     }, async);
 
     // make sure that all edges have a single outgoing edge and that all sink
@@ -2087,7 +2085,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         if (!check) {
             assert(!subgraph_mask);
             assert(!get_last(edge - 1));
-            assert(atomic_fetch_bit(discovered, edge - 1));
+            assert(fetch_bit(discovered, edge - 1));
             assert(get_W(edge - 1) == kSentinelCode);
         } else {
             assert(get_W(edge) != kSentinelCode);
@@ -2095,11 +2093,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         t = fwd(t, get_W(t) % alph_size);
         check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
         assert(t);
-        assert(!atomic_fetch_bit(discovered, t, async));
+        assert(!fetch_bit(discovered, t, async));
         if (!check) {
             assert(!subgraph_mask);
             assert(!get_last(t - 1));
-            assert(atomic_fetch_bit(discovered, t - 1));
+            assert(fetch_bit(discovered, t - 1));
             assert(get_W(t - 1) == kSentinelCode);
         }
     }, async);
@@ -2124,15 +2122,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(edge);
             std::ignore = check;
             assert(check);
-        } while (edge != start && !atomic_fetch_bit(discovered, edge, async));
+        } while (edge != start && !fetch_bit(discovered, edge, async));
 
         if (edge == start && path.size()) {
             for (edge_index edge : path) {
-                if (atomic_fetch_bit(discovered, edge, async))
+                if (fetch_bit(discovered, edge, async))
                     return;
             }
             for (edge_index edge : path) {
-                atomic_set_bit(discovered, edge, async);
+                set_bit(discovered, edge, async);
             }
 
             progress_bar += path.size();
@@ -2210,7 +2208,7 @@ void call_paths_from_queue(const BOSS &boss,
             edges_async.pop_front();
             lock.unlock();
             for (const Edge &next_edge : next_edges_future.get()) {
-                if (atomic_fetch_bit(discovered, next_edge.first, async))
+                if (fetch_bit(discovered, next_edge.first, async))
                     continue;
 
                 lock.lock();
@@ -2290,7 +2288,7 @@ void call_paths(const BOSS &boss,
     do {
         // traverse simple path until we reach its tail or
         // the first edge that has already been discovered
-        while (!atomic_fetch_and_set_bit(discovered, edge, async)) {
+        while (!fetch_and_set_bit(discovered, edge, async)) {
             assert(edge > 0);
             assert(!subgraph_mask || (*subgraph_mask)[edge]);
             ++progress_bar;
@@ -2344,7 +2342,7 @@ void call_paths(const BOSS &boss,
                 assert(!boss.get_last(edge - 1));
                 edge_index t = boss.pred_last(edge - 1) + 1;
                 if (boss.get_W(t) == boss.kSentinelCode) {
-                    progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+                    progress_bar += !fetch_and_set_bit(discovered, t, async);
                     ++t;
                 }
 
@@ -2366,10 +2364,10 @@ void call_paths(const BOSS &boss,
             // loop over the outgoing edges
             do {
                 assert((!subgraph_mask || (*subgraph_mask)[edge]
-                    || atomic_fetch_bit(discovered, edge, async))
+                    || fetch_bit(discovered, edge, async))
                         && "k-mers not from subgraph are marked as discovered");
 
-                if (!atomic_fetch_bit(discovered, edge, async)) {
+                if (!fetch_bit(discovered, edge, async)) {
                     if (!next_edge && !split_to_unitigs) {
                         // save the edge for discovery if we extract contigs
                         next_edge = edge;
@@ -2467,7 +2465,7 @@ void call_path(const BOSS &boss,
             // this should only happen if there are redundant dummy edges
             t = boss.pred_W(t, boss.kSentinelCode);
         }
-        progress_bar += !atomic_fetch_and_set_bit(discovered, t, async);
+        progress_bar += !fetch_and_set_bit(discovered, t, async);
     }
 
     std::reverse(dual_path.begin(), dual_path.end());
@@ -2489,9 +2487,9 @@ void call_path(const BOSS &boss,
                     })) {
                 // if this unitig or its dual path has been printed already,
                 // exit early
-                if (atomic_fetch_bit(written, path.front(), async)
+                if (fetch_bit(written, path.front(), async)
                         || (path.back() != dual_path.back()
-                            && atomic_fetch_bit(written, dual_path.back(), async))) {
+                            && fetch_bit(written, dual_path.back(), async))) {
                     return;
                 }
 
@@ -2502,7 +2500,7 @@ void call_path(const BOSS &boss,
         // traverse the path with its dual and discover them
         for (size_t i = 0; i < path.size(); ++i) {
             assert(path[i]);
-            atomic_set_bit(written, path[i], async);
+            set_bit(written, path[i], async);
             if (safe_to_unlock) {
                 assert(async);
                 safe_to_unlock = false;
@@ -2518,8 +2516,8 @@ void call_path(const BOSS &boss,
             }
 
             // check if another thread has written the reverse-complement k-mer
-            if (!atomic_fetch_and_set_bit(written, dual_path[i], async)) {
-                progress_bar += !atomic_fetch_and_set_bit(discovered, dual_path[i], async);
+            if (!fetch_and_set_bit(written, dual_path[i], async)) {
+                progress_bar += !fetch_and_set_bit(discovered, dual_path[i], async);
                 continue;
             }
 

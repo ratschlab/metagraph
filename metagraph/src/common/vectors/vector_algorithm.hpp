@@ -41,10 +41,8 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
  */
 
 template <class t_int_vec>
-inline bool atomic_fetch_and_set_bit(t_int_vec &v,
-                                     size_t i,
-                                     bool atomic = false,
-                                     int memorder = __ATOMIC_SEQ_CST) {
+inline bool fetch_and_set_bit(t_int_vec &v, size_t i,
+                              bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -65,10 +63,8 @@ inline bool atomic_fetch_and_set_bit(t_int_vec &v,
 }
 
 template <class t_int_vec>
-inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
-                                       size_t i,
-                                       bool atomic = false,
-                                       int memorder = __ATOMIC_SEQ_CST) {
+inline bool fetch_and_unset_bit(t_int_vec &v, size_t i,
+                                bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -89,10 +85,8 @@ inline bool atomic_fetch_and_unset_bit(t_int_vec &v,
 }
 
 template <class t_int_vec>
-inline bool atomic_fetch_bit(t_int_vec &v,
-                             size_t i,
-                             bool atomic = false,
-                             int memorder = __ATOMIC_SEQ_CST) {
+inline bool fetch_bit(t_int_vec &v, size_t i,
+                      bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -102,10 +96,8 @@ inline bool atomic_fetch_bit(t_int_vec &v,
 }
 
 template <class t_int_vec>
-inline void atomic_set_bit(t_int_vec &v,
-                           size_t i,
-                           bool atomic = false,
-                           int memorder = __ATOMIC_SEQ_CST) {
+inline void set_bit(t_int_vec &v, size_t i,
+                    bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -117,10 +109,8 @@ inline void atomic_set_bit(t_int_vec &v,
 }
 
 template <class t_int_vec>
-inline void atomic_unset_bit(t_int_vec &v,
-                             size_t i,
-                             bool atomic = false,
-                             int memorder = __ATOMIC_SEQ_CST) {
+inline void unset_bit(t_int_vec &v, size_t i,
+                      bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -182,7 +172,7 @@ void call_ones(const sdsl::bit_vector &vector,
 
     uint64_t i = begin;
     for ( ; i < end && (i & 0x3F); ++i) {
-        if (atomic_fetch_bit(vector, i, true, memorder))
+        if (fetch_bit(vector, i, true, memorder))
             callback(i);
     }
     uint64_t word;
@@ -197,12 +187,12 @@ void call_ones(const sdsl::bit_vector &vector,
         callback(i++);
 
         for ( ; i < j; ++i) {
-            if (atomic_fetch_bit(vector, i, true, memorder))
+            if (fetch_bit(vector, i, true, memorder))
                 callback(i);
         }
     }
     for ( ; i < end; ++i) {
-        if (atomic_fetch_bit(vector, i, true, memorder))
+        if (fetch_bit(vector, i, true, memorder))
             callback(i);
     }
 }
@@ -268,7 +258,7 @@ void call_zeros(const sdsl::bit_vector &vector,
 
     uint64_t i = begin;
     for ( ; i < end && (i & 0x3F); ++i) {
-        if (!atomic_fetch_bit(vector, i, true, memorder))
+        if (!fetch_bit(vector, i, true, memorder))
             callback(i);
     }
     uint64_t word;
@@ -283,12 +273,12 @@ void call_zeros(const sdsl::bit_vector &vector,
         callback(i++);
 
         for ( ; i < j; ++i) {
-            if (!atomic_fetch_bit(vector, i, true, memorder))
+            if (!fetch_bit(vector, i, true, memorder))
                 callback(i);
         }
     }
     for ( ; i < end; ++i) {
-        if (!atomic_fetch_bit(vector, i, true, memorder))
+        if (!fetch_bit(vector, i, true, memorder))
             callback(i);
     }
 }
