@@ -42,7 +42,7 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
 
 template <class t_int_vec>
 inline bool fetch_and_set_bit(t_int_vec &v, size_t i,
-                              bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+                              bool atomic = false, int memorder = __ATOMIC_ACQ_REL) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
     assert(i < v.size());
@@ -65,7 +65,7 @@ inline bool fetch_and_set_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline bool fetch_and_unset_bit(t_int_vec &v, size_t i,
-                                bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+                                bool atomic = false, int memorder = __ATOMIC_ACQ_REL) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -87,7 +87,7 @@ inline bool fetch_and_unset_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline bool fetch_bit(t_int_vec &v, size_t i,
-                      bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+                      bool atomic = false, int memorder = __ATOMIC_ACQUIRE) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -98,7 +98,7 @@ inline bool fetch_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline void set_bit(t_int_vec &v, size_t i,
-                    bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+                    bool atomic = false, int memorder = __ATOMIC_RELEASE) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -111,7 +111,7 @@ inline void set_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline void unset_bit(t_int_vec &v, size_t i,
-                      bool atomic = false, int memorder = __ATOMIC_SEQ_CST) {
+                      bool atomic = false, int memorder = __ATOMIC_RELEASE) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -162,7 +162,7 @@ void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                Callback callback,
                bool atomic,
-               int memorder = __ATOMIC_SEQ_CST) {
+               int memorder = __ATOMIC_ACQUIRE) {
     if (!atomic) {
         call_ones(vector, begin, end, callback);
         return;
@@ -248,7 +248,7 @@ void call_zeros(const sdsl::bit_vector &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback,
                 bool atomic,
-                int memorder = __ATOMIC_SEQ_CST) {
+                int memorder = __ATOMIC_ACQUIRE) {
     if (!atomic) {
         call_zeros(vector, begin, end, callback);
         return;
