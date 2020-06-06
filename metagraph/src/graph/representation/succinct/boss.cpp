@@ -2066,7 +2066,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 assert(t);
                 enqueue_start(edge);
             }
-        });
+        }, async);
         call_paths_from_queue();
     }
 
