@@ -29,12 +29,12 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        return maybe_enqueue(false, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class F, typename... Args>
     auto force_enqueue(F&& f, Args&&... args) {
-        return maybe_enqueue(true, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(true, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     void join();
@@ -58,7 +58,7 @@ class ThreadPool {
     bool stop_;
 
     template <class F, typename... Args>
-    auto maybe_enqueue(bool force, F&& f, Args&&... args) {
+    auto emplace(bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
