@@ -297,6 +297,31 @@ inline typename KMER_TO::WordType lift(const KMER_FROM &kmer, size_t k) {
     return word;
 }
 
+// shift to the next dummy sink and add +1 to each character of the k-mer
+template <typename KMER_TO, typename KMER_FROM>
+inline typename KMER_TO::WordType get_sink_and_lift(const KMER_FROM &kmer, size_t k) {
+    static constexpr int L1 = KMER_FROM::kBitsPerChar;
+    static constexpr int L2 = KMER_TO::kBitsPerChar;
+    static_assert(L2 >= L1);
+    static_assert(L2 <= L1 + 1);
+    assert(sizeof(typename KMER_TO::WordType)
+            >= sizeof(typename KMER_FROM::WordType));
+
+    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
+
+    typename KMER_TO::WordType word = (kmer.data() & first_char_mask_1) + 1;
+
+    for (int pos = L1 * (k - 1); pos >= L1 * 2; pos -= L1) {
+        word <<= L2;
+        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
+        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
+    }
+
+    word <<= L2;
+
+    return word;
+}
+
 /**
  * Generates non-redundant dummy-1 source k-mers and dummy sink kmers from #kmers.
  * @return a triplet containing the names of the original k-mer blocks, the dummy-1 source
@@ -360,9 +385,7 @@ generate_dummy_1_kmers(size_t k,
                 // skip k-mers with the same suffix as v, as they generate identical dummy
                 // sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
-                KMER v_lifted(lift<KMER>(v, k + 1));
-                v_lifted.to_next(k + 1, BOSS::kSentinelCode);
-                dummy_sink_chunks[F].add(v_lifted.data());
+                dummy_sink_chunks[F].add(get_sink_and_lift<KMER>(v, k + 1));
                 num_sink++;
             }
             if (!sink_gen_it.empty()) {
@@ -388,9 +411,7 @@ generate_dummy_1_kmers(size_t k,
         while (!sink_gen_it.empty()) {
             KMER_REAL v(sink_gen_it.pop());
             skip_same_suffix(v, sink_gen_it, 1);
-            KMER v_lifted(lift<KMER>(v, k + 1));
-            v_lifted.to_next(k + 1, BOSS::kSentinelCode);
-            dummy_sink_chunks[F].add(v_lifted.data());
+            dummy_sink_chunks[F].add(get_sink_and_lift<KMER>(v, k + 1));
             num_sink++;
         }
     }
