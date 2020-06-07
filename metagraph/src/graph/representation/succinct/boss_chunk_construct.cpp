@@ -276,7 +276,7 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
 
 // add +1 to each character of the k-mer
 template <typename KMER_TO, typename KMER_FROM>
-KMER_TO lift(const KMER_FROM &kmer, size_t k) {
+inline KMER_TO lift(const KMER_FROM &kmer, size_t k) {
     constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
@@ -286,10 +286,12 @@ KMER_TO lift(const KMER_FROM &kmer, size_t k) {
 
     typename KMER_TO::WordType word = 0;
 
-    for (int i = k - 1; i >= 0; --i) {
+    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
+
+    for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
         word <<= L2;
-        assert(kmer[i] + 1 <= sdsl::bits::lo_set[L2]);
-        word |= kmer[i] + 1;
+        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
+        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
     }
 
     return KMER_TO(word);

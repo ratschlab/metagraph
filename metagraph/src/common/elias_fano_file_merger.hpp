@@ -166,7 +166,7 @@ class Transformed {
 
     inline const T& top() const { return top_; }
 
-    inline T pop() {
+    inline T pop() __attribute__((always_inline)) {
         decoder_.pop();
         T result = top_;
         if (!decoder_.empty()) {
