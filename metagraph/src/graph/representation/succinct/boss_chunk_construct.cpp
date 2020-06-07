@@ -277,8 +277,8 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
 // add +1 to each character of the k-mer
 template <typename KMER_TO, typename KMER_FROM>
 inline typename KMER_TO::WordType lift(const KMER_FROM &kmer, size_t k) {
-    constexpr size_t L1 = KMER_FROM::kBitsPerChar;
-    constexpr size_t L2 = KMER_TO::kBitsPerChar;
+    static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
+    static constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
     static_assert(L2 <= L1 + 1);
     assert(sizeof(typename KMER_TO::WordType)
@@ -337,42 +337,37 @@ generate_dummy_1_kmers(size_t k,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
 
-        std::function<KMER_INT(const KMER_INT_REAL &)> transform_kmer = [k](const KMER_INT_REAL &v) {
-            return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1);
-        };
-
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
-        common::Transformed<common::MergeDecoder<KMER_INT_REAL>, KMER_INT>
-                    it(transform_kmer, F_chunks, false);
+        common::MergeDecoder<KMER_INT_REAL> it(F_chunks, false);
 
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 0; c < alphabet_size; ++c) {
             W_chunks.push_back(real_F_W[c * alphabet_size + F]);
         }
-        common::Transformed<common::ConcatDecoder<KMER_INT_REAL>, KMER_INT>
-                    sink_gen_it(transform_kmer, W_chunks);
+        common::ConcatDecoder<KMER_INT_REAL> sink_gen_it(W_chunks);
 
         while (!it.empty()) {
-            KMER dummy_source(it.pop());
+            KMER_REAL dummy_source(it.pop());
             // skip k-mers that would generate identical source dummy k-mers
             skip_same_suffix(dummy_source, it, 0);
-            dummy_source.to_prev(k + 1, BOSS::kSentinelCode);
+            dummy_source.to_prev(k + 1, 0);
             // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
             while (!sink_gen_it.empty()
                     && sink_gen_it.top() < dummy_source.data()) {
-                KMER v(sink_gen_it.pop());
+                KMER_REAL v(sink_gen_it.pop());
                 // skip k-mers with the same suffix as v, as they generate identical dummy
                 // sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
-                v.to_next(k + 1, BOSS::kSentinelCode);
-                dummy_sink_chunks[F].add(v.data());
+                KMER v_lifted(lift<KMER>(v, k + 1));
+                v_lifted.to_next(k + 1, BOSS::kSentinelCode);
+                dummy_sink_chunks[F].add(v_lifted.data());
                 num_sink++;
             }
             if (!sink_gen_it.empty()) {
-                KMER top(sink_gen_it.top());
-                if (KMER::compare_suffix(top, dummy_source, 1)) {
+                KMER_REAL top(sink_gen_it.top());
+                if (KMER_REAL::compare_suffix(top, dummy_source, 1)) {
                     // The source dummy k-mer #dummy_source generated from #it is
                     // redundant iff it shares its suffix with another real k-mer (#top).
                     // In this case, #top generates a dummy sink k-mer redundant with #it.
@@ -382,15 +377,20 @@ generate_dummy_1_kmers(size_t k,
                     continue;
                 }
             }
-            dummy_l1_chunks[F].add(dummy_source.data());
+            // lift all and reset the first character to the sentinel 0 (apply mask)
+            KMER_INT dummy_source_lifted = lift<KMER>(dummy_source, k + 1);
+            static constexpr size_t L = KMER::kBitsPerChar;
+            static const KMER_INT mask = ~KMER_INT(((1ull << L) - 1) << L);
+            dummy_l1_chunks[F].add(dummy_source_lifted & mask);
             num_source++;
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
-            KMER v(sink_gen_it.pop());
+            KMER_REAL v(sink_gen_it.pop());
             skip_same_suffix(v, sink_gen_it, 1);
-            v.to_next(k + 1, BOSS::kSentinelCode);
-            dummy_sink_chunks[F].add(v.data());
+            KMER v_lifted(lift<KMER>(v, k + 1));
+            v_lifted.to_next(k + 1, BOSS::kSentinelCode);
+            dummy_sink_chunks[F].add(v_lifted.data());
             num_sink++;
         }
     }
