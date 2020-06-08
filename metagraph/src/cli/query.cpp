@@ -98,6 +98,89 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 }
 
 /**
+ * @brief      Construct annotation submatrix with a subset of rows extracted
+ *             from the full annotation matrix
+ *
+ * @param[in]  full_annotation  The full annotation matrix.
+ * @param[in]  index_in_full    Indexes of rows in the full annotation matrix.
+ *                              index_in_full[i] = -1 means that the i-th row in
+ *                              the submatrix is empty.
+ * @param[in]  num_threads      The number of threads used.
+ *
+ * @return     Annotation submatrix in the UniqueRowAnnotator representation
+ */
+std::unique_ptr<annotate::UniqueRowAnnotator>
+slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
+                 const std::vector<uint64_t> &index_in_full,
+                 size_t num_threads) {
+    const uint64_t npos = -1;
+
+    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
+
+    for (uint64_t i = 0; i < index_in_full.size(); ++i) {
+        if (index_in_full[i] != npos)
+            from_full_to_small.emplace_back(index_in_full[i], i);
+    }
+
+    ips4o::parallel::sort(from_full_to_small.begin(), from_full_to_small.end(),
+                          utils::LessFirst(), num_threads);
+
+    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
+                                    utils::VectorHash,
+                                    std::equal_to<SmallVector<uint32_t>>,
+                                    std::allocator<SmallVector<uint32_t>>,
+                                    std::vector<SmallVector<uint32_t>>,
+                                    uint32_t>;
+    RowSet unique_rows { SmallVector<uint32_t>() };
+    std::vector<uint32_t> row_rank(index_in_full.size(), 0);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t batch_begin = 0;
+                        batch_begin < from_full_to_small.size();
+                                        batch_begin += kRowBatchSize) {
+        const uint64_t batch_end
+            = std::min(batch_begin + kRowBatchSize,
+                       static_cast<uint64_t>(from_full_to_small.size()));
+
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(batch_end - batch_begin);
+        for (uint64_t i = batch_begin; i < batch_end; ++i) {
+            assert(from_full_to_small[i].first < full_annotation.num_objects());
+
+            row_indexes.push_back(from_full_to_small[i].first);
+        }
+
+        auto rows = full_annotation.get_matrix().get_rows(row_indexes);
+
+        assert(rows.size() == batch_end - batch_begin);
+
+        #pragma omp critical
+        {
+            for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                const auto &row = rows[i - batch_begin];
+                auto it = unique_rows.emplace(row.begin(), row.end()).first;
+                row_rank[from_full_to_small[i].second] = it - unique_rows.begin();
+                if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
+                    throw std::runtime_error("There must be less than 2^32 unique rows."
+                                             " Reduce the query batch size.");
+            }
+        }
+    }
+
+    auto &annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&>(
+        unique_rows.values_container()
+    );
+
+    // copy annotations from the full graph to the query graph
+    return std::make_unique<annotate::UniqueRowAnnotator>(
+        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
+                                          std::move(row_rank),
+                                          full_annotation.num_labels()),
+        full_annotation.get_label_encoder()
+    );
+}
+
+/**
  * Construct a de Bruijn graph from the query sequences
  * fetched in |call_sequences|.
  *
@@ -296,79 +379,22 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
     }
 
-    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_query;
-    from_full_to_query.reserve(index_in_full_graph.size());
-
-    for (uint64_t node = 0; node < index_in_full_graph.size(); ++node) {
-        if (index_in_full_graph[node]) {
-            from_full_to_query.emplace_back(
-                AnnotatedDBG::graph_to_anno_index(index_in_full_graph[node]),
-                AnnotatedDBG::graph_to_anno_index(node)
-            );
+    // convert to annotation indexes: remove 0 and shift
+    for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
+        if (index_in_full_graph[i]) {
+            index_in_full_graph[i - 1]
+                = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
+        } else {
+            index_in_full_graph[i - 1] = -1;  // npos
         }
     }
-
-    ips4o::parallel::sort(from_full_to_query.begin(), from_full_to_query.end(),
-                          utils::LessFirst(), num_threads);
-
-    logger->trace("[Query graph construction] Prepared row indexes for query {} sec",
-                  timer.elapsed());
-    timer.reset();
+    index_in_full_graph.pop_back();
 
     // initialize fast query annotation
-    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
-                                    utils::VectorHash,
-                                    std::equal_to<SmallVector<uint32_t>>,
-                                    std::allocator<SmallVector<uint32_t>>,
-                                    std::vector<SmallVector<uint32_t>>,
-                                    uint32_t>;
-    RowSet unique_rows { SmallVector<uint32_t>() };
-    std::vector<uint32_t> row_rank(graph->max_index(), 0);
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t batch_begin = 0;
-                        batch_begin < from_full_to_query.size();
-                                        batch_begin += kRowBatchSize) {
-        const uint64_t batch_end
-            = std::min(batch_begin + kRowBatchSize,
-                       static_cast<uint64_t>(from_full_to_query.size()));
-
-        std::vector<uint64_t> row_indexes;
-        row_indexes.reserve(batch_end - batch_begin);
-
-        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            assert(from_full_to_query[i].first < full_annotation.num_objects());
-            row_indexes.push_back(from_full_to_query[i].first);
-            if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
-                throw std::runtime_error("There must be less than 2^32 unique rows."
-                                         " Reduce the query batch size.");
-        }
-
-        auto rows = full_annotation.get_matrix().get_rows(row_indexes);
-
-        assert(rows.size() == batch_end - batch_begin);
-
-        #pragma omp critical
-        {
-            for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                const auto &row = rows[i - batch_begin];
-                auto it = unique_rows.emplace(row.begin(), row.end()).first;
-                row_rank[from_full_to_query[i].second] = it - unique_rows.begin();
-            }
-        }
-    }
-
-    auto annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&&>(
-        unique_rows.values_container()
-    );
-
     // copy annotations from the full graph to the query graph
-    auto annotation = std::make_unique<annotate::UniqueRowAnnotator>(
-        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
-                                          std::move(row_rank),
-                                          full_annotation.num_labels()),
-        full_annotation.get_label_encoder()
-    );
+    auto annotation = slice_annotation(full_annotation,
+                                       index_in_full_graph,
+                                       num_threads);
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",
                   timer.elapsed());
