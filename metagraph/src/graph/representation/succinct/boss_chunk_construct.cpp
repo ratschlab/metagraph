@@ -274,9 +274,21 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     }
 }
 
-// add +1 to each character of the k-mer
+// construct word `...1001001001` with k ones for lifting k-mers
+template <typename WordType>
+inline WordType get_sentinel_delta(size_t char_width, size_t k) {
+    assert(char_width * k <= sizeof(WordType) * 8);
+    WordType word = 0;
+    for (size_t i = 0; i < k; ++i) {
+        word <<= char_width;
+        word |= 1;
+    }
+    return word;
+}
+
+// transforms k-mer to the new character width
 template <typename KMER_TO, typename KMER_FROM>
-inline typename KMER_TO::WordType lift(const KMER_FROM &kmer, size_t k) {
+inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
     static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     static constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
@@ -284,17 +296,22 @@ inline typename KMER_TO::WordType lift(const KMER_FROM &kmer, size_t k) {
     assert(sizeof(typename KMER_TO::WordType)
             >= sizeof(typename KMER_FROM::WordType));
 
-    typename KMER_TO::WordType word = 0;
+    if constexpr(L1 == L2) {
+        return kmer.data();
 
-    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
+    } else {
+        typename KMER_TO::WordType word = 0;
 
-    for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
-        word <<= L2;
-        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
-        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
+        static constexpr uint64_t char_mask = (1ull << L1) - 1;
+
+        for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
+            word <<= L2;
+            assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
+            word |= static_cast<uint64_t>(kmer.data() >> pos) & char_mask;
+        }
+
+        return word;
     }
-
-    return word;
 }
 
 // shift to the next dummy sink and add +1 to each character of the k-mer
@@ -359,6 +376,11 @@ generate_dummy_1_kmers(size_t k,
     uint64_t num_sink = 0;
     uint64_t num_source = 0;
 
+    static constexpr size_t L = KMER::kBitsPerChar;
+    KMER_INT kmer_delta = get_sentinel_delta<KMER_INT>(L, k + 1);
+    // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
+    kmer_delta &= ~KMER_INT(((1ull << L) - 1) << L);
+
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
 
@@ -401,10 +423,7 @@ generate_dummy_1_kmers(size_t k,
                 }
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            KMER_INT dummy_source_lifted = lift<KMER>(dummy_source, k + 1);
-            static constexpr size_t L = KMER::kBitsPerChar;
-            static const KMER_INT mask = ~KMER_INT(((1ull << L) - 1) << L);
-            dummy_l1_chunks[F].add(dummy_source_lifted & mask);
+            dummy_l1_chunks[F].add(transform<KMER>(dummy_source, k + 1) + kmer_delta);
             num_source++;
         }
         // handle leftover sink_gen_it
@@ -532,14 +551,19 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
+    const KMER_INT kmer_delta
+            = get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+
     // push all other dummy and non-dummy k-mers to |kmers_out|
-    async_worker.enqueue([k, kmers_out, real_split_by_W, dummy_chunks]() {
+    async_worker.enqueue([k, kmer_delta, kmers_out, real_split_by_W, dummy_chunks]() {
         common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
-            [k](const T_INT_REAL &v) {
+            [&](const T_INT_REAL &v) {
                 if constexpr (utils::is_pair_v<T>) {
-                    return T(lift<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1), v.second);
+                    return T(transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
+                                + kmer_delta,
+                             v.second);
                 } else {
-                    return lift<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1);
+                    return transform<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1) + kmer_delta;
                 }
             },
             real_split_by_W, true
