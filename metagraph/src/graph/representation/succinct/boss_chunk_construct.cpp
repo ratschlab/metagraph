@@ -315,7 +315,7 @@ inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
 }
 
 template <>
-inline sdsl::uint128_t
+inline __attribute__((always_inline)) sdsl::uint128_t
 transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
         const kmer::KMerBOSS<uint64_t, 2> &kmer,
         size_t k) {
