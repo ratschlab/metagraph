@@ -10,6 +10,8 @@
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 
+const size_t kRowBatchSize = 1'000'000;
+
 
 template <class MatrixType>
 Rainbow<MatrixType>::Rainbow(MatrixType&& reduced_matrix,
@@ -62,18 +64,19 @@ Rainbow<MatrixType>::get_rows(const std::vector<Row> &rows) const {
 
 template <class MatrixType>
 std::vector<BinaryMatrix::SetBitPositions>
-Rainbow<MatrixType>::get_rows(std::vector<Row> *rows) const {
+Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 
     std::vector<std::pair<uint64_t, /* code */
                           uint64_t /* row */>> row_codes(rows->size());
 
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < rows->size(); ++i) {
         row_codes[i] = { get_code((*rows)[i]), i };
     }
 
     ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
-                          utils::LessFirst(), get_num_threads());
+                          utils::LessFirst(), num_threads);
 
     std::vector<Row> row_ids;
     uint64_t last_code = std::numeric_limits<uint64_t>::max();
@@ -86,7 +89,24 @@ Rainbow<MatrixType>::get_rows(std::vector<Row> *rows) const {
         (*rows)[i] = row_ids.size() - 1;
     }
 
-    return reduced_matrix_.get_rows(row_ids);
+    std::vector<SetBitPositions> result(row_ids.size());
+
+    uint64_t batch_size = std::max((size_t)1u,
+                                   std::min(kRowBatchSize,
+                                            row_ids.size() / num_threads));
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0; i < row_ids.size(); i += batch_size) {
+        std::vector<uint64_t> indexes(row_ids.begin() + i,
+                                      std::min(row_ids.begin() + batch_size,
+                                               row_ids.end()));
+        auto rows = reduced_matrix_.get_rows(indexes);
+        for (size_t j = 0; j < rows.size(); ++j) {
+            result[i + j] = std::move(rows[j]);
+        }
+    }
+
+    return result;
 }
 
 template <class MatrixType>
