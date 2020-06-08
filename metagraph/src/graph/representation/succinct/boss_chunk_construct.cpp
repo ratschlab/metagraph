@@ -314,30 +314,9 @@ inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
     }
 }
 
-template <typename KMER_TO, typename KMER_FROM>
-inline typename KMER_TO::WordType lift2(const KMER_FROM &kmer, size_t k) {
-    static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
-    static constexpr size_t L2 = KMER_TO::kBitsPerChar;
-    static_assert(L2 >= L1);
-    static_assert(L2 <= L1 + 1);
-    assert(sizeof(typename KMER_TO::WordType)
-                   >= sizeof(typename KMER_FROM::WordType));
-
-    typename KMER_TO::WordType word = 0;
-
-    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
-
-    for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
-        word <<= L2;
-        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
-        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
-    }
-
-    return word;
-}
-
 template <>
-inline sdsl::uint128_t lift<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
+inline sdsl::uint128_t
+transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
         const kmer::KMerBOSS<uint64_t, 2> &kmer,
         size_t k) {
     static constexpr uint16_t lookup[256] = {
