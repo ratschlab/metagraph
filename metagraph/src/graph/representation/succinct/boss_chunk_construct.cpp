@@ -314,6 +314,69 @@ inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
     }
 }
 
+template <typename KMER_TO, typename KMER_FROM>
+inline typename KMER_TO::WordType lift2(const KMER_FROM &kmer, size_t k) {
+    static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
+    static constexpr size_t L2 = KMER_TO::kBitsPerChar;
+    static_assert(L2 >= L1);
+    static_assert(L2 <= L1 + 1);
+    assert(sizeof(typename KMER_TO::WordType)
+                   >= sizeof(typename KMER_FROM::WordType));
+
+    typename KMER_TO::WordType word = 0;
+
+    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
+
+    for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
+        word <<= L2;
+        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
+        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
+    }
+
+    return word;
+}
+
+template <>
+inline sdsl::uint128_t lift<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
+        const kmer::KMerBOSS<uint64_t, 2> &kmer,
+        size_t k) {
+    static constexpr uint16_t lookup[256] = {
+        585,  586,  587,  588,  593,  594,  595,  596,  601,  602,  603,  604,  609,
+        610,  611,  612,  649,  650,  651,  652,  657,  658,  659,  660,  665,  666,
+        667,  668,  673,  674,  675,  676,  713,  714,  715,  716,  721,  722,  723,
+        724,  729,  730,  731,  732,  737,  738,  739,  740,  777,  778,  779,  780,
+        785,  786,  787,  788,  793,  794,  795,  796,  801,  802,  803,  804,  1097,
+        1098, 1099, 1100, 1105, 1106, 1107, 1108, 1113, 1114, 1115, 1116, 1121, 1122,
+        1123, 1124, 1161, 1162, 1163, 1164, 1169, 1170, 1171, 1172, 1177, 1178, 1179,
+        1180, 1185, 1186, 1187, 1188, 1225, 1226, 1227, 1228, 1233, 1234, 1235, 1236,
+        1241, 1242, 1243, 1244, 1249, 1250, 1251, 1252, 1289, 1290, 1291, 1292, 1297,
+        1298, 1299, 1300, 1305, 1306, 1307, 1308, 1313, 1314, 1315, 1316, 1609, 1610,
+        1611, 1612, 1617, 1618, 1619, 1620, 1625, 1626, 1627, 1628, 1633, 1634, 1635,
+        1636, 1673, 1674, 1675, 1676, 1681, 1682, 1683, 1684, 1689, 1690, 1691, 1692,
+        1697, 1698, 1699, 1700, 1737, 1738, 1739, 1740, 1745, 1746, 1747, 1748, 1753,
+        1754, 1755, 1756, 1761, 1762, 1763, 1764, 1801, 1802, 1803, 1804, 1809, 1810,
+        1811, 1812, 1817, 1818, 1819, 1820, 1825, 1826, 1827, 1828, 2121, 2122, 2123,
+        2124, 2129, 2130, 2131, 2132, 2137, 2138, 2139, 2140, 2145, 2146, 2147, 2148,
+        2185, 2186, 2187, 2188, 2193, 2194, 2195, 2196, 2201, 2202, 2203, 2204, 2209,
+        2210, 2211, 2212, 2249, 2250, 2251, 2252, 2257, 2258, 2259, 2260, 2265, 2266,
+        2267, 2268, 2273, 2274, 2275, 2276, 2313, 2314, 2315, 2316, 2321, 2322, 2323,
+        2324, 2329, 2330, 2331, 2332, 2337, 2338, 2339, 2340
+    };
+    const uint8_t * kmer_char = reinterpret_cast<const uint8_t *>(&kmer);
+    // Note: since we're transforming 64-bit kmers to 128 bits, we know that 21 < k < 33
+    sdsl::uint128_t result =
+            static_cast<sdsl::uint128_t>(lookup[kmer_char[7]]) << 84
+            | static_cast<sdsl::uint128_t>(lookup[kmer_char[6]]) << 72
+            | static_cast<sdsl::uint128_t>(lookup[kmer_char[5]]) << 60
+            | static_cast<uint64_t>(lookup[kmer_char[4]]) << 48
+            | static_cast<uint64_t>(lookup[kmer_char[3]]) << 36
+            | static_cast<uint64_t>(lookup[kmer_char[2]]) << 24
+            | static_cast<uint64_t>(lookup[kmer_char[1]]) << 12
+            | lookup[kmer_char[0]];
+
+    return result & ((sdsl::uint128_t(1) << 3 * k) - 1);
+}
+
 // shift to the next dummy sink and add +1 to each character of the k-mer
 template <typename KMER_TO, typename KMER_FROM>
 inline typename KMER_TO::WordType get_sink_and_lift(const KMER_FROM &kmer, size_t k) {
