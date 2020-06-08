@@ -117,6 +117,53 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads) {
     assert(index_in_full_graph.size());
 
+    if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
+        // use a shortcut for Rainbow<> annotation
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(index_in_full_graph.size() - 1);
+        for (uint64_t i = 1; i < index_in_full_graph.size(); ++i) {
+            if (index_in_full_graph[i]) {
+                row_indexes.push_back(index_in_full_graph[i] - 1);
+            } else {
+                row_indexes.push_back(0);
+            }
+        }
+
+        auto unique_rows = rb->get_rows(&row_indexes, num_threads);
+
+        if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("There must be less than 2^32 unique rows."
+                                     " Reduce the query batch size.");
+        }
+
+        if (full_annotation.get_matrix().get_row(0).size()) {
+            logger->trace("Add empty row");
+            unique_rows.emplace_back();
+            for (uint64_t i = 1; i < index_in_full_graph.size(); ++i) {
+                if (!index_in_full_graph[i]) {
+                    row_indexes[i - 1] = unique_rows.size() - 1;
+                }
+            }
+        }
+
+        // TODO: Remove this conversion.
+        //       Either use SmallVector for SetBitsPositions
+        //       or use SetBitsPositions in UniqueRowBinmat.
+        std::vector<SmallVector<uint32_t>> annotation_rows(unique_rows.size());
+        for (auto &row : unique_rows) {
+            annotation_rows.emplace_back(row.begin(), row.end());
+        }
+
+        // copy annotations from the full graph to the query graph
+        return std::make_unique<annotate::UniqueRowAnnotator>(
+            std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
+                                              std::vector<uint32_t>(row_indexes.begin(),
+                                                                    row_indexes.end()),
+                                              full_annotation.num_labels()),
+            full_annotation.get_label_encoder()
+        );
+    }
+
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
     from_full_to_small.reserve(index_in_full_graph.size() - 1);
 
