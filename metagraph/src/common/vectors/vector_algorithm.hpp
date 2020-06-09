@@ -98,7 +98,7 @@ inline bool fetch_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline void set_bit(t_int_vec &v, size_t i,
-                    bool atomic = false, int memorder = __ATOMIC_RELEASE) {
+                    bool atomic = false, int memorder = __ATOMIC_RELAXED) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
@@ -111,7 +111,7 @@ inline void set_bit(t_int_vec &v, size_t i,
 
 template <class t_int_vec>
 inline void unset_bit(t_int_vec &v, size_t i,
-                      bool atomic = false, int memorder = __ATOMIC_RELEASE) {
+                      bool atomic = false, int memorder = __ATOMIC_RELAXED) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 

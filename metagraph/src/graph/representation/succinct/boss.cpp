@@ -2145,7 +2145,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                     return;
             }
             for (edge_index edge : path) {
-                set_bit(discovered, edge, async, __ATOMIC_RELAXED);
+                set_bit(discovered, edge, async);
             }
 
             progress_bar += path.size();
