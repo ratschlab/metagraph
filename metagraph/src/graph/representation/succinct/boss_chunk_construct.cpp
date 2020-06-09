@@ -288,30 +288,28 @@ inline WordType get_sentinel_delta(size_t char_width, size_t k) {
 
 // transforms k-mer to the new character width
 template <typename KMER_TO, typename KMER_FROM>
-inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
+inline __attribute__((always_inline)) typename KMER_TO::WordType
+transform(const KMER_FROM &kmer, size_t) {
     static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     static constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
     static_assert(L2 <= L1 + 1);
     assert(sizeof(typename KMER_TO::WordType)
-            >= sizeof(typename KMER_FROM::WordType));
+                   >= sizeof(typename KMER_FROM::WordType));
 
-    if constexpr(L1 == L2) {
+    if constexpr (L1 == L2)
         return kmer.data();
 
-    } else {
-        typename KMER_TO::WordType word = 0;
-
-        static constexpr uint64_t char_mask = (1ull << L1) - 1;
-
-        for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
-            word <<= L2;
-            assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
-            word |= static_cast<uint64_t>(kmer.data() >> pos) & char_mask;
-        }
-
-        return word;
+    typename KMER_TO::WordType word = 0;
+    auto source = static_cast<typename KMER_TO::WordType>(kmer.data());
+    auto char_mask = static_cast<typename KMER_TO::WordType>((1ull << L1) - 1);
+    while (char_mask) {
+        word |= (source & char_mask);
+        source <<= (L2 - L1);
+        char_mask <<= L2;
     }
+
+    return word;
 }
 
 template <>
