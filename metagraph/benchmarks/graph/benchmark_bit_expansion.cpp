@@ -19,7 +19,9 @@ using namespace mtg;
 
 // transforms k-mer to the new character width
 template <typename KMER_TO, typename KMER_FROM>
-inline __attribute__((always_inline)) typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
+inline __attribute__((always_inline)) __attribute__((optimize("unroll-loops")))
+typename KMER_TO::WordType
+transform(const KMER_FROM &kmer, size_t k) {
     static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     static constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
