@@ -122,6 +122,7 @@ class GraphClient:
             if align:
                 df['sequence'] = res['sequence']
                 df['score'] = res['score']
+                df['cigar'] = res['cigar']
 
             return df
 

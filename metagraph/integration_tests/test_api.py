@@ -137,7 +137,7 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 200)
 
         self.assertEqual(len(ret.json()), repetitions)
-        expected = {'score': 12, 'seq_description': 'query0', 'sequence': 'TCGATC'}
+        expected = {'score': 12, 'seq_description': 'query0', 'sequence': 'TCGATC', 'cigar': '6=2S'}
         self.assertDictEqual(ret.json()[0], expected)
 
         self.assertListEqual(
@@ -189,7 +189,8 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
+        self.assertIn('cigar', df.columns)
+        self.assertEqual((self.sample_query_expected_cols, 5), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -206,6 +207,7 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.align(["TCGATCGA"] * repetitions)
 
         align_res = ret[self.graph_name]
+        self.assertIn('cigar', align_res.columns)
         self.assertEqual(len(align_res), repetitions)
 
 
@@ -275,3 +277,7 @@ class TestAPIClientWithProperties(TestAPIBase):
         self.assertIn('latitude', df.columns)
         self.assertEqual(df['latitude'].dtype, float)
         self.assertEqual(df.shape, (3, 9))
+
+    def test_api_search_property_df_empty(self):
+        df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST")[self.graph_name]
+        self.assertTrue(df.empty)

@@ -25,6 +25,7 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
 const std::string SCORE_JSON_FIELD = "score";
 const std::string SEQUENCE_JSON_FIELD = "sequence";
+const std::string CIGAR_JSON_FIELD = "cigar";
 
 // convert values into proper types, i.e. 'nan' -> null, strings representing numbers -> numbers
 Json::Value adjust_for_types(const std::string &v) {
@@ -65,6 +66,7 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
 
             res_obj[SEQUENCE_JSON_FIELD] = query_desc_parts[1];
             res_obj[SCORE_JSON_FIELD] = (int)atoi(query_desc_parts[2].c_str());
+            res_obj[CIGAR_JSON_FIELD] = query_desc_parts[3];
         }
 
         res_obj["results"] = Json::Value(Json::arrayValue);
@@ -185,6 +187,7 @@ std::string process_align_request(const std::string &received_message,
 
             align_entry[SCORE_JSON_FIELD] = path.get_score();
             align_entry[SEQUENCE_JSON_FIELD] = path.get_sequence();
+            align_entry[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
         } else {
             align_entry[SEQUENCE_JSON_FIELD] = "";
         }
