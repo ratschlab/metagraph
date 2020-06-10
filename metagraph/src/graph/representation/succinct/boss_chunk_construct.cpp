@@ -20,7 +20,6 @@
 namespace mtg {
 namespace succinct {
 
-using namespace mtg;
 using mtg::common::logger;
 using mtg::common::ChunkedWaitQueue;
 using mtg::kmer::get_int_t;
@@ -61,8 +60,6 @@ inline void push_back(Container &kmers, const KMER &kmer) {
 template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
-    // TODO: this is a bit of a waste as we usually have less than 2^bits characters
-    // Maybe define an ALPHABET_SIZE constant in KmerExtractorBOSS and KmerBOSS?
     using KMER_INT = typename KMER::WordType;
 
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
@@ -70,7 +67,8 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
-    std::vector<const T*> it(alphabet_size + 1);
+    std::vector<size_t> max_it(alphabet_size);
+    std::vector<size_t> it(alphabet_size);
     for (TAlphabet c = 1; c < alphabet_size; ++c) {
         std::vector<KMER_INT> zeros(k + 1, 0);
         zeros[k - 1] = c;
@@ -78,9 +76,10 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
                                  KMER(zeros, k + 1), // the $$...i->$ k-mer
                                  [](const T &a, const KMER &b) -> bool {
                                      return get_first(a) < b;
-                                 });
+                                 }) - kmers.data();
+        max_it[c - 1] = it[c];
     }
-    it[alphabet_size] = kmers.data() + kmers.size();
+    max_it[alphabet_size - 1] = kmers.size();
 
     std::vector<KMER> last_dummy(alphabet_size, KMER(0));
     size_t size = kmers.size();
@@ -94,18 +93,15 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 
         TAlphabet last_char = kmer[0];
 
-        if (last_dummy[last_char] == dummy_sink)
-            continue; // avoid generating duplicate dummy sink kmers
-
-        last_dummy[last_char] = dummy_sink;
-
-        while (it[last_char] < it[last_char + 1]
-                && KMER::less(get_first(*it[last_char]), dummy_sink)) {
+        while (it[last_char] < max_it[last_char]
+                && KMER::less(get_first(kmers[it[last_char]]), dummy_sink)) {
             it[last_char]++;
         }
-        if (!KMER::compare_suffix(get_first(*it[last_char]), dummy_sink)
-                || it[last_char] == it[last_char + 1]) {
+        if (last_dummy[last_char] != dummy_sink
+            && (it[last_char] == max_it[last_char]
+                || !KMER::compare_suffix(get_first(kmers[it[last_char]]), dummy_sink))) {
             push_back(kmers, dummy_sink);
+            last_dummy[last_char] = dummy_sink;
         }
     }
 }
@@ -315,7 +311,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
-    logger->trace("Generating dummy-1 source kmers and dummy sink k-mers...");
+    logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 1; F < alphabet_size; ++F) {  // skip $$..$
         std::vector<std::string> F_chunks(  // chunks with k-mers ***F*
