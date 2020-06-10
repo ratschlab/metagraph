@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import json
 from typing import Dict, Tuple, List, Iterable, Union, Any
 
 import pandas as pd
@@ -61,7 +60,7 @@ class GraphClientJson:
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
-        payload = json.dumps(payload_dict)
+        payload = payload_dict
 
         return self._do_request(endpoint, payload)
 
@@ -73,7 +72,7 @@ class GraphClientJson:
 
         url = f'http://{self.host}:{self.port}/{endpoint_path}'
         if post_req:
-            ret = requests.post(url=url, data=payload)
+            ret = requests.post(url=url, json=payload)
         else:
             ret = requests.get(url=url)
 
