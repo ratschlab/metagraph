@@ -213,11 +213,35 @@ std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
     return Json::writeString(builder, root);
 }
 
+std::thread start_server(HttpServer &server_startup, Config &config) {
+    server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
+
+    if (config.host_address != "") {
+        server_startup.config.address = config.host_address;
+    }
+    server_startup.config.port = config.port;
+
+    logger->info("[Server] Will listen on {} port {}", config.host_address,
+                 server_startup.config.port);
+    return std::thread([&server_startup]() { server_startup.start(); });
+}
 
 int run_server(Config *config) {
     assert(config);
 
     assert(config->infbase_annotators.size() == 1);
+
+    HttpServer initial_server;
+    initial_server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
+                                        shared_ptr<HttpServer::Request> ) {
+      response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
+                      "Server is currently initializing, please come back later.");
+    };
+    initial_server.default_resource["POST"] = initial_server.default_resource["GET"];
+
+    // creating an initial server which informs the requester, that the server is initializing
+    // i.e. graphs are loaded from disk, which may take a while
+    std::thread initial_server_thread = start_server(initial_server, *config);
 
     logger->info("[Server] Loading graph...");
 
@@ -229,20 +253,12 @@ int run_server(Config *config) {
     std::unique_ptr<IDBGAligner> aligner;
     aligner.reset(build_aligner(*graph, *config).release());
 
-    const size_t num_threads = std::max(1u, get_num_threads());
-
-    HttpServer server;
-    server.config.thread_pool_size = num_threads;
-    if (config->host_address != "") {
-        logger->info("[Server] Will listen on interface {}", config->host_address);
-        server.config.address = config->host_address;
-    }
-
-    server.config.port = config->port;
-
+    // defaults for the server
     config->num_top_labels = 10000;
     config->fast = true;
 
+    // the actual server
+    HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &content) {
@@ -282,15 +298,11 @@ int run_server(Config *config) {
         }
     };
 
-    std::promise<unsigned short> server_port;
-    std::thread server_thread([&server, &server_port]() {
-        server.start([&server_port](unsigned short port) { server_port.set_value(port); });
-    });
+    // everything is ready, stopping initial server and start the actual server
+    initial_server.stop();
+    initial_server_thread.join();
 
-    logger->info("[Server] Initializing a HTTP server with {} threads"
-                 ", listening on port {}",
-                 num_threads, server_port.get_future().get());
-
+    std::thread server_thread = start_server(server, *config);
     server_thread.join();
 
     return 0;
