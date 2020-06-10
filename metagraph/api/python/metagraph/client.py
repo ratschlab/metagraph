@@ -22,10 +22,11 @@ class GraphClientJson:
     returning error message in the second element of the tuple returned.
     """
 
-    def __init__(self, host: str, port: int, label: str = None):
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
         self.host = host
         self.port = port
         self.label = label
+        self.api_path = api_path
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -65,7 +66,12 @@ class GraphClientJson:
         return self._do_request(endpoint, payload)
 
     def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
-        url = f'http://{self.host}:{self.port}/{endpoint}'
+        endpoint_path = endpoint
+
+        if self.api_path:
+            endpoint_path = f"{self.api_path.lstrip('/')}/{endpoint}"
+
+        url = f'http://{self.host}:{self.port}/{endpoint_path}'
         if post_req:
             ret = requests.post(url=url, data=payload)
         else:
@@ -81,8 +87,8 @@ class GraphClientJson:
 
 
 class GraphClient:
-    def __init__(self, host: str, port: int, label: str = None):
-        self._json_client = GraphClientJson(host, port)
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+        self._json_client = GraphClientJson(host, port, api_path=api_path)
         self.label = label
 
     def search(self, sequence: Union[str, Iterable[str]],
@@ -145,11 +151,11 @@ class MultiGraphClient:
     def __init__(self):
         self.graphs = {}
 
-    def add_graph(self, host: str, port: int, label: str = None) -> None:
+    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
         if not label:
             label = f"{host}:{port}"
 
-        self.graphs[label] = GraphClient(host, port, label)
+        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in
