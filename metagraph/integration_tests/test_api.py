@@ -1,7 +1,7 @@
 import json
+import os
 import shlex
 import time
-import os
 from subprocess import Popen
 
 import requests

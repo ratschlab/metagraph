@@ -131,7 +131,9 @@ class GraphClient:
             return df
 
         def build_df_from_json(j):
-            return pd.concat(_build_df_per_result(query_res) for query_res in j)
+            if j:
+                return pd.concat(_build_df_per_result(query_res) for query_res in j)
+            return pd.DataFrame()
 
         return build_df_from_json(json_obj)
 
