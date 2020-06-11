@@ -42,8 +42,9 @@ class GraphClientJson:
 
         return self._json_seq_query(sequence, param_dict, "search")
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> Tuple[JsonDict, str]:
-        return self._json_seq_query(sequence, {}, "align")
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Tuple[JsonDict, str]:
+        params = {'max_alternative_alignments' : max_alternative_alignments}
+        return self._json_seq_query(sequence, params, "align")
 
     # noinspection PyTypeChecker
     def column_labels(self) -> Tuple[JsonStrList, str]:
@@ -131,12 +132,23 @@ class GraphClient:
 
         return build_df_from_json(json_obj)
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence)
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> pd.DataFrame:
+        json_obj, err = self._json_client.align(sequence, max_alternative_alignments)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
-        return pd.DataFrame(json_obj)
+
+        def _df_per_seq_res(seq_res):
+            df = pd.DataFrame(seq_res['alignments'])
+            df['seq_description'] = seq_res['seq_description']
+            return df
+
+        if not json_obj:
+            return pd.DataFrame({})
+
+        return (pd.concat([ _df_per_seq_res(a) for a in json_obj]).
+                 reset_index(drop=True))
+
 
     def column_labels(self) -> List[str]:
         json_obj, err = self._json_client.column_labels()
@@ -174,12 +186,12 @@ class MultiGraphClient:
 
         return result
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> Dict[
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for label, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence)
+            result[label] = graph_client.align(sequence, max_alternative_alignments)
 
         return result
 

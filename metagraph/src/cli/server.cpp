@@ -25,6 +25,7 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
 const std::string SCORE_JSON_FIELD = "score";
 const std::string SEQUENCE_JSON_FIELD = "sequence";
+const std::string ALIGNMENT_JSON_FIELD = "alignments";
 const std::string CIGAR_JSON_FIELD = "cigar";
 
 // convert values into proper types, i.e. 'nan' -> null, strings representing numbers -> numbers
@@ -123,7 +124,6 @@ std::string process_search_request(const std::string &received_message,
         throw std::domain_error("No input sequences received from client");
 
     Config config(config_orig);
-
     // discovery_fraction a proxy of 1 - %similarity
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
@@ -167,27 +167,42 @@ std::string process_search_request(const std::string &received_message,
 }
 
 std::string process_align_request(const std::string &received_message,
-                                  const IDBGAligner &aligner) {
+                                  const DeBruijnGraph &graph,
+                                  const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
 
     Json::Value root = Json::Value(Json::arrayValue);
 
+    Config config(config_orig);
+
+    if(json.isMember("max_alternative_alignments")) {
+        config.alignment_num_alternative_paths = json["max_alternative_alignments"].asInt();
+    }
+    std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
+
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const auto paths = aligner.align(read_stream->seq.s);
+        const QueryAlignment<IDBGAligner::node_index> paths = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
 
         // not supporting reverse complement yet
         if (!paths.empty()) {
-            auto path = paths.front();
+            Json::Value alignments = Json::Value(Json::arrayValue);
 
-            align_entry[SCORE_JSON_FIELD] = path.get_score();
-            align_entry[SEQUENCE_JSON_FIELD] = path.get_sequence();
-            align_entry[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+            std::for_each(paths.begin(), paths.end(), [&](Alignment<IDBGAligner::node_index> path){
+                Json::Value a;
+                a[SCORE_JSON_FIELD] = path.get_score();
+                a[SEQUENCE_JSON_FIELD] = path.get_sequence();
+                a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+
+                alignments.append(a);
+            });
+
+            align_entry[ALIGNMENT_JSON_FIELD] = alignments;
         } else {
             align_entry[SEQUENCE_JSON_FIELD] = "";
         }
@@ -250,8 +265,7 @@ int run_server(Config *config) {
 
     logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
-    std::unique_ptr<IDBGAligner> aligner;
-    aligner.reset(build_aligner(*graph, *config).release());
+    std::unique_ptr<IDBGAligner> default_aligner = build_aligner(*graph, *config);
 
     // defaults for the server
     config->num_top_labels = 10000;
@@ -262,14 +276,14 @@ int run_server(Config *config) {
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &content) {
-            return process_search_request(content, *anno_graph, *config, *aligner);
+            return process_search_request(content, *anno_graph, *config, *default_aligner);
         });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &content) {
-            return process_align_request(content, *aligner);
+            return process_align_request(content, *graph, *config);
         });
     };
 
