@@ -85,6 +85,9 @@ class GraphClientJson:
 
         return json_obj, ""
 
+    def stats(self) -> Tuple[dict, str]:
+        return self._do_request("stats", {}, post_req=False)
+
 
 class GraphClient:
     def __init__(self, host: str, port: int, label: str = None, api_path: str = None):

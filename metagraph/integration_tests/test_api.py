@@ -258,6 +258,13 @@ class TestAPIJson(TestAPIBase):
         for i in range(0, repetitions):
             self.assertEqual(res_list[i]['seq_description'], str(i))
 
+    def test_api_stats(self):
+        res = self.graph_client.stats()[0]
+
+        self.assertIn("graph", res.keys())
+        graph_props = res['graph']
+        self.assertEqual(graph_props["k"], 6)
+
 
 class TestAPIClientWithProperties(TestAPIBase):
     """

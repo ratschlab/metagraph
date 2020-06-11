@@ -228,6 +228,32 @@ std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
     return Json::writeString(builder, root);
 }
 
+std::string process_stats_request(const DeBruijnGraph &graph, const AnnotatedDBG &anno_graph,
+                                  const std::string &graph_filename, const std::string &annotation_filename) {
+    Json::Value root;
+
+    Json::Value graph_stats;
+    graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
+    graph_stats["k"] = (uint64_t) graph.get_k();
+    graph_stats["nodes"] = graph.num_nodes();
+    graph_stats["is_canonical_mode"] = graph.is_canonical_mode();
+    root["graph"] = graph_stats;
+
+    Json::Value annotation_stats;
+    const auto &annotation = anno_graph.get_annotation();
+    annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
+    annotation_stats["labels"] = (uint64_t) annotation.num_labels();
+    annotation_stats["objects"] = (uint64_t) annotation.num_objects();
+    annotation_stats["density"] = static_cast<double>(annotation.num_relations())
+                                  / annotation.num_objects()
+                                  / annotation.num_labels();
+
+    root["annotation"] = annotation_stats;
+
+    Json::StreamWriterBuilder builder;
+    return Json::writeString(builder, root);
+}
+
 std::thread start_server(HttpServer &server_startup, Config &config) {
     server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
 
@@ -292,6 +318,13 @@ int run_server(Config *config) {
         process_request(response, request, [&](const std::string &) {
             return process_column_label_request(*anno_graph);
         });
+    };
+
+    server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                    shared_ptr<HttpServer::Request> request) {
+      process_request(response, request, [&](const std::string &) {
+        return process_stats_request(*graph, *anno_graph, config->infbase, config->infbase_annotators.front());
+      });
     };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
