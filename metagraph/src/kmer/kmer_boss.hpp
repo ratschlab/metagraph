@@ -32,6 +32,7 @@ class KMerBOSS {
     typedef G WordType;
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
+    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
 
     /** Construct a default, uninitialized, BOSS k-mer. */
     KMerBOSS() {}
@@ -113,7 +114,6 @@ class KMerBOSS {
     void print_hex(std::ostream &os) const;
 
   private:
-    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
     static inline const WordType kAllButFirstCharMask = ~(WordType(kFirstCharMask));
     static inline const WordType kAllSetMask = ~(WordType(0ull));
     WordType seq_; // kmer sequence

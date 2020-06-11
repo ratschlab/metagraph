@@ -61,7 +61,6 @@ template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     using KMER_INT = typename KMER::WordType;
-
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
 
     Vector<T> &kmers = *kmers_p;
@@ -168,6 +167,60 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
     }
 }
 
+template <typename T>
+inline T
+reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complement_code) {
+    using KMER = utils::get_first_type_t<T>;
+    using INT = typename KMER::WordType;
+    INT kmer = utils::get_first(v).data();
+    constexpr uint64_t mask = KMER::kFirstCharMask;
+    auto cc = [&complement_code](uint64_t v) { return complement_code[v]; };
+    INT last_two_chars = cc(kmer & mask);
+    kmer >>= KMER::kBitsPerChar;
+    last_two_chars = (last_two_chars << KMER::kBitsPerChar) | cc(kmer & mask);
+    kmer >>= KMER::kBitsPerChar;
+    INT result = 0;
+    for (uint32_t i = 2; i < k; ++i) {
+        TAlphabet next_char = kmer & mask;
+        assert(next_char >= 0 && next_char < complement_code.size());
+        result = (result << KMER::kBitsPerChar) | cc(next_char);
+        kmer >>= KMER::kBitsPerChar;
+    }
+    result = (result << 2 * KMER::kBitsPerChar) | last_two_chars;
+    if constexpr (utils::is_pair_v<T>) {
+        return T(KMER(result), v.second);
+    } else {
+        return KMER(result);
+    }
+}
+
+template <typename T>
+void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
+    logger->trace("Adding reverse complements...");
+    // reserve space for the reverse complements and the ~10% dummy source/sink k-mers
+    size_t size = kmers->size();
+    if (size < 2) {
+        return;
+    }
+    kmers->reserve(2 * size);
+
+    const T *kmer = kmers->data() + 1;  // skip $$...$
+    const T *end = kmers->data() + size;
+    for(; kmer != end; ++kmer) {
+        kmers->push_back(reverse_complement(k+1, *kmer, KmerExtractorBOSS::kComplementCode));
+    }
+    if constexpr (utils::is_pair_v<T>) {
+        common::sort_and_merge(num_threads, reinterpret_cast<Vector<get_int_t<T>> *>(kmers));
+    } else {
+        ips4o::parallel::sort(kmers->begin(), kmers->end(),
+                              utils::LessFirst(), num_threads);
+        auto unique_end = std::unique(kmers->begin(), kmers->end());
+        kmers->erase(unique_end, kmers->end());
+    }
+    logger->trace("...done. {}% of k-mers didn't have a reverse complement",
+                  (kmers->size() - size) * 100. / size);
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 /**
@@ -177,15 +230,21 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
  * of length 2, 3, ... up to k-1.
  *
  * @param k the node length in the BOOS graph (so k-mer length is k+1)
+ * @param num_threads number of threads available for sorting
+ * @param both_strands for each k-mer, also add its reverse complement
  * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
 template <typename T>
-void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
+void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     Vector<T> &kmers = *kmers_p;
-    size_t original_end = kmers.size();
 
+    if (both_strands) {
+        add_reverse_complements(k, num_threads, &kmers);
+    }
+    size_t original_end = kmers.size();
+    logger->trace("Total number of real k-mers: {}", original_end);
     add_dummy_sink_kmers(k, &kmers);
 
     size_t dummy_source_begin = kmers.size();
@@ -386,6 +445,71 @@ generate_dummy_1_kmers(size_t k,
     return { real_split_by_W, dummy_l1_names, dummy_sink_name };
 }
 
+/** Merges #original_kmers with #reverse_complements and places the result into #kmers */
+template <typename T, typename T_INT>
+static void merge(common::EliasFanoDecoder<T_INT> &original_kmers,
+                  ChunkedWaitQueue<T_INT> &reverse_complements,
+                  ChunkedWaitQueue<T> *kmers) {
+    std::optional<T_INT> orig = original_kmers.next();
+    auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT> &>(*kmers);
+    uint64_t duplicates = 0;
+    for (auto &it = reverse_complements.begin(); it != reverse_complements.end(); ++it) {
+        while (orig.has_value() && get_first(orig.value()) < get_first(*it)) {
+            kmers_int.push(orig.value());
+            orig = original_kmers.next();
+        }
+        if (!orig.has_value() || get_first(orig.value()) > get_first(*it)) {
+            kmers_int.push(*it);
+        } else {
+            duplicates++;
+            if constexpr (utils::is_pair_v<T_INT>) {
+                constexpr auto max = std::numeric_limits<typename T_INT::second_type>::max();
+                if (orig.value().second < max - (*it).second) {
+                    kmers_int.push({ get_first(*it), orig.value().second + (*it).second });
+                } else {
+                    kmers_int.push({ get_first(*it), max });
+                }
+            } else {
+                kmers_int.push(*it);
+            }
+            orig = original_kmers.next();
+        }
+    }
+    while (orig.has_value()) {
+        kmers_int.push(orig.value());
+        orig = original_kmers.next();
+    }
+    logger->trace("Number of k-mers that had a reverse complement: {}", duplicates);
+    kmers->shutdown();
+}
+
+/**
+ * Adds reverse complements
+ */
+template <typename T, typename T_INT>
+void add_reverse_complements(size_t k,
+                             const std::filesystem::path &dir,
+                             ThreadPool& async_worker,
+                             common::SortedSetDisk<T_INT> *rc_set,
+                             ChunkedWaitQueue<T> *kmers) {
+    logger->trace("Adding reverse complements...");
+    common::EliasFanoEncoderBuffered<T_INT> original(dir/"original", ENCODER_BUFFER_SIZE);
+    for (auto &it = ++kmers->begin(); it != kmers->end(); ++it) {
+        const T &reverse = reverse_complement(k + 1, *it, KmerExtractorBOSS::kComplementCode);
+        rc_set->add(reinterpret_cast<const T_INT &>(reverse));
+        const T &kmer = *it;
+        original.add(reinterpret_cast<const T_INT &>(kmer));
+    }
+    original.finish();
+    // start merging #original with #reverse_complements into #kmers
+    kmers->reset();
+    async_worker.enqueue([rc_set, &dir, kmers](){
+      ChunkedWaitQueue<T_INT> &reverse_complements = rc_set->data(true);
+      common::EliasFanoDecoder<T_INT> original_kmers(dir/"original");
+      merge(original_kmers, reverse_complements, kmers);
+    });
+}
+
 /**
  * Specialization of recover_dummy_nodes for a disk-based container, such as
  * #SortedSetDisk and #SortedMultisetDisk.
@@ -399,6 +523,7 @@ generate_dummy_1_kmers(size_t k,
  */
 template <class KmerCollector, typename T>
 void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
+                              bool both_strands,
                               ChunkedWaitQueue<T> *kmers,
                               ThreadPool &async_worker) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
@@ -407,14 +532,25 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
 
+
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
+    size_t num_threads = kmer_collector.num_threads();
+
+    // compute the reverse complements of #kmers and place them in #rc_set
+    std::string rc_dir = dir/"rc";
+    std::filesystem::create_directory(rc_dir);
+    common::SortedSetDisk<T_INT> rc_set(num_threads, kmer_collector.buffer_size(), rc_dir,
+                                        std::numeric_limits<size_t>::max());
+    if (both_strands) {
+        add_reverse_complements(k, dir, async_worker, &rc_set, kmers);
+    }
 
     std::string dummy_sink_name;
     std::vector<std::string> real_split_by_W;
     std::vector<std::string> dummy_names;
     std::tie(real_split_by_W, dummy_names, dummy_sink_name)
-            = generate_dummy_1_kmers(k, kmer_collector.num_threads(), dir, kmers);
+            = generate_dummy_1_kmers(k, num_threads, dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> dummy_chunks = { dummy_sink_name };
@@ -518,13 +654,14 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::filesystem::path &tmp_dir,
                          size_t max_disk_space)
         : kmer_collector_(k + 1,
-                          canonical_mode,
+                          filter_suffix.empty() ? false : canonical_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
                           tmp_dir,
                           max_disk_space),
-          bits_per_count_(bits_per_count) {
+          bits_per_count_(bits_per_count),
+          canonical_mode_(canonical_mode)  {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
@@ -542,6 +679,10 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         kmer_collector_.add_sequences(generate_sequences);
     }
 
+    bool canonical_mode() const {
+        return canonical_mode_;
+    }
+
     BOSS::Chunk* build_chunk() {
         typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
 
@@ -550,16 +691,18 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         auto &kmers = reinterpret_container<T>(kmer_ints);
 
         if (!kmer_collector_.suffix_length()) {
-            logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
             if constexpr ((std::is_same_v<typename KmerCollector::Data,
                                           ChunkedWaitQueue<T_INT>>)) {
-                recover_dummy_nodes_disk(kmer_collector_, &kmers, async_worker_);
+                recover_dummy_nodes_disk(kmer_collector_, canonical_mode_, &kmers,
+                                         async_worker_);
             } else {
                 // kmer_collector stores (BOSS::k_ + 1)-mers
                 static_assert(std::is_same_v<typename KmerCollector::Data, Vector<T_INT>>);
                 recover_dummy_nodes(kmer_collector_.get_k() - 1,
-                                    kmer_collector_.num_threads(), &kmers);
+                                    kmer_collector_.num_threads(),
+                                    canonical_mode_,
+                                    &kmers);
             }
             logger->trace("Dummy source k-mers were reconstructed in {} sec",
                           timer.elapsed());
@@ -570,7 +713,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         // kmer_collector stores (BOSS::k_ + 1)-mers
         result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
                                  kmer_collector_.get_k() - 1,
-                                 kmer_collector_.is_both_strands_mode(),
+                                 canonical_mode_,
                                  kmers,
                                  bits_per_count_);
 
@@ -583,6 +726,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     KmerCollector kmer_collector_;
     uint8_t bits_per_count_;
+    bool canonical_mode_;
     /** Used as an async executor for merging chunks from disk */
     ThreadPool async_worker_ = ThreadPool(1, 1);
 };

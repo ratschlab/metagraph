@@ -12,6 +12,9 @@
 namespace mtg {
 namespace common {
 
+template <class Container>
+void sort_and_merge(size_t num_threads, Container * data);
+
 // Thread safe data storage for counting
 template <typename T,
           typename C = uint8_t,
