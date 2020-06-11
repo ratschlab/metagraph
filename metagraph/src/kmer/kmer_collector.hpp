@@ -60,7 +60,8 @@ class KmerCollector {
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
                   const std::filesystem::path &tmp_dir = "/tmp/",
-                  size_t max_disk_space = 1e9);
+                  size_t max_disk_space = 1e9,
+                  bool canonical_only = false);
 
     ~KmerCollector();
 
@@ -121,6 +122,8 @@ class KmerCollector {
 
     bool both_strands_mode_;
 
+    bool canonical_only_;
+
     std::filesystem::path tmp_dir_;
 
     size_t buffer_size_;
@@ -135,7 +138,8 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                   bool canonical_only);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
@@ -143,7 +147,8 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                 bool canonical_only);
 
 } // namespace kmer
 } // namespace mtg
