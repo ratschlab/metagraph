@@ -297,7 +297,8 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
-        if (config->anno_type != Config::BRWT || !config->infbase.size()) {
+        if ((config->anno_type == Config::BRWT || !config->infbase.size())
+                && config->anno_type != Config::RbBRWT) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -387,7 +388,10 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RbBRWT: {
-                convert<RbBRWTAnnotator>(std::move(annotator), *config, timer);
+                auto rb_brwt_annotator = convert_to_RbBRWT<RbBRWTAnnotator>(files);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                logger->trace("Serializing to '{}'", config->outfbase);
+                rb_brwt_annotator->serialize(config->outfbase);
                 break;
             }
         }
