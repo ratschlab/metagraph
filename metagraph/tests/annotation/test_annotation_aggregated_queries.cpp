@@ -1,7 +1,8 @@
 #include "gtest/gtest.h"
 
-#include "../test_helpers.hpp"
 #include "common/vector_map.hpp"
+
+#include "../test_helpers.hpp"
 #include "test_annotation.hpp"
 
 
