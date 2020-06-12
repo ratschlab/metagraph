@@ -563,7 +563,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
-    auto get_columns = [&](const CallColumn &call_column) {
+    auto call_columns = [&](const CallColumn &call_column) {
         column_names.clear();
 
         bool success = ColumnCompressed<>::merge_load(
@@ -583,7 +583,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
         }
     };
 
-    auto matrix = convert_to_RainbowBRWT(get_columns);
+    auto matrix = convert_to_RainbowBRWT(call_columns);
 
     std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
     column_names.erase(std::unique(column_names.begin(), column_names.end()),
