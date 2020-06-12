@@ -449,8 +449,13 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     VectorMap<uint32_t /* class */,
               uint64_t /* count */,
               uint32_t /* index type */> row_counter;
-    for (uint32_t row_class : row_classes) {
-        row_counter[row_class]++;
+    {
+        ProgressBar progress_bar(row_classes.size(), "Counting row classes",
+                                 std::cerr, !common::get_verbose());
+        for (uint32_t row_class : row_classes) {
+            row_counter[row_class]++;
+            ++progress_bar;
+        }
     }
 
     logger->trace("Number of unique rows: {}", row_counter.size());
