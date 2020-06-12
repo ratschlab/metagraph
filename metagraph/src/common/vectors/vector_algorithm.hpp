@@ -49,7 +49,7 @@ inline bool fetch_and_set_bit(t_int_vec &v, size_t i, bool atomic = false) {
     uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_or(&v.data()[i >> 6], mask, __ATOMIC_ACQUIRE) & mask;
+        return __atomic_fetch_or(&v.data()[i >> 6], mask, __ATOMIC_ACQ_REL) & mask;
     } else {
         uint64_t *word = &v.data()[i >> 6];
         if (*word & mask) {
@@ -69,7 +69,7 @@ inline bool fetch_and_unset_bit(t_int_vec &v, size_t i, bool atomic = false) {
     uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_and(&v.data()[i >> 6], ~mask, __ATOMIC_ACQUIRE) & mask;
+        return __atomic_fetch_and(&v.data()[i >> 6], ~mask, __ATOMIC_ACQ_REL) & mask;
     } else {
         uint64_t *word = &v.data()[i >> 6];
         if (*word & mask) {
