@@ -85,12 +85,12 @@ transform_lookup(const kmer::KMerBOSS<uint64_t, 2> &kmer, size_t /*k*/) {
 template <class Function>
 static void run(benchmark::State &state, const Function &transform) {
     std::mt19937 rng(123457);
-    std::uniform_int_distribution<std::mt19937::result_type>
-                    dist(0, std::numeric_limits<uint32_t>::max());
-    sdsl::uint128_t value = (sdsl::uint128_t(dist(rng)) << 64) + dist(rng);
+    std::uniform_int_distribution<uint64_t> dist;
+    uint64_t value = dist(rng);
+    uint64_t delta = dist(rng);
     for (auto _ : state) {
         benchmark::DoNotOptimize(transform(kmer::KMerBOSS<uint64_t, 2>(value), 31));
-        value++;
+        value += delta;
     }
 }
 
