@@ -9,6 +9,7 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
+#include "common/vector_map.hpp"
 #include "common/algorithms.hpp"
 #include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
@@ -445,19 +446,17 @@ convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator)
     logger->trace("Identifying unique rows");
     std::vector<uint32_t> row_classes = get_row_classes(columns);
 
-    tsl::hopscotch_map<uint32_t /* class */, uint64_t /* count */> row_counter;
+    VectorMap<uint32_t /* class */,
+              uint64_t /* count */,
+              uint32_t /* index type */> row_counter;
     for (uint32_t row_class : row_classes) {
         row_counter[row_class]++;
     }
 
     logger->trace("Number of unique rows: {}", row_counter.size());
 
-    std::vector<std::pair<uint32_t, uint64_t>> pairs;
-    pairs.reserve(row_counter.size());
-    for (const auto &pair : row_counter) {
-        pairs.push_back(pair);
-    }
-    row_counter.clear();
+    auto &pairs = const_cast<std::vector<std::pair<uint32_t, uint64_t>>&>(
+                    row_counter.values_container());
 
     ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
                           get_num_threads());
