@@ -46,11 +46,10 @@ inline bool fetch_and_set_bit(t_int_vec &v, size_t i, bool atomic = false) {
     static_assert(sizeof(*v.data()) == 8);
     assert(i < v.size());
 
-    uint8_t lo = i & 0x3F;
-    uint64_t mask = (1llu << lo);
+    uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return (__atomic_fetch_or(&v.data()[i >> 6], mask, __ATOMIC_ACQUIRE) >> lo) & 1;
+        return __atomic_fetch_or(&v.data()[i >> 6], mask, __ATOMIC_ACQUIRE) & mask;
     } else {
         uint64_t *word = &v.data()[i >> 6];
         if (*word & mask) {
@@ -67,11 +66,10 @@ inline bool fetch_and_unset_bit(t_int_vec &v, size_t i, bool atomic = false) {
     // these assume that the underlying vector contains packed 64-bit integers
     static_assert(sizeof(*v.data()) == 8);
 
-    uint8_t lo = i & 0x3F;
-    uint64_t mask = (1llu << lo);
+    uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return (__atomic_fetch_and(&v.data()[i >> 6], ~mask, __ATOMIC_ACQUIRE) >> lo) & 1;
+        return __atomic_fetch_and(&v.data()[i >> 6], ~mask, __ATOMIC_ACQUIRE) & mask;
     } else {
         uint64_t *word = &v.data()[i >> 6];
         if (*word & mask) {
@@ -198,9 +196,8 @@ void call_ones(const Bitmap &vector, Callback callback) {
 }
 
 template <class Callback>
-void call_ones(const sdsl::bit_vector &vector, Callback callback,
-               bool atomic, int memorder = __ATOMIC_ACQUIRE) {
-    call_ones(vector, 0, vector.size(), callback, atomic, memorder);
+void call_ones(const sdsl::bit_vector &vector, Callback callback, bool atomic) {
+    call_ones(vector, 0, vector.size(), callback, atomic);
 }
 
 template <class Bitmap, class Callback>
