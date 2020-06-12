@@ -146,17 +146,9 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             }
         }
 
-        // TODO: Remove this conversion.
-        //       Either use SmallVector for SetBitsPositions
-        //       or use SetBitsPositions in UniqueRowBinmat.
-        std::vector<SmallVector<uint32_t>> annotation_rows(unique_rows.size());
-        for (auto &row : unique_rows) {
-            annotation_rows.emplace_back(row.begin(), row.end());
-        }
-
         // copy annotations from the full graph to the query graph
         return std::make_unique<annotate::UniqueRowAnnotator>(
-            std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
+            std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                               std::vector<uint32_t>(row_indexes.begin(),
                                                                     row_indexes.end()),
                                               full_annotation.num_labels()),
@@ -175,13 +167,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     ips4o::parallel::sort(from_full_to_small.begin(), from_full_to_small.end(),
                           utils::LessFirst(), num_threads);
 
-    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
+    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
                                     utils::VectorHash,
-                                    std::equal_to<SmallVector<uint32_t>>,
-                                    std::allocator<SmallVector<uint32_t>>,
-                                    std::vector<SmallVector<uint32_t>>,
+                                    std::equal_to<BinaryMatrix::SetBitPositions>,
+                                    std::allocator<BinaryMatrix::SetBitPositions>,
+                                    std::vector<BinaryMatrix::SetBitPositions>,
                                     uint32_t>;
-    RowSet unique_rows { SmallVector<uint32_t>() };
+    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
     std::vector<uint32_t> row_rank(index_in_full_graph.size() - 1, 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -217,7 +209,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
     }
 
-    auto annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&&>(
+    auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
         unique_rows.values_container()
     );
 
