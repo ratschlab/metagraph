@@ -78,28 +78,28 @@ Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const 
     ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
                           utils::LessFirst(), num_threads);
 
-    std::vector<Row> row_ids;
+    std::vector<Row> unique_row_codes;
     uint64_t last_code = std::numeric_limits<uint64_t>::max();
 
     for (const auto &[code, i] : row_codes) {
         if (code != last_code) {
-            row_ids.push_back(code);
+            unique_row_codes.push_back(code);
             last_code = code;
         }
-        (*rows)[i] = row_ids.size() - 1;
+        (*rows)[i] = unique_row_codes.size() - 1;
     }
 
-    std::vector<SetBitPositions> result(row_ids.size());
+    std::vector<SetBitPositions> result(unique_row_codes.size());
 
     uint64_t batch_size = std::max((size_t)1u,
                                    std::min(kRowBatchSize,
-                                            row_ids.size() / num_threads));
+                                            unique_row_codes.size() / num_threads));
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t i = 0; i < row_ids.size(); i += batch_size) {
-        std::vector<uint64_t> indexes(row_ids.begin() + i,
-                                      std::min(row_ids.begin() + batch_size,
-                                               row_ids.end()));
+    for (uint64_t i = 0; i < unique_row_codes.size(); i += batch_size) {
+        std::vector<uint64_t> indexes(unique_row_codes.begin() + i,
+                                      std::min(unique_row_codes.begin() + batch_size,
+                                               unique_row_codes.end()));
         auto rows = reduced_matrix_.get_rows(indexes);
         for (size_t j = 0; j < rows.size(); ++j) {
             result[i + j] = std::move(rows[j]);
