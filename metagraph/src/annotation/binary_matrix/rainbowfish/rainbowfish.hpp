@@ -26,8 +26,8 @@ class Rainbowfish : public RainbowMatrix {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
-    // Return unique rows and update the row indexes in |rows| to point to their
-    // respective rows in the vector returned.
+    // Return unique rows (in arbitrary order) and update the row indexes
+    // in |rows| to point to their respective rows in the vector returned.
     std::vector<SetBitPositions> get_rows(std::vector<Row> *rows,
                                           size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const;
