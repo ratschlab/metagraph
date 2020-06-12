@@ -114,6 +114,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  const std::vector<uint64_t> &index_in_full,
                  size_t num_threads) {
     const uint64_t npos = -1;
+
     if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
         // shortcut construction for Rainbow<> annotation
         std::vector<uint64_t> row_indexes(index_in_full.size());
@@ -419,15 +420,16 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
     }
 
-    // convert to annotation indexes
-    for (size_t i = 0; i < index_in_full_graph.size(); ++i) {
+    // convert to annotation indexes: remove 0 and shift
+    for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
         if (index_in_full_graph[i]) {
-            index_in_full_graph[i]
+            index_in_full_graph[i - 1]
                 = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
         } else {
-            index_in_full_graph[i] = -1;  // npos
+            index_in_full_graph[i - 1] = -1;  // npos
         }
     }
+    index_in_full_graph.pop_back();
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
