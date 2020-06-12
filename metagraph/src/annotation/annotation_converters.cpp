@@ -462,13 +462,29 @@ convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator)
     ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
                           get_num_threads());
 
+    if (common::get_verbose()) {
+        // print historgram of row multiplicities
+        std::stringstream mult_log_message;
+        uint64_t multiplicity = pairs[0].second;
+        uint64_t num_unique_rows = 0;
+        for (const auto &[row_class, count] : pairs) {
+            assert(count <= multiplicity);
+            if (count == multiplicity) {
+                num_unique_rows++;
+            } else {
+                mult_log_message << multiplicity << ": " << num_unique_rows << ", ";
+                multiplicity = count;
+                num_unique_rows = 1;
+            }
+        }
+        mult_log_message << multiplicity << ": " << num_unique_rows;
+        logger->trace("<Row multiplicity: num unique rows>: {}", mult_log_message.str());
+    }
+
     tsl::hopscotch_map<uint32_t, uint32_t> class_to_code;
-    std::stringstream mult_log_message;
     for (uint32_t i = 0; i < pairs.size(); ++i) {
         class_to_code.emplace(pairs[i].first, i);
-        mult_log_message << i << ": " << pairs[i].second << ", ";
     }
-    logger->trace("Row multiplicities: {}", mult_log_message.str());
 
     // maps unique row ids to the respective rows of the original matrix
     std::vector<uint64_t> row_pointers(class_to_code.size());
