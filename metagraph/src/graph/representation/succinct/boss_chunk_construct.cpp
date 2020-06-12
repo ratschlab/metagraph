@@ -230,10 +230,13 @@ using Decoder = common::EliasFanoDecoder<T>;
 
 /**
  * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
+ * T_REAL: type KmerExtractorT::KMerBOSS representing k-mers over the alphabet
+ * without the sentinel character (e.g., ACGT).
  */
 template <typename T_REAL>
-std::vector<std::string>
-split(size_t k, const std::filesystem::path &dir, const ChunkedWaitQueue<T_REAL> &kmers) {
+std::vector<std::string> split(size_t k,
+                               const std::filesystem::path &dir,
+                               const ChunkedWaitQueue<T_REAL> &kmers) {
     using T_INT_REAL = get_int_t<T_REAL>;
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
@@ -288,7 +291,8 @@ inline WordType get_sentinel_delta(size_t char_width, size_t k) {
 
 // transforms k-mer to the new character width
 template <typename KMER_TO, typename KMER_FROM>
-inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
+inline __attribute__((always_inline))
+typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
     static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
     static constexpr size_t L2 = KMER_TO::kBitsPerChar;
     static_assert(L2 >= L1);
@@ -317,8 +321,7 @@ inline typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
 template <>
 inline __attribute__((always_inline)) sdsl::uint128_t
 transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
-        const kmer::KMerBOSS<uint64_t, 2> &kmer,
-        size_t k) {
+        const kmer::KMerBOSS<uint64_t, 2> &kmer, size_t /*k*/) {
     static constexpr uint16_t lookup[256] = {
         0,    1,    2,    3,    8,    9,    10,   11,   16,   17,   18,   19,   24,
         25,   26,   27,   64,   65,   66,   67,   72,   73,   74,   75,   80,   81,
@@ -341,10 +344,9 @@ transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
         1682, 1683, 1688, 1689, 1690, 1691, 1728, 1729, 1730, 1731, 1736, 1737, 1738,
         1739, 1744, 1745, 1746, 1747, 1752, 1753, 1754, 1755
     };
-    const uint8_t * kmer_char = reinterpret_cast<const uint8_t *>(&kmer);
-    // Note: since we're transforming 64-bit kmers to 128 bits, we know that 21 < k < 33
-    sdsl::uint128_t result =
-            static_cast<sdsl::uint128_t>(lookup[kmer_char[7]]) << 84
+    const uint8_t *kmer_char = reinterpret_cast<const uint8_t *>(&kmer);
+    // transform 64-bit kmer to 128 bits
+    return static_cast<sdsl::uint128_t>(lookup[kmer_char[7]]) << 84
             | static_cast<sdsl::uint128_t>(lookup[kmer_char[6]]) << 72
             | static_cast<sdsl::uint128_t>(lookup[kmer_char[5]]) << 60
             | static_cast<uint64_t>(lookup[kmer_char[4]]) << 48
@@ -352,8 +354,6 @@ transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
             | static_cast<uint64_t>(lookup[kmer_char[2]]) << 24
             | static_cast<uint64_t>(lookup[kmer_char[1]]) << 12
             | lookup[kmer_char[0]];
-
-    return result & ((sdsl::uint128_t(1) << 3 * k) - 1);
 }
 
 // shift to the next dummy sink and add +1 to each character of the k-mer
@@ -392,11 +392,11 @@ generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
                        const std::filesystem::path &dir,
                        ChunkedWaitQueue<T_REAL> &kmers) {
-    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS
-    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerExtractorBOSS::KmerBOSS
+    using KMER_INT = typename KMER::WordType; // KmerExtractorBOSS::KmerBOSS::WordType
 
-    using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS
-    using KMER_INT_REAL = typename KMER_REAL::WordType; // 64/128/256-bit integer
+    using KMER_REAL = get_first_type_t<T_REAL>; // KmerExtractorT::KmerBOSS without sentinel
+    using KMER_INT_REAL = typename KMER_REAL::WordType; // KmerExtractorT::KmerBOSS::WordType
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W = split(k, dir, kmers);
