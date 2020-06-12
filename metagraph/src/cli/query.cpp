@@ -2,13 +2,15 @@
 
 #include <ips4o.hpp>
 #include <fmt/format.h>
+#include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/hash/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -314,8 +316,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     // initialize fast query annotation
-    // TODO: use SmallVector if it doesn't slow it down too much. Increase the batch size
-    std::vector<BinaryMatrix::SetBitPositions> annotation_rows(graph->max_index());
+    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
+                                    utils::VectorHash,
+                                    std::equal_to<SmallVector<uint32_t>>,
+                                    std::allocator<SmallVector<uint32_t>>,
+                                    std::vector<SmallVector<uint32_t>>,
+                                    uint32_t>;
+    RowSet unique_rows { SmallVector<uint32_t>() };
+    std::vector<uint32_t> row_rank(graph->max_index(), 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t batch_begin = 0;
@@ -330,24 +338,36 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         for (uint64_t i = batch_begin; i < batch_end; ++i) {
             assert(from_full_to_query[i].first < full_annotation.num_objects());
-
             row_indexes.push_back(from_full_to_query[i].first);
+            if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
+                throw std::runtime_error("There must be less than 2^32 unique rows."
+                                         " Reduce the query batch size.");
         }
 
         auto rows = full_annotation.get_matrix().get_rows(row_indexes);
 
         assert(rows.size() == batch_end - batch_begin);
 
-        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            annotation_rows[from_full_to_query[i].second]
-                = std::move(rows[i - batch_begin]);
+        #pragma omp critical
+        {
+            for (uint64_t i = batch_begin; i < batch_end; ++i) {
+                const auto &row = rows[i - batch_begin];
+                auto it = unique_rows.emplace(row.begin(), row.end()).first;
+                row_rank[from_full_to_query[i].second] = it - unique_rows.begin();
+            }
         }
     }
 
+    auto annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&&>(
+        unique_rows.values_container()
+    );
+
     // copy annotations from the full graph to the query graph
-    auto annotation = std::make_unique<annotate::RowCompressed<>>(
-        std::move(annotation_rows),
-        full_annotation.get_label_encoder().get_labels()
+    auto annotation = std::make_unique<annotate::UniqueRowAnnotator>(
+        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
+                                          std::move(row_rank),
+                                          full_annotation.num_labels()),
+        full_annotation.get_label_encoder()
     );
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",

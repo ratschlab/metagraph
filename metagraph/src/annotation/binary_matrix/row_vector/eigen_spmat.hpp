@@ -12,12 +12,6 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
   public:
     EigenSpMat(uint64_t num_rows = 0, uint64_t max_num_cols = 10'000'000);
 
-    EigenSpMat(const EigenSpMat &other) = default;
-    EigenSpMat& operator=(const EigenSpMat &other) = default;
-
-    EigenSpMat(EigenSpMat&& other) = default;
-    EigenSpMat& operator=(EigenSpMat&& other) = default;
-
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return mat_.rows(); }
 

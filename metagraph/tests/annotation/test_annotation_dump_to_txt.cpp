@@ -23,6 +23,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
+                         annotate::UniqueRowAnnotator,
                          annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
 TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
