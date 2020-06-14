@@ -16,12 +16,6 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
     VectorRowBinMat(std::vector<RowType>&& rows, uint64_t num_columns);
 
-    VectorRowBinMat(const VectorRowBinMat &other) = default;
-    VectorRowBinMat& operator=(const VectorRowBinMat &other) = default;
-
-    VectorRowBinMat(VectorRowBinMat&& other) = default;
-    VectorRowBinMat& operator=(VectorRowBinMat&& other) = default;
-
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
 
