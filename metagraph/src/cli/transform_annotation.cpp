@@ -301,7 +301,7 @@ int transform_annotation(Config *config) {
         // to BRWT with a hierarchical clustering of columns specified (infbase)
         // or RbBRWT, for which the construction is done with streaming columns
         // from disk.
-        if ((config->anno_type == Config::BRWT || !config->infbase.size())
+        if ((config->anno_type != Config::BRWT || !config->infbase.size())
                 && config->anno_type != Config::RbBRWT) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
