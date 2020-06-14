@@ -406,21 +406,37 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
         if (row_classes.empty())
             row_classes.assign(col_ptr->size(), 0);
 
-        col_ptr->call_ones([&](uint64_t i) {
-            uint32_t &row_class = row_classes[i];
+        const size_t batch_size = 5'000'000;
+        #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic)
+        for (uint64_t begin = 0; begin < col_ptr->size(); begin += batch_size) {
+            uint64_t end = std::min(begin + batch_size, col_ptr->size());
 
-            auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
-            if (inserted) {
-                ++max_class;
+            std::vector<uint64_t> pos;
+            pos.reserve(batch_size);
 
-                if (max_class == std::numeric_limits<uint32_t>::max()) {
-                    logger->error("Too many distinct rows");
-                    exit(1);
+            col_ptr->call_ones_in_range(begin, end, [&](uint64_t i) {
+                pos.push_back(i);
+            });
+
+            #pragma omp critical
+            {
+                for (uint64_t i : pos) {
+                    uint32_t &row_class = row_classes[i];
+
+                    auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
+                    if (inserted) {
+                        ++max_class;
+
+                        if (max_class == std::numeric_limits<uint32_t>::max()) {
+                            logger->error("Too many distinct rows");
+                            exit(1);
+                        }
+                    }
+
+                    row_class = it->second;
                 }
             }
-
-            row_class = it->second;
-        });
+        }
 
         ++progress_bar;
     });
