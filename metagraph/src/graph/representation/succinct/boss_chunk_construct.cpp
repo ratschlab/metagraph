@@ -237,7 +237,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
 template <typename T>
-void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector<T> *kmers_p) {
+void recover_dummy_nodes(size_t k, bool both_strands, size_t num_threads, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     Vector<T> &kmers = *kmers_p;
 
