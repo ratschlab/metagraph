@@ -16,7 +16,7 @@
 
 
 namespace annotate {
-using CallColumn = std::function<void(size_t, const bit_vector &)>;
+using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 std::unique_ptr<Rainbow<BRWT>>
 convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns);
 } // namespace annotate
@@ -121,7 +121,7 @@ template <>
 Rainbow<BRWT> build_matrix_from_columns<Rainbow<BRWT>>(const BitVectorPtrArray &columns, uint64_t) {
     return std::move(*annotate::convert_to_RainbowBRWT([&](const auto &callback) {
         for (size_t j = 0; j < columns.size(); ++j) {
-            callback(j, *columns[j]);
+            callback(columns[j]->copy());
         }
     }));
 }

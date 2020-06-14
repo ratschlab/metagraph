@@ -387,10 +387,11 @@ void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
                              num_threads);
 }
 
-using CallColumn = std::function<void(size_t, const bit_vector &)>;
+using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 
-std::vector<uint32_t> get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
-                                      size_t num_columns) {
+std::vector<uint32_t>
+get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
+                size_t num_columns) {
     std::vector<uint32_t> row_classes;
     uint64_t max_class = 0;
 
@@ -399,17 +400,13 @@ std::vector<uint32_t> get_row_classes(const std::function<void(const CallColumn 
 
     tsl::hopscotch_map<uint32_t, uint32_t> new_class;
 
-    std::mutex mu;
-
-    call_columns([&](size_t, const bit_vector &column) {
+    call_columns([&](const auto &col_ptr) {
         new_class.clear();
 
         if (row_classes.empty())
-            row_classes.assign(column.size(), 0);
+            row_classes.assign(col_ptr->size(), 0);
 
-        std::lock_guard<std::mutex> lock(mu);
-
-        column.call_ones([&](uint64_t i) {
+        col_ptr->call_ones([&](uint64_t i) {
             uint32_t &row_class = row_classes[i];
 
             auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
@@ -433,11 +430,11 @@ std::vector<uint32_t> get_row_classes(const std::function<void(const CallColumn 
 
 std::unique_ptr<Rainbow<BRWT>>
 convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns) {
-    std::atomic<uint64_t> num_columns = 0;
-    std::atomic<uint64_t> num_ones = 0;
-    call_columns([&](size_t, const bit_vector &column) {
+    uint64_t num_columns = 0;
+    uint64_t num_ones = 0;
+    call_columns([&](const auto &col_ptr) {
         num_columns++;
-        num_ones += column.num_set_bits();
+        num_ones += col_ptr->num_set_bits();
     });
 
     if (!num_columns)
@@ -508,14 +505,19 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
                              std::cerr, !common::get_verbose());
 
     std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
-    call_columns([&](size_t j, const auto &column) {
-        sdsl::bit_vector reduced_column(row_pointers.size(), false);
-        for (size_t r = 0; r < row_pointers.size(); ++r) {
-            reduced_column[r] = column[row_pointers[r]];
-        }
-        columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
-        ++progress_bar;
+    size_t j = 0;
+    ThreadPool thread_pool(get_num_threads());
+    call_columns([&](auto &&col_ptr) {
+        thread_pool.enqueue([&](size_t j, const auto &col_ptr) {
+            sdsl::bit_vector reduced_column(row_pointers.size(), false);
+            for (size_t r = 0; r < row_pointers.size(); ++r) {
+                reduced_column[r] = (*col_ptr)[row_pointers[r]];
+            }
+            columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
+            ++progress_bar;
+        }, j++, std::move(col_ptr));
     });
+    thread_pool.join();
 
     logger->trace("Compressing assignment vector");
 
@@ -560,22 +562,20 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 template <>
 std::unique_ptr<RbBRWTAnnotator>
 convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files) {
-    std::vector<std::pair<uint64_t, std::string>> column_names;
-    std::mutex mu;
+    LEncoder label_encoder;
 
     auto call_columns = [&](const CallColumn &call_column) {
-        column_names.clear();
+        label_encoder.clear();
 
         bool success = ColumnCompressed<>::merge_load(
             annotation_files,
-            [&](uint64_t column_index,
+            [&](uint64_t /*column_index*/,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                call_column(column_index, *column);
-                std::lock_guard<std::mutex> lock(mu);
-                column_names.emplace_back(column_index, label);
+                call_column(std::move(column));
+                label_encoder.insert_and_encode(label);
             },
-            get_num_threads()
+            1
         );
         if (!success) {
             logger->error("Can't load annotation columns");
@@ -585,16 +585,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
 
     auto matrix = convert_to_RainbowBRWT(call_columns);
 
-    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
-    column_names.erase(std::unique(column_names.begin(), column_names.end()),
-                       column_names.end());
-
-    assert(matrix->num_columns() == column_names.size());
-
-    LEncoder label_encoder;
-    for (const auto &[i, label] : column_names) {
-        label_encoder.insert_and_encode(label);
-    }
+    assert(matrix->num_columns() == label_encoder.size());
 
     return std::make_unique<RbBRWTAnnotator>(std::move(matrix), label_encoder);
 }
@@ -602,12 +593,13 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
 template <>
 std::unique_ptr<RbBRWTAnnotator>
 convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    auto &columns = const_cast<std::vector<std::unique_ptr<bit_vector>>&>(
+        annotator.get_matrix().data()
+    );
     auto matrix = convert_to_RainbowBRWT(
         [&](const auto &callback) {
-            const auto &columns = annotator.get_matrix().data();
-            #pragma omp parallel for num_threads(get_num_threads())
-            for (size_t j = 0; j < columns.size(); ++j) {
-                callback(j, *columns[j]);
+            for (auto &column : columns) {
+                callback(std::move(column));
             }
         }
     );
