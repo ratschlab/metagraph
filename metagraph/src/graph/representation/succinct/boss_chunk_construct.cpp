@@ -209,6 +209,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     for(; kmer != end; ++kmer) {
         kmers->push_back(reverse_complement(k+1, *kmer, KmerExtractorBOSS::kComplementCode));
     }
+    logger->trace("done. Sorting all real k-mers...");
     if constexpr (utils::is_pair_v<T>) {
         common::sort_and_merge(num_threads, reinterpret_cast<Vector<get_int_t<T>> *>(kmers));
     } else {
