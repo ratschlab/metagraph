@@ -217,8 +217,11 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
             }
         }
     }
-    logger->trace("Sorting all kmers...");
-    ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
+    logger->trace("Sorting reverse complements...");
+    ips4o::parallel::sort(kmers->begin() + size, kmers->end(), utils::LessFirst(), num_threads);
+    size_t block_size = static_cast<size_t>(std::sqrt(size));
+    logger->trace("Merging canonical with reverse complements...");
+    common::merge(kmers->data(), 0, size, kmers->size(), block_size);
     logger->trace("Done");
 }
 
