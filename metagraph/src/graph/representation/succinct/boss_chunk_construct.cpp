@@ -64,7 +64,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER_INT = typename KMER::WordType;
 
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
-
+    logger->trace("Alphabet size is {}", alphabet_size);
     Vector<T> &kmers = *kmers_p;
 
     // points to the current k-mer with the given first character
@@ -81,6 +81,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
         max_it[c - 1] = it[c];
     }
     max_it[alphabet_size - 1] = kmers.size();
+    logger->trace("Computed max_it");
 
     std::vector<KMER> last_dummy(alphabet_size, KMER(0));
     size_t size = kmers.size();
@@ -104,6 +105,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
             push_back(kmers, dummy_sink);
             last_dummy[last_char] = dummy_sink;
         }
+        std::cout << ".";
     }
 }
 
@@ -249,6 +251,7 @@ void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector
     size_t original_end = kmers.size();
     logger->trace("Total number of real k-mers: {}", original_end);
     add_dummy_sink_kmers(k, &kmers);
+    logger->trace("Added {} dummy sink k-mers", kmers.size() - original_end);
 
     size_t dummy_source_begin = kmers.size();
     add_dummy_source_kmers(k, &kmers, original_end);
