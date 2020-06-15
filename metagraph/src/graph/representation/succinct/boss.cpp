@@ -1721,24 +1721,14 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
 // If multiple outgoing edges are found, set |*i| to the last and return false.
 inline bool masked_pick_single_outgoing(const BOSS &boss,
                                         edge_index *i,
-                                        const bitmap *subgraph_mask,
-                                        bool trim_sentinels) {
+                                        const bitmap *subgraph_mask) {
     assert(i && *i);
     assert(boss.get_last(*i));
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     // in boss, at least one outgoing edge always exists
-    if (!subgraph_mask) {
-        if (!trim_sentinels)
-            return boss.is_single_outgoing(*i);
-
-        if (*i == 1 || boss.get_W(*i) == boss.kSentinelCode) {
-            *i = 0;
-            return false;
-        } else {
-            return boss.get_last(*i - 1) || boss.get_W(*i - 1) == boss.kSentinelCode;
-        }
-    }
+    if (!subgraph_mask)
+        return boss.is_single_outgoing(*i);
 
     edge_index j = *i;
 
@@ -1746,9 +1736,6 @@ inline bool masked_pick_single_outgoing(const BOSS &boss,
 
     while (--j > 0 && !boss.get_last(j)) {
         if ((*subgraph_mask)[j]) {
-            if (trim_sentinels && boss.get_W(j) == boss.kSentinelCode)
-                continue;
-
             // stop if there are multiple outgoing edges detected
             if (edge_detected)
                 return false;
@@ -2024,7 +2011,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         i = succ_last(i);
 
         // no outgoing edges or a unique outgoing edge
-        if (masked_pick_single_outgoing(*this, &i, subgraph_mask, trim_sentinels) || !i)
+        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
         if (subgraph_mask) {
@@ -2105,18 +2092,19 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask));
         assert(t);
         assert(get_node_seq(t)[0] != kSentinelCode);
-        assert(!fetch_bit(discovered.data(), t, async));
+        assert(!fetch_bit(discovered.data(), t, async)
+                    || (get_W(t) == kSentinelCode && !trim_sentinels));
     }, async);
 
     // make sure that all edges have a single outgoing edge and that all sink
     // dummy k-mers have been handled
     call_zeros(discovered, [&](edge_index edge) {
         edge_index t = succ_last(edge);
-        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask, trim_sentinels));
+        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
         assert(t == edge);
         assert(get_W(edge) != kSentinelCode);
         t = fwd(t, get_W(t) % alph_size);
-        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask, trim_sentinels));
+        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
         assert(t);
         assert(!fetch_bit(discovered.data(), t, async));
     }, async);
@@ -2139,8 +2127,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edge = fwd(edge, d);
             bool check = masked_pick_single_outgoing(*this,
                                                      &edge,
-                                                     subgraph_mask,
-                                                     trim_sentinels);
+                                                     subgraph_mask);
             assert(edge);
             std::ignore = check;
             assert(check);
@@ -2340,8 +2327,7 @@ void call_paths(const BOSS &boss,
 
             auto single_outgoing = masked_pick_single_outgoing(boss,
                                                                &edge,
-                                                               subgraph_mask,
-                                                               trim_sentinels);
+                                                               subgraph_mask);
             // stop the traversal if there are no edges outgoing from the target
             if (!edge)
                 break;
@@ -2574,8 +2560,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         if (path.back() != kSentinelCode
                 && !masked_pick_single_outgoing(*this,
                                                 &(last_fwd = fwd(last_edge, path.back())),
-                                                subgraph_mask,
-                                                true /* trim_sentinels */)
+                                                subgraph_mask)
                 && last_fwd) {
             callback(std::move(sequence), std::move(edges));
             return;
