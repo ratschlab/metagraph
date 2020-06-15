@@ -28,8 +28,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool canonical_only) {
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
     static_assert(std::is_same_v<typename KMER::WordType, typename Container::value_type>);
     static_assert(std::is_same_v<typename KMER::WordType, typename Container::key_type>);
@@ -40,22 +39,13 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     KmerExtractor kmer_extractor;
 
     generate_reads([&](const std::string &read) {
-        size_t old_size = buffer.size();
         kmer_extractor.sequence_to_kmers(read, k, suffix,
                                          reinterpret_cast<Vector<KMER> *>(&buffer));
         if (both_strands_mode) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
-            size_t size = buffer.size();
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix,
                                              reinterpret_cast<Vector<KMER> *>(&buffer));
-            assert(size - old_size == buffer.size() - size);
-            if (canonical_only) { // keep only the canonical k-mers
-                for(uint32_t i = old_size; i < size; ++i) {
-                    buffer[i] = std::min(buffer[i], buffer[buffer.size() + old_size - i - 1]);
-                }
-                buffer.resize(size);
-            }
         }
 
         if (buffer.size() > 0.9 * kBufferSize) {
@@ -78,8 +68,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                 bool canonical_only) {
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
     static_assert(utils::is_instance_v<Container, common::SortedMultiset>
                   || utils::is_instance_v<Container, common::SortedMultisetDisk>);
@@ -94,22 +83,14 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 
     KmerExtractor kmer_extractor;
 
-    generate_reads([&](const std::string &read, uint64_t count) __attribute__ ((optnone)) {
+    generate_reads([&](const std::string &read, uint64_t count) {
         count = std::min(count, kmers->max_count());
 
         kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer);
         if (both_strands_mode) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
-            size_t size = buffer.size();
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &buffer);
-            assert(2 * size == buffer.size());
-            if (canonical_only) { // keep only the canonical k-mers
-                for(uint32_t i = 0; i < size; ++i) {
-                    buffer[i] = std::min(buffer[i], buffer[buffer.size() - i - 1]);
-                }
-                buffer.resize(size);
-            }
         }
 
         for (const KMER &kmer : buffer) {
@@ -148,8 +129,7 @@ KmerCollector<KMER, KmerExtractor, Container>
                 size_t num_threads,
                 double memory_preallocated,
                 const std::filesystem::path &tmp_dir,
-                size_t __attribute__((unused)) max_disk_space,
-                bool canonical_only)
+                size_t __attribute__((unused)) max_disk_space)
       : k_(k),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_), 1),
@@ -157,8 +137,7 @@ KmerCollector<KMER, KmerExtractor, Container>
                  kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
                  kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        both_strands_mode_(both_strands_mode),
-        canonical_only_(canonical_only) {
+        both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
 
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
@@ -190,14 +169,14 @@ void KmerCollector<KMER, KmerExtractor, Container>
         thread_pool_.enqueue(extract_kmers<KMER, Extractor, Container>,
                              generate_sequences,
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, canonical_only_);
+                             filter_suffix_encoded_);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              [generate_sequences](CallStringCount callback) {
                                  generate_sequences([&](const std::string &seq) { callback(seq, 1); });
                              },
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, canonical_only_);
+                             filter_suffix_encoded_);
     }
 }
 
@@ -212,12 +191,12 @@ void KmerCollector<KMER, KmerExtractor, Container>
                                  });
                              },
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, canonical_only_);
+                             filter_suffix_encoded_);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, Container>,
                              generate_sequences,
                              k_, both_strands_mode_, kmers_.get(),
-                             filter_suffix_encoded_, canonical_only_);
+                             filter_suffix_encoded_);
     }
 }
 
