@@ -207,22 +207,15 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
 
     T *kmer = kmers->data() + 1; // skip $$...$
     const T *end = kmers->data() + size;
-    if (k % 2) {
-        for (; kmer != end; ++kmer) {
-            const T &rc
-                    = reverse_complement(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
-            if (get_first(rc) != get_first(*kmer)) {
-                kmers->push_back(rc);
-            } else {
-                if constexpr (utils::is_pair_v<T>) {
-                    kmer->second *= 2;
-                }
+    for (; kmer != end; ++kmer) {
+        const T &rc
+                = reverse_complement(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
+        if (get_first(rc) != get_first(*kmer)) {
+            kmers->push_back(rc);
+        } else {
+            if constexpr (utils::is_pair_v<T>) {
+                kmer->second *= 2;
             }
-        }
-    } else {
-        for (; kmer != end; ++kmer) {
-            kmers->push_back(
-                    reverse_complement(k + 1, *kmer, KmerExtractorBOSS::kComplementCode));
         }
     }
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
