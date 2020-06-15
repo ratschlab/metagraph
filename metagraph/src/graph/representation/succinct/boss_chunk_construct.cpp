@@ -485,17 +485,16 @@ void add_reverse_complements(size_t k,
     logger->trace("Adding reverse complements...");
     common::EliasFanoEncoderBuffered<T_INT> original(dir/"original", ENCODER_BUFFER_SIZE);
     for (auto &it = ++kmers->begin(); it != kmers->end(); ++it) {
-        const T &kmer = *it;
+        T kmer = *it;
         const T &reverse = reverse_complement(k + 1, *it, KmerExtractorBOSS::kComplementCode);
         if (get_first(kmer) != get_first(reverse)) {
             rc_set->add(reinterpret_cast<const T_INT &>(reverse));
             original.add(reinterpret_cast<const T_INT &>(kmer));
         } else {
             if constexpr (utils::is_pair_v<T>) {
-                original.add({kmer.first.data(), 2 * kmer.second });
-            } else {
-                original.add(reinterpret_cast<const T_INT &>(kmer));
+                kmer.second *= 2;
             }
+            original.add(reinterpret_cast<const T_INT &>(kmer));
         }
     }
     original.finish();
