@@ -40,11 +40,14 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
  * for more details.
  */
 
-inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic = false) {
+inline bool fetch_and_set_bit(uint64_t *v,
+                              uint64_t i,
+                              bool atomic = false,
+                              int mo = __ATOMIC_SEQ_CST) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_or(&v[i >> 6], mask, __ATOMIC_ACQ_REL) & mask;
+        return __atomic_fetch_or(&v[i >> 6], mask, mo) & mask;
     } else {
         uint64_t &word = v[i >> 6];
         if (word & mask) {
@@ -56,11 +59,14 @@ inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     }
 }
 
-inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic = false) {
+inline bool fetch_and_unset_bit(uint64_t *v,
+                                uint64_t i,
+                                bool atomic = false,
+                                int mo = __ATOMIC_SEQ_CST) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_and(&v[i >> 6], ~mask, __ATOMIC_ACQ_REL) & mask;
+        return __atomic_fetch_and(&v[i >> 6], ~mask, mo) & mask;
     } else {
         uint64_t &word = v[i >> 6];
         if (word & mask) {
@@ -72,23 +78,32 @@ inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     }
 }
 
-inline bool fetch_bit(const uint64_t *v, uint64_t i, bool atomic = false) {
+inline bool fetch_bit(const uint64_t *v,
+                      uint64_t i,
+                      bool atomic = false,
+                      int mo = __ATOMIC_SEQ_CST) {
     return atomic
-        ? ((__atomic_load_n(&v[i >> 6], __ATOMIC_ACQUIRE) >> (i & 0x3F)) & 1)
+        ? ((__atomic_load_n(&v[i >> 6], mo) >> (i & 0x3F)) & 1)
         : ((v[i >> 6] >> (i & 0x3F)) & 1);
 }
 
-inline void set_bit(uint64_t *v, uint64_t i, bool atomic = false) {
+inline void set_bit(uint64_t *v,
+                    uint64_t i,
+                    bool atomic = false,
+                    int mo = __ATOMIC_SEQ_CST) {
     if (atomic) {
-        __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), __ATOMIC_RELEASE);
+        __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), mo);
     } else {
         v[i >> 6] |= (1llu << (i & 0x3F));
     }
 }
 
-inline void unset_bit(uint64_t *v, uint64_t i, bool atomic = false) {
+inline void unset_bit(uint64_t *v,
+                      uint64_t i,
+                      bool atomic = false,
+                      int mo = __ATOMIC_SEQ_CST) {
     if (atomic) {
-        __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), __ATOMIC_RELEASE);
+        __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), mo);
     } else {
         v[i >> 6] &= ~(1llu << (i & 0x3F));
     }
@@ -133,7 +148,8 @@ template <class Callback>
 void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                Callback callback,
-               bool atomic) {
+               bool atomic,
+               int mo) {
     if (!atomic) {
         call_ones(vector, begin, end, callback);
         return;
@@ -149,7 +165,7 @@ void call_ones(const sdsl::bit_vector &vector,
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = __atomic_load_n(&vector.data()[i >> 6], __ATOMIC_ACQUIRE);
+        word = __atomic_load_n(&vector.data()[i >> 6], mo);
         if (!word) {
             i += 64;
             continue;
@@ -217,7 +233,8 @@ template <class Callback>
 void call_zeros(const sdsl::bit_vector &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback,
-                bool atomic) {
+                bool atomic,
+                int mo) {
     if (!atomic) {
         call_zeros(vector, begin, end, callback);
         return;
@@ -233,7 +250,7 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
     uint64_t word;
     for (uint64_t j = i + 64; j <= end; j += 64) {
-        word = ~__atomic_load_n(&vector.data()[i >> 6], __ATOMIC_ACQUIRE);
+        word = ~__atomic_load_n(&vector.data()[i >> 6], mo);
         if (!word) {
             i += 64;
             continue;
