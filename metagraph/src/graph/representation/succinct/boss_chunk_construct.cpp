@@ -898,7 +898,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
                                      kmer_collector_.get_k() - 1,
-                                     kmer_collector_.is_both_strands_mode(),
+                                     canonical_mode_,
                                      kmers,
                                      bits_per_count_);
         } else {
@@ -922,7 +922,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
     result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
                              kmer_collector_.get_k() - 1, \
-                             kmer_collector_.is_both_strands_mode(), \
+                             canonical_mode_, \
                              queue, \
                              bits_per_count_)
 
