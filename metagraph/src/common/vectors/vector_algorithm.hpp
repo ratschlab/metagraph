@@ -191,8 +191,11 @@ void call_ones(const Bitmap &vector, Callback callback) {
 }
 
 template <class Callback>
-void call_ones(const sdsl::bit_vector &vector, Callback callback, bool atomic) {
-    call_ones(vector, 0, vector.size(), callback, atomic);
+void call_ones(const sdsl::bit_vector &vector,
+               Callback callback,
+               bool atomic,
+               int mo = __ATOMIC_SEQ_CST) {
+    call_ones(vector, 0, vector.size(), callback, atomic, mo);
 }
 
 template <class Bitmap, class Callback>
@@ -276,8 +279,11 @@ void call_zeros(const Bitmap &vector, Callback callback) {
 }
 
 template <class Callback>
-void call_zeros(const sdsl::bit_vector &vector, Callback callback, bool atomic) {
-    call_zeros(vector, 0, vector.size(), callback, atomic);
+void call_zeros(const sdsl::bit_vector &vector,
+                Callback callback,
+                bool atomic,
+                int mo = __ATOMIC_SEQ_CST) {
+    call_zeros(vector, 0, vector.size(), callback, atomic, mo);
 }
 
 uint64_t count_ones(const sdsl::bit_vector &vector, uint64_t begin, uint64_t end);
