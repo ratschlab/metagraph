@@ -149,7 +149,7 @@ void call_ones(const sdsl::bit_vector &vector,
                uint64_t begin, uint64_t end,
                Callback callback,
                bool atomic,
-               int mo) {
+               int mo = __ATOMIC_SEQ_CST) {
     if (!atomic) {
         call_ones(vector, begin, end, callback);
         return;
@@ -234,7 +234,7 @@ void call_zeros(const sdsl::bit_vector &vector,
                 uint64_t begin, uint64_t end,
                 Callback callback,
                 bool atomic,
-                int mo) {
+                int mo = __ATOMIC_SEQ_CST) {
     if (!atomic) {
         call_zeros(vector, begin, end, callback);
         return;
