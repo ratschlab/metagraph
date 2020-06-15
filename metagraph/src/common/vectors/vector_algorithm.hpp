@@ -40,7 +40,7 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
  * for more details.
  */
 
-inline bool fetch_and_set_bit(uint64_t *v, size_t i, bool atomic = false) {
+inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
@@ -56,7 +56,7 @@ inline bool fetch_and_set_bit(uint64_t *v, size_t i, bool atomic = false) {
     }
 }
 
-inline bool fetch_and_unset_bit(uint64_t *v, size_t i, bool atomic = false) {
+inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
@@ -72,13 +72,13 @@ inline bool fetch_and_unset_bit(uint64_t *v, size_t i, bool atomic = false) {
     }
 }
 
-inline bool fetch_bit(const uint64_t *v, size_t i, bool atomic = false) {
+inline bool fetch_bit(const uint64_t *v, uint64_t i, bool atomic = false) {
     return atomic
         ? ((__atomic_load_n(&v[i >> 6], __ATOMIC_ACQUIRE) >> (i & 0x3F)) & 1)
         : ((v[i >> 6] >> (i & 0x3F)) & 1);
 }
 
-inline void set_bit(uint64_t *v, size_t i, bool atomic = false) {
+inline void set_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     if (atomic) {
         __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), __ATOMIC_RELEASE);
     } else {
@@ -86,7 +86,7 @@ inline void set_bit(uint64_t *v, size_t i, bool atomic = false) {
     }
 }
 
-inline void unset_bit(uint64_t *v, size_t i, bool atomic = false) {
+inline void unset_bit(uint64_t *v, uint64_t i, bool atomic = false) {
     if (atomic) {
         __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), __ATOMIC_RELEASE);
     } else {
