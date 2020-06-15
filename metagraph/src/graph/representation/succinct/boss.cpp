@@ -43,7 +43,7 @@ const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
-const size_t TRAVERSAL_START_BATCH_SIZE = 20;
+const size_t TRAVERSAL_START_BATCH_SIZE = 100;
 
 
 BOSS::BOSS(size_t k)
@@ -1806,7 +1806,7 @@ using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
 // traverse graph from the specified (k+1)-mer/edge and call
 // all paths reachable from it
 void call_paths(const BOSS &boss,
-                Edge&& starting_edge,
+                std::vector<Edge>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -1876,7 +1876,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto enqueue_start = [&](edge_index start, bool force = false) {
         if (async) {
             auto start_path = [&,start]() {
-                ::call_paths(*this, Edge(start, get_node_seq(start)), callback,
+                ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
                              split_to_unitigs, kmers_in_single_form,
                              trim_sentinels, thread_pool, &discovered, &visited,
                              async, visited_mutex, progress_bar, subgraph_mask);
@@ -1892,7 +1892,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 thread_pool.enqueue(start_path);
             }
         } else {
-            ::call_paths(*this, Edge(start, get_node_seq(start)), callback,
+            ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
                          split_to_unitigs, kmers_in_single_form,
                          trim_sentinels, thread_pool, &discovered, &visited,
                          async, visited_mutex, progress_bar, subgraph_mask);
@@ -2159,7 +2159,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 }
 
 void call_paths(const BOSS &boss,
-                Edge&& starting_edge,
+                std::vector<Edge>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -2177,7 +2177,6 @@ void call_paths(const BOSS &boss,
     auto &discovered = *discovered_ptr;
     // store all branch nodes on the way
     std::vector<TAlphabet> kmer;
-    std::vector<Edge> edges { std::move(starting_edge) };
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
@@ -2275,20 +2274,19 @@ void call_paths(const BOSS &boss,
             // edge and continue traversing the graph
             edge = next_edge;
 
-            // TODO: add batching.
-            // if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
-            for (Edge &next_edge : edges) {
+            if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
-                    [=,&boss,&thread_pool,&visited_mutex,&progress_bar](const auto &next_edge) {
-                        ::call_paths(boss, Edge(next_edge), callback,
+                    [=,&boss,&thread_pool,&visited_mutex,&progress_bar](std::vector<Edge> &edges) {
+                        ::call_paths(boss, std::move(edges), callback,
                                      split_to_unitigs, kmers_in_single_form,
                                      trim_sentinels, thread_pool, discovered_ptr, visited_ptr,
                                      async, visited_mutex, progress_bar, subgraph_mask);
                     },
-                    std::move(next_edge)
+                    std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
+                                      edges.end())
                 );
             }
-            edges.clear();
+            edges.resize(TRAVERSAL_START_BATCH_SIZE / 2);
         }
 
         if (path.empty())
