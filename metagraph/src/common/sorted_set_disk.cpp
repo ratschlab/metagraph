@@ -32,6 +32,5 @@ template class SortedSetDisk<std::pair<uint64_t, uint32_t>>;
 template class SortedSetDisk<std::pair<sdsl::uint128_t, uint32_t>>;
 template class SortedSetDisk<std::pair<sdsl::uint256_t, uint32_t>>;
 
-
 } // namespace common
 } // namespace mtg
