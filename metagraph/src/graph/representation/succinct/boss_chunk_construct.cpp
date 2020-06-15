@@ -71,7 +71,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     std::vector<size_t> max_it(alphabet_size);
     std::vector<size_t> it(alphabet_size);
     for (TAlphabet c = 1; c < alphabet_size; ++c) {
-        std::vector<KMER_INT> zeros(k + 1, 0);
+        std::vector<uint8_t> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
                                  KMER(zeros, k + 1), // the $$...i->$ k-mer
@@ -84,6 +84,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     logger->trace("Computed max_it");
 
     std::vector<KMER> last_dummy(alphabet_size, KMER(0));
+    logger->trace("Declared last dummy");
     size_t size = kmers.size();
     for (size_t i = 1; i < size; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
@@ -92,17 +93,21 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 
         KMER dummy_sink = kmer;
         dummy_sink.to_next(k + 1, BOSS::kSentinelCode);
+        logger->trace("Next dummy");
 
         TAlphabet last_char = kmer[0];
-
+        logger->trace("last char {}", last_char);
         while (it[last_char] < max_it[last_char]
                 && KMER::less(get_first(kmers[it[last_char]]), dummy_sink)) {
             it[last_char]++;
         }
+        logger->trace("First iteration... it last char {}", it[last_char]);
         if (last_dummy[last_char] != dummy_sink
             && (it[last_char] == max_it[last_char]
                 || !KMER::compare_suffix(get_first(kmers[it[last_char]]), dummy_sink))) {
+            logger->trace("Pushing back...");
             push_back(kmers, dummy_sink);
+            logger->trace("Pushed back...");
             last_dummy[last_char] = dummy_sink;
         }
         std::cout << ".";
