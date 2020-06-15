@@ -1807,36 +1807,18 @@ using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
 // all paths reachable from it
 void call_paths(const BOSS &boss,
                 Edge&& starting_edge,
-                std::vector<Edge> &edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
+                ThreadPool &thread_pool,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 bool async,
                 std::mutex &visited_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
-
-template <class EdgeStorage, class AsyncEdgeStorage>
-void call_paths_from_queue(const BOSS &boss,
-                           EdgeStorage &edges,
-                           AsyncEdgeStorage &edges_async,
-                           const BOSS::Call<std::vector<edge_index>&&,
-                                            std::vector<TAlphabet>&&> &callback,
-                           ThreadPool *thread_pool,
-                           bool split_to_unitigs,
-                           bool kmers_in_single_form,
-                           bool trim_sentinels,
-                           sdsl::bit_vector &discovered,
-                           sdsl::bit_vector &visited,
-                           bool async,
-                           std::mutex &visited_mutex,
-                           std::mutex &edge_mutex,
-                           ProgressBar &progress_bar,
-                           const bitmap *subgraph_mask);
 
 void call_path(const BOSS &boss,
                const BOSS::Call<std::vector<edge_index>&&,
@@ -1887,45 +1869,33 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    std::vector<Edge> edges;
-    std::deque<std::future<std::vector<Edge>>> edges_async;
     std::mutex visited_mutex;
-    std::mutex edge_mutex;
-    std::unique_ptr<ThreadPool> thread_pool;
+    ThreadPool thread_pool(num_threads ? num_threads : 1);
     bool async = num_threads > 1;
-
-    if (async)
-        thread_pool = std::make_unique<ThreadPool>(num_threads);
-
-    auto call_paths_from_queue = [&]() {
-        ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
-                                split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, visited, async, visited_mutex, edge_mutex,
-                                progress_bar, subgraph_mask);
-    };
 
     auto enqueue_start = [&](edge_index start, bool force = false) {
         if (async) {
             auto start_path = [&,start]() {
-                std::vector<Edge> edges;
-                edges.reserve(TRAVERSAL_START_BATCH_SIZE);
-                ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
+                ::call_paths(*this, Edge(start, get_node_seq(start)), callback,
                              split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, &discovered, &visited,
+                             trim_sentinels, thread_pool, &discovered, &visited,
                              async, visited_mutex, progress_bar, subgraph_mask);
-                return edges;
             };
 
             // If enqueue_start is being called by another task in the thread
             // pool, force needs to be true to force a job to be queued when
             // the the maximum number of tasks is reached. Otherwise, it will
             // deadlock at that point.
-            std::lock_guard<std::mutex> lock(edge_mutex);
-            edges_async.emplace_back(force ? thread_pool->force_enqueue(start_path)
-                                           : thread_pool->enqueue(start_path));
+            if (force) {
+                thread_pool.force_enqueue(start_path);
+            } else {
+                thread_pool.enqueue(start_path);
+            }
         } else {
-            edges.emplace_back(start, get_node_seq(start));
-            call_paths_from_queue();
+            ::call_paths(*this, Edge(start, get_node_seq(start)), callback,
+                         split_to_unitigs, kmers_in_single_form,
+                         trim_sentinels, thread_pool, &discovered, &visited,
+                         async, visited_mutex, progress_bar, subgraph_mask);
         }
     };
 
@@ -1940,7 +1910,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             enqueue_start(i);
     }
 
-    call_paths_from_queue();
+    thread_pool.join();
 
     if (subgraph_mask) {
         // find all edges in a block with no incoming edge and enqueue a traversal
@@ -1965,7 +1935,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 do {
                     if ((*subgraph_mask)[end] && (!kmers_in_single_form
                             || !fetch_bit(discovered.data(), end, async))) {
-                        enqueue_start(end, thread_pool.get());
+                        enqueue_start(end, async);
                     }
 
                 } while (--end > 0 && !get_last(end));
@@ -1981,15 +1951,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             } else {
                 end = discovered.size();
             }
-            if (thread_pool) {
-                thread_pool->enqueue(enqueue_starts_in_range, begin, end);
-            } else {
-                enqueue_starts_in_range(begin, end);
-            }
+            thread_pool.enqueue(enqueue_starts_in_range, begin, end);
             begin = end;
         }
 
-        call_paths_from_queue();
+        thread_pool.join();
     }
 
 #ifndef NDEBUG
@@ -2041,7 +2007,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     }, async);
 
-    call_paths_from_queue();
+    thread_pool.join();
 
     if (subgraph_mask) {
         // handle all merges
@@ -2057,7 +2023,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 enqueue_start(edge);
             }
         }, async);
-        call_paths_from_queue();
+        thread_pool.join();
     }
 
     if (kmers_in_single_form) {
@@ -2078,7 +2044,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 }
             }, async);
 
-            call_paths_from_queue();
+            thread_pool.join();
         }
     }
 
@@ -2148,7 +2114,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
     };
 
-    if (!thread_pool) {
+    if (!async) {
         call_zeros(discovered, start_cycle, async);
 
     } else {
@@ -2160,7 +2126,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 return;
             }
 
-            thread_pool->enqueue([&,index_buffer]() {
+            thread_pool.enqueue([&,index_buffer]() {
                 std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
             });
 
@@ -2169,12 +2135,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }, async);
 
         if (index_buffer.size()) {
-            thread_pool->enqueue([&,index_buffer]() {
+            thread_pool.enqueue([&,index_buffer]() {
                 std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
             });
         }
 
-        thread_pool->join();
+        thread_pool.join();
     }
 
 #ifndef NDEBUG
@@ -2192,71 +2158,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 #endif
 }
 
-template <class EdgeStorage, class AsyncEdgeStorage>
-void call_paths_from_queue(const BOSS &boss,
-                           EdgeStorage &edges,
-                           AsyncEdgeStorage &edges_async,
-                           const BOSS::Call<std::vector<edge_index>&&,
-                                            std::vector<TAlphabet>&&> &callback,
-                           ThreadPool *thread_pool,
-                           bool split_to_unitigs,
-                           bool kmers_in_single_form,
-                           bool trim_sentinels,
-                           sdsl::bit_vector &discovered,
-                           sdsl::bit_vector &visited,
-                           bool async,
-                           std::mutex &visited_mutex,
-                           std::mutex &edge_mutex,
-                           ProgressBar &progress_bar,
-                           const bitmap *subgraph_mask) {
-    if (async) {
-        std::unique_lock<std::mutex> lock(edge_mutex);
-        while (edges_async.size()) {
-            auto next_edges_future = std::move(edges_async.front());
-            edges_async.pop_front();
-            lock.unlock();
-            for (const Edge &next_edge : next_edges_future.get()) {
-                if (fetch_bit(discovered.data(), next_edge.first, async))
-                    continue;
-
-                lock.lock();
-                edges_async.emplace_back(thread_pool->enqueue([&](Edge next_edge) {
-                    std::vector<Edge> edges;
-                    edges.reserve(TRAVERSAL_START_BATCH_SIZE);
-                    ::call_paths(boss, std::move(next_edge), edges, callback,
-                                 split_to_unitigs, kmers_in_single_form,
-                                 trim_sentinels, &discovered, &visited,
-                                 async, visited_mutex, progress_bar, subgraph_mask);
-                    return edges;
-                }, Edge(next_edge)));
-                lock.unlock();
-            }
-            lock.lock();
-        }
-
-        lock.unlock();
-        thread_pool->join();
-
-    } else {
-        while (edges.size()) {
-            auto next_edge = std::move(edges.back());
-            edges.pop_back();
-            ::call_paths(boss, std::move(next_edge), edges, callback,
-                         split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, &discovered, &visited,
-                         async, visited_mutex, progress_bar, subgraph_mask);
-        }
-    }
-}
-
 void call_paths(const BOSS &boss,
                 Edge&& starting_edge,
-                std::vector<Edge> &edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
+                ThreadPool &thread_pool,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 bool async,
@@ -2266,18 +2175,20 @@ void call_paths(const BOSS &boss,
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
-
-    edge_index edge = starting_edge.first;
-    auto sequence = std::move(starting_edge.second);
-
     // store all branch nodes on the way
     std::vector<TAlphabet> kmer;
-    std::vector<edge_index> path;
+    std::vector<Edge> edges { std::move(starting_edge) };
 
-    path.reserve(100);
-    sequence.reserve(100 + boss.get_k());
+    // keep traversing until we have worked off all branches from the queue
+    while (!edges.empty()) {
+        // store all branch nodes on the way
+        std::vector<edge_index> path;
+        auto [edge, sequence] = std::move(edges.back());
+        edges.pop_back();
 
-    do {
+        path.reserve(100);
+        sequence.reserve(100 + boss.get_k());
+
         // traverse simple path until we reach its tail or
         // the first edge that has already been discovered
         while (!fetch_and_set_bit(discovered.data(), edge, async)) {
@@ -2363,24 +2274,30 @@ void call_paths(const BOSS &boss,
             // pick the last outgoing but not yet discovered
             // edge and continue traversing the graph
             edge = next_edge;
+
+            // TODO: add batching.
+            // if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
+            for (Edge &next_edge : edges) {
+                thread_pool.force_enqueue(
+                    [=,&boss,&thread_pool,&visited_mutex,&progress_bar](const auto &next_edge) {
+                        ::call_paths(boss, Edge(next_edge), callback,
+                                     split_to_unitigs, kmers_in_single_form,
+                                     trim_sentinels, thread_pool, discovered_ptr, visited_ptr,
+                                     async, visited_mutex, progress_bar, subgraph_mask);
+                    },
+                    std::move(next_edge)
+                );
+            }
+            edges.clear();
         }
+
+        if (path.empty())
+            continue;
 
         call_path(boss, callback, path, sequence,
                   kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
                   async, visited_mutex, progress_bar, subgraph_mask);
-
-        if (edges.empty())
-            return;
-
-        if (edges.size() < TRAVERSAL_START_BATCH_SIZE) {
-            std::tie(edge, sequence) = std::move(edges.back());
-            edges.pop_back();
-            kmer.clear();
-            path.clear();
-        } else {
-            break;
-        }
-    } while (true);
+    }
 }
 
 // Call the path or all primary paths extracted from it.
