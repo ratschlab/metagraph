@@ -8,7 +8,7 @@
 namespace mtg {
 namespace common {
 template <typename T>
-size_t find_next_x_block(T *arr,
+size_t find_next_X_block(T *arr,
                          size_t beg,
                          size_t z,
                          size_t y,
@@ -16,22 +16,23 @@ size_t find_next_x_block(T *arr,
                          size_t f,
                          size_t buf1,
                          size_t buf2) {
+    T min1 = std::numeric_limits<T>::max();
+    T min2 = std::numeric_limits<T>::max();
     size_t m = (static_cast<int64_t>(z - beg - f) / static_cast<int64_t>(k)) * k + f + beg;
     if (m <= z)
         m += k;
+    size_t i = m; // find from m; the start of the block adjacent to the right of z
     size_t result = 0;
-    bool init = false;
-    T min_end;
-    // find from m; the start of the block adjacent to the right of z
-    for(size_t start = m; start + k <= y; start +=k) {
-        if (start != buf1 && start != buf2) {
-            size_t end = (start < buf1 && buf1 < start + k) ? m - 1 : start + k - 1;
-            if (!init || (arr[start] <= arr[result] && arr[end] <= min_end)) {
-                result = start;
-                min_end = arr[end];
-                init = true;
+    while (i + k <= y) {
+        if (i != buf1 && i != buf2) {
+            size_t j = (i < buf1 && buf1 < i + k) ? m - 1 : i + k - 1;
+            if (arr[i] <= min1 && arr[j] <= min2) {
+                result = i;
+                min1 = arr[i];
+                min2 = arr[j];
             }
         }
+        i += k;
     }
     return result;
 }
@@ -88,7 +89,7 @@ void merge(T *arr, size_t beg, size_t mid, size_t end, size_t k) {
             if ((x - beg) % k == f) { // x reached the start position of the new block
                 if (z < x - k)
                     buf2 = x - k;
-                x = find_next_x_block(arr, beg, z, y, k, f, buf1, buf2);
+                x = find_next_X_block(arr, beg, z, y, k, f, buf1, buf2);
             }
         } else {
             arr[z] = arr[y];
