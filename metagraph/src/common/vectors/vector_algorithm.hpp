@@ -37,43 +37,34 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
  * fetch_and_* return the old values. The default memorder __ATOMIC_SEQ_CST
  * enforces the ordering of writes and reads across threads. See
  * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
- * for other options.
+ * for more details.
  */
 
-template <class t_int_vec>
-inline bool fetch_and_set_bit(t_int_vec &v, size_t i, bool atomic = false) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-    assert(i < v.size());
-
-    uint64_t mask = (1llu << (i & 0x3F));
+inline bool fetch_and_set_bit(uint64_t *v, size_t i, bool atomic = false) {
+    const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_or(&v.data()[i >> 6], mask, __ATOMIC_ACQ_REL) & mask;
+        return __atomic_fetch_or(&v[i >> 6], mask, __ATOMIC_ACQ_REL) & mask;
     } else {
-        uint64_t *word = &v.data()[i >> 6];
-        if (*word & mask) {
+        uint64_t &word = v[i >> 6];
+        if (word & mask) {
             return true;
         } else {
-            *word |= mask;
+            word |= mask;
             return false;
         }
     }
 }
 
-template <class t_int_vec>
-inline bool fetch_and_unset_bit(t_int_vec &v, size_t i, bool atomic = false) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
-    uint64_t mask = (1llu << (i & 0x3F));
+inline bool fetch_and_unset_bit(uint64_t *v, size_t i, bool atomic = false) {
+    const uint64_t mask = (1llu << (i & 0x3F));
 
     if (atomic) {
-        return __atomic_fetch_and(&v.data()[i >> 6], ~mask, __ATOMIC_ACQ_REL) & mask;
+        return __atomic_fetch_and(&v[i >> 6], ~mask, __ATOMIC_ACQ_REL) & mask;
     } else {
-        uint64_t *word = &v.data()[i >> 6];
-        if (*word & mask) {
-            *word &= ~mask;
+        uint64_t &word = v[i >> 6];
+        if (word & mask) {
+            word &= ~mask;
             return true;
         } else {
             return false;
@@ -81,37 +72,25 @@ inline bool fetch_and_unset_bit(t_int_vec &v, size_t i, bool atomic = false) {
     }
 }
 
-template <class t_int_vec>
-inline bool fetch_bit(t_int_vec &v, size_t i, bool atomic = false) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
+inline bool fetch_bit(const uint64_t *v, size_t i, bool atomic = false) {
     return atomic
-        ? ((__atomic_load_n(&v.data()[i >> 6], __ATOMIC_ACQUIRE) >> (i & 0x3F)) & 1)
-        : ((v.data()[i >> 6] >> (i & 0x3F)) & 1);
+        ? ((__atomic_load_n(&v[i >> 6], __ATOMIC_ACQUIRE) >> (i & 0x3F)) & 1)
+        : ((v[i >> 6] >> (i & 0x3F)) & 1);
 }
 
-template <class t_int_vec>
-inline void set_bit(t_int_vec &v, size_t i, bool atomic = false) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
+inline void set_bit(uint64_t *v, size_t i, bool atomic = false) {
     if (atomic) {
-        __atomic_or_fetch(&v.data()[i >> 6], 1llu << (i & 0x3F), __ATOMIC_RELAXED);
+        __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), __ATOMIC_RELEASE);
     } else {
-        v.data()[i >> 6] |= (1llu << (i & 0x3F));
+        v[i >> 6] |= (1llu << (i & 0x3F));
     }
 }
 
-template <class t_int_vec>
-inline void unset_bit(t_int_vec &v, size_t i, bool atomic = false) {
-    // these assume that the underlying vector contains packed 64-bit integers
-    static_assert(sizeof(*v.data()) == 8);
-
+inline void unset_bit(uint64_t *v, size_t i, bool atomic = false) {
     if (atomic) {
-        __atomic_and_fetch(&v.data()[i >> 6], ~(1llu << (i & 0x3F)), __ATOMIC_RELAXED);
+        __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), __ATOMIC_RELEASE);
     } else {
-        v.data()[i >> 6] &= ~(1llu << (i & 0x3F));
+        v[i >> 6] &= ~(1llu << (i & 0x3F));
     }
 }
 
@@ -165,7 +144,7 @@ void call_ones(const sdsl::bit_vector &vector,
 
     uint64_t i = begin;
     for ( ; i < end && (i & 0x3F); ++i) {
-        if (fetch_bit(vector, i, true))
+        if (fetch_bit(vector.data(), i, true))
             callback(i);
     }
     uint64_t word;
@@ -180,12 +159,12 @@ void call_ones(const sdsl::bit_vector &vector,
         callback(i++);
 
         for ( ; i < j; ++i) {
-            if (fetch_bit(vector, i, true))
+            if (fetch_bit(vector.data(), i, true))
                 callback(i);
         }
     }
     for ( ; i < end; ++i) {
-        if (fetch_bit(vector, i, true))
+        if (fetch_bit(vector.data(), i, true))
             callback(i);
     }
 }
@@ -249,7 +228,7 @@ void call_zeros(const sdsl::bit_vector &vector,
 
     uint64_t i = begin;
     for ( ; i < end && (i & 0x3F); ++i) {
-        if (!fetch_bit(vector, i, true))
+        if (!fetch_bit(vector.data(), i, true))
             callback(i);
     }
     uint64_t word;
@@ -264,12 +243,12 @@ void call_zeros(const sdsl::bit_vector &vector,
         callback(i++);
 
         for ( ; i < j; ++i) {
-            if (!fetch_bit(vector, i, true))
+            if (!fetch_bit(vector.data(), i, true))
                 callback(i);
         }
     }
     for ( ; i < end; ++i) {
-        if (!fetch_bit(vector, i, true))
+        if (!fetch_bit(vector.data(), i, true))
             callback(i);
     }
 }

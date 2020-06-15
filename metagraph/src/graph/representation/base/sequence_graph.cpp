@@ -354,12 +354,7 @@ void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t num_threads,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
-    ::call_sequences(*this,
-                     callback,
-                     num_threads,
-                     true,
-                     min_tip_size,
-                     kmers_in_single_form);
+    ::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
 }
 
 /**

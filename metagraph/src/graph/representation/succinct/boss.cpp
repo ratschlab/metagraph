@@ -1950,7 +1950,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //
     // used to indicate if an edge from a source node has been taken
     for (edge_index i = succ_last(1); i >= 1; --i) {
-        if ((!subgraph_mask || (*subgraph_mask)[i]) && !fetch_bit(discovered, i, async))
+        if ((!subgraph_mask || (*subgraph_mask)[i]) && !fetch_bit(discovered.data(), i, async))
             enqueue_start(i);
     }
 
@@ -1978,7 +1978,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
                 do {
                     if ((*subgraph_mask)[end] && (!kmers_in_single_form
-                            || !fetch_bit(discovered, end, async))) {
+                            || !fetch_bit(discovered.data(), end, async))) {
                         enqueue_start(end, thread_pool.get());
                     }
 
@@ -2029,7 +2029,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         if (subgraph_mask) {
             do {
-                if (!fetch_bit(discovered, i, async)) {
+                if (!fetch_bit(discovered.data(), i, async)) {
                     assert((*subgraph_mask)[i]);
                     assert(get_W(i) != kSentinelCode);
                     enqueue_start(i);
@@ -2048,7 +2048,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(begin != i);
 
             for (size_t j = begin; j <= i; ++j) {
-                if (!fetch_bit(discovered, j, async))
+                if (!fetch_bit(discovered.data(), j, async))
                     enqueue_start(j);
             }
         }
@@ -2085,7 +2085,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 TAlphabet d = get_W(t);
                 assert(d < alph_size);
                 if (!masked_pick_single_incoming(*this, &t, d, subgraph_mask)
-                        || fetch_bit(discovered, t, async)) {
+                        || fetch_bit(discovered.data(), t, async)) {
                     start_found = true;
                     assert(t);
                     enqueue_start(edge);
@@ -2105,7 +2105,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask));
         assert(t);
         assert(get_node_seq(t)[0] != kSentinelCode);
-        assert(!fetch_bit(discovered, t, async));
+        assert(!fetch_bit(discovered.data(), t, async));
     }, async);
 
     // make sure that all edges have a single outgoing edge and that all sink
@@ -2118,7 +2118,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         t = fwd(t, get_W(t) % alph_size);
         assert(masked_pick_single_outgoing(*this, &t, subgraph_mask, trim_sentinels));
         assert(t);
-        assert(!fetch_bit(discovered, t, async));
+        assert(!fetch_bit(discovered.data(), t, async));
     }, async);
 #endif
 
@@ -2144,15 +2144,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(edge);
             std::ignore = check;
             assert(check);
-        } while (edge != start && !fetch_bit(discovered, edge, async));
+        } while (edge != start && !fetch_bit(discovered.data(), edge, async));
 
         if (edge == start && path.size()) {
             for (edge_index edge : path) {
-                if (fetch_bit(discovered, edge, async))
+                if (fetch_bit(discovered.data(), edge, async))
                     return;
             }
             for (edge_index edge : path) {
-                set_bit(discovered, edge, async);
+                set_bit(discovered.data(), edge, async);
             }
 
             progress_bar += path.size();
@@ -2230,7 +2230,7 @@ void call_paths_from_queue(const BOSS &boss,
             edges_async.pop_front();
             lock.unlock();
             for (const Edge &next_edge : next_edges_future.get()) {
-                if (fetch_bit(discovered, next_edge.first, async))
+                if (fetch_bit(discovered.data(), next_edge.first, async))
                     continue;
 
                 lock.lock();
@@ -2295,7 +2295,7 @@ void call_paths(const BOSS &boss,
     do {
         // traverse simple path until we reach its tail or
         // the first edge that has already been discovered
-        while (!fetch_and_set_bit(discovered, edge, async)) {
+        while (!fetch_and_set_bit(discovered.data(), edge, async)) {
             assert(edge > 0);
             assert(!subgraph_mask || (*subgraph_mask)[edge]);
             ++progress_bar;
@@ -2360,10 +2360,10 @@ void call_paths(const BOSS &boss,
             // loop over the outgoing edges
             do {
                 assert((!subgraph_mask || (*subgraph_mask)[edge]
-                    || fetch_bit(discovered, edge, async))
+                    || fetch_bit(discovered.data(), edge, async))
                         && "k-mers not from subgraph are marked as discovered");
 
-                if (!fetch_bit(discovered, edge, async)) {
+                if (!fetch_bit(discovered.data(), edge, async)) {
                     if (!next_edge && !split_to_unitigs) {
                         // save the edge for discovery if we extract contigs
                         next_edge = edge;
@@ -2474,7 +2474,7 @@ void call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!visited[dual_path[i]]) {
                 visited[dual_path[i]] = true;
-                progress_bar += !fetch_and_set_bit(discovered, dual_path[i], concurrent);
+                progress_bar += !fetch_and_set_bit(discovered.data(), dual_path[i], concurrent);
                 continue;
             }
         }
