@@ -94,7 +94,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
 
     KmerExtractor kmer_extractor;
 
-    generate_reads([&](const std::string &read, uint64_t count) {
+    generate_reads([&](const std::string &read, uint64_t count) __attribute__ ((optnone)) {
         count = std::min(count, kmers->max_count());
 
         kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer);
