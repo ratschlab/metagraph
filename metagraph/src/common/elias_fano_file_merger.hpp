@@ -60,6 +60,8 @@ class MergeHeap {
 template <typename T>
 class ConcatDecoder {
   public:
+    typedef T value_type;
+
     ConcatDecoder(const std::vector<std::string> &names)
         : names_(names), source_(names[0], false) {
         get_next();
@@ -104,6 +106,8 @@ class ConcatDecoder {
 template <typename T>
 class MergeDecoder {
   public:
+    typedef T value_type;
+
     MergeDecoder(const std::vector<std::string> &source_names, bool remove_sources) {
         sources_.reserve(source_names.size());
         for (uint32_t i = 0; i < source_names.size(); ++i) {
@@ -141,6 +145,40 @@ class MergeDecoder {
   private:
     std::vector<EliasFanoDecoder<T>> sources_;
     common::MergeHeap<T> heap_;
+};
+
+// transforms objects from Decoder::T to T
+template <class Decoder, typename T>
+class Transformed {
+    typedef typename Decoder::value_type source_type;
+  public:
+    typedef T value_type;
+
+    template <typename... Args>
+    Transformed(const std::function<T(const source_type &)> &transform,
+                const Args&... args)
+          : decoder_(args...), transform_(transform) {
+        if (!decoder_.empty())
+            top_ = transform_(decoder_.top());
+    }
+
+    inline bool empty() const { return decoder_.empty(); }
+
+    inline const T& top() const { return top_; }
+
+    inline T pop() __attribute__((always_inline)) {
+        decoder_.pop();
+        T result = top_;
+        if (!decoder_.empty()) {
+            top_ = transform_(decoder_.top());
+        }
+        return result;
+    }
+
+  private:
+    Decoder decoder_;
+    std::function<T(const source_type &)> transform_;
+    T top_;
 };
 
 /**
@@ -200,59 +238,6 @@ void merge_files(const std::vector<std::string> &sources,
         }
     }
     on_new_item(current);
-}
-
-/**
- * Merges the Ts in #sources with the Ts in #source_no_count.
- * Identical elements are not de-duped.
- */
-template <typename T>
-void merge_dummy(const std::vector<std::string> &sources,
-                 std::vector<std::string> sources_no_count,
-                 const std::function<void(const T &)> &on_new_item,
-                 bool remove_sources = true) {
-    MergeDecoder<T> decoder(sources, remove_sources);
-    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
-    while (!decoder.empty() && !decoder_no_count.empty()) {
-        if (decoder.top() < decoder_no_count.top()) {
-            on_new_item(decoder.pop());
-        } else {
-            on_new_item(decoder_no_count.pop());
-        }
-    }
-    while (!decoder.empty()) {
-        on_new_item(decoder.pop());
-    }
-    while (!decoder_no_count.empty()) {
-        on_new_item(decoder_no_count.pop());
-    }
-}
-
-/**
- * Merges the <T, C> pairs in #sources with the Ts in #source_no_count. The INTs in
- * source_no_count will be assigned a count of 0.
- * Identical elements are not de-duped.
- */
-template <typename T, typename C>
-void merge_dummy(const std::vector<std::string> &sources,
-                 const std::vector<std::string> &sources_no_count,
-                 const std::function<void(const std::pair<T, C> &)> &on_new_item,
-                 bool remove_sources = true) {
-    MergeDecoder<std::pair<T, C>> decoder(sources, remove_sources);
-    MergeDecoder<T> decoder_no_count(sources_no_count, remove_sources);
-    while (!decoder.empty() && !decoder_no_count.empty()) {
-        if (decoder.top().first < decoder_no_count.top()) {
-            on_new_item(decoder.pop());
-        } else {
-            on_new_item({ decoder_no_count.pop(), 0U });
-        }
-    }
-    while (!decoder.empty()) {
-        on_new_item(decoder.pop());
-    }
-    while (!decoder_no_count.empty()) {
-        on_new_item({ decoder_no_count.pop(), 0U });
-    }
 }
 
 } // namespace common

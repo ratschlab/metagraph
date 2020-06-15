@@ -280,16 +280,19 @@ std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &co
                 buffer_size += columns[j]->rank1(end - 1)
                                 - (begin ? columns[j]->rank1(begin - 1) : 0);
             }
-            // reserve space for 3 buffers of size |buffer_size| each
-            uint64_t *buff = __atomic_fetch_add(&buffer, buffer_size * 3,
-                                                __ATOMIC_RELAXED);
 
             std::pair<uint64_t *, uint64_t *> &result = results[begin / block_size];
             std::pair<uint64_t *, uint64_t *> buffer_pos;
             std::pair<uint64_t *, uint64_t *> buffer_merge;
-            result.first = result.second = buff;
-            buffer_pos.first = buffer_pos.second = buff + buffer_size;
-            buffer_merge.first = buffer_merge.second = buff + 2 * buffer_size;
+
+            #pragma omp critical
+            {
+                // reserve space for 3 buffers of size |buffer_size| each
+                result.first = result.second = buffer;
+                buffer_pos.first = buffer_pos.second = buffer + buffer_size;
+                buffer_merge.first = buffer_merge.second = buffer + 2 * buffer_size;
+                buffer += 3 * buffer_size;
+            }
 
             // write the positions of ones in the first vector to |result|
             columns[0]->call_ones_in_range(begin, end,
