@@ -1805,10 +1805,9 @@ using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
 
 // traverse graph from the specified (k+1)-mer/edge and call
 // all paths reachable from it
-template <class EdgeStorage>
 void call_paths(const BOSS &boss,
                 Edge&& starting_edge,
-                EdgeStorage &edges,
+                std::vector<Edge> &edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -1817,7 +1816,7 @@ void call_paths(const BOSS &boss,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 bool async,
-                std::mutex &vector_mutex,
+                std::mutex &visited_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
 
@@ -1834,7 +1833,7 @@ void call_paths_from_queue(const BOSS &boss,
                            sdsl::bit_vector &discovered,
                            sdsl::bit_vector &visited,
                            bool async,
-                           std::mutex &vector_mutex,
+                           std::mutex &visited_mutex,
                            std::mutex &edge_mutex,
                            ProgressBar &progress_bar,
                            const bitmap *subgraph_mask);
@@ -1849,7 +1848,7 @@ void call_path(const BOSS &boss,
                sdsl::bit_vector &discovered,
                sdsl::bit_vector &visited,
                bool concurrent,
-               std::mutex &vector_mutex,
+               std::mutex &visited_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask);
 
@@ -1890,7 +1889,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     std::vector<Edge> edges;
     std::deque<std::future<std::vector<Edge>>> edges_async;
-    std::mutex vector_mutex;
+    std::mutex visited_mutex;
     std::mutex edge_mutex;
     std::unique_ptr<ThreadPool> thread_pool;
     bool async = num_threads > 1;
@@ -1901,7 +1900,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto call_paths_from_queue = [&]() {
         ::call_paths_from_queue(*this, edges, edges_async, callback, thread_pool.get(),
                                 split_to_unitigs, kmers_in_single_form, trim_sentinels,
-                                discovered, visited, async, vector_mutex, edge_mutex,
+                                discovered, visited, async, visited_mutex, edge_mutex,
                                 progress_bar, subgraph_mask);
     };
 
@@ -1913,7 +1912,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 ::call_paths(*this, Edge(start, get_node_seq(start)), edges, callback,
                              split_to_unitigs, kmers_in_single_form,
                              trim_sentinels, &discovered, &visited,
-                             async, vector_mutex, progress_bar, subgraph_mask);
+                             async, visited_mutex, progress_bar, subgraph_mask);
                 return edges;
             };
 
@@ -2145,7 +2144,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             progress_bar += path.size();
             call_path(*this, callback, path, sequence,
                       kmers_in_single_form, trim_sentinels, discovered, visited,
-                      async, vector_mutex, progress_bar, subgraph_mask);
+                      async, visited_mutex, progress_bar, subgraph_mask);
         }
     };
 
@@ -2206,7 +2205,7 @@ void call_paths_from_queue(const BOSS &boss,
                            sdsl::bit_vector &discovered,
                            sdsl::bit_vector &visited,
                            bool async,
-                           std::mutex &vector_mutex,
+                           std::mutex &visited_mutex,
                            std::mutex &edge_mutex,
                            ProgressBar &progress_bar,
                            const bitmap *subgraph_mask) {
@@ -2227,7 +2226,7 @@ void call_paths_from_queue(const BOSS &boss,
                     ::call_paths(boss, std::move(next_edge), edges, callback,
                                  split_to_unitigs, kmers_in_single_form,
                                  trim_sentinels, &discovered, &visited,
-                                 async, vector_mutex, progress_bar, subgraph_mask);
+                                 async, visited_mutex, progress_bar, subgraph_mask);
                     return edges;
                 }, Edge(next_edge)));
                 lock.unlock();
@@ -2245,15 +2244,14 @@ void call_paths_from_queue(const BOSS &boss,
             ::call_paths(boss, std::move(next_edge), edges, callback,
                          split_to_unitigs, kmers_in_single_form,
                          trim_sentinels, &discovered, &visited,
-                         async, vector_mutex, progress_bar, subgraph_mask);
+                         async, visited_mutex, progress_bar, subgraph_mask);
         }
     }
 }
 
-template <class EdgeStorage>
 void call_paths(const BOSS &boss,
                 Edge&& starting_edge,
-                EdgeStorage &edges,
+                std::vector<Edge> &edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -2262,10 +2260,10 @@ void call_paths(const BOSS &boss,
                 sdsl::bit_vector *discovered_ptr,
                 sdsl::bit_vector *visited_ptr,
                 bool async,
-                std::mutex &vector_mutex,
+                std::mutex &visited_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask) {
-    assert(discovered_ptr);
+    assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
 
@@ -2325,9 +2323,7 @@ void call_paths(const BOSS &boss,
             // make one traversal step
             edge = boss.fwd(edge, d);
 
-            auto single_outgoing = masked_pick_single_outgoing(boss,
-                                                               &edge,
-                                                               subgraph_mask);
+            auto single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
             // stop the traversal if there are no edges outgoing from the target
             if (!edge)
                 break;
@@ -2371,7 +2367,7 @@ void call_paths(const BOSS &boss,
 
         call_path(boss, callback, path, sequence,
                   kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
-                  async, vector_mutex, progress_bar, subgraph_mask);
+                  async, visited_mutex, progress_bar, subgraph_mask);
 
         if (edges.empty())
             return;
@@ -2400,7 +2396,7 @@ void call_path(const BOSS &boss,
                sdsl::bit_vector &discovered,
                sdsl::bit_vector &visited,
                bool concurrent,
-               std::mutex &vector_mutex,
+               std::mutex &visited_mutex,
                ProgressBar &progress_bar,
                const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
@@ -2438,7 +2434,7 @@ void call_path(const BOSS &boss,
     std::reverse(dual_path.begin(), dual_path.end());
 
     // then lock all threads
-    std::unique_lock<std::mutex> lock(vector_mutex);
+    std::unique_lock<std::mutex> lock(visited_mutex);
 
     // traverse the path with its dual and visit the nodes
     size_t begin = 0;
