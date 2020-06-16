@@ -61,7 +61,6 @@ inline void push_back(Container &kmers, const KMER &kmer) {
 template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
-    using KMER_INT = typename KMER::WordType;
 
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
     logger->trace("Alphabet size is {}", alphabet_size);
@@ -81,10 +80,8 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
         max_it[c - 1] = it[c];
     }
     max_it[alphabet_size - 1] = kmers.size();
-    logger->trace("Computed max_it");
 
     std::vector<KMER> last_dummy(alphabet_size, KMER(0));
-    logger->trace("Declared last dummy");
     size_t size = kmers.size();
     for (size_t i = 1; i < size; ++i) { // starting at 1 to skip the $$...$$ k-mer
         const KMER &kmer = get_first(kmers[i]);
@@ -93,24 +90,18 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 
         KMER dummy_sink = kmer;
         dummy_sink.to_next(k + 1, BOSS::kSentinelCode);
-        logger->trace("Next dummy");
 
         TAlphabet last_char = kmer[0];
-        logger->trace("last char {}", last_char);
         while (it[last_char] < max_it[last_char]
                 && KMER::less(get_first(kmers[it[last_char]]), dummy_sink)) {
             it[last_char]++;
         }
-        logger->trace("First iteration... it last char {}", it[last_char]);
         if (last_dummy[last_char] != dummy_sink
             && (it[last_char] == max_it[last_char]
                 || !KMER::compare_suffix(get_first(kmers[it[last_char]]), dummy_sink))) {
-            logger->trace("Pushing back...");
             push_back(kmers, dummy_sink);
-            logger->trace("Pushed back...");
             last_dummy[last_char] = dummy_sink;
         }
-        std::cout << ".";
     }
 }
 
@@ -211,7 +202,9 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     if (size < 2) {
         return;
     }
-    kmers->reserve(2 * size);
+    // extra 10% for dummy kmers; better to waste some extra space now than to have a
+    // twice larger re-allocation after the reverse complements were added
+    kmers->reserve(2.2 * size);
 
     const T *kmer = kmers->data() + 1;  // skip $$...$
     const T *end = kmers->data() + size;
