@@ -1973,7 +1973,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     // loops that have partially been traversed (only when extracting
     // primary unitigs/contigs).
 
-    auto start_cycle = [&](edge_index edge) {
+    std::mutex mu;
+    auto process_cycle = [&](edge_index edge) {
+        if (fetch_bit(discovered.data(), edge, async))
+            return;
+
         edge_index start = edge;
         std::vector<edge_index> path;
         std::vector<TAlphabet> sequence = get_node_seq(edge);
@@ -1986,16 +1990,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edge = fwd(edge, d);
             masked_pick_single_outgoing(*this, &edge, subgraph_mask);
             assert(edge);
-        } while (edge != start && !fetch_bit(discovered.data(), edge, async));
-
-        if (!path.size())
-            return;
-
-        // TODO: fix for unitigs
-        for (edge_index edge : path) {
-            if (fetch_bit(discovered.data(), edge, async))
-                return;
-        }
+        } while (edge != start);
 
         for (edge_index edge : path) {
             if (!fetch_and_set_bit(discovered.data(), edge, async))
@@ -2008,7 +2003,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     };
 
     if (!async) {
-        call_zeros(discovered, start_cycle, async);
+        call_zeros(discovered, process_cycle);
 
     } else {
         std::vector<edge_index> index_buffer;
@@ -2022,7 +2017,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             }
 
             thread_pool.enqueue([&,index_buffer]() {
-                std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
+                std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
             });
 
             index_buffer.clear();
@@ -2031,7 +2026,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         if (index_buffer.size()) {
             thread_pool.enqueue([&,index_buffer]() {
-                std::for_each(index_buffer.begin(), index_buffer.end(), start_cycle);
+                std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
             });
         }
 
@@ -2179,8 +2174,9 @@ void call_paths(const BOSS &boss,
                     std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                       edges.end())
                 );
+
+                edges.resize(TRAVERSAL_START_BATCH_SIZE / 2);
             }
-            edges.resize(TRAVERSAL_START_BATCH_SIZE / 2);
         }
 
         if (path.empty())
