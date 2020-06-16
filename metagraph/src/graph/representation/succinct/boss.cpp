@@ -1856,7 +1856,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     discovered[0] = true;
 
     if (trim_sentinels) {
-        // TODO: make parallel
+        #pragma omp parallel for num_threads(num_threads) schedule(static, kBlockSize)
         for (uint64_t i = 1; i < W_->size(); ++i) {
             if (get_W(i) == kSentinelCode)
                 discovered[i] = true;
@@ -1864,38 +1864,31 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
 
     sdsl::bit_vector visited = kmers_in_single_form ? discovered : sdsl::bit_vector();
+    std::mutex visited_mutex;
 
     ProgressBar progress_bar(discovered.size() - sdsl::util::cnt_one_bits(discovered),
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    std::mutex visited_mutex;
     ThreadPool thread_pool(num_threads ? num_threads : 1);
-    bool async = num_threads > 1;
+    bool async = true;
 
-    auto enqueue_start = [&](edge_index start, bool force = false) {
-        if (async) {
-            auto start_path = [&,start]() {
-                ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
-                             split_to_unitigs, kmers_in_single_form,
-                             trim_sentinels, thread_pool, &discovered, &visited,
-                             async, visited_mutex, progress_bar, subgraph_mask);
-            };
-
-            // If enqueue_start is being called by another task in the thread
-            // pool, force needs to be true to force a job to be queued when
-            // the the maximum number of tasks is reached. Otherwise, it will
-            // deadlock at that point.
-            if (force) {
-                thread_pool.force_enqueue(start_path);
-            } else {
-                thread_pool.enqueue(start_path);
-            }
-        } else {
+    auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start, bool force = false) {
+        auto start_path = [&,start]() {
             ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
                          split_to_unitigs, kmers_in_single_form,
                          trim_sentinels, thread_pool, &discovered, &visited,
                          async, visited_mutex, progress_bar, subgraph_mask);
+        };
+
+        // If enqueue_start is being called by another task in the thread
+        // pool, force needs to be true to force a job to be queued when
+        // the the maximum number of tasks is reached. Otherwise, it will
+        // deadlock at that point.
+        if (force) {
+            thread_pool.force_enqueue(start_path);
+        } else {
+            thread_pool.enqueue(start_path);
         }
     };
 
@@ -1905,60 +1898,49 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //  .____
     //
     // used to indicate if an edge from a source node has been taken
-    for (edge_index i = succ_last(1); i >= 1; --i) {
-        if ((!subgraph_mask || (*subgraph_mask)[i]) && !fetch_bit(discovered.data(), i, async))
-            enqueue_start(i);
+    if (!subgraph_mask) {
+        for (edge_index i = succ_last(1); i >= 1; --i) {
+            if (!fetch_bit(discovered.data(), i, async))
+                enqueue_start(thread_pool, i);
+        }
+
+    } else {
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (uint64_t begin = 1; begin < discovered.size(); begin += kBlockSize) {
+            begin = pred_last(begin) + 1;
+            // find all edges in a block with no incoming edge
+            // and enqueue a traversal task from each one
+            uint64_t end = pred_last(std::min(begin + kBlockSize,
+                                              discovered.size() - 1)) + 1;
+            edge_index last_i = 0;
+            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
+                i = succ_last(i);
+                if (i == last_i)
+                    return;
+
+                last_i = i;
+
+                // skip |i| if it has at least one incoming edge
+                edge_index j = bwd(i);
+                masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
+                if (j)
+                    return;
+
+                do {
+                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
+                            || !fetch_bit(discovered.data(), i, async))) {
+                        enqueue_start(thread_pool, i, async);
+                    }
+
+                } while (--i > 0 && !get_last(i));
+            });
+        }
     }
 
     thread_pool.join();
 
-    if (subgraph_mask) {
-        // find all edges in a block with no incoming edge and enqueue a traversal
-        // task from each one
-        auto enqueue_starts_in_range = [&](size_t begin, size_t end) {
-            edge_index last_i = 0;
-            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
-                edge_index end = succ_last(i);
-                if (end == last_i)
-                    return;
-
-                edge_index j = bwd(end);
-                bool check = masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
-                if (j)
-                    return;
-
-                last_i = end;
-
-                std::ignore = check;
-                assert(!check);
-
-                do {
-                    if ((*subgraph_mask)[end] && (!kmers_in_single_form
-                            || !fetch_bit(discovered.data(), end, async))) {
-                        enqueue_start(end, async);
-                    }
-
-                } while (--end > 0 && !get_last(end));
-            });
-        };
-
-        // check each block in a separate thread
-        size_t begin = 0;
-        size_t end;
-        while (begin < discovered.size()) {
-            if (begin + kBlockSize < discovered.size()) {
-                end = std::min(succ_last(begin + kBlockSize) + 1, discovered.size());
-            } else {
-                end = discovered.size();
-            }
-            thread_pool.enqueue(enqueue_starts_in_range, begin, end);
-            begin = end;
-        }
-
-        thread_pool.join();
-    }
-
 #ifndef NDEBUG
+    // make sure there are no undiscovered source nodes left
     call_zeros(discovered, [&](edge_index edge) {
         assert(!subgraph_mask || (*subgraph_mask)[edge]);
         edge_index t = bwd(edge);
@@ -1967,86 +1949,53 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }, async);
 #endif
 
-
     // then all forks
     //  ____.____
     //       \___
     //
     call_zeros(discovered, [&](edge_index i) {
-        i = succ_last(i);
+        if (!get_last(i))
+            return;
 
         // no outgoing edges or a unique outgoing edge
         if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
-        if (subgraph_mask) {
-            do {
-                if (!fetch_bit(discovered.data(), i, async)) {
-                    assert((*subgraph_mask)[i]);
-                    assert(get_W(i) != kSentinelCode);
-                    enqueue_start(i);
-                }
-
-            } while (--i > 0 && !get_last(i));
-
-        } else {
-            assert(!get_last(i - 1));
-            edge_index begin = pred_last(i - 1) + 1;
-
-            // check if the fork involved a dummy edge
-            if (get_W(begin) == kSentinelCode)
-                ++begin;
-
-            assert(begin != i);
-
-            for (size_t j = begin; j <= i; ++j) {
-                if (!fetch_bit(discovered.data(), j, async))
-                    enqueue_start(j);
-            }
-        }
-
+        do {
+            if (!fetch_bit(discovered.data(), i, async))
+                enqueue_start(thread_pool, i);
+        } while (--i > 0 && !get_last(i));
     }, async);
 
     thread_pool.join();
 
-    if (subgraph_mask) {
-        // handle all merges
-        //  ____.___
-        //  ___/
-        //
-        call_zeros(discovered, [&](edge_index edge) {
-            edge_index t = bwd(edge);
-            TAlphabet d = get_W(t);
-            assert(d < alph_size);
-            if (!masked_pick_single_incoming(*this, &t, d, subgraph_mask)) {
-                assert(t);
-                enqueue_start(edge);
-            }
-        }, async);
-        thread_pool.join();
-    }
+    // What's left: loops and loops partially traversed
+    // (for extracting primary unitigs/contigs).
 
+    // finish partially traversed loops
     if (kmers_in_single_form) {
         // check for edges whose predecesors have already been traversed
-        // (this should only happen when outputting simplitigs)
-        bool start_found = true;
-        while (start_found) {
+        // (this should only happen when outputting primary unitigs/contigs)
+        bool start_found;
+        do {
             start_found = false;
             call_zeros(discovered, [&](edge_index edge) {
                 edge_index t = bwd(edge);
-                TAlphabet d = get_W(t);
-                assert(d < alph_size);
-                if (!masked_pick_single_incoming(*this, &t, d, subgraph_mask)
-                        || fetch_bit(discovered.data(), t, async)) {
+                masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+                if (fetch_bit(discovered.data(), t, async)) {
                     start_found = true;
                     assert(t);
-                    enqueue_start(edge);
+                    enqueue_start(thread_pool, edge);
                 }
             }, async);
-
             thread_pool.join();
-        }
+        // While finishing the partially traversed loops, other full loops
+        // could be touched as well. Iterate until we have no loops partially
+        // traversed.
+        } while (start_found);
     }
+
+    // Now we only have to traverse loops that have not been traversed
 
 #ifndef NDEBUG
     // make sure all remaining edges have a single incoming edge which has not
@@ -2075,9 +2024,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }, async);
 #endif
 
-    // handle remaining disconnected loops
-    std::vector<edge_index> index_buffer;
-    index_buffer.reserve(TRAVERSAL_START_BATCH_SIZE);
+    // handle remaining isolated loops
 
     auto start_cycle = [&](edge_index edge) {
         edge_index start = edge;
@@ -2090,34 +2037,35 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             sequence.push_back(d);
             path.push_back(edge);
             edge = fwd(edge, d);
-            bool check = masked_pick_single_outgoing(*this,
-                                                     &edge,
-                                                     subgraph_mask);
+            masked_pick_single_outgoing(*this, &edge, subgraph_mask);
             assert(edge);
-            std::ignore = check;
-            assert(check);
         } while (edge != start && !fetch_bit(discovered.data(), edge, async));
 
-        if (edge == start && path.size()) {
-            for (edge_index edge : path) {
-                if (fetch_bit(discovered.data(), edge, async))
-                    return;
-            }
-            for (edge_index edge : path) {
-                set_bit(discovered.data(), edge, async);
-            }
+        if (!path.size())
+            return;
 
-            progress_bar += path.size();
-            call_path(*this, callback, path, sequence,
-                      kmers_in_single_form, trim_sentinels, discovered, visited,
-                      async, visited_mutex, progress_bar, subgraph_mask);
+        // TODO: fix for unitigs
+        for (edge_index edge : path) {
+            if (fetch_bit(discovered.data(), edge, async))
+                return;
         }
+
+        for (edge_index edge : path) {
+            if (!fetch_and_set_bit(discovered.data(), edge, async))
+                ++progress_bar;
+        }
+
+        call_path(*this, callback, path, sequence,
+                  kmers_in_single_form, trim_sentinels, discovered, visited,
+                  async, visited_mutex, progress_bar, subgraph_mask);
     };
 
     if (!async) {
         call_zeros(discovered, start_cycle, async);
 
     } else {
+        std::vector<edge_index> index_buffer;
+
         call_zeros(discovered, [&](edge_index edge) {
             // traverse loops in parallel and only check for unique k-mers at the
             // end of the traversal
@@ -2180,7 +2128,6 @@ void call_paths(const BOSS &boss,
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
-        // store all branch nodes on the way
         std::vector<edge_index> path;
         auto [edge, sequence] = std::move(edges.back());
         edges.pop_back();
