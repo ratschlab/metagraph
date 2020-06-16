@@ -3,6 +3,8 @@
 
 #include <type_traits>
 
+#include <sdsl/int_vector_mapper.hpp>
+
 #include "boss.hpp"
 
 /**
@@ -19,8 +21,11 @@ class BOSS::Chunk {
      * @param k k-mer size
      * @param canonical if true, the BOSS table will be constructed with both a k-mer
      *        and its reverse complement
+     * @param swap_dir directory where to write vector buffers for construction with
+     * streaming
      */
-    Chunk(uint64_t alph_size, size_t k, bool canonical);
+    Chunk(uint64_t alph_size, size_t k, bool canonical,
+          const std::string &swap_dir = "");
 
     /**
      * Creates a BOSS Chunk with k-mer counts. Assumes that k-mers are distinct and
@@ -32,13 +37,16 @@ class BOSS::Chunk {
      * @param kmers_with_counts the k-mers and their counts to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
      * weight counts
+     * @param swap_dir directory where to write vector buffers for construction with
+     * streaming
      */
     template <typename Array>
     Chunk(uint64_t alph_size,
           size_t k,
           bool canonical,
           const Array &kmers_with_counts,
-          uint8_t bits_per_count = 0);
+          uint8_t bits_per_count = 0,
+          const std::string &swap_dir = "");
 
     /**
      * Adds an entry into the BOSS table.
@@ -69,7 +77,8 @@ class BOSS::Chunk {
     static std::pair<BOSS* /* boss */, bool /* is_canonical */>
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                            bool verbose = false,
-                           sdsl::int_vector<> *weights = nullptr);
+                           sdsl::int_vector<> *weights = nullptr,
+                           const std::string &swap_dir = "");
 
     static constexpr auto kFileExtension = ".dbg.chunk";
 
@@ -80,10 +89,11 @@ class BOSS::Chunk {
     size_t k_;
     bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
-    sdsl::int_vector<> W_;
-    sdsl::bit_vector last_;
+    std::string dir_;
+    sdsl::int_vector_mapper<> W_;
+    sdsl::int_vector_mapper<1> last_;
     std::vector<uint64_t> F_;
-    sdsl::int_vector<> weights_;
+    sdsl::int_vector_mapper<> weights_;
     uint64_t size_;
 };
 
