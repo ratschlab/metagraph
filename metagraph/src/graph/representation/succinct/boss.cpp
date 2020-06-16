@@ -1969,62 +1969,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     thread_pool.join();
 
-    // What's left: loops and loops partially traversed
-    // (for extracting primary unitigs/contigs).
-
-    // finish partially traversed loops
-    if (kmers_in_single_form) {
-        // check for edges whose predecesors have already been traversed
-        // (this should only happen when outputting primary unitigs/contigs)
-        bool start_found;
-        do {
-            start_found = false;
-            call_zeros(discovered, [&](edge_index edge) {
-                edge_index t = bwd(edge);
-                masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
-                if (fetch_bit(discovered.data(), t, async)) {
-                    start_found = true;
-                    assert(t);
-                    enqueue_start(thread_pool, edge);
-                }
-            }, async);
-            thread_pool.join();
-        // While finishing the partially traversed loops, other full loops
-        // could be touched as well. Iterate until we have no loops partially
-        // traversed.
-        } while (start_found);
-    }
-
-    // Now we only have to traverse loops that have not been traversed
-
-#ifndef NDEBUG
-    // make sure all remaining edges have a single incoming edge which has not
-    // been traversed
-    // make sure all dummy source edges have been traversed
-    call_zeros(discovered, [&](edge_index edge) {
-        edge_index t = bwd(edge);
-        assert(masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask));
-        assert(t);
-        assert(get_node_seq(t)[0] != kSentinelCode);
-        assert(!fetch_bit(discovered.data(), t, async)
-                    || (get_W(t) == kSentinelCode && !trim_sentinels));
-    }, async);
-
-    // make sure that all edges have a single outgoing edge and that all sink
-    // dummy k-mers have been handled
-    call_zeros(discovered, [&](edge_index edge) {
-        edge_index t = succ_last(edge);
-        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
-        assert(t == edge);
-        assert(get_W(edge) != kSentinelCode);
-        t = fwd(t, get_W(t) % alph_size);
-        assert(masked_pick_single_outgoing(*this, &t, subgraph_mask));
-        assert(t);
-        assert(!fetch_bit(discovered.data(), t, async));
-    }, async);
-#endif
-
-    // handle remaining isolated loops
+    // Now we only have to traverse loops that have not been traversed or
+    // loops that have partially been traversed (only when extracting
+    // primary unitigs/contigs).
 
     auto start_cycle = [&](edge_index edge) {
         edge_index start = edge;
