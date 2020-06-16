@@ -204,7 +204,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     }
     // extra 10% for dummy kmers; better to waste some extra space now than to have a
     // twice larger re-allocation after the reverse complements were added
-    kmers->reserve(2.2 * size);
+    kmers->reserve(2.4 * size);
 
     const T *kmer = kmers->data() + 1;  // skip $$...$
     const T *end = kmers->data() + size;
