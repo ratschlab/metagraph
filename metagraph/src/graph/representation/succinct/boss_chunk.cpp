@@ -131,7 +131,8 @@ const std::string& create_int_vector(const std::string &filename) {
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
                    const std::string &swap_dir)
       : alph_size_(alph_size), k_(k), canonical_(canonical),
-        dir_(utils::create_temp_dir(swap_dir, "graph_chunk")),
+        dir_(swap_dir.size() ? std::filesystem::path(swap_dir)
+                             : utils::create_temp_dir("", "graph_chunk")),
         W_(create_int_vector(dir_ + "/W"), false, true),
         last_(create_int_vector(dir_ + "/last"), false, true),
         weights_(create_int_vector(dir_ + "/weights"), false, true) {
