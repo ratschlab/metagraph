@@ -1973,7 +1973,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     // loops that have partially been traversed (only when extracting
     // primary unitigs/contigs).
 
-    std::mutex mu;
     auto process_cycle = [&](edge_index edge) {
         if (fetch_bit(discovered.data(), edge, async))
             return;
