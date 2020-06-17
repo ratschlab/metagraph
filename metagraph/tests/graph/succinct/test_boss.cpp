@@ -1728,6 +1728,33 @@ TEST(BOSS, CallUnitigsMasked) {
     }
 }
 
+TEST(BOSS, CallUnitigsSingleKmer) {
+    size_t k = 6;
+    std::vector<std::string> sequences {
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAA",
+        "GGGGGGGTGCTCTTTTTTT"
+    };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(std::move(sequences));
+    BOSS graph(&constructor);
+    graph.prune_and_mark_all_dummy_edges(1);
+    std::multiset<std::string> unitigs {
+        "GGGGGGTGCTCTTTTTT",
+        "GGGGGGG",
+        "GAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAAGAGC",
+        "TTTTTTT"
+    };
+    std::mutex seq_mutex;
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs([&](auto&& seq, auto&&) {
+            std::lock_guard<std::mutex> lock(seq_mutex);
+            obs_unitigs.emplace(seq);
+        }, num_threads, 0, true);
+        EXPECT_EQ(unitigs, obs_unitigs);
+    }
+}
+
 template <class Callback>
 void call_edges(const BOSS &boss, Callback callback) {
     boss.call_paths([&](auto&& edges, auto&& path) {

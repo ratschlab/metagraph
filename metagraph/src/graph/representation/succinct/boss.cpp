@@ -1820,19 +1820,24 @@ void call_paths(const BOSS &boss,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
 
-void call_path(const BOSS &boss,
-               const BOSS::Call<std::vector<edge_index>&&,
-                                std::vector<TAlphabet>&&> &callback,
-               std::vector<edge_index> &path,
-               std::vector<TAlphabet> &sequence,
-               bool kmers_in_single_form,
-               bool trim_sentinels,
-               sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
-               bool concurrent,
-               std::mutex &visited_mutex,
-               ProgressBar &progress_bar,
-               const bitmap *subgraph_mask);
+
+using MarkedPath = std::tuple<std::vector<edge_index>,
+                              std::vector<TAlphabet>,
+                              sdsl::bit_vector>;
+
+MarkedPath call_path(const BOSS &boss,
+                     const BOSS::Call<std::vector<edge_index>&&,
+                                      std::vector<TAlphabet>&&> &callback,
+                     std::vector<edge_index> &path,
+                     std::vector<TAlphabet> &sequence,
+                     bool kmers_in_single_form,
+                     bool trim_sentinels,
+                     sdsl::bit_vector &discovered,
+                     sdsl::bit_vector &visited,
+                     bool concurrent,
+                     std::mutex &visited_mutex,
+                     ProgressBar &progress_bar,
+                     const bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1964,9 +1969,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             if (!fetch_bit(discovered.data(), i, async))
                 enqueue_start(thread_pool, i);
         } while (--i > 0 && !get_last(i));
+
+        // sync all traversals to prevent starting from nodes that could potentially
+        // be reached by already running threads
+        if (!split_to_unitigs)
+            thread_pool.join();
     }, async);
 
-    thread_pool.join();
+    if (split_to_unitigs)
+        thread_pool.join();
 
 #ifndef NDEBUG
     // make sure that all forks have been covered
@@ -2208,31 +2219,76 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        call_path(boss, callback, path, sequence,
-                  kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
-                  async, visited_mutex, progress_bar, subgraph_mask);
+        auto marked_dual_path = call_path(
+            boss, callback, path, sequence,
+            kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
+            async, visited_mutex, progress_bar, subgraph_mask
+        );
+
+        if (kmers_in_single_form) {
+            // if the reverse complement of the current path was traversed, then
+            // add the neighbours of those nodes to the edge stack
+            const auto &rev_dual_path = std::get<0>(marked_dual_path);
+            const auto &rev_comp_seq = std::get<1>(marked_dual_path);
+            const auto &rev_dual_discovered = std::get<2>(marked_dual_path);
+            for (size_t i = 0; i < rev_dual_path.size(); ++i) {
+                if (!rev_dual_discovered[i])
+                    continue;
+
+                if (rev_dual_path[i]) {
+                    edge = rev_dual_path[i];
+                    edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
+                    bool is_single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+                    if (!edge)
+                        continue;
+
+                    if (is_single_outgoing && i && rev_dual_discovered[i - 1]) {
+                        // if the only outgoing edge is the one that was previously
+                        // considered, ignore this
+                        assert(edge == rev_dual_path[i - 1]);
+                        continue;
+                    }
+
+                    kmer = std::vector<TAlphabet>(rev_comp_seq.end() - i - boss.get_k(),
+                                                  rev_comp_seq.end() - i);
+                    assert(kmer == boss.get_node_seq(edge));
+
+                    do {
+                        assert((!subgraph_mask || (*subgraph_mask)[edge]
+                            || fetch_bit(discovered.data(), edge, async))
+                                && "k-mers not from subgraph are marked as discovered");
+
+                        if (i && edge == rev_dual_path[i - 1])
+                            continue;
+
+                        if (!fetch_bit(discovered.data(), edge, async))
+                            edges.emplace_back(edge, kmer);
+                    } while (--edge > 0 && !boss.get_last(edge));
+                }
+            }
+        }
     }
 }
 
 // Call the path or all primary paths extracted from it.
 // The primary paths are the longest subsequences without any
 // k-mers with their reverse-complement pairs already traversed.
-void call_path(const BOSS &boss,
-               const BOSS::Call<std::vector<edge_index>&&,
-                                std::vector<TAlphabet>&&> &callback,
-               std::vector<edge_index> &path,
-               std::vector<TAlphabet> &sequence,
-               bool kmers_in_single_form,
-               bool trim_sentinels,
-               sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
-               bool concurrent,
-               std::mutex &visited_mutex,
-               ProgressBar &progress_bar,
-               const bitmap *subgraph_mask) {
+MarkedPath call_path(const BOSS &boss,
+                     const BOSS::Call<std::vector<edge_index>&&,
+                                      std::vector<TAlphabet>&&> &callback,
+                     std::vector<edge_index> &path,
+                     std::vector<TAlphabet> &sequence,
+                     bool kmers_in_single_form,
+                     bool trim_sentinels,
+                     sdsl::bit_vector &discovered,
+                     sdsl::bit_vector &visited,
+                     bool concurrent,
+                     std::mutex &visited_mutex,
+                     ProgressBar &progress_bar,
+                     const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return;
+        return MarkedPath();
     }
 
     // trim trailing sentinels '$'
@@ -2246,7 +2302,7 @@ void call_path(const BOSS &boss,
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
     if (first_valid_it + boss.get_k() >= sequence.end())
-        return;
+        return MarkedPath();
 
     sequence.erase(sequence.begin(), first_valid_it);
     path.erase(path.begin(),
@@ -2254,7 +2310,7 @@ void call_path(const BOSS &boss,
 
     if (!kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return;
+        return MarkedPath();
     }
 
     // get dual path (mapping of the reverse complement sequence)
@@ -2263,6 +2319,7 @@ void call_path(const BOSS &boss,
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
+    sdsl::bit_vector dual_marker(dual_path.size(), false);
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(visited_mutex);
@@ -2287,7 +2344,10 @@ void call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!visited[dual_path[i]]) {
                 visited[dual_path[i]] = true;
-                progress_bar += !fetch_and_set_bit(discovered.data(), dual_path[i], concurrent);
+                if (!fetch_and_set_bit(discovered.data(), dual_path[i], concurrent)) {
+                    dual_marker[i] = true;
+                    ++progress_bar;
+                }
                 continue;
             }
         }
@@ -2314,6 +2374,8 @@ void call_path(const BOSS &boss,
         callback({ path.begin() + begin, path.end() },
                  { sequence.begin() + begin, sequence.end() });
     }
+
+    return std::make_tuple(std::move(dual_path), std::move(rev_comp_seq), std::move(dual_marker));
 }
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
