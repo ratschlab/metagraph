@@ -1955,6 +1955,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(discovered, [&](edge_index i) {
+        // map to succ_last(i) since this edge may not be in subgraph_mask
         i = succ_last(i);
 
         // no outgoing edges or a unique outgoing edge
