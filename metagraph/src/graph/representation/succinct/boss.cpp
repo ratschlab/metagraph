@@ -1954,8 +1954,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     call_zeros(discovered, [&](edge_index i) {
-        if (!get_last(i))
-            return;
+        i = succ_last(i);
 
         // no outgoing edges or a unique outgoing edge
         if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
@@ -1968,6 +1967,34 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }, async);
 
     thread_pool.join();
+
+#ifndef NDEBUG
+    // make sure that all forks have been covered
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index t = succ_last(edge);
+        bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t);
+        assert(check);
+
+        // make sure the next neighbouring edge has also not been discovered
+        t = fwd(t, get_W(t) % alph_size);
+        check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(discovered.data(), t, async));
+    }, async);
+#endif
+
+#ifndef NDEBUG
+    // make sure that all merges have been covered
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index t = bwd(edge);
+        bool check = masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(discovered.data(), t, async));
+    }, async);
+#endif
 
     // Now we only have to traverse loops that have not been traversed or
     // loops that have partially been traversed (only when extracting
