@@ -2288,7 +2288,7 @@ std::vector<Edge> call_path(const BOSS &boss,
     // traverse the path with its dual and visit the nodes
     size_t begin = 0;
     bool last_rev_comp_marked = false;
-    std::vector<Edge> edges;
+    std::vector<std::pair<size_t, bool>> dual_endpoints;
     for (size_t i = 0; i < path.size(); ++i) {
         assert(path[i]);
 
@@ -2310,41 +2310,9 @@ std::vector<Edge> call_path(const BOSS &boss,
                 visited[dual_path[i]] = true;
                 if (!fetch_and_set_bit(discovered.data(), dual_path[i], concurrent)) {
                     ++progress_bar;
-
-                    // if a reverse complement edge was marked, find breakpoints
-                    // from which to continue traversal
-                    edge_index edge = boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size);
-                    bool is_single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
-                    if (!edge) {
-                        last_rev_comp_marked = true;
-                        continue;
-                    }
-
-                    if (is_single_outgoing && i && last_rev_comp_marked) {
-                        // if the only outgoing edge is the one that was previously
-                        // considered, ignore this
-                        assert(edge == dual_path[i - 1]);
-                        continue;
-                    }
-
-                    std::vector<TAlphabet> kmer(rev_comp_seq.end() - i - boss.get_k(),
-                                                rev_comp_seq.end() - i);
-                    assert(kmer == boss.get_node_seq(edge));
-
-                    do {
-                        assert((!subgraph_mask || (*subgraph_mask)[edge]
-                            || fetch_bit(discovered.data(), edge, concurrent))
-                                && "k-mers not from subgraph are marked as discovered");
-
-                        if (i && edge == dual_path[i - 1])
-                            continue;
-
-                        if (!fetch_bit(discovered.data(), edge, concurrent)) {
-                            edges.emplace_back(edge, kmer);
-                        }
-                    } while (--edge > 0 && !boss.get_last(edge));
+                    dual_endpoints.emplace_back(i, last_rev_comp_marked);
+                    last_rev_comp_marked = true;
                 }
-                last_rev_comp_marked = true;
                 continue;
             }
         }
@@ -2371,6 +2339,40 @@ std::vector<Edge> call_path(const BOSS &boss,
     } else if (begin < path.size()) {
         callback({ path.begin() + begin, path.end() },
                  { sequence.begin() + begin, sequence.end() });
+    }
+
+    std::vector<Edge> edges;
+    for (const auto &[i, last_rev_comp_marked] : dual_endpoints) {
+        // if a reverse complement edge was marked, find breakpoints
+        // from which to continue traversal
+        edge_index edge = boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size);
+        bool is_single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+        if (!edge)
+            continue;
+
+        if (is_single_outgoing && i && last_rev_comp_marked) {
+            // if the only outgoing edge is the one that was previously
+            // considered, ignore this
+            assert(edge == dual_path[i - 1]);
+            continue;
+        }
+
+        std::vector<TAlphabet> kmer(rev_comp_seq.end() - i - boss.get_k(),
+                                    rev_comp_seq.end() - i);
+        assert(kmer == boss.get_node_seq(edge));
+
+        do {
+            assert((!subgraph_mask || (*subgraph_mask)[edge]
+                || fetch_bit(discovered.data(), edge, concurrent))
+                    && "k-mers not from subgraph are marked as discovered");
+
+            if (i && edge == dual_path[i - 1])
+                continue;
+
+            if (!fetch_bit(discovered.data(), edge, concurrent)) {
+                edges.emplace_back(edge, kmer);
+            }
+        } while (--edge > 0 && !boss.get_last(edge));
     }
 
     return edges;
