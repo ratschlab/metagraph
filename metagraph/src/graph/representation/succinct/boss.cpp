@@ -1938,17 +1938,20 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
     }
 
-    thread_pool.join();
+    if (!split_to_unitigs) {
+        thread_pool.join();
 
 #ifndef NDEBUG
-    // make sure there are no undiscovered source nodes left
-    call_zeros(discovered, [&](edge_index edge) {
-        assert(!subgraph_mask || (*subgraph_mask)[edge]);
-        edge_index t = bwd(edge);
-        masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
-        assert(t);
-    }, async);
+        // make sure there are no undiscovered source nodes left
+        call_zeros(discovered, [&](edge_index edge) {
+            assert(!subgraph_mask || (*subgraph_mask)[edge]);
+            edge_index t = bwd(edge);
+            masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+            assert(t);
+        }, async);
 #endif
+
+    }
 
     // then all forks
     //  ____.____
