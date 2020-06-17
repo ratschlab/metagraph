@@ -68,7 +68,7 @@ void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *d
         std::vector<uint8_t> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
-                                 KMER_REAL(zeros, k + 1), // the AA...i->A k-mer
+                                 KMER_REAL(zeros, k + 1), // the AA...c->A k-mer
                                  [](const T_REAL &a, const KMER_REAL &b) -> bool {
                                      return get_first(a) < b;
                                  }) - kmers.data();
@@ -327,17 +327,17 @@ std::vector<std::string> split(size_t k,
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
-    size_t num_parent_kmers = 0;
+    size_t num_kmers = 0;
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
         const T_REAL &kmer = *it;
         TAlphabet F = get_first(kmer)[k];
         TAlphabet W = get_first(kmer)[0];
         size_t idx = F * alphabet_size + W;
         sinks[idx].add(reinterpret_cast<const T_INT_REAL &>(kmer));
-        num_parent_kmers++;
+        num_kmers++;
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
-    logger->trace("Total number of non-dummy k-mers: {}", num_parent_kmers);
+    logger->trace("Total number of real k-mers: {}", num_kmers);
     return names;
 }
 
