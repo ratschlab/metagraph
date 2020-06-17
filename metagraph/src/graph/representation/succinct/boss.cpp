@@ -2024,11 +2024,23 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edge = fwd(edge, d);
             masked_pick_single_outgoing(*this, &edge, subgraph_mask);
             assert(edge);
-        } while (edge != start);
+        } while (edge != start && !fetch_bit(discovered.data(), edge, async));
 
-        for (edge_index edge : path) {
-            if (!fetch_and_set_bit(discovered.data(), edge, async))
+        if (edge != start)
+            return;
+
+        {
+            std::unique_lock<std::mutex> lock(visited_mutex);
+            for (edge_index edge : path) {
+                if (fetch_bit(discovered.data(), edge, async))
+                    return;
+            }
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            for (edge_index edge : path) {
+                set_bit(discovered.data(), edge, async, __ATOMIC_RELAXED);
                 ++progress_bar;
+            }
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
         }
 
         call_path(*this, callback, path, sequence,
@@ -2045,10 +2057,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         call_zeros(discovered, [&](edge_index edge) {
             // traverse loops in parallel and only check for unique k-mers at the
             // end of the traversal
-            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE) {
-                index_buffer.push_back(edge);
+            index_buffer.push_back(edge);
+            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE)
                 return;
-            }
 
             thread_pool.enqueue([&,index_buffer]() {
                 std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);

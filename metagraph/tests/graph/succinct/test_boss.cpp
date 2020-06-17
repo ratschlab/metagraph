@@ -1042,6 +1042,27 @@ TEST(BOSS, CallUnitigsTwoLoops) {
     }
 }
 
+TEST(BOSS, CallUnitigsTwoBigLoops) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        size_t k = 10;
+        BOSSConstructor constructor(k);
+        constructor.add_sequences({
+            "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAAGAGC",
+            "GTGAGGCGTCATGCATGCATGCGTAGCTCGATCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        });
+        BOSS graph(&constructor);
+
+        std::atomic<size_t> num_sequences = 0;
+
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+        }, num_threads);
+
+        EXPECT_EQ(2, num_sequences);
+    }
+}
+
 TEST(BOSS, CallPathsFourLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 1; k < 20; ++k) {
