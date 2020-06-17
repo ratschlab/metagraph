@@ -2287,7 +2287,7 @@ std::vector<Edge> call_path(const BOSS &boss,
 
     // traverse the path with its dual and visit the nodes
     size_t begin = 0;
-    bool last_rev_comp_marked = false;
+    bool last_dual_newly_discovered = false;
     std::vector<std::pair<size_t, bool>> dual_endpoints;
     for (size_t i = 0; i < path.size(); ++i) {
         assert(path[i]);
@@ -2300,7 +2300,7 @@ std::vector<Edge> call_path(const BOSS &boss,
             // hence the edge path[i] is going to be traversed first.
             if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
                     || dual_path[i] == path[i]) {
-                last_rev_comp_marked = false;
+                last_dual_newly_discovered = false;
                 continue;
             }
 
@@ -2310,8 +2310,11 @@ std::vector<Edge> call_path(const BOSS &boss,
                 visited[dual_path[i]] = true;
                 if (!fetch_and_set_bit(discovered.data(), dual_path[i], concurrent)) {
                     ++progress_bar;
-                    dual_endpoints.emplace_back(i, last_rev_comp_marked);
-                    last_rev_comp_marked = true;
+
+                    // add this edge to a list to check if traversal should be
+                    // branched from this point
+                    dual_endpoints.emplace_back(i, last_dual_newly_discovered);
+                    last_dual_newly_discovered = true;
                 }
                 continue;
             }
@@ -2327,7 +2330,7 @@ std::vector<Edge> call_path(const BOSS &boss,
         }
 
         begin = i + 1;
-        last_rev_comp_marked = false;
+        last_dual_newly_discovered = false;
     }
 
     lock.unlock();
@@ -2341,16 +2344,16 @@ std::vector<Edge> call_path(const BOSS &boss,
                  { sequence.begin() + begin, sequence.end() });
     }
 
+    // if reverse complement edges have been newly discovered, pick the ones from
+    // which to continue traversing
     std::vector<Edge> edges;
-    for (const auto &[i, last_rev_comp_marked] : dual_endpoints) {
-        // if a reverse complement edge was marked, find breakpoints
-        // from which to continue traversal
+    for (const auto &[i, last_dual_newly_discovered] : dual_endpoints) {
         edge_index edge = boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size);
         bool is_single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
         if (!edge)
             continue;
 
-        if (is_single_outgoing && i && last_rev_comp_marked) {
+        if (is_single_outgoing && i && last_dual_newly_discovered) {
             // if the only outgoing edge is the one that was previously
             // considered, ignore this
             assert(edge == dual_path[i - 1]);
