@@ -316,7 +316,7 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
                                             + std::string(100, 'G'));
 
             for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
+                std::unique_ptr<BOSS::Chunk> graph_data;
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                     std::unique_ptr<IBOSSChunkConstructor> constructor(
@@ -329,12 +329,16 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
                                                     + std::string(100, 'G'));
 
                     auto next_block = constructor->build_chunk();
-                    graph_data.extend(*next_block);
-                    delete next_block;
+                    if (graph_data) {
+                        graph_data->extend(*next_block);
+                        delete next_block;
+                    } else {
+                        graph_data.reset(next_block);
+                    }
                 }
 
                 BOSS boss;
-                graph_data.initialize_boss(&boss);
+                graph_data->initialize_boss(&boss);
 
                 EXPECT_EQ(boss_dynamic, boss);
             }
@@ -354,7 +358,7 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
                                             + std::string(100, 'G'));
 
             for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
+                std::unique_ptr<BOSS::Chunk> graph_data;
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                     std::unique_ptr<IBOSSChunkConstructor> constructor(
@@ -367,12 +371,16 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
                                                     + std::string(100, 'G'));
 
                     auto next_block = constructor->build_chunk();
-                    graph_data.extend(*next_block);
-                    delete next_block;
+                    if (graph_data) {
+                        graph_data->extend(*next_block);
+                        delete next_block;
+                    } else {
+                        graph_data.reset(next_block);
+                    }
                 }
 
                 BOSS boss;
-                graph_data.initialize_boss(&boss);
+                graph_data->initialize_boss(&boss);
 
                 EXPECT_EQ(boss_dynamic, boss);
             }
