@@ -2222,12 +2222,18 @@ void call_paths(const BOSS &boss,
             async, visited_mutex, progress_bar, subgraph_mask
         );
 
-        if (kmers_in_single_form) {
+        if (kmers_in_single_form && rev_comp_breakpoints.size()) {
             // if the reverse complement of the current path was traversed, then
             // add the neighbours of those nodes to the edge stack
-            for (Edge &edge : rev_comp_breakpoints) {
-                edges.emplace_back(std::move(edge));
-            }
+            thread_pool.force_enqueue(
+                [=,&boss,&thread_pool,&visited_mutex,&progress_bar](std::vector<Edge> &edges) {
+                    ::call_paths(boss, std::move(edges), callback,
+                                 split_to_unitigs, kmers_in_single_form,
+                                 trim_sentinels, thread_pool, discovered_ptr, visited_ptr,
+                                 async, visited_mutex, progress_bar, subgraph_mask);
+                },
+                std::move(rev_comp_breakpoints)
+            );
         }
     }
 }
