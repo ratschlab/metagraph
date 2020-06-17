@@ -48,6 +48,8 @@ class BOSS::Chunk {
           uint8_t bits_per_count = 0,
           const std::string &swap_dir = "");
 
+    ~Chunk();
+
     /**
      * Adds an entry into the BOSS table.
      * @param W edge label

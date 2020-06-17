@@ -128,7 +128,7 @@ KmerCollector<KMER, KmerExtractor, Container>
                 std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
-                const std::filesystem::path &tmp_dir,
+                const std::filesystem::path &swap_dir,
                 size_t __attribute__((unused)) max_disk_space)
       : k_(k),
         num_threads_(num_threads),
@@ -143,7 +143,7 @@ KmerCollector<KMER, KmerExtractor, Container>
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
-        tmp_dir_ = utils::create_temp_dir(tmp_dir, "kmers");
+        tmp_dir_ = utils::create_temp_dir(swap_dir, "kmers");
         kmers_ = std::make_unique<Container>(num_threads, buffer_size_,
                                              tmp_dir_, max_disk_space);
     } else {

@@ -26,7 +26,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                size_t num_threads = 1,
                double memory_preallocated = 0,
                mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
-               const std::filesystem::path &tmp_dir = "/tmp/",
+               const std::filesystem::path &swap_dir = "/tmp/",
                size_t max_disk_space_bytes = 1e9);
 
     virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
