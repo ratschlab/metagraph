@@ -2042,22 +2042,22 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             // traverse loops in parallel and only check for unique k-mers at the
             // end of the traversal
             index_buffer.push_back(edge);
-            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE)
-                return;
 
-            thread_pool.enqueue([&,index_buffer]() {
-                std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
-            });
+            if (index_buffer.size() == TRAVERSAL_START_BATCH_SIZE) {
+                thread_pool.enqueue([&,index_buffer]() {
+                    std::for_each(index_buffer.begin(), index_buffer.end(),
+                                  process_cycle);
+                });
 
-            index_buffer.clear();
+                index_buffer.clear();
+            }
 
         }, async);
 
-        if (index_buffer.size()) {
-            thread_pool.enqueue([&,index_buffer]() {
-                std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
-            });
-        }
+        thread_pool.enqueue([&,index_buffer]() {
+            std::for_each(index_buffer.begin(), index_buffer.end(),
+                          process_cycle);
+        });
 
         thread_pool.join();
     }
@@ -2217,18 +2217,12 @@ void call_paths(const BOSS &boss,
             async, visited_mutex, progress_bar, subgraph_mask
         );
 
-        if (kmers_in_single_form && rev_comp_breakpoints.size()) {
-            // if the reverse complement of the current path was traversed, then
-            // add the neighbours of those nodes to the edge stack
-            thread_pool.force_enqueue(
-                [=,&boss,&thread_pool,&visited_mutex,&progress_bar](std::vector<Edge> &edges) {
-                    ::call_paths(boss, std::move(edges), callback,
-                                 split_to_unitigs, kmers_in_single_form,
-                                 trim_sentinels, thread_pool, discovered_ptr, visited_ptr,
-                                 async, visited_mutex, progress_bar, subgraph_mask);
-                },
-                std::move(rev_comp_breakpoints)
-            );
+        if (rev_comp_breakpoints.size()) {
+            assert(kmers_in_single_form);
+            // If the reverse complement of the current path was traversed, then
+            // schedule the neighbours of those nodes for traversal as well.
+            edges.insert(edges.end(), rev_comp_breakpoints.begin(),
+                                      rev_comp_breakpoints.end());
         }
     }
 }
