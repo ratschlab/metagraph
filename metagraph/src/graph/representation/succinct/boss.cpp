@@ -1906,35 +1906,36 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     } else {
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t begin = 1; begin < discovered.size(); begin += kBlockSize) {
-            begin = pred_last(begin) + 1;
-            // find all edges in a block with no incoming edge
-            // and enqueue a traversal task from each one
-            uint64_t end = pred_last(std::min(begin + kBlockSize,
-                                              discovered.size() - 1)) + 1;
-            edge_index last_i = 0;
-            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
-                i = succ_last(i);
-                if (i == last_i)
-                    return;
+            thread_pool.enqueue([&](edge_index begin) {
+                begin = pred_last(begin) + 1;
+                // find all edges in a block with no incoming edge
+                // and enqueue a traversal task from each one
+                uint64_t end = pred_last(std::min(begin + kBlockSize,
+                                                  discovered.size() - 1)) + 1;
+                edge_index last_i = 0;
+                call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
+                    i = succ_last(i);
+                    if (i == last_i)
+                        return;
 
-                last_i = i;
+                    last_i = i;
 
-                // skip |i| if it has at least one incoming edge
-                edge_index j = bwd(i);
-                masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
-                if (j)
-                    return;
+                    // skip |i| if it has at least one incoming edge
+                    edge_index j = bwd(i);
+                    masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
+                    if (j)
+                        return;
 
-                do {
-                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
-                            || !fetch_bit(discovered.data(), i, async))) {
-                        enqueue_start(thread_pool, i, async);
-                    }
+                    do {
+                        if ((*subgraph_mask)[i] && (!kmers_in_single_form
+                                || !fetch_bit(discovered.data(), i, async))) {
+                            enqueue_start(thread_pool, i, async);
+                        }
 
-                } while (--i > 0 && !get_last(i));
-            });
+                    } while (--i > 0 && !get_last(i));
+                });
+            }, begin);
         }
     }
 
