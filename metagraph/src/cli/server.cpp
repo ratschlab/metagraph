@@ -177,7 +177,7 @@ std::string process_align_request(const std::string &received_message,
 
     Config config(config_orig);
 
-    if(json.isMember("max_alternative_alignments")) {
+    if (json.isMember("max_alternative_alignments")) {
         config.alignment_num_alternative_paths = json["max_alternative_alignments"].asInt();
     }
     std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
@@ -193,14 +193,14 @@ std::string process_align_request(const std::string &received_message,
         if (!paths.empty()) {
             Json::Value alignments = Json::Value(Json::arrayValue);
 
-            std::for_each(paths.begin(), paths.end(), [&](Alignment<IDBGAligner::node_index> path){
+            for (const Alignment<IDBGAligner::node_index> &path : paths) {
                 Json::Value a;
                 a[SCORE_JSON_FIELD] = path.get_score();
                 a[SEQUENCE_JSON_FIELD] = path.get_sequence();
                 a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
 
                 alignments.append(a);
-            });
+            };
 
             align_entry[ALIGNMENT_JSON_FIELD] = alignments;
         } else {
@@ -272,9 +272,9 @@ int run_server(Config *config) {
 
     HttpServer initial_server;
     initial_server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
-                                        shared_ptr<HttpServer::Request> ) {
-      response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
-                      "Server is currently initializing, please come back later.");
+                                                shared_ptr<HttpServer::Request> /* request */) {
+        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
+                        "Server is currently initializing, please come back later.");
     };
     initial_server.default_resource["POST"] = initial_server.default_resource["GET"];
 
@@ -319,10 +319,11 @@ int run_server(Config *config) {
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
-                                                    shared_ptr<HttpServer::Request> request) {
-      process_request(response, request, [&](const std::string &) {
-        return process_stats_request(*graph, *anno_graph, config->infbase, config->infbase_annotators.front());
-      });
+                                            shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, [&](const std::string &) {
+            return process_stats_request(*graph, *anno_graph, config->infbase,
+                                         config->infbase_annotators.front());
+        });
     };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
