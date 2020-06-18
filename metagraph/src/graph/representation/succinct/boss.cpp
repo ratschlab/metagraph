@@ -1893,25 +1893,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     ThreadPool thread_pool(num_threads ? num_threads : 1);
     bool async = true;
 
-    auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start, bool force = false) {
-        auto start_path = [&,start]() {
+    auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
+        thread_pool.enqueue([&,start]() {
             ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
                          split_to_unitigs, kmers_in_single_form,
                          trim_sentinels, thread_pool, &discovered, &visited,
                          async, visited_mutex, progress_bar, subgraph_mask);
-        };
-
-        // If enqueue_start is being called by another task in the thread
-        // pool, force needs to be true to force a job to be queued when
-        // the the maximum number of tasks is reached. Otherwise, it will
-        // deadlock at that point.
-        if (force) {
-            thread_pool.force_enqueue(start_path);
-        } else {
-            thread_pool.enqueue(start_path);
-        }
+        });
     };
-
 
     // start traversal from the source dummy edges first
     //
@@ -2177,6 +2166,8 @@ void call_paths(const BOSS &boss,
             // stop the traversal if there are no edges outgoing from the target
             if (out_edges.empty())
                 break;
+
+            edge = out_edges.front();
 
             // continue the non-branching traversal further if
             //      1. there is only one edge outgoing from the target
