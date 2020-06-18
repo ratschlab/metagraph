@@ -1871,8 +1871,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    ThreadPool thread_pool(num_threads ? num_threads : 1);
-    bool async = true;
+    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
+    bool async = num_threads > 1;
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start, bool force = false) {
         auto start_path = [&,start]() {
