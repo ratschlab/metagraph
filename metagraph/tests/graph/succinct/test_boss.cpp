@@ -1044,22 +1044,45 @@ TEST(BOSS, CallUnitigsTwoLoops) {
 
 TEST(BOSS, CallUnitigsTwoBigLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::cout << "nthreads\t" << num_threads << std::endl;
         size_t k = 10;
+        std::vector<std::string> sequences {
+            "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+            "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        };
         BOSSConstructor constructor(k);
-        constructor.add_sequences({
-            "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAAGAGC",
-            "GTGAGGCGTCATGCATGCATGCGTAGCTCGATCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
-        });
+        constructor.add_sequences(std::vector<std::string>(sequences));
         BOSS graph(&constructor);
 
         std::atomic<size_t> num_sequences = 0;
+        std::atomic<size_t> num_kmers = 0;
+        std::mutex sm;
 
         graph.call_unitigs([&](const auto &seq, const auto &path) {
             ASSERT_EQ(path, graph.map_to_edges(seq));
             num_sequences++;
+            num_kmers += path.size();
         }, num_threads);
 
         EXPECT_EQ(2, num_sequences);
+        EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1,
+                  num_kmers);
+
+        num_sequences = 0;
+        num_kmers = 0;
+
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq));
+            num_sequences++;
+            num_kmers += path.size();
+            std::lock_guard<std::mutex> lock(sm);
+            std::cout << "bar\t" << seq << std::endl;
+        }, num_threads, 0, true);
+
+        EXPECT_EQ(2, num_sequences);
+        EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
+                  num_kmers);
+        std::cout << "\n\n";
     }
 }
 
