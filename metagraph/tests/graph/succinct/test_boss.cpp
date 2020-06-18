@@ -1072,11 +1072,9 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         num_kmers = 0;
 
         graph.call_unitigs([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
+            ASSERT_EQ(path, graph.map_to_edges(seq)) << seq;
             num_sequences++;
             num_kmers += path.size();
-            std::lock_guard<std::mutex> lock(sm);
-            std::cout << "bar\t" << seq << std::endl;
         }, num_threads, 0, true);
 
         EXPECT_EQ(2, num_sequences);

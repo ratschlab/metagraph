@@ -1852,7 +1852,8 @@ call_path(const BOSS &boss,
           bool concurrent,
           std::mutex &visited_mutex,
           ProgressBar &progress_bar,
-          const bitmap *subgraph_mask);
+          const bitmap *subgraph_mask,
+          bool is_cycle = false);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -2037,7 +2038,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         call_path(*this, callback, path, sequence,
                   kmers_in_single_form, trim_sentinels, discovered, visited,
-                  async, visited_mutex, progress_bar, subgraph_mask);
+                  async, visited_mutex, progress_bar, subgraph_mask,
+                  true); // process cycle
     };
 
     if (!async) {
@@ -2262,7 +2264,15 @@ call_path(const BOSS &boss,
           bool concurrent,
           std::mutex &visited_mutex,
           ProgressBar &progress_bar,
-          const bitmap *subgraph_mask) {
+          const bitmap *subgraph_mask,
+          bool is_cycle) {
+#ifndef NDEBUG
+    for (edge_index e : path) {
+        assert(e);
+        assert(fetch_bit(discovered.data(), e, concurrent));
+    }
+#endif
+
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
         return {};
@@ -2302,11 +2312,25 @@ call_path(const BOSS &boss,
     // then lock all threads
     std::unique_lock<std::mutex> lock(visited_mutex);
 
+    if (is_cycle) {
+        // rotate the loop so we don't cut it if there is an edge discovered
+        for (size_t i = 0; i < path.size(); ++i) {
+            if (dual_path[i]
+                    && fetch_bit(discovered.data(), dual_path[i], concurrent)) {
+                std::rotate(path.begin(), path.begin() + i, path.end());
+                std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+                // for cycles seq[:k] = seq[-k:]
+                sequence.resize(sequence.size() - boss.get_k());
+                std::rotate(sequence.begin(), sequence.begin() + i , sequence.end());
+                sequence.insert(sequence.end(), sequence.begin(), sequence.begin() + boss.get_k());
+                break;
+            }
+        }
+    }
+
     // traverse the path with its dual and visit the nodes
     size_t begin = 0;
     for (size_t i = 0; i < path.size(); ++i) {
-        assert(path[i]);
-
         if (!visited[path[i]]) {
             visited[path[i]] = true;
 
