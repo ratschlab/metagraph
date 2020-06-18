@@ -1821,6 +1821,8 @@ void call_paths(const BOSS &boss,
                 const bitmap *subgraph_mask);
 
 
+// Returns new edges visited while fetching (only
+// for primary mode |kmers_in_single_form| = true).
 std::vector<Edge> call_path(const BOSS &boss,
                             const BOSS::Call<std::vector<edge_index>&&,
                                              std::vector<TAlphabet>&&> &callback,
@@ -1871,8 +1873,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
-    bool async = num_threads > 1;
+    ThreadPool thread_pool(num_threads ? num_threads : 1);
+    bool async = true;
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start, bool force = false) {
         auto start_path = [&,start]() {
@@ -1906,52 +1908,36 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     } else {
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t begin = 1; begin < discovered.size(); begin += kBlockSize) {
-            thread_pool.enqueue([&](edge_index begin) {
-                begin = pred_last(begin) + 1;
-                // find all edges in a block with no incoming edge
-                // and enqueue a traversal task from each one
-                uint64_t end = pred_last(std::min(begin + kBlockSize,
-                                                  discovered.size() - 1)) + 1;
-                edge_index last_i = 0;
-                call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
-                    i = succ_last(i);
-                    if (i == last_i)
-                        return;
+            begin = pred_last(begin) + 1;
+            // find all edges in a block with no incoming edge
+            // and enqueue a traversal task from each one
+            uint64_t end = pred_last(std::min(begin + kBlockSize,
+                                              discovered.size() - 1)) + 1;
+            edge_index last_i = 0;
+            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
+                i = succ_last(i);
+                if (i == last_i)
+                    return;
 
-                    last_i = i;
+                last_i = i;
 
-                    // skip |i| if it has at least one incoming edge
-                    edge_index j = bwd(i);
-                    masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
-                    if (j)
-                        return;
+                // skip |i| if it has at least one incoming edge
+                edge_index j = bwd(i);
+                masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
+                if (j)
+                    return;
 
-                    do {
-                        if ((*subgraph_mask)[i] && (!kmers_in_single_form
-                                || !fetch_bit(discovered.data(), i, async))) {
-                            enqueue_start(thread_pool, i, async);
-                        }
+                do {
+                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
+                            || !fetch_bit(discovered.data(), i, async))) {
+                        enqueue_start(thread_pool, i);
+                    }
 
-                    } while (--i > 0 && !get_last(i));
-                });
-            }, begin);
+                } while (--i > 0 && !get_last(i));
+            });
         }
-    }
-
-    if (!split_to_unitigs) {
-        thread_pool.join();
-
-#ifndef NDEBUG
-        // make sure there are no undiscovered source nodes left
-        call_zeros(discovered, [&](edge_index edge) {
-            assert(!subgraph_mask || (*subgraph_mask)[edge]);
-            edge_index t = bwd(edge);
-            masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
-            assert(t);
-        }, async);
-#endif
-
     }
 
     // then all forks
@@ -1968,31 +1954,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (!fetch_bit(discovered.data(), i, async)) {
-                if (split_to_unitigs) {
-                    enqueue_start(thread_pool, i);
-                } else {
-                    // To ensure longer sequences when not splitting into unitigs,
-                    // all traversal threads should be joined before starting
-                    // new ones.
-                    // This buffers all edges first and only joins threads if
-                    // new traversals are going to be started.
-                    edge_buffer.push_back(i);
-                }
-            }
+            if (!fetch_bit(discovered.data(), i, async))
+                enqueue_start(thread_pool, i);
+
         } while (--i > 0 && !get_last(i));
-
-        if (edge_buffer.size()) {
-            // sync all traversals to prevent starting from nodes that could
-            // potentially be reached by already running threads
-            thread_pool.join();
-            for (edge_index i : edge_buffer) {
-                if (!fetch_bit(discovered.data(), i, async))
-                    enqueue_start(thread_pool, i);
-            }
-            edge_buffer.clear();
-        }
-
     }, async);
 
     thread_pool.join();
@@ -2012,9 +1977,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         assert(check);
         assert(!fetch_bit(discovered.data(), t, async));
     }, async);
-#endif
 
-#ifndef NDEBUG
     // make sure that all merges have been covered
     call_zeros(discovered, [&](edge_index edge) {
         edge_index t = bwd(edge);
