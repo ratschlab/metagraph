@@ -1820,19 +1820,20 @@ void call_paths(const BOSS &boss,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
 
-void call_path(const BOSS &boss,
-               const BOSS::Call<std::vector<edge_index>&&,
-                                std::vector<TAlphabet>&&> &callback,
-               std::vector<edge_index> &path,
-               std::vector<TAlphabet> &sequence,
-               bool kmers_in_single_form,
-               bool trim_sentinels,
-               sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
-               bool concurrent,
-               std::mutex &visited_mutex,
-               ProgressBar &progress_bar,
-               const bitmap *subgraph_mask);
+
+std::vector<Edge> call_path(const BOSS &boss,
+                            const BOSS::Call<std::vector<edge_index>&&,
+                                             std::vector<TAlphabet>&&> &callback,
+                            std::vector<edge_index> &path,
+                            std::vector<TAlphabet> &sequence,
+                            bool kmers_in_single_form,
+                            bool trim_sentinels,
+                            sdsl::bit_vector &discovered,
+                            sdsl::bit_vector &visited,
+                            bool concurrent,
+                            std::mutex &visited_mutex,
+                            ProgressBar &progress_bar,
+                            const bitmap *subgraph_mask);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1870,8 +1871,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    ThreadPool thread_pool(num_threads ? num_threads : 1);
-    bool async = true;
+    ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
+    bool async = num_threads > 1;
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start, bool force = false) {
         auto start_path = [&,start]() {
@@ -1905,69 +1906,124 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
 
     } else {
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t begin = 1; begin < discovered.size(); begin += kBlockSize) {
-            begin = pred_last(begin) + 1;
-            // find all edges in a block with no incoming edge
-            // and enqueue a traversal task from each one
-            uint64_t end = pred_last(std::min(begin + kBlockSize,
-                                              discovered.size() - 1)) + 1;
-            edge_index last_i = 0;
-            call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
-                i = succ_last(i);
-                if (i == last_i)
-                    return;
+            thread_pool.enqueue([&](edge_index begin) {
+                begin = pred_last(begin) + 1;
+                // find all edges in a block with no incoming edge
+                // and enqueue a traversal task from each one
+                uint64_t end = pred_last(std::min(begin + kBlockSize,
+                                                  discovered.size() - 1)) + 1;
+                edge_index last_i = 0;
+                call_ones(*subgraph_mask, begin, end, [&](edge_index i) {
+                    i = succ_last(i);
+                    if (i == last_i)
+                        return;
 
-                last_i = i;
+                    last_i = i;
 
-                // skip |i| if it has at least one incoming edge
-                edge_index j = bwd(i);
-                masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
-                if (j)
-                    return;
+                    // skip |i| if it has at least one incoming edge
+                    edge_index j = bwd(i);
+                    masked_pick_single_incoming(*this, &j, get_W(j), subgraph_mask);
+                    if (j)
+                        return;
 
-                do {
-                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
-                            || !fetch_bit(discovered.data(), i, async))) {
-                        enqueue_start(thread_pool, i, async);
-                    }
+                    do {
+                        if ((*subgraph_mask)[i] && (!kmers_in_single_form
+                                || !fetch_bit(discovered.data(), i, async))) {
+                            enqueue_start(thread_pool, i, async);
+                        }
 
-                } while (--i > 0 && !get_last(i));
-            });
+                    } while (--i > 0 && !get_last(i));
+                });
+            }, begin);
         }
     }
 
-    thread_pool.join();
+    if (!split_to_unitigs) {
+        thread_pool.join();
 
 #ifndef NDEBUG
-    // make sure there are no undiscovered source nodes left
-    call_zeros(discovered, [&](edge_index edge) {
-        assert(!subgraph_mask || (*subgraph_mask)[edge]);
-        edge_index t = bwd(edge);
-        masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
-        assert(t);
-    }, async);
+        // make sure there are no undiscovered source nodes left
+        call_zeros(discovered, [&](edge_index edge) {
+            assert(!subgraph_mask || (*subgraph_mask)[edge]);
+            edge_index t = bwd(edge);
+            masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+            assert(t);
+        }, async);
 #endif
+
+    }
 
     // then all forks
     //  ____.____
     //       \___
     //
+    std::vector<edge_index> edge_buffer;
     call_zeros(discovered, [&](edge_index i) {
-        if (!get_last(i))
-            return;
+        // map to succ_last(i) since this edge may not be in subgraph_mask
+        i = succ_last(i);
 
         // no outgoing edges or a unique outgoing edge
         if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
             return;
 
         do {
-            if (!fetch_bit(discovered.data(), i, async))
-                enqueue_start(thread_pool, i);
+            if (!fetch_bit(discovered.data(), i, async)) {
+                if (split_to_unitigs) {
+                    enqueue_start(thread_pool, i);
+                } else {
+                    // To ensure longer sequences when not splitting into unitigs,
+                    // all traversal threads should be joined before starting
+                    // new ones.
+                    // This buffers all edges first and only joins threads if
+                    // new traversals are going to be started.
+                    edge_buffer.push_back(i);
+                }
+            }
         } while (--i > 0 && !get_last(i));
+
+        if (edge_buffer.size()) {
+            // sync all traversals to prevent starting from nodes that could
+            // potentially be reached by already running threads
+            thread_pool.join();
+            for (edge_index i : edge_buffer) {
+                if (!fetch_bit(discovered.data(), i, async))
+                    enqueue_start(thread_pool, i);
+            }
+            edge_buffer.clear();
+        }
+
     }, async);
 
     thread_pool.join();
+
+#ifndef NDEBUG
+    // make sure that all forks have been covered
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index t = succ_last(edge);
+        bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t);
+        assert(check);
+
+        // make sure the next neighbouring edge has also not been discovered
+        t = fwd(t, get_W(t) % alph_size);
+        check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(discovered.data(), t, async));
+    }, async);
+#endif
+
+#ifndef NDEBUG
+    // make sure that all merges have been covered
+    call_zeros(discovered, [&](edge_index edge) {
+        edge_index t = bwd(edge);
+        bool check = masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(discovered.data(), t, async));
+    }, async);
+#endif
 
     // Now we only have to traverse loops that have not been traversed or
     // loops that have partially been traversed (only when extracting
@@ -1989,11 +2045,23 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             edge = fwd(edge, d);
             masked_pick_single_outgoing(*this, &edge, subgraph_mask);
             assert(edge);
-        } while (edge != start);
+        } while (edge != start && !fetch_bit(discovered.data(), edge, async));
 
-        for (edge_index edge : path) {
-            if (!fetch_and_set_bit(discovered.data(), edge, async))
+        if (edge != start)
+            return;
+
+        {
+            std::unique_lock<std::mutex> lock(visited_mutex);
+            for (edge_index edge : path) {
+                if (fetch_bit(discovered.data(), edge, async))
+                    return;
+            }
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+            for (edge_index edge : path) {
+                set_bit(discovered.data(), edge, async, __ATOMIC_RELAXED);
                 ++progress_bar;
+            }
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
         }
 
         call_path(*this, callback, path, sequence,
@@ -2010,10 +2078,9 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         call_zeros(discovered, [&](edge_index edge) {
             // traverse loops in parallel and only check for unique k-mers at the
             // end of the traversal
-            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE) {
-                index_buffer.push_back(edge);
+            index_buffer.push_back(edge);
+            if (index_buffer.size() < TRAVERSAL_START_BATCH_SIZE)
                 return;
-            }
 
             thread_pool.enqueue([&,index_buffer]() {
                 std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
@@ -2181,31 +2248,47 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        call_path(boss, callback, path, sequence,
-                  kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
-                  async, visited_mutex, progress_bar, subgraph_mask);
+        auto rev_comp_breakpoints = call_path(
+            boss, callback, path, sequence,
+            kmers_in_single_form, trim_sentinels, discovered, *visited_ptr,
+            async, visited_mutex, progress_bar, subgraph_mask
+        );
+
+        if (kmers_in_single_form && rev_comp_breakpoints.size()) {
+            // if the reverse complement of the current path was traversed, then
+            // add the neighbours of those nodes to the edge stack
+            thread_pool.force_enqueue(
+                [=,&boss,&thread_pool,&visited_mutex,&progress_bar](std::vector<Edge> &edges) {
+                    ::call_paths(boss, std::move(edges), callback,
+                                 split_to_unitigs, kmers_in_single_form,
+                                 trim_sentinels, thread_pool, discovered_ptr, visited_ptr,
+                                 async, visited_mutex, progress_bar, subgraph_mask);
+                },
+                std::move(rev_comp_breakpoints)
+            );
+        }
     }
 }
 
 // Call the path or all primary paths extracted from it.
 // The primary paths are the longest subsequences without any
 // k-mers with their reverse-complement pairs already traversed.
-void call_path(const BOSS &boss,
-               const BOSS::Call<std::vector<edge_index>&&,
-                                std::vector<TAlphabet>&&> &callback,
-               std::vector<edge_index> &path,
-               std::vector<TAlphabet> &sequence,
-               bool kmers_in_single_form,
-               bool trim_sentinels,
-               sdsl::bit_vector &discovered,
-               sdsl::bit_vector &visited,
-               bool concurrent,
-               std::mutex &visited_mutex,
-               ProgressBar &progress_bar,
-               const bitmap *subgraph_mask) {
+std::vector<Edge> call_path(const BOSS &boss,
+                            const BOSS::Call<std::vector<edge_index>&&,
+                                             std::vector<TAlphabet>&&> &callback,
+                            std::vector<edge_index> &path,
+                            std::vector<TAlphabet> &sequence,
+                            bool kmers_in_single_form,
+                            bool trim_sentinels,
+                            sdsl::bit_vector &discovered,
+                            sdsl::bit_vector &visited,
+                            bool concurrent,
+                            std::mutex &visited_mutex,
+                            ProgressBar &progress_bar,
+                            const bitmap *subgraph_mask) {
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return;
+        return {};
     }
 
     // trim trailing sentinels '$'
@@ -2219,7 +2302,7 @@ void call_path(const BOSS &boss,
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
     if (first_valid_it + boss.get_k() >= sequence.end())
-        return;
+        return {};
 
     sequence.erase(sequence.begin(), first_valid_it);
     path.erase(path.begin(),
@@ -2227,7 +2310,7 @@ void call_path(const BOSS &boss,
 
     if (!kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return;
+        return {};
     }
 
     // get dual path (mapping of the reverse complement sequence)
@@ -2242,6 +2325,8 @@ void call_path(const BOSS &boss,
 
     // traverse the path with its dual and visit the nodes
     size_t begin = 0;
+    bool last_dual_newly_discovered = false;
+    std::vector<std::pair<size_t, bool>> dual_endpoints;
     for (size_t i = 0; i < path.size(); ++i) {
         assert(path[i]);
 
@@ -2253,6 +2338,7 @@ void call_path(const BOSS &boss,
             // hence the edge path[i] is going to be traversed first.
             if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
                     || dual_path[i] == path[i]) {
+                last_dual_newly_discovered = false;
                 continue;
             }
 
@@ -2260,7 +2346,14 @@ void call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!visited[dual_path[i]]) {
                 visited[dual_path[i]] = true;
-                progress_bar += !fetch_and_set_bit(discovered.data(), dual_path[i], concurrent);
+                if (!fetch_and_set_bit(discovered.data(), dual_path[i], concurrent)) {
+                    ++progress_bar;
+
+                    // add this edge to a list to check if traversal should be
+                    // branched from this point
+                    dual_endpoints.emplace_back(i, last_dual_newly_discovered);
+                    last_dual_newly_discovered = true;
+                }
                 continue;
             }
         }
@@ -2275,6 +2368,7 @@ void call_path(const BOSS &boss,
         }
 
         begin = i + 1;
+        last_dual_newly_discovered = false;
     }
 
     lock.unlock();
@@ -2287,6 +2381,42 @@ void call_path(const BOSS &boss,
         callback({ path.begin() + begin, path.end() },
                  { sequence.begin() + begin, sequence.end() });
     }
+
+    // if reverse complement edges have been newly discovered, pick the ones from
+    // which to continue traversing
+    std::vector<Edge> edges;
+    for (const auto &[i, last_dual_newly_discovered] : dual_endpoints) {
+        edge_index edge = boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size);
+        bool is_single_outgoing = masked_pick_single_outgoing(boss, &edge, subgraph_mask);
+        if (!edge)
+            continue;
+
+        if (is_single_outgoing && i && last_dual_newly_discovered) {
+            // if the only outgoing edge is the one that was previously
+            // considered, ignore this
+            assert(edge == dual_path[i - 1]);
+            continue;
+        }
+
+        std::vector<TAlphabet> kmer(rev_comp_seq.end() - i - boss.get_k(),
+                                    rev_comp_seq.end() - i);
+        assert(kmer == boss.get_node_seq(edge));
+
+        do {
+            assert((!subgraph_mask || (*subgraph_mask)[edge]
+                || fetch_bit(discovered.data(), edge, concurrent))
+                    && "k-mers not from subgraph are marked as discovered");
+
+            if (i && edge == dual_path[i - 1])
+                continue;
+
+            if (!fetch_bit(discovered.data(), edge, concurrent)) {
+                edges.emplace_back(edge, kmer);
+            }
+        } while (--edge > 0 && !boss.get_last(edge));
+    }
+
+    return edges;
 }
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
