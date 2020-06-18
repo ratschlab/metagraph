@@ -1958,6 +1958,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //  ____.____
     //       \___
     //
+    std::vector<edge_index> edge_buffer;
     call_zeros(discovered, [&](edge_index i) {
         // map to succ_last(i) since this edge may not be in subgraph_mask
         i = succ_last(i);
@@ -1967,18 +1968,33 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             return;
 
         do {
-            if (!fetch_bit(discovered.data(), i, async))
-                enqueue_start(thread_pool, i);
+            if (!fetch_bit(discovered.data(), i, async)) {
+                if (split_to_unitigs) {
+                    enqueue_start(thread_pool, i);
+                } else {
+                    // To ensure longer sequences when not splitting into unitigs,
+                    // all traversal threads should be joined before starting
+                    // new ones.
+                    // This buffers all edges first and only joins threads if
+                    // new traversals are going to be started.
+                    edge_buffer.push_back(i);
+                }
+            }
         } while (--i > 0 && !get_last(i));
 
-        // sync all traversals to prevent starting from nodes that could potentially
-        // be reached by already running threads
-        if (!split_to_unitigs)
+        if (edge_buffer.size()) {
+            // sync all traversals to prevent starting from nodes that could
+            // potentially be reached by already running threads
             thread_pool.join();
+            for (edge_index i : edge_buffer) {
+                enqueue_start(thread_pool, i);
+            }
+            edge_buffer.clear();
+        }
+
     }, async);
 
-    if (split_to_unitigs)
-        thread_pool.join();
+    thread_pool.join();
 
 #ifndef NDEBUG
     // make sure that all forks have been covered
