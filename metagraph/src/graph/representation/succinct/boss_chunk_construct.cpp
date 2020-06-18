@@ -198,7 +198,6 @@ reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complemen
 template <typename T>
 void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     logger->trace("Adding reverse complements...");
-    // reserve space for the reverse complements and the ~10% dummy source/sink k-mers
     size_t size = kmers->size();
     if (size < 2) {
         return;

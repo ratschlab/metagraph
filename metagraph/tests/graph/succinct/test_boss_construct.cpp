@@ -14,6 +14,7 @@
 #include "common/sorted_set.hpp"
 #include "common/sorted_multiset.hpp"
 #include "common/sorted_multiset_disk.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
@@ -295,7 +296,7 @@ TYPED_TEST(BOSSConstruct, ConstructionLong) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionShort) {
-    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK*/ }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);
@@ -350,15 +351,15 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
 TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
     const uint64_t num_threads = 4;
 
-    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK */}) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; k += 6) {
             BOSS boss_dynamic(k);
             boss_dynamic.add_sequence(std::string(100, 'A'));
             boss_dynamic.add_sequence(std::string(100, 'C'));
             boss_dynamic.add_sequence(std::string(100, 'T') + "A"
                                             + std::string(100, 'G'));
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
 
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
                 BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
@@ -612,7 +613,6 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
 #endif
 }
 
-#include "common/utils/template_utils.hpp"
 using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
 template <typename T>
