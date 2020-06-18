@@ -244,9 +244,7 @@ std::string process_stats_request(const DeBruijnGraph &graph, const AnnotatedDBG
     annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
     annotation_stats["labels"] = (uint64_t) annotation.num_labels();
     annotation_stats["objects"] = (uint64_t) annotation.num_objects();
-    annotation_stats["density"] = static_cast<double>(annotation.num_relations())
-                                  / annotation.num_objects()
-                                  / annotation.num_labels();
+    annotation_stats["relations"] = (uint64_t) annotation.num_relations();
 
     root["annotation"] = annotation_stats;
 
