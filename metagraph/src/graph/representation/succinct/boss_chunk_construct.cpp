@@ -175,16 +175,16 @@ reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complemen
     using INT = typename KMER::WordType;
     INT kmer = utils::get_first(v).data();
     constexpr uint64_t mask = KMER::kFirstCharMask;
-    auto cc = [&complement_code](uint64_t v) { return complement_code[v]; };
-    INT last_two_chars = cc(kmer & mask);
+    INT last_two_chars = complement_code[static_cast<TAlphabet>(kmer & mask)];
     kmer >>= KMER::kBitsPerChar;
-    last_two_chars = (last_two_chars << KMER::kBitsPerChar) | cc(kmer & mask);
+    last_two_chars = (last_two_chars << KMER::kBitsPerChar)
+            | complement_code[static_cast<TAlphabet>(kmer & mask)];
     kmer >>= KMER::kBitsPerChar;
     INT result = 0;
     for (uint32_t i = 2; i < k; ++i) {
         TAlphabet next_char = kmer & mask;
         assert(next_char >= 0 && next_char < complement_code.size());
-        result = (result << KMER::kBitsPerChar) | cc(next_char);
+        result = (result << KMER::kBitsPerChar) | complement_code[next_char];
         kmer >>= KMER::kBitsPerChar;
     }
     result = (result << 2 * KMER::kBitsPerChar) | last_two_chars;
