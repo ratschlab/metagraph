@@ -1987,7 +1987,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             // potentially be reached by already running threads
             thread_pool.join();
             for (edge_index i : edge_buffer) {
-                enqueue_start(thread_pool, i);
+                if (!fetch_bit(discovered.data(), i, async))
+                    enqueue_start(thread_pool, i);
             }
             edge_buffer.clear();
         }
