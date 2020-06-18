@@ -40,22 +40,14 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     KmerExtractor kmer_extractor;
 
     generate_reads([&](const std::string &read) {
-        size_t old_size = buffer.size();
         kmer_extractor.sequence_to_kmers(read, k, suffix,
-                                         reinterpret_cast<Vector<KMER> *>(&buffer));
-        if (both_strands_mode) {
+                                         reinterpret_cast<Vector<KMER> *>(&buffer),
+                                         canonical_only);
+        if (both_strands_mode && !canonical_only) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
-            size_t size = buffer.size();
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix,
                                              reinterpret_cast<Vector<KMER> *>(&buffer));
-            assert(size - old_size == buffer.size() - size);
-            if (canonical_only) { // keep only the canonical k-mers
-                for(uint32_t i = old_size; i < size; ++i) {
-                    buffer[i] = std::min(buffer[i], buffer[buffer.size() + old_size - i - 1]);
-                }
-                buffer.resize(size);
-            }
         }
 
         if (buffer.size() > 0.9 * kBufferSize) {
@@ -97,19 +89,11 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     generate_reads([&](const std::string &read, uint64_t count) {
         count = std::min(count, kmers->max_count());
 
-        kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer);
-        if (both_strands_mode) {
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer, canonical_only);
+        if (both_strands_mode && !canonical_only) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
-            size_t size = buffer.size();
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &buffer);
-            assert(2 * size == buffer.size());
-            if (canonical_only) { // keep only the canonical k-mers
-                for(uint32_t i = 0; i < size; ++i) {
-                    buffer[i] = std::min(buffer[i], buffer[buffer.size() - i - 1]);
-                }
-                buffer.resize(size);
-            }
         }
 
         for (const KMER &kmer : buffer) {

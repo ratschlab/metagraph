@@ -843,7 +843,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           memory_preallocated,
                           tmp_dir,
                           max_disk_space,
-                          filter_suffix.empty() /* keep only canonical k-mers */),
+                          both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
             && (!utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>
