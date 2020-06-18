@@ -1766,7 +1766,7 @@ inline void masked_call_outgoing(const BOSS &boss,
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
     do {
-        if ((*subgraph_mask)[i])
+        if (!subgraph_mask || (*subgraph_mask)[i])
             callback(i);
     } while (--i > 0 && !boss.get_last(i));
 }
