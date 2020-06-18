@@ -173,6 +173,8 @@ class KmerExtractorT {
 
     std::vector<std::string> generate_suffixes(size_t len) const;
 
+    const std::vector<TAlphabet>& complement_code() const;
+
   private:
     const TAlphabet *char_to_code_;
     const std::vector<TAlphabet> complement_code_;
