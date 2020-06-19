@@ -2016,12 +2016,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(edge);
         } while (edge != start);
 
-        // TODO: shorten this comment
         // If |kmers_in_single_form| = true, the edge mask |fetched| is
-        // initialized and this, we can invoke call_path for the same loop
-        // from multiple threads and delegate the rest to it.
-        // Otherwise we can't call the same loop multiple times, so we check
-        // its representative node and pick the first one.
+        // used in call_path to prevent calling k-mers multiple times.
+        // Otherwise, that check has to be done here, so we check the cycle's
+        // representative node to see if the cycle has been called already.
         if (!kmers_in_single_form) {
             edge_index rep = *std::min_element(path.begin(), path.end());
             if (fetch_and_set_bit(visited.data(), rep, async))
