@@ -51,42 +51,36 @@ void SortedMultiset<T, C, Container>::shrink_data() {
                   data_.size(), (data_.size() * sizeof(value_type) >> 20));
 }
 
-template <class Container>
-void sort_and_merge(size_t num_threads, Container *data) {
-    if (data->empty())
+template <typename T, typename C, class Container>
+void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
+    if (!data_.size())
         return;
 
-    ips4o::parallel::sort(data->begin(), data->end(),
-        [](const auto &first, const auto &second) {
+    ips4o::parallel::sort(data_.begin(), data_.end(),
+        [](const value_type &first, const value_type &second) {
             return first.first < second.first;
         },
-        num_threads);
+        num_threads_
+    );
 
-    auto first = data->begin();
-    auto last = data->end();
+    auto first = data_.begin();
+    auto last = data_.end();
 
     auto dest = first;
 
-    using T = typename Container::value_type;
-    constexpr auto max = std::numeric_limits<typename T::second_type>::max();
     while (++first != last) {
         if (first->first == dest->first) {
-            if (first->second < max - dest->second) {
+            if (first->second < max_count() - dest->second) {
                 dest->second += first->second;
             } else {
-                dest->second = max;
+                dest->second = max_count();
             }
         } else {
-            *++dest = std::move(*first);
+            *++dest = std::move(*first);;
         }
     }
 
-    data->erase(++dest, data->end());
-}
-
-template <typename T, typename C, class Container>
-void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
-  sort_and_merge(num_threads_, &data_);
+    data_.erase(++dest, data_.end());
 }
 
 template <typename T, typename C, class Container>
@@ -114,14 +108,5 @@ template class SortedMultiset<uint64_t, uint32_t>;
 template class SortedMultiset<sdsl::uint128_t, uint32_t>;
 template class SortedMultiset<sdsl::uint256_t, uint32_t>;
 
-template void sort_and_merge(size_t, Vector<std::pair<uint64_t, uint8_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint128_t, uint8_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint256_t, uint8_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<uint64_t, uint16_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint128_t, uint16_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint256_t, uint16_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<uint64_t, uint32_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint128_t, uint32_t>> *);
-template void sort_and_merge(size_t, Vector<std::pair<sdsl::uint256_t, uint32_t>> *);
 } // namespace common
 } // namespace mtg

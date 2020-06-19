@@ -44,9 +44,6 @@ class CollectKmers : public ::testing::Test { };
 template <typename Kmer>
 class CountKmers : public ::testing::Test { };
 
-template <typename Kmer>
-class ReverseComplement : public ::testing::Test { };
-
 template <typename KMER, bool Weighted = false>
 class BOSSConfigurationType {
  public:
@@ -295,7 +292,7 @@ TYPED_TEST(BOSSConstruct, ConstructionLong) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionShort) {
-    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK*/ }) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
             BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
                                         20'000, container);
@@ -350,15 +347,15 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
 TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
     const uint64_t num_threads = 4;
 
-    for (auto container : { kmer::ContainerType::VECTOR/*, kmer::ContainerType::VECTOR_DISK */}) {
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; k += 6) {
             BOSS boss_dynamic(k);
             boss_dynamic.add_sequence(std::string(100, 'A'));
             boss_dynamic.add_sequence(std::string(100, 'C'));
             boss_dynamic.add_sequence(std::string(100, 'T') + "A"
                                             + std::string(100, 'G'));
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
 
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
                 BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
@@ -398,7 +395,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix
+        k, false, kmers, suffix, false
     );
     delete reads;
 }
@@ -493,7 +490,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                 callback(read, 1);
             }
         },
-        k, false, kmers, suffix
+        k, false, kmers, suffix, false
     );
     delete reads;
 }
@@ -612,60 +609,4 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
 #endif
 }
 
-#include "common/utils/template_utils.hpp"
-using TAlphabet = KmerExtractorBOSS::TAlphabet;
-
-template <typename T>
-inline T
-reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complement_code) {
-    using KMER = utils::get_first_type_t<T>;
-    using INT = typename KMER::WordType;
-    INT kmer = utils::get_first(v).data();
-    constexpr uint64_t mask = KMER::kFirstCharMask;
-    auto cc = [&complement_code](uint64_t v) { return complement_code[v]; };
-    INT last_two_chars = cc(kmer & mask);
-    kmer >>= KMER::kBitsPerChar;
-    last_two_chars = (last_two_chars << KMER::kBitsPerChar) | cc(kmer & mask);
-    kmer >>= KMER::kBitsPerChar;
-    INT result = 0;
-    for (uint32_t i = 2; i < k; ++i) {
-        TAlphabet next_char = kmer & mask;
-        assert(next_char >= 0 && next_char < complement_code.size());
-        result = (result << KMER::kBitsPerChar) | cc(next_char);
-        kmer >>= KMER::kBitsPerChar;
-    }
-    result = (result << 2 * KMER::kBitsPerChar) | last_two_chars;
-    if constexpr (utils::is_pair_v<T>) {
-        return T(KMER(result), v.second);
-    } else {
-        return KMER(result);
-    }
-}
-
-TYPED_TEST(ReverseComplement, Palindrome) {
-    std::vector<uint8_t> seq = { 1, 2, 3, 4 };
-    TypeParam kmer_boss(seq); // ACGT
-    EXPECT_EQ(kmer_boss,
-              reverse_complement(4, kmer_boss, KmerExtractorBOSS::kComplementCode));
-}
-
-TYPED_TEST(ReverseComplement, Random) {
-    std::mt19937 gen(12345);
-    std::uniform_int_distribution<uint64_t> dis(0,
-                                                KmerExtractorBOSS::kComplementCode.size() - 1);
-    for (uint32_t k = 2; k < sizeof(TypeParam) * 8 / TypeParam::kBitsPerChar; ++k) {
-        for (uint32_t trial = 0; trial < 10; ++trial) {
-            std::vector<uint8_t> kmer(k);
-            std::vector<uint8_t> complement_kmer(k);
-            for (uint32_t i = 0; i < k; ++i) {
-                kmer[i] = dis(gen);
-                complement_kmer[k - i - 1] = KmerExtractorBOSS::kComplementCode[kmer[i]];
-            }
-            TypeParam kmer_boss(kmer);
-            TypeParam expected(complement_kmer);
-            EXPECT_EQ(expected,
-                      reverse_complement(k, kmer_boss, KmerExtractorBOSS::kComplementCode));
-        }
-    }
-}
 }  // namespace
