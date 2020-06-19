@@ -74,9 +74,9 @@ void ThreadPool::initialize(size_t num_workers) {
 
                     task = std::move(this->tasks.front());
                     this->tasks.pop();
-                    full_condition.notify_one();
                 }
 
+                full_condition.notify_one();
                 task();
             }
         });

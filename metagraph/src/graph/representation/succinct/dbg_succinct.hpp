@@ -59,9 +59,11 @@ class DBGSuccinct : public DeBruijnGraph {
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
     virtual void call_sequences(const CallPath &callback,
+                                size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const override final;
 
     virtual void call_unitigs(const CallPath &callback,
+                              size_t num_threads = 1,
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override final;
 
