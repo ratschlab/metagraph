@@ -2233,7 +2233,9 @@ void call_paths(const BOSS &boss,
 
         assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
 
-        for (const auto &[next_edge, kmer] : rev_comp_breakpoints) {
+        for (const auto &[edge, kmer] : rev_comp_breakpoints) {
+            edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
+            assert(boss.get_node_seq(next_edge) == kmer);
             masked_call_outgoing(boss, next_edge, subgraph_mask,
                                  [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async)) {
@@ -2305,7 +2307,6 @@ call_path(const BOSS &boss,
     std::reverse(dual_path.begin(), dual_path.end());
 
     std::vector<Edge> dual_endpoints;
-    dual_endpoints.reserve(path.size());
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
@@ -2353,13 +2354,10 @@ call_path(const BOSS &boss,
                     // add this edge to a list to check if traversal should be
                     // branched from this point
                     dual_endpoints.emplace_back(Edge {
-                        boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size),
+                        dual_path[i],
                         std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
                                                rev_comp_seq.end() - i)
                     });
-
-                    assert(boss.get_node_seq(dual_endpoints.back().first)
-                        == dual_endpoints.back().second);
                 }
                 continue;
             }
