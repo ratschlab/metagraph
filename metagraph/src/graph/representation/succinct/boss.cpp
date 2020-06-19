@@ -2357,6 +2357,9 @@ call_path(const BOSS &boss,
                         std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
                                                rev_comp_seq.end() - i)
                     });
+
+                    assert(boss.get_node_seq(dual_endpoints.back().first)
+                        == dual_endpoints.back().second);
                 }
                 continue;
             }
