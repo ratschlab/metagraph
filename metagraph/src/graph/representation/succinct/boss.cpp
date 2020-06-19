@@ -1839,6 +1839,10 @@ void call_paths(const BOSS &boss,
 
 // Returns new edges visited while fetching the path (only returns
 // a non-empty set for primary mode |kmers_in_single_form| = true).
+// Since fwd will be called on all edges in the returned vector, the corresponding
+// node sequences have been precomputed in these Edges
+// e.g.,
+// edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
 std::vector<Edge>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
@@ -2236,7 +2240,10 @@ void call_paths(const BOSS &boss,
 
         for (const auto &[edge, kmer] : rev_comp_breakpoints) {
             edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
+
+            // the sequence of next_edge was already computed in call_path
             assert(boss.get_node_seq(next_edge) == kmer);
+
             masked_call_outgoing(boss, next_edge, subgraph_mask,
                                  [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async)) {
@@ -2247,10 +2254,12 @@ void call_paths(const BOSS &boss,
     }
 }
 
-// Call the path or all primary paths extracted from it.
-// The primary paths are the longest subsequences without any
-// k-mers with their reverse-complement pairs already traversed.
-// Returns ... TODO
+// Returns new edges visited while fetching the path (only returns
+// a non-empty set for primary mode |kmers_in_single_form| = true).
+// Since fwd will be called on all edges in the returned vector, the corresponding
+// node sequences have been precomputed in these Edges
+// e.g.,
+// edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
 std::vector<Edge>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
@@ -2353,8 +2362,10 @@ call_path(const BOSS &boss,
                 if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
                     ++progress_bar;
 
-                    // add this edge to a list to check if traversal should be
-                    // branched from this point
+                    // Add this edge to a list to check if traversal should be
+                    // branched from this point.
+                    // boss.fwd is not called on dual_path[i] to reduce the amount
+                    // of time spend in the critical section
                     dual_endpoints.emplace_back(Edge {
                         dual_path[i],
                         std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
