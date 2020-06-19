@@ -392,7 +392,7 @@ generate_dummy_1_kmers(size_t k,
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
     kmer_delta &= ~KMER_INT(((1ull << L) - 1) << L);
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
 
         // stream k-mers of pattern ***F*
@@ -434,7 +434,7 @@ generate_dummy_1_kmers(size_t k,
                 }
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[F].add(transform<KMER>(dummy_source, k + 1) + kmer_delta);
+            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
             num_source++;
         }
         // handle leftover sink_gen_it
