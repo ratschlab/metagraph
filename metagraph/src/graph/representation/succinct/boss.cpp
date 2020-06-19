@@ -1839,7 +1839,7 @@ void call_paths(const BOSS &boss,
 
 // Returns new edges visited while fetching the path (only returns
 // a non-empty set for primary mode |kmers_in_single_form| = true).
-std::vector<edge_index>
+std::vector<Edge>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -2231,11 +2231,9 @@ void call_paths(const BOSS &boss,
             async, fetched_mutex, progress_bar, subgraph_mask
         );
 
-        for (edge_index e : rev_comp_breakpoints) {
-            edge_index next_edge = boss.fwd(e, boss.get_W(e) % boss.alph_size);
+        assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
 
-            std::vector<TAlphabet> kmer = boss.get_node_seq(next_edge);
-
+        for (const auto &[next_edge, kmer] : rev_comp_breakpoints) {
             masked_call_outgoing(boss, next_edge, subgraph_mask,
                                  [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async)) {
@@ -2250,7 +2248,7 @@ void call_paths(const BOSS &boss,
 // The primary paths are the longest subsequences without any
 // k-mers with their reverse-complement pairs already traversed.
 // Returns ... TODO
-std::vector<edge_index>
+std::vector<Edge>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -2306,7 +2304,7 @@ call_path(const BOSS &boss,
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
 
-    std::vector<edge_index> dual_endpoints;
+    std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
     // then lock all threads
@@ -2319,10 +2317,13 @@ call_path(const BOSS &boss,
                     && fetch_bit(visited.data(), dual_path[i], concurrent)) {
                 std::rotate(path.begin(), path.begin() + i, path.end());
                 std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+
                 // for cycles seq[:k] = seq[-k:]
-                sequence.resize(sequence.size() - boss.get_k());
-                std::rotate(sequence.begin(), sequence.begin() + i , sequence.end());
-                sequence.insert(sequence.end(), sequence.begin(), sequence.begin() + boss.get_k());
+                std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
+                std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
+
+                std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+                std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
                 break;
             }
         }
@@ -2351,7 +2352,11 @@ call_path(const BOSS &boss,
 
                     // add this edge to a list to check if traversal should be
                     // branched from this point
-                    dual_endpoints.emplace_back(dual_path[i]);
+                    dual_endpoints.emplace_back(Edge {
+                        boss.fwd(dual_path[i], boss.get_W(dual_path[i]) % boss.alph_size),
+                        std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
+                                               rev_comp_seq.end() - i)
+                    });
                 }
                 continue;
             }
