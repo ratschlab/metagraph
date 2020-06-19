@@ -170,33 +170,6 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
 }
 
 template <typename T>
-inline T
-reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complement_code) {
-    using KMER = utils::get_first_type_t<T>;
-    using INT = typename KMER::WordType;
-    INT kmer = utils::get_first(v).data();
-    constexpr uint64_t mask = KMER::kFirstCharMask;
-    INT last_two_chars = complement_code[static_cast<TAlphabet>(kmer & mask)];
-    kmer >>= KMER::kBitsPerChar;
-    last_two_chars = (last_two_chars << KMER::kBitsPerChar)
-            | complement_code[static_cast<TAlphabet>(kmer & mask)];
-    kmer >>= KMER::kBitsPerChar;
-    INT result = 0;
-    for (uint32_t i = 2; i < k; ++i) {
-        TAlphabet next_char = kmer & mask;
-        assert(next_char >= 0 && next_char < complement_code.size());
-        result = (result << KMER::kBitsPerChar) | complement_code[next_char];
-        kmer >>= KMER::kBitsPerChar;
-    }
-    result = (result << 2 * KMER::kBitsPerChar) | last_two_chars;
-    if constexpr (utils::is_pair_v<T>) {
-        return T(KMER(result), v.second);
-    } else {
-        return KMER(result);
-    }
-}
-
-template <typename T>
 void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     logger->trace("Adding reverse complements...");
     size_t size = kmers->size();
