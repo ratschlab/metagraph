@@ -172,7 +172,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     kmers->reserve(2 * size);
 
     logger->trace("Adding reverse complements...");
-    const std::vector<TAlphabet>& complement_code = KmerExtractor2Bit().complement_code();
+    const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
     for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
         const T &rc = kmer::reverse_complement(k + 1, *kmer, complement_code);
         if (get_first(rc) != get_first(*kmer)) {
@@ -726,7 +726,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
-        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
+        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
+            && !filter_suffix.empty()) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
