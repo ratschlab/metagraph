@@ -1,7 +1,7 @@
 import json
+import os
 import shlex
 import time
-import os
 from subprocess import Popen
 
 import requests
@@ -127,7 +127,7 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.json(), [])
 
     @parameterized.expand([(1,1), (3,1)])
-    def test_api_raw_align_sequence(self, repetitions, foo):
+    def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
         payload = json.dumps({"FASTA": fasta_str})
@@ -137,7 +137,8 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 200)
 
         self.assertEqual(len(ret.json()), repetitions)
-        expected = {'score': 12, 'seq_description': 'query0', 'sequence': 'TCGATC'}
+        expected = {'seq_description': 'query0',
+                    'alignments': [{'score': 12, 'sequence': 'TCGATC', 'cigar': '6=2S'}]}
         self.assertDictEqual(ret.json()[0], expected)
 
         self.assertListEqual(
@@ -189,7 +190,8 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_cols, 4), df.shape)
+        self.assertIn('cigar', df.columns)
+        self.assertEqual((self.sample_query_expected_cols, 5), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -203,10 +205,15 @@ class TestAPIClient(TestAPIBase):
 
     def test_api_align_df(self):
         repetitions = 4
-        ret = self.graph_client.align(["TCGATCGA"] * repetitions)
+        alignment_cnt = 3
+        seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
+        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt)
 
         align_res = ret[self.graph_name]
-        self.assertEqual(len(align_res), repetitions)
+        self.assertIn('cigar', align_res.columns)
+        # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
+        # but here it turns out to be the case
+        self.assertEqual(len(align_res), repetitions *  alignment_cnt)
 
 
 class TestAPIJson(TestAPIBase):
@@ -251,6 +258,13 @@ class TestAPIJson(TestAPIBase):
         for i in range(0, repetitions):
             self.assertEqual(res_list[i]['seq_description'], str(i))
 
+    def test_api_stats(self):
+        res = self.graph_client.stats()[0]
+
+        self.assertIn("graph", res.keys())
+        graph_props = res['graph']
+        self.assertEqual(graph_props["k"], 6)
+
 
 class TestAPIClientWithProperties(TestAPIBase):
     """
@@ -275,3 +289,7 @@ class TestAPIClientWithProperties(TestAPIBase):
         self.assertIn('latitude', df.columns)
         self.assertEqual(df['latitude'].dtype, float)
         self.assertEqual(df.shape, (3, 9))
+
+    def test_api_search_property_df_empty(self):
+        df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST")[self.graph_name]
+        self.assertTrue(df.empty)

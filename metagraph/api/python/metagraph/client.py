@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import json
 from typing import Dict, Tuple, List, Iterable, Union, Any
 
 import pandas as pd
@@ -22,10 +21,11 @@ class GraphClientJson:
     returning error message in the second element of the tuple returned.
     """
 
-    def __init__(self, host: str, port: int, label: str = None):
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
         self.host = host
         self.port = port
         self.label = label
+        self.api_path = api_path
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -42,8 +42,9 @@ class GraphClientJson:
 
         return self._json_seq_query(sequence, param_dict, "search")
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> Tuple[JsonDict, str]:
-        return self._json_seq_query(sequence, {}, "align")
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Tuple[JsonDict, str]:
+        params = {'max_alternative_alignments' : max_alternative_alignments}
+        return self._json_seq_query(sequence, params, "align")
 
     # noinspection PyTypeChecker
     def column_labels(self) -> Tuple[JsonStrList, str]:
@@ -60,14 +61,19 @@ class GraphClientJson:
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
-        payload = json.dumps(payload_dict)
+        payload = payload_dict
 
         return self._do_request(endpoint, payload)
 
     def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
-        url = f'http://{self.host}:{self.port}/{endpoint}'
+        endpoint_path = endpoint
+
+        if self.api_path:
+            endpoint_path = f"{self.api_path.lstrip('/')}/{endpoint}"
+
+        url = f'http://{self.host}:{self.port}/{endpoint_path}'
         if post_req:
-            ret = requests.post(url=url, data=payload)
+            ret = requests.post(url=url, json=payload)
         else:
             ret = requests.get(url=url)
 
@@ -79,10 +85,13 @@ class GraphClientJson:
 
         return json_obj, ""
 
+    def stats(self) -> Tuple[dict, str]:
+        return self._do_request("stats", {}, post_req=False)
+
 
 class GraphClient:
-    def __init__(self, host: str, port: int, label: str = None):
-        self._json_client = GraphClientJson(host, port)
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+        self._json_client = GraphClientJson(host, port, api_path=api_path)
         self.label = label
 
     def search(self, sequence: Union[str, Iterable[str]],
@@ -117,20 +126,34 @@ class GraphClient:
             if align:
                 df['sequence'] = res['sequence']
                 df['score'] = res['score']
+                df['cigar'] = res['cigar']
 
             return df
 
         def build_df_from_json(j):
-            return pd.concat(_build_df_per_result(query_res) for query_res in j)
+            if j:
+                return pd.concat(_build_df_per_result(query_res) for query_res in j)
+            return pd.DataFrame()
 
         return build_df_from_json(json_obj)
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence)
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> pd.DataFrame:
+        json_obj, err = self._json_client.align(sequence, max_alternative_alignments)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
-        return pd.DataFrame(json_obj)
+
+        def _df_per_seq_res(seq_res):
+            df = pd.DataFrame(seq_res['alignments'])
+            df['seq_description'] = seq_res['seq_description']
+            return df
+
+        if not json_obj:
+            return pd.DataFrame({})
+
+        return (pd.concat([ _df_per_seq_res(a) for a in json_obj]).
+                 reset_index(drop=True))
+
 
     def column_labels(self) -> List[str]:
         json_obj, err = self._json_client.column_labels()
@@ -145,11 +168,11 @@ class MultiGraphClient:
     def __init__(self):
         self.graphs = {}
 
-    def add_graph(self, host: str, port: int, label: str = None) -> None:
+    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
         if not label:
             label = f"{host}:{port}"
 
-        self.graphs[label] = GraphClient(host, port, label)
+        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in
@@ -168,12 +191,12 @@ class MultiGraphClient:
 
         return result
 
-    def align(self, sequence: Union[str, Iterable[str]]) -> Dict[
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for label, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence)
+            result[label] = graph_client.align(sequence, max_alternative_alignments)
 
         return result
 
