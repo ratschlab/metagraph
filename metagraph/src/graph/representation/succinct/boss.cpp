@@ -2238,17 +2238,16 @@ void call_paths(const BOSS &boss,
 
         assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
 
-        for (const auto &[edge, kmer] : rev_comp_breakpoints) {
+        for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
+            kmer = std::move(kmer_seq);
             edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
 
             // the sequence of next_edge was already computed in call_path
             assert(boss.get_node_seq(next_edge) == kmer);
 
-            masked_call_outgoing(boss, next_edge, subgraph_mask,
-                                 [&](edge_index e) {
-                if (!fetch_bit(visited.data(), e, async)) {
+            masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
+                if (!fetch_bit(visited.data(), e, async))
                     edges.emplace_back(e, kmer);
-                }
             });
         }
     }
