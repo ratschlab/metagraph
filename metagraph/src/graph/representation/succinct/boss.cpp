@@ -1950,11 +1950,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //  ____.____
     //       \___
     //
+    std::vector<edge_index> edges;
     call_zeros(visited, [&](edge_index i) {
         // map to succ_last(i) since this edge may not be in subgraph_mask
         i = succ_last(i);
 
-        std::vector<edge_index> edges;
+        edges.resize(0);
         masked_call_outgoing(*this, i, subgraph_mask,
                              [&](edge_index e) { edges.push_back(e); });
 
@@ -2307,6 +2308,7 @@ call_path(const BOSS &boss,
     std::reverse(dual_path.begin(), dual_path.end());
 
     std::vector<Edge> dual_endpoints;
+    dual_endpoints.reserve(path.size());
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
