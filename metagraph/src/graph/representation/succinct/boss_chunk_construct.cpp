@@ -553,10 +553,10 @@ void add_reverse_complements(size_t k,
  * the dummy-k kmers, for k=2..k
  */
 template <class KmerCollector, typename T_REAL, typename T>
-void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
-                              ChunkedWaitQueue<T_REAL> &kmers,
-                              ChunkedWaitQueue<T> *kmers_out,
-                              ThreadPool &async_worker) {
+void recover_dummy_nodes(const KmerCollector &kmer_collector,
+                         ChunkedWaitQueue<T_REAL> &kmers,
+                         ChunkedWaitQueue<T> *kmers_out,
+                         ThreadPool &async_worker) {
     using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
@@ -772,33 +772,22 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
-            if constexpr(std::is_same_v<typename KmerCollector::Data,
-                                        ChunkedWaitQueue<T_INT>>) {
-#define INIT_CHUNK(KMER, recover_dummy) \
-    ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
-    recover_dummy(kmer_collector_, kmers, &queue, async_worker_); \
-    logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
-    result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
-                             kmer_collector_.get_k() - 1, \
-                             kmer_collector_.is_both_strands_mode(), \
-                             queue, \
-                             bits_per_count_)
+#define INIT_CHUNK(KMER) \
+            ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
+            recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_); \
+            logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
+            result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
+                                     kmer_collector_.get_k() - 1, \
+                                     kmer_collector_.is_both_strands_mode(), \
+                                     queue, \
+                                     bits_per_count_)
 
-                if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer64, recover_dummy_nodes_disk);
-                } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer128, recover_dummy_nodes_disk);
-                } else {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer256, recover_dummy_nodes_disk);
-                }
+            if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
+                INIT_CHUNK(KmerExtractorBOSS::Kmer64);
+            } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
+                INIT_CHUNK(KmerExtractorBOSS::Kmer128);
             } else {
-                if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer64, recover_dummy_nodes);
-                } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer128, recover_dummy_nodes);
-                } else {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer256, recover_dummy_nodes);
-                }
+                INIT_CHUNK(KmerExtractorBOSS::Kmer256);
             }
         }
 
