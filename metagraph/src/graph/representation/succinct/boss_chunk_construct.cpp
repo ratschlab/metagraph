@@ -172,9 +172,9 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     kmers->reserve(2 * size);
 
     logger->trace("Adding reverse complements...");
+    const std::vector<TAlphabet>& complement_code = KmerExtractor2Bit().complement_code();
     for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
-        const T &rc = kmer::reverse_complement(k + 1, *kmer,
-                                               KmerExtractorBOSS::kComplementCode);
+        const T &rc = kmer::reverse_complement(k + 1, *kmer, complement_code);
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
         } else {
@@ -211,7 +211,6 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                          ChunkedWaitQueue<T> *kmers_out,
                          ThreadPool &async_worker) {
     using KMER = get_first_type_t<T>;
-
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
@@ -563,8 +562,6 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
-    const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
-
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
@@ -594,6 +591,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
             dummy_chunks.push_back(f);
         }
 
+        const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
         std::vector<std::string> dummy_next_names(alphabet_size);
         std::vector<Encoder<KMER_INT>> dummy_next_chunks;
         for (TAlphabet i = 0; i < alphabet_size; ++i) {
