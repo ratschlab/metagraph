@@ -728,9 +728,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
-        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
-            && (!utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>
-                || filter_suffix.size())) {
+        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
