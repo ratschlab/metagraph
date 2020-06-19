@@ -53,15 +53,20 @@ int assemble(Config *config) {
         logger->trace("Writing graph to GFA...");
 
         std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa") + ".gfa");
+        std::mutex str_mutex;
 
         gfa_file << "H\tVN:Z:1.0" << std::endl;
         graph->call_unitigs(
             [&](const auto &unitig, const auto &path) {
-                gfa_file << "S\t" << path.back() << "\t" << unitig << std::endl;
+                std::ostringstream ostr;
+                ostr << "S\t" << path.back() << "\t" << unitig << "\n";
                 graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                    gfa_file << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M" << std::endl;
+                    ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M\n";
                 });
+                std::lock_guard<std::mutex> lock(str_mutex);
+                gfa_file << ostr.str();
             },
+            get_num_threads(),
             config->min_tip_size
         );
     }
@@ -69,13 +74,22 @@ int assemble(Config *config) {
     seq_io::FastaWriter writer(config->outfbase, config->header,
                                config->enumerate_out_sequences,
                                get_num_threads() > 1);
+    std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
-        graph->call_unitigs([&](const auto &unitig, auto&&) { writer.write(unitig); },
+        graph->call_unitigs([&](const auto &unitig, auto&&) {
+                                std::lock_guard<std::mutex> lock(write_mutex);
+                                writer.write(unitig);
+                            },
+                            get_num_threads(),
                             config->min_tip_size,
                             config->kmers_in_single_form);
     } else {
-        graph->call_sequences([&](const auto &contig, auto&&) { writer.write(contig); },
+        graph->call_sequences([&](const auto &contig, auto&&) {
+                                  std::lock_guard<std::mutex> lock(write_mutex);
+                                  writer.write(contig);
+                              },
+                              get_num_threads(),
                               config->kmers_in_single_form);
     }
 
