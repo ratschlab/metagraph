@@ -1936,13 +1936,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 if (j)
                     return;
 
-                do {
-                    if ((*subgraph_mask)[i] && (!kmers_in_single_form
-                            || !fetch_bit(visited.data(), i, async))) {
-                        enqueue_start(thread_pool, i);
+                masked_call_outgoing(*this, i, subgraph_mask,
+                                     [&](edge_index e) {
+                    if (!kmers_in_single_form || !fetch_bit(visited.data(), e, async)) {
+                        enqueue_start(thread_pool, e);
                     }
-
-                } while (--i > 0 && !get_last(i));
+                });
             });
         }
     }
@@ -1955,15 +1954,18 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         // map to succ_last(i) since this edge may not be in subgraph_mask
         i = succ_last(i);
 
+        std::vector<edge_index> edges;
+        masked_call_outgoing(*this, i, subgraph_mask,
+                             [&](edge_index e) { edges.push_back(e); });
+
         // no outgoing edges or a unique outgoing edge
-        if (masked_pick_single_outgoing(*this, &i, subgraph_mask) || !i)
+        if (edges.size() < 2)
             return;
 
-        do {
-            if (!fetch_bit(visited.data(), i, async))
-                enqueue_start(thread_pool, i);
-
-        } while (--i > 0 && !get_last(i));
+        for (edge_index e : edges) {
+            if (!fetch_bit(visited.data(), e, async))
+                enqueue_start(thread_pool, e);
+        }
     }, async);
 
     thread_pool.join();
