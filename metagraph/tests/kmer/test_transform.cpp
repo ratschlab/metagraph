@@ -1,4 +1,4 @@
-#include "graph/representation/succinct/transform.hpp"
+#include "kmer/kmer_transform.hpp"
 
 #include <random>
 #include <vector>
@@ -28,7 +28,7 @@ TYPED_TEST_SUITE(ReverseComplement, KmerTypes);
 TYPED_TEST(ReverseComplement, Palindrome) {
     std::vector<uint8_t> seq = { 1, 2, 3, 4 };
     TypeParam kmer_boss(seq); // ACGT
-    EXPECT_EQ(kmer_boss, reverse_complement(4, kmer_boss, complement_code));
+    EXPECT_EQ(kmer_boss, kmer::reverse_complement(4, kmer_boss, complement_code));
 }
 
 TYPED_TEST(ReverseComplement, Random) {
@@ -44,7 +44,7 @@ TYPED_TEST(ReverseComplement, Random) {
             }
             TypeParam kmer_boss(kmer);
             TypeParam expected(complement_kmer);
-            EXPECT_EQ(expected, reverse_complement(k, kmer_boss, complement_code));
+            EXPECT_EQ(expected, kmer::reverse_complement(k, kmer_boss, complement_code));
         }
     }
 }
