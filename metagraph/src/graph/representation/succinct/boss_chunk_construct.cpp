@@ -90,8 +90,8 @@ void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *d
             it[last_char]++;
         }
         if (last_dummy[last_char] != shifted
-                && (it[last_char] == max_it[last_char]
-                        || !KMER_REAL::compare_suffix(get_first(kmers[it[last_char]]), shifted))) {
+            && (it[last_char] == max_it[last_char]
+                || !KMER_REAL::compare_suffix(get_first(kmers[it[last_char]]), shifted))) {
             dummy_kmers->emplace_back(kmer::transform<KMER>(shifted, k + 1) + kmer_delta);
             last_dummy[last_char] = shifted;
         }
@@ -198,7 +198,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
  * @param k the node length in the BOOS graph (so k-mer length is k+1)
  * @param num_threads number of threads available for sorting
  * @param both_strands for each k-mer, also add its reverse complement
- * @param kmers_p real (not dummy) k-mers to generate dummy k-mers for
+ * @param kmers real (not dummy) k-mers to generate dummy k-mers for
  * @param kmers_out sorted real+dummy k-mers
  * @tparam T_REAL the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
