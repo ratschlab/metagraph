@@ -31,11 +31,7 @@ reverse_complement(size_t k, const T &v, const std::vector<TAlphabet> &complemen
         kmer >>= KMER::kBitsPerChar;
     }
     result = (result << 2 * KMER::kBitsPerChar) | last_two_chars;
-    if constexpr (utils::is_pair_v<T>) {
-        return T(KMER(result), v.second);
-    } else {
-        return KMER(result);
-    }
+    return KMER(result);
 }
 
 // construct word `...1001001001` with k ones for lifting k-mers

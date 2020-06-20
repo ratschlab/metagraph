@@ -466,11 +466,6 @@ KmerExtractorTDecl(std::vector<std::string>)
     return result;
 }
 
-KmerExtractorTDecl(const std::vector<typename KmerExtractorT<LogSigma>::TAlphabet>&)
-::complement_code() const {
-    return complement_code_;
-}
-
 /**
  * Break the sequence into kmers and add them to the kmer storage.
  */

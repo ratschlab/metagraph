@@ -17,7 +17,6 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
-#include "kmer/kmer_boss.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
 
@@ -75,7 +74,6 @@ typedef ::testing::Types<kmer::KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_ch
 
 TYPED_TEST_SUITE(CollectKmers, KmerTypes);
 TYPED_TEST_SUITE(CountKmers, KmerTypes);
-TYPED_TEST_SUITE(ReverseComplement, KmerTypes);
 
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
@@ -395,7 +393,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix, false
+        k, false, kmers, suffix
     );
     delete reads;
 }
@@ -490,7 +488,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                 callback(read, 1);
             }
         },
-        k, false, kmers, suffix, false
+        k, false, kmers, suffix
     );
     delete reads;
 }
