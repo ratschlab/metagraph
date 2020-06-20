@@ -51,8 +51,6 @@ class KmerExtractorBOSS {
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
 
-    static const std::vector<TAlphabet> kComplementCode;
-
     KmerExtractorBOSS();
 
     /**
@@ -92,6 +90,7 @@ class KmerExtractorBOSS {
 
   private:
     static const TAlphabet *kCharToNucleotide;
+    static const std::vector<TAlphabet> kComplementCode;
 };
 
 

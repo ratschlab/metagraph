@@ -183,7 +183,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
     for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
-        const T &rc = kmer::reverse_complement(k + 1, *kmer, complement_code);
+        const T &rc = rev_comp(k + 1, *kmer, complement_code);
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
         } else {
@@ -228,7 +228,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     if (kmer_collector.is_both_strands_mode()) {
         add_reverse_complements(k, num_threads, &kmers);
     }
-    
+
     logger->trace("Total number of real k-mers: {}", kmers.size());
 
     auto dummy_kmers = std::make_unique<Vector<KMER>>();
