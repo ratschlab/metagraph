@@ -71,7 +71,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     std::vector<size_t> max_it(alphabet_size);
     std::vector<size_t> it(alphabet_size);
     for (TAlphabet c = 1; c < alphabet_size; ++c) {
-        std::vector<uint8_t> zeros(k + 1, 0);
+        std::vector<TAlphabet> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
                                  KMER(zeros, k + 1), // the $$...i->$ k-mer
@@ -170,8 +170,17 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
 }
 
 template <typename T>
+inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_code) {
+    if constexpr (utils::is_pair_v<T>) {
+        return T(kmer::reverse_complement(k, kmer.first, complement_code), kmer.second);
+    } else {
+        return kmer::reverse_complement(k, kmer, complement_code);
+    }
+}
+
+template <typename T>
 void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
-    logger->trace("Adding reverse complements...");
+    logger->trace("Adding reverse-complement k-mers...");
     size_t size = kmers->size();
     if (size < 2) {
         return;
@@ -183,14 +192,12 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     T *kmer = kmers->data() + 1; // skip $$...$
     const T *end = kmers->data() + size;
     for(; kmer != end; ++kmer) {
-        const T &rc = kmer::reverse_complement(k + 1, *kmer,
-                                               KmerExtractorBOSS::kComplementCode);
+        const T &rc = rev_comp(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
         } else {
-            if constexpr (utils::is_pair_v<T>) {
+            if constexpr (utils::is_pair_v<T>)
                 kmer->second *= 2;
-            }
         }
     }
     logger->trace("Sorting all real kmers...");
@@ -219,6 +226,7 @@ void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector
     if (both_strands) {
         add_reverse_complements(k, num_threads, &kmers);
     }
+
     size_t original_end = kmers.size();
     logger->trace("Total number of real k-mers: {}", original_end);
     add_dummy_sink_kmers(k, &kmers);
@@ -478,8 +486,7 @@ void add_reverse_complements(size_t k,
     common::EliasFanoEncoderBuffered<T_INT> original(dir/"original", ENCODER_BUFFER_SIZE);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         const T &kmer = *it;
-        const T &reverse = kmer::reverse_complement(k + 1, *it,
-                                                    KmerExtractor2Bit().complement_code());
+        const T &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
         if (get_first(kmer) != get_first(reverse)) {
             rc_set->add(reinterpret_cast<const T_INT &>(reverse));
             original.add(reinterpret_cast<const T_INT &>(kmer));

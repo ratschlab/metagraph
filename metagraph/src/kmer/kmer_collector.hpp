@@ -137,7 +137,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    bool both_strands_mode,
                    Container *kmers,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool canonical_only);
+                   bool canonical_only = false);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
@@ -146,7 +146,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  bool both_strands_mode,
                  Container *kmers,
                  const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                 bool canonical_only);
+                 bool canonical_only = false);
 
 } // namespace kmer
 } // namespace mtg

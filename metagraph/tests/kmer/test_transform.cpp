@@ -48,4 +48,5 @@ TYPED_TEST(ReverseComplement, Random) {
         }
     }
 }
+
 } // namespace
