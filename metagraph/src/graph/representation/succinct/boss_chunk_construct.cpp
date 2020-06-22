@@ -14,6 +14,7 @@
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "kmer/kmer_to_int_converter.hpp"
+#include "kmer/kmer_transform.hpp"
 #include "boss_chunk.hpp"
 
 
@@ -61,7 +62,6 @@ inline void push_back(Container &kmers, const KMER &kmer) {
 template <typename T>
 void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
-    using KMER_INT = typename KMER::WordType;
 
     const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
 
@@ -71,7 +71,7 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
     std::vector<size_t> max_it(alphabet_size);
     std::vector<size_t> it(alphabet_size);
     for (TAlphabet c = 1; c < alphabet_size; ++c) {
-        std::vector<KMER_INT> zeros(k + 1, 0);
+        std::vector<TAlphabet> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
                                  KMER(zeros, k + 1), // the $$...i->$ k-mer
@@ -169,6 +169,47 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
     }
 }
 
+template <typename T>
+inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_code) {
+    if constexpr (utils::is_pair_v<T>) {
+        return T(kmer::reverse_complement(k, kmer.first, complement_code), kmer.second);
+    } else {
+        return kmer::reverse_complement(k, kmer, complement_code);
+    }
+}
+
+template <typename T>
+void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
+    logger->trace("Adding reverse-complement k-mers...");
+    size_t size = kmers->size();
+    if (size < 2) {
+        return;
+    }
+    // extra 20% for dummy kmers; better to waste some extra space now than to have a
+    // twice larger re-allocation after the reverse complements were added
+    kmers->reserve(2.4 * size);
+
+    T *kmer = kmers->data() + 1; // skip $$...$
+    const T *end = kmers->data() + size;
+    for( ; kmer != end; ++kmer) {
+        const T &rc = rev_comp(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
+        if (get_first(rc) != get_first(*kmer)) {
+            kmers->push_back(std::move(rc));
+        } else {
+            if constexpr (utils::is_pair_v<T>) {
+                using C = typename T::second_type;
+                if (kmer->second >> (sizeof(C) * 8 - 1)) {
+                    kmer->second = std::numeric_limits<C>::max();
+                } else {
+                    kmer->second *= 2;
+                }
+            }
+        }
+    }
+    logger->trace("Sorting all real kmers...");
+    ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 /**
@@ -178,16 +219,24 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
  * of length 2, 3, ... up to k-1.
  *
  * @param k the node length in the BOOS graph (so k-mer length is k+1)
+ * @param num_threads number of threads available for sorting
+ * @param both_strands for each k-mer, also add its reverse complement
  * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  */
 template <typename T>
-void recover_dummy_nodes(size_t k, size_t num_threads, Vector<T> *kmers_p) {
+void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector<T> *kmers_p) {
     using KMER = get_first_type_t<T>;
     Vector<T> &kmers = *kmers_p;
-    size_t original_end = kmers.size();
 
+    if (both_strands) {
+        add_reverse_complements(k, num_threads, &kmers);
+    }
+
+    size_t original_end = kmers.size();
+    logger->trace("Total number of real k-mers: {}", original_end);
     add_dummy_sink_kmers(k, &kmers);
+    logger->trace("Added {} dummy sink k-mers", kmers.size() - original_end);
 
     size_t dummy_source_begin = kmers.size();
     add_dummy_source_kmers(k, &kmers, original_end);
@@ -250,17 +299,17 @@ std::vector<std::string> split(size_t k,
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
-    size_t num_parent_kmers = 0;
+    size_t num_kmers = 0;
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
         const T_REAL &kmer = *it;
         TAlphabet F = get_first(kmer)[k];
         TAlphabet W = get_first(kmer)[0];
         size_t idx = F * alphabet_size + W;
         sinks[idx].add(reinterpret_cast<const T_INT_REAL &>(kmer));
-        num_parent_kmers++;
+        num_kmers++;
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
-    logger->trace("Total number of non-dummy k-mers: {}", num_parent_kmers);
+    logger->trace("Total number of real k-mers: {}", num_kmers);
     return names;
 }
 
@@ -273,137 +322,6 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
         }
         decoder.pop();
     }
-}
-
-// construct word `...1001001001` with k ones for lifting k-mers
-template <typename WordType>
-inline WordType get_sentinel_delta(size_t char_width, size_t k) {
-    assert(char_width * k <= sizeof(WordType) * 8);
-    WordType word = 0;
-    for (size_t i = 0; i < k; ++i) {
-        word <<= char_width;
-        word |= 1;
-    }
-    return word;
-}
-
-// transforms k-mer to the new character width
-template <typename KMER_TO, typename KMER_FROM>
-inline __attribute__((always_inline))
-typename KMER_TO::WordType transform(const KMER_FROM &kmer, size_t k) {
-    static constexpr size_t L1 = KMER_FROM::kBitsPerChar;
-    static constexpr size_t L2 = KMER_TO::kBitsPerChar;
-    static_assert(L2 >= L1);
-    static_assert(L2 <= L1 + 1);
-    assert(sizeof(typename KMER_TO::WordType)
-            >= sizeof(typename KMER_FROM::WordType));
-
-    if constexpr(L1 == L2) {
-        return kmer.data();
-
-    } else {
-        typename KMER_TO::WordType word = 0;
-
-        static constexpr uint64_t char_mask = (1ull << L1) - 1;
-
-        for (int pos = L1 * (k - 1); pos >= 0; pos -= L1) {
-            word <<= L2;
-            assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
-            word |= static_cast<uint64_t>(kmer.data() >> pos) & char_mask;
-        }
-
-        return word;
-    }
-}
-
-static const uint16_t lookup_2_3[256] = {
-    0,    1,    2,    3,    8,    9,    10,   11,   16,   17,   18,   19,   24,
-    25,   26,   27,   64,   65,   66,   67,   72,   73,   74,   75,   80,   81,
-    82,   83,   88,   89,   90,   91,   128,  129,  130,  131,  136,  137,  138,
-    139,  144,  145,  146,  147,  152,  153,  154,  155,  192,  193,  194,  195,
-    200,  201,  202,  203,  208,  209,  210,  211,  216,  217,  218,  219,  512,
-    513,  514,  515,  520,  521,  522,  523,  528,  529,  530,  531,  536,  537,
-    538,  539,  576,  577,  578,  579,  584,  585,  586,  587,  592,  593,  594,
-    595,  600,  601,  602,  603,  640,  641,  642,  643,  648,  649,  650,  651,
-    656,  657,  658,  659,  664,  665,  666,  667,  704,  705,  706,  707,  712,
-    713,  714,  715,  720,  721,  722,  723,  728,  729,  730,  731,  1024, 1025,
-    1026, 1027, 1032, 1033, 1034, 1035, 1040, 1041, 1042, 1043, 1048, 1049, 1050,
-    1051, 1088, 1089, 1090, 1091, 1096, 1097, 1098, 1099, 1104, 1105, 1106, 1107,
-    1112, 1113, 1114, 1115, 1152, 1153, 1154, 1155, 1160, 1161, 1162, 1163, 1168,
-    1169, 1170, 1171, 1176, 1177, 1178, 1179, 1216, 1217, 1218, 1219, 1224, 1225,
-    1226, 1227, 1232, 1233, 1234, 1235, 1240, 1241, 1242, 1243, 1536, 1537, 1538,
-    1539, 1544, 1545, 1546, 1547, 1552, 1553, 1554, 1555, 1560, 1561, 1562, 1563,
-    1600, 1601, 1602, 1603, 1608, 1609, 1610, 1611, 1616, 1617, 1618, 1619, 1624,
-    1625, 1626, 1627, 1664, 1665, 1666, 1667, 1672, 1673, 1674, 1675, 1680, 1681,
-    1682, 1683, 1688, 1689, 1690, 1691, 1728, 1729, 1730, 1731, 1736, 1737, 1738,
-    1739, 1744, 1745, 1746, 1747, 1752, 1753, 1754, 1755
-};
-
-template <>
-inline __attribute__((always_inline)) sdsl::uint128_t
-transform<kmer::KMerBOSS<sdsl::uint128_t, 3>, kmer::KMerBOSS<uint64_t, 2>>(
-        const kmer::KMerBOSS<uint64_t, 2> &kmer, size_t /*k*/) {
-    const uint8_t *kmer_char = reinterpret_cast<const uint8_t *>(&kmer);
-    // transform 64-bit kmer to 128 bits
-    return static_cast<sdsl::uint128_t>(lookup_2_3[kmer_char[7]]) << 84
-            | static_cast<sdsl::uint128_t>(lookup_2_3[kmer_char[6]]) << 72
-            | static_cast<sdsl::uint128_t>(lookup_2_3[kmer_char[5]]) << 60
-            | static_cast<uint64_t>(lookup_2_3[kmer_char[4]]) << 48
-            | static_cast<uint64_t>(lookup_2_3[kmer_char[3]]) << 36
-            | static_cast<uint64_t>(lookup_2_3[kmer_char[2]]) << 24
-            | static_cast<uint64_t>(lookup_2_3[kmer_char[1]]) << 12
-            | lookup_2_3[kmer_char[0]];
-}
-
-template <>
-inline __attribute__((always_inline)) sdsl::uint256_t
-transform<kmer::KMerBOSS<sdsl::uint256_t, 3>, kmer::KMerBOSS<sdsl::uint128_t, 2>>(
-        const kmer::KMerBOSS<sdsl::uint128_t, 2> &kmer, size_t /*k*/) {
-    const uint8_t *kmer_char = reinterpret_cast<const uint8_t *>(&kmer);
-    // transform 128-bit kmer to 256 bits
-    return sdsl::uint256_t(0, static_cast<sdsl::uint128_t>(lookup_2_3[kmer_char[15]]) << 52)
-            | sdsl::uint256_t(static_cast<uint64_t>(lookup_2_3[kmer_char[14]]) << 48
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[13]]) << 36
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[12]]) << 24
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[11]]) << 12
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[10]])
-                            ) << 120
-            | sdsl::uint128_t(static_cast<uint64_t>(lookup_2_3[kmer_char[9]]) << 48
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[8]]) << 36
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[7]]) << 24
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[6]]) << 12
-                                | static_cast<uint64_t>(lookup_2_3[kmer_char[5]])
-                            ) << 60
-            | (static_cast<uint64_t>(lookup_2_3[kmer_char[4]]) << 48
-                        | static_cast<uint64_t>(lookup_2_3[kmer_char[3]]) << 36
-                        | static_cast<uint64_t>(lookup_2_3[kmer_char[2]]) << 24
-                        | static_cast<uint64_t>(lookup_2_3[kmer_char[1]]) << 12
-                        | lookup_2_3[kmer_char[0]]);
-}
-
-// shift to the next dummy sink and add +1 to each character of the k-mer
-template <typename KMER_TO, typename KMER_FROM>
-inline typename KMER_TO::WordType get_sink_and_lift(const KMER_FROM &kmer, size_t k) {
-    static constexpr int L1 = KMER_FROM::kBitsPerChar;
-    static constexpr int L2 = KMER_TO::kBitsPerChar;
-    static_assert(L2 >= L1);
-    static_assert(L2 <= L1 + 1);
-    assert(sizeof(typename KMER_TO::WordType)
-            >= sizeof(typename KMER_FROM::WordType));
-
-    static constexpr uint64_t first_char_mask_1 = (1ull << L1) - 1;
-
-    typename KMER_TO::WordType word = (kmer.data() & first_char_mask_1) + 1;
-
-    for (int pos = L1 * (k - 1); pos >= L1 * 2; pos -= L1) {
-        word <<= L2;
-        assert(kmer[pos / L1] + 1 <= sdsl::bits::lo_set[L2]);
-        word |= (static_cast<uint64_t>(kmer.data() >> pos) & first_char_mask_1) + 1;
-    }
-
-    word <<= L2;
-
-    return word;
 }
 
 /**
@@ -444,7 +362,7 @@ generate_dummy_1_kmers(size_t k,
     uint64_t num_source = 0;
 
     static constexpr size_t L = KMER::kBitsPerChar;
-    KMER_INT kmer_delta = get_sentinel_delta<KMER_INT>(L, k + 1);
+    KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
     kmer_delta &= ~KMER_INT(((1ull << L) - 1) << L);
 
@@ -474,7 +392,7 @@ generate_dummy_1_kmers(size_t k,
                 // skip k-mers with the same suffix as v, as they generate identical dummy
                 // sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
-                dummy_sink_chunks[F].add(get_sink_and_lift<KMER>(v, k + 1));
+                dummy_sink_chunks[F].add(kmer::get_sink_and_lift<KMER>(v, k + 1));
                 num_sink++;
             }
             if (!sink_gen_it.empty()) {
@@ -490,14 +408,14 @@ generate_dummy_1_kmers(size_t k,
                 }
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[F].add(transform<KMER>(dummy_source, k + 1) + kmer_delta);
+            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
             num_source++;
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER_REAL v(sink_gen_it.pop());
             skip_same_suffix(v, sink_gen_it, 1);
-            dummy_sink_chunks[F].add(get_sink_and_lift<KMER>(v, k + 1));
+            dummy_sink_chunks[F].add(kmer::get_sink_and_lift<KMER>(v, k + 1));
             num_sink++;
         }
     }
@@ -533,6 +451,88 @@ generate_dummy_1_kmers(size_t k,
     return { real_split_by_W, dummy_l1_names, dummy_sink_name };
 }
 
+/** Merges #original_kmers with #reverse_complements and places the result into #kmers */
+template <typename T, typename T_INT>
+static void merge(common::EliasFanoDecoder<T_INT> &original_kmers,
+                  ChunkedWaitQueue<T_INT> &reverse_complements,
+                  ChunkedWaitQueue<T> *kmers) {
+    auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT> &>(*kmers);
+    auto &it = reverse_complements.begin();
+    std::optional<T_INT> orig = original_kmers.next();
+    while (it != reverse_complements.end() && orig.has_value()) {
+        if (get_first(orig.value()) < get_first(*it)) {
+            kmers_int.push(orig.value());
+            orig = original_kmers.next();
+        } else {
+            kmers_int.push(*it);
+            ++it;
+        }
+    }
+    while (it != reverse_complements.end()) {
+        kmers_int.push(*it);
+        ++it;
+    }
+    while (orig.has_value()) {
+        kmers_int.push(orig.value());
+        orig = original_kmers.next();
+    }
+    kmers->shutdown();
+}
+
+/**
+ * Adds reverse complements
+ */
+template <typename T_REAL>
+void add_reverse_complements(size_t k,
+                             size_t num_threads,
+                             size_t buffer_size,
+                             const std::filesystem::path &dir,
+                             ThreadPool& async_worker,
+                             ChunkedWaitQueue<T_REAL> *kmers) {
+    using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
+
+    std::string rc_dir = dir/"rc";
+    std::filesystem::create_directory(rc_dir);
+    auto rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
+            num_threads, buffer_size, rc_dir, std::numeric_limits<size_t>::max());
+    logger->trace("Adding reverse complements...");
+    common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
+    Vector<T_INT_REAL> buffer;
+    buffer.reserve(10'000);
+    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+        const T_REAL &kmer = *it;
+        const T_REAL &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
+        if (get_first(kmer) != get_first(reverse)) {
+            buffer.push_back(reinterpret_cast<const T_INT_REAL &>(reverse));
+            if (buffer.size() == buffer.capacity()) {
+                rc_set->insert(buffer.begin(), buffer.end());
+                buffer.resize(0);
+            }
+            original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
+        } else {
+            if constexpr (utils::is_pair_v<T_REAL>) {
+                using C = typename T_REAL::second_type;
+                if (kmer.second >> (sizeof(C) * 8 - 1)) {
+                    original.add({ kmer.first.data(), std::numeric_limits<C>::max() });
+                } else {
+                    original.add({ kmer.first.data(), 2 * kmer.second });
+                }
+            } else {
+                original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
+            }
+        }
+    }
+    rc_set->insert(buffer.begin(), buffer.end());
+    original.finish();
+    // start merging #original with #reverse_complements into #kmers
+    kmers->reset();
+    async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers]() {
+        ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
+        common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir / "original");
+        merge(original_kmers, reverse_complements, kmers);
+    });
+}
+
 /**
  * Specialization of recover_dummy_nodes for a disk-based container, such as
  * #SortedSetDisk and #SortedMultisetDisk.
@@ -559,12 +559,19 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
+    size_t num_threads = kmer_collector.num_threads();
+
+    if (kmer_collector.is_both_strands_mode()) {
+        // compute the reverse complements of #kmers, then merge back into #kmers
+        add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
+                                async_worker, &kmers);
+    }
 
     std::string dummy_sink_name;
     std::vector<std::string> real_split_by_W;
     std::vector<std::string> dummy_names;
     std::tie(real_split_by_W, dummy_names, dummy_sink_name)
-            = generate_dummy_1_kmers<T_REAL, T>(k, kmer_collector.num_threads(), dir, kmers);
+            = generate_dummy_1_kmers<T_REAL, T>(k, num_threads, dir, kmers);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> dummy_chunks = { dummy_sink_name };
@@ -619,18 +626,18 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
     }
 
     const KMER_INT kmer_delta
-            = get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+            = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
     async_worker.enqueue([k, kmer_delta, kmers_out, real_split_by_W, dummy_chunks]() {
         common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
             [&](const T_INT_REAL &v) {
                 if constexpr (utils::is_pair_v<T>) {
-                    return T(transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
+                    return T(kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
                                 + kmer_delta,
                              v.second);
                 } else {
-                    return transform<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1) + kmer_delta;
+                    return kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1) + kmer_delta;
                 }
             },
             real_split_by_W, true
@@ -694,7 +701,7 @@ template <typename KmerCollector>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
   public:
     BOSSChunkConstructor(size_t k,
-                         bool canonical_mode,
+                         bool both_strands_mode,
                          uint8_t bits_per_count,
                          const std::string &filter_suffix,
                          size_t num_threads,
@@ -702,12 +709,13 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::filesystem::path &swap_dir,
                          size_t max_disk_space)
         : kmer_collector_(k + 1,
-                          canonical_mode,
+                          both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
                           swap_dir,
-                          max_disk_space),
+                          max_disk_space,
+                          both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
             && (!utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>
@@ -749,7 +757,9 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                     // kmer_collector stores (BOSS::k_ + 1)-mers
                     static_assert(std::is_same_v<typename KmerCollector::Data, Vector<T_INT>>);
                     recover_dummy_nodes(kmer_collector_.get_k() - 1,
-                                        kmer_collector_.num_threads(), &kmers);
+                                        kmer_collector_.num_threads(),
+                                        kmer_collector_.is_both_strands_mode(),
+                                        &kmers);
                 }
                 logger->trace("Dummy source k-mers were reconstructed in {} sec",
                               timer.elapsed());

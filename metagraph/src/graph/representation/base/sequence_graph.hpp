@@ -172,6 +172,7 @@ class DeBruijnGraph : public SequenceGraph {
      * reverse-complement has been extracted.
      */
     virtual void call_sequences(const CallPath &callback,
+                                size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const;
     /**
      * Call all unitigs except short tips, where tips are
@@ -181,6 +182,7 @@ class DeBruijnGraph : public SequenceGraph {
      * reverse-complement has been extracted.
      */
     virtual void call_unitigs(const CallPath &callback,
+                              size_t num_threads = 1,
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const;
 

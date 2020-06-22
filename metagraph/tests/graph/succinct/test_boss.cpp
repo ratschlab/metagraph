@@ -927,538 +927,640 @@ TEST(BOSS, CallPathsEmptyGraph) {
 }
 
 TEST(BOSS, CallUnitigsEmptyGraph) {
-    for (size_t k = 1; k < 30; ++k) {
-        BOSS empty(k);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 30; ++k) {
+            BOSS empty(k);
 
-        BOSS reconstructed(k);
-        empty.call_unitigs([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, empty.map_to_edges(sequence));
-            reconstructed.add_sequence(sequence);
-        });
+            BOSS reconstructed(k);
+            std::mutex seq_mutex;
+            empty.call_unitigs([&](const auto &sequence, const auto &path) {
+                ASSERT_EQ(path, empty.map_to_edges(sequence));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                reconstructed.add_sequence(sequence);
+            }, num_threads);
 
-        EXPECT_EQ(empty, reconstructed);
+            EXPECT_EQ(empty, reconstructed);
+        }
     }
 }
 
 TEST(BOSS, CallPathsOneLoop) {
-    for (size_t k = 1; k < 20; ++k) {
-        BOSS graph(k);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSS graph(k);
 
-        ASSERT_EQ(1u, graph.num_edges());
+            ASSERT_EQ(1u, graph.num_edges());
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
-        graph.call_sequences([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
-            num_sequences++;
-        });
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads);
+            graph.call_sequences([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
     }
 }
 
 TEST(BOSS, CallUnitigsOneLoop) {
-    for (size_t k = 1; k < 20; ++k) {
-        BOSS graph(k);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSS graph(k);
 
-        ASSERT_EQ(1u, graph.num_edges());
+            ASSERT_EQ(1u, graph.num_edges());
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_unitigs([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
-            num_sequences++;
-        });
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads,
+                             true /* unitigs */);
+            graph.call_unitigs([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
     }
 }
 
 TEST(BOSS, CallPathsTwoLoops) {
-    for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A') });
-        BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A') });
+            BOSS graph(&constructor);
 
-        ASSERT_EQ(2u, graph.num_edges());
+            ASSERT_EQ(2u, graph.num_edges());
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
-        graph.call_sequences([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
-            num_sequences++;
-        });
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads);
+            graph.call_sequences([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
     }
 }
 
 TEST(BOSS, CallUnitigsTwoLoops) {
-    for (size_t k = 1; k < 20; ++k) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A') });
+            BOSS graph(&constructor);
+
+            ASSERT_EQ(2u, graph.num_edges());
+
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
+
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads,
+                             true /* unitigs */);
+            graph.call_unitigs([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
+
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
+    }
+}
+
+TEST(BOSS, CallUnitigsTwoBigLoops) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        size_t k = 10;
+        std::vector<std::string> sequences {
+            "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+            "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        };
         BOSSConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A') });
+        constructor.add_sequences(std::vector<std::string>(sequences));
         BOSS graph(&constructor);
 
-        ASSERT_EQ(2u, graph.num_edges());
+        std::atomic<size_t> num_sequences = 0;
+        std::atomic<size_t> num_kmers = 0;
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
-
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
         graph.call_unitigs([&](const auto &seq, const auto &path) {
             ASSERT_EQ(path, graph.map_to_edges(seq));
             num_sequences++;
-        });
+            num_kmers += path.size();
+        }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        EXPECT_EQ(2, num_sequences);
+        EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1,
+                  num_kmers);
+
+        num_sequences = 0;
+        num_kmers = 0;
+
+        graph.call_unitigs([&](const auto &seq, const auto &path) {
+            ASSERT_EQ(path, graph.map_to_edges(seq)) << seq;
+            num_sequences++;
+            num_kmers += path.size();
+        }, num_threads, 0, true);
+
+        EXPECT_EQ(2, num_sequences);
+        EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
+                  num_kmers);
     }
 }
 
 TEST(BOSS, CallPathsFourLoops) {
-    for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A'),
-                                    std::string(100, 'G'),
-                                    std::string(100, 'C') });
-        BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'G'),
+                                        std::string(100, 'C') });
+            BOSS graph(&constructor);
 
-        ASSERT_EQ(4u, graph.num_edges());
+            ASSERT_EQ(4u, graph.num_edges());
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
-        graph.call_sequences([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
-            num_sequences++;
-        });
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads);
+            graph.call_sequences([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
     }
 }
 
 TEST(BOSS, CallUnitigsFourLoops) {
-    for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A'),
-                                    std::string(100, 'G'),
-                                    std::string(100, 'C') });
-        BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'G'),
+                                        std::string(100, 'C') });
+            BOSS graph(&constructor);
 
-        ASSERT_EQ(4u, graph.num_edges());
+            ASSERT_EQ(4u, graph.num_edges());
 
-        size_t num_paths = 0;
-        size_t num_sequences = 0;
+            std::atomic<size_t> num_paths = 0;
+            std::atomic<size_t> num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_unitigs([&](const auto &seq, const auto &path) {
-            ASSERT_EQ(path, graph.map_to_edges(seq));
-            num_sequences++;
-        });
+            graph.call_paths([&](const auto &, const auto &) { num_paths++; },
+                             num_threads,
+                             true /* unitigs */);
+            graph.call_unitigs([&](const auto &seq, const auto &path) {
+                ASSERT_EQ(path, graph.map_to_edges(seq));
+                num_sequences++;
+            }, num_threads);
 
-        EXPECT_EQ(graph.num_edges(), num_paths);
-        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+            EXPECT_EQ(graph.num_edges(), num_paths);
+            EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+        }
     }
 }
 
 TEST(BOSS, CallPaths) {
-    for (size_t k = 1; k < 10; ++k) {
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACACTAG", true);
-            graph.add_sequence("AACGACATG", true);
-            graph.switch_state(BOSS::State::STAT);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 10; ++k) {
+            std::mutex seq_mutex;
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACACTAG", true);
+                graph.add_sequence("AACGACATG", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_sequences([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AGACACTGA", true);
-            graph.add_sequence("GACTACGTA", true);
-            graph.add_sequence("ACTAACGTA", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AGACACTGA", true);
+                graph.add_sequence("GACTACGTA", true);
+                graph.add_sequence("ACTAACGTA", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_sequences([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AGACACAGT", true);
-            graph.add_sequence("GACTTGCAG", true);
-            graph.add_sequence("ACTAGTCAG", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AGACACAGT", true);
+                graph.add_sequence("GACTTGCAG", true);
+                graph.add_sequence("ACTAGTCAG", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_sequences([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACTCGTAGC", true);
-            graph.add_sequence("AAATGCGTAGC", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACTCGTAGC", true);
+                graph.add_sequence("AAATGCGTAGC", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_sequences([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACT", false);
-            graph.add_sequence("AAATG", false);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACT", false);
+                graph.add_sequence("AAATG", false);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_sequences([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_sequences([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
+                EXPECT_EQ(graph, reconstructed);
+            }
         }
     }
 }
 
 TEST(BOSS, CallUnitigs) {
-    for (size_t k = 1; k < 10; ++k) {
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACACTAG", true);
-            graph.add_sequence("AACGACATG", true);
-            graph.switch_state(BOSS::State::STAT);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 1; k < 10; ++k) {
+            std::mutex seq_mutex;
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACACTAG", true);
+                graph.add_sequence("AACGACATG", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AGACACTGA", true);
-            graph.add_sequence("GACTACGTA", true);
-            graph.add_sequence("ACTAACGTA", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AGACACTGA", true);
+                graph.add_sequence("GACTACGTA", true);
+                graph.add_sequence("ACTAACGTA", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AGACACAGT", true);
-            graph.add_sequence("GACTTGCAG", true);
-            graph.add_sequence("ACTAGTCAG", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AGACACAGT", true);
+                graph.add_sequence("GACTTGCAG", true);
+                graph.add_sequence("ACTAGTCAG", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACTCGTAGC", true);
-            graph.add_sequence("AAATGCGTAGC", true);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACTCGTAGC", true);
+                graph.add_sequence("AAATGCGTAGC", true);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
-        }
-        {
-            BOSS graph(k);
-            graph.add_sequence("AAACT", false);
-            graph.add_sequence("AAATG", false);
-            graph.switch_state(BOSS::State::STAT);
+                EXPECT_EQ(graph, reconstructed);
+            }
+            {
+                BOSS graph(k);
+                graph.add_sequence("AAACT", false);
+                graph.add_sequence("AAATG", false);
+                graph.switch_state(BOSS::State::STAT);
 
-            BOSS reconstructed(k);
+                BOSS reconstructed(k);
 
-            graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(sequence));
-                reconstructed.add_sequence(sequence);
-            });
+                graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(sequence));
+                    std::unique_lock<std::mutex> lock(seq_mutex);
+                    reconstructed.add_sequence(sequence);
+                }, num_threads);
 
-            EXPECT_EQ(graph, reconstructed);
+                EXPECT_EQ(graph, reconstructed);
+            }
         }
     }
 }
 
 TEST(BOSS, CallUnitigs1) {
-    BOSSConstructor constructor(3);
-    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
-                                "ACTCT" });
-    BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        BOSSConstructor constructor(3);
+        constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                    "ACTCT" });
+        BOSS graph(&constructor);
 
-    std::multiset<std::string> contigs {
-        "$$$$",
-        "$$$ACT",
-        "ACTCT$",
-        "ACTA",
-        "CTAGCTA",
-    };
+        std::multiset<std::string> contigs {
+            "$$$$",
+            "$$$ACT",
+            "ACTCT$",
+            "ACTA",
+            "CTAGCTA",
+        };
 
-    std::multiset<std::string> obs_contigs;
-    graph.call_paths(
-        [&](const auto &, const auto &seq) {
-            obs_contigs.insert(graph.decode(seq));
-        },
-        true
-    );
+        std::multiset<std::string> obs_contigs;
+        std::mutex seq_mutex;
+        graph.call_paths(
+            [&](const auto &, const auto &seq) {
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_contigs.insert(graph.decode(seq));
+            },
+            num_threads,
+            true // unitigs
+        );
 
-    EXPECT_EQ(contigs, obs_contigs) << graph;
+        EXPECT_EQ(contigs, obs_contigs) << graph;
+    }
 }
 
 TEST(BOSS, CallUnitigsDisconnected1) {
-    BOSSConstructor constructor(3);
-    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
-                                "ACTCT",
-                                "ATCATCATCATCATCATCAT" });
-    BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        BOSSConstructor constructor(3);
+        constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                    "ACTCT",
+                                    "ATCATCATCATCATCATCAT" });
+        BOSS graph(&constructor);
 
-    std::multiset<std::string> contigs {
-        "$$$$",
-        "$$$ACT",
-        "ACTCT$",
-        "ACTA",
-        "CTAGCTA",
-        "TCATCA",
-    };
+        std::multiset<std::string> contigs {
+            "$$$$",
+            "$$$ACT",
+            "ACTCT$",
+            "ACTA",
+            "CTAGCTA",
+            "TCATCA",
+        };
 
-    std::multiset<std::string> obs_contigs;
+        std::multiset<std::string> obs_contigs;
+        std::mutex seq_mutex;
 
-    graph.call_paths(
-        [&](const auto &, const auto &seq) {
-            obs_contigs.insert(graph.decode(seq));
-        },
-        true
-    );
+        graph.call_paths(
+            [&](const auto &, const auto &seq) {
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_contigs.insert(graph.decode(seq));
+            },
+            num_threads,
+            true // unitigs
+        );
 
-    EXPECT_EQ(contigs, obs_contigs);
+        EXPECT_EQ(contigs, obs_contigs);
+    }
 }
 
 #ifndef _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
-    BOSSConstructor constructor(3);
-    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
-                                "ACTCT",
-                                "ATCATCATCATCATCATCAT",
-                                "ATNATNATNATNATNATNAT" });
-    BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        BOSSConstructor constructor(3);
+        constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                    "ACTCT",
+                                    "ATCATCATCATCATCATCAT",
+                                    "ATNATNATNATNATNATNAT" });
+        BOSS graph(&constructor);
 
-    std::multiset<std::string> contigs {
-        "$$$$",
-        "$$$ACT",
-        "ACTCT$",
-        "ACTA",
-        "CTAGCTA",
-        "TCATCA",
-        "TNATNA",
-    };
+        std::multiset<std::string> contigs {
+            "$$$$",
+            "$$$ACT",
+            "ACTCT$",
+            "ACTA",
+            "CTAGCTA",
+            "TCATCA",
+            "TNATNA",
+        };
 
-    std::multiset<std::string> obs_contigs;
+        std::multiset<std::string> obs_contigs;
+        std::mutex seq_mutex;
 
-    graph.call_paths(
-        [&](const auto &, const auto &seq) {
-            obs_contigs.insert(graph.decode(seq));
-        },
-        true
-    );
+        graph.call_paths(
+            [&](const auto &, const auto &seq) {
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_contigs.insert(graph.decode(seq));
+            },
+            num_threads,
+            true // unitigs
+        );
 
-    EXPECT_EQ(contigs, obs_contigs);
+        EXPECT_EQ(contigs, obs_contigs);
+    }
 }
 
 TEST(BOSS, CallUnitigsTwoComponents) {
-    BOSSConstructor constructor(3);
-    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
-                                "ACTCT",
-                                "ATCATCATCATCATCATCAT",
-                                "ATNATNATNATNATNATNAT",
-                                "ATCNATCNATCNATCNATCNATCNAT" });
-    BOSS graph(&constructor);
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        BOSSConstructor constructor(3);
+        constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                    "ACTCT",
+                                    "ATCATCATCATCATCATCAT",
+                                    "ATNATNATNATNATNATNAT",
+                                    "ATCNATCNATCNATCNATCNATCNAT" });
+        BOSS graph(&constructor);
 
-    std::multiset<std::string> contigs {
-        "$$$$",
-        "$$$ACT",
-        "ACTCT$",
-        "ACTA",
-        "CTAGCTA",
-        "NATC",
-        "ATCNAT",
-        "NATNAT",
-        "ATCATC",
-    };
+        std::multiset<std::string> contigs {
+            "$$$$",
+            "$$$ACT",
+            "ACTCT$",
+            "ACTA",
+            "CTAGCTA",
+            "NATC",
+            "ATCNAT",
+            "NATNAT",
+            "ATCATC",
+        };
 
-    std::multiset<std::string> obs_contigs;
+        std::multiset<std::string> obs_contigs;
+        std::mutex seq_mutex;
 
-    graph.call_paths(
-        [&](const auto &, const auto &seq) {
-            obs_contigs.insert(graph.decode(seq));
-        },
-        true
-    );
+        graph.call_paths(
+            [&](const auto &, const auto &seq) {
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_contigs.insert(graph.decode(seq));
+            },
+            num_threads,
+            true // unitigs
+        );
 
-    EXPECT_EQ(contigs, obs_contigs);
+        EXPECT_EQ(contigs, obs_contigs);
+    }
 }
 #endif
 
 TEST(BOSS, CallUnitigsWithPruning) {
-    BOSSConstructor constructor(4);
-    constructor.add_sequences({
-        "ACTATAGCTAGTCTATGCGA",
-        "ACTATAGCTAGTCTAA",
-        "ACTATAGCTA",
-        "ACTATAGCTT",
-        "ACTATC",
-    });
-    BOSS graph(&constructor);
-    ASSERT_EQ(4u, graph.get_k());
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        BOSSConstructor constructor(4);
+        constructor.add_sequences({
+            "ACTATAGCTAGTCTATGCGA",
+            "ACTATAGCTAGTCTAA",
+            "ACTATAGCTA",
+            "ACTATAGCTT",
+            "ACTATC",
+        });
+        BOSS graph(&constructor);
+        ASSERT_EQ(4u, graph.get_k());
 
-    // BOSS constructs unitigs from its edges as k-mers
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        );
-        EXPECT_EQ(contigs.size(), num_contigs);
-        num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 1);
-        EXPECT_EQ(contigs.size(), num_contigs);
-    }
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 2);
-        EXPECT_EQ(contigs.size(), num_contigs);
-    }
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 3);
-        EXPECT_EQ(contigs.size(), num_contigs);
-    }
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 4);
-        EXPECT_EQ(contigs.size(), num_contigs);
-    }
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 5);
-        EXPECT_EQ(contigs.size(), num_contigs);
-    }
-    {
-        std::set<std::string> contigs {
-            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
-        };
-        size_t num_contigs = 0;
-        graph.call_unitigs(
-            [&](const auto &str, const auto &path) {
-                EXPECT_EQ(path, graph.map_to_edges(str));
-                EXPECT_TRUE(contigs.count(str)) << str;
-                num_contigs++;
-            }
-        , 6);
-        EXPECT_EQ(contigs.size(), num_contigs);
+        // BOSS constructs unitigs from its edges as k-mers
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads);
+            EXPECT_EQ(contigs.size(), num_contigs);
+            num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 1 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 2 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 3 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 4 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 5 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
+        {
+            std::set<std::string> contigs {
+                "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+            };
+            std::atomic<size_t> num_contigs = 0;
+            graph.call_unitigs(
+                [&](const auto &str, const auto &path) {
+                    EXPECT_EQ(path, graph.map_to_edges(str));
+                    EXPECT_TRUE(contigs.count(str)) << str;
+                    num_contigs++;
+                }
+            , num_threads, 6 /* max_pruned_dead_end_size */);
+            EXPECT_EQ(contigs.size(), num_contigs);
+        }
     }
 }
 
@@ -1476,6 +1578,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "AGACAAATCGCTCCACCAA",
@@ -1494,16 +1597,20 @@ TEST(BOSS, CallUnitigsCheckDegree) {
         "TCTGAACTC"
     };
 
-    std::multiset<std::string> obs_unitigs;
-    graph.call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            EXPECT_EQ(path, graph.map_to_edges(unitig));
-            obs_unitigs.insert(unitig);
-        },
-        2
-    );
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_unitigs.insert(unitig);
+            },
+            num_threads,
+            2 // max_pruned_dead_end_size
+        );
 
-    EXPECT_EQ(unitigs, obs_unitigs);
+        EXPECT_EQ(unitigs, obs_unitigs) << num_threads;
+    }
 }
 
 TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
@@ -1520,6 +1627,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(8u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "AGACAAATCGCTCCACCAA",
@@ -1538,16 +1646,20 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
         "TCTGAACTC"
     };
 
-    std::multiset<std::string> obs_unitigs;
-    graph.call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            EXPECT_EQ(path, graph.map_to_edges(unitig));
-            obs_unitigs.insert(unitig);
-        },
-        2
-    );
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_unitigs.insert(unitig);
+            },
+            num_threads,
+            2 // max_pruned_dead_end_size
+        );
 
-    EXPECT_EQ(unitigs, obs_unitigs);
+        EXPECT_EQ(unitigs, obs_unitigs);
+    }
 }
 
 TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
@@ -1559,6 +1671,7 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1566,16 +1679,20 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
     };
 
-    std::multiset<std::string> obs_unitigs;
-    graph.call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            EXPECT_EQ(path, graph.map_to_edges(unitig));
-            obs_unitigs.insert(unitig);
-        },
-        2
-    );
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_unitigs.insert(unitig);
+            },
+            num_threads,
+            2 // max_pruned_dead_end_size
+        );
 
-    EXPECT_EQ(unitigs, obs_unitigs);
+        EXPECT_EQ(unitigs, obs_unitigs);
+    }
 }
 
 TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
@@ -1587,6 +1704,7 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
     });
     BOSS graph(&constructor);
     ASSERT_EQ(30u, graph.get_k());
+    std::mutex seq_mutex;
 
     std::multiset<std::string> unitigs {
         "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1594,16 +1712,20 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
     };
 
-    std::multiset<std::string> obs_unitigs;
-    graph.call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            EXPECT_EQ(path, graph.map_to_edges(unitig));
-            obs_unitigs.insert(unitig);
-        },
-        2
-    );
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs_unitigs.insert(unitig);
+            },
+            num_threads,
+            2 // max_pruned_dead_end_size
+        );
 
-    EXPECT_EQ(unitigs, obs_unitigs);
+        EXPECT_EQ(unitigs, obs_unitigs);
+    }
 }
 
 TEST(BOSS, CallUnitigsMasked) {
@@ -1615,6 +1737,7 @@ TEST(BOSS, CallUnitigsMasked) {
     BOSSConstructor constructor(k);
     constructor.add_sequences(std::vector<std::string>(sequences));
     BOSS graph(&constructor);
+    std::mutex seq_mutex;
 
     sdsl::bit_vector mask_bv(graph.num_edges() + 1, false);
     graph.map_to_edges(
@@ -1624,19 +1747,51 @@ TEST(BOSS, CallUnitigsMasked) {
     bit_vector_stat mask(std::move(mask_bv));
 
     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
-    std::unordered_multiset<std::string> obs;
 
-    graph.call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            EXPECT_EQ(path, graph.map_to_edges(unitig));
-            obs.insert(unitig);
-        },
-        0,
-        false,
-        &mask
-    );
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::unordered_multiset<std::string> obs;
 
-    EXPECT_EQ(obs, ref);
+        graph.call_unitigs(
+            [&](const auto &unitig, const auto &path) {
+                EXPECT_EQ(path, graph.map_to_edges(unitig));
+                std::unique_lock<std::mutex> lock(seq_mutex);
+                obs.insert(unitig);
+            },
+            num_threads,
+            0, // max_pruned_dead_end_size
+            false, // kmers_in_single_form
+            &mask // subgraph_mask
+        );
+
+        EXPECT_EQ(obs, ref);
+    }
+}
+
+TEST(BOSS, CallUnitigsSingleKmer) {
+    size_t k = 6;
+    std::vector<std::string> sequences {
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAA",
+        "GGGGGGGTGCTCTTTTTTT"
+    };
+    BOSSConstructor constructor(k);
+    constructor.add_sequences(std::move(sequences));
+    BOSS graph(&constructor);
+    graph.prune_and_mark_all_dummy_edges(1);
+    std::multiset<std::string> unitigs {
+        "GGGGGGTGCTCTTTTTT",
+        "GGGGGGG",
+        "GAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAAGAGC",
+        "TTTTTTT"
+    };
+    std::mutex seq_mutex;
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        std::multiset<std::string> obs_unitigs;
+        graph.call_unitigs([&](auto&& seq, auto&&) {
+            std::lock_guard<std::mutex> lock(seq_mutex);
+            obs_unitigs.emplace(seq);
+        }, num_threads, 0, true);
+        EXPECT_EQ(unitigs, obs_unitigs);
+    }
 }
 
 template <class Callback>

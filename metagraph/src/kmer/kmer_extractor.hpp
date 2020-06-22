@@ -51,6 +51,8 @@ class KmerExtractorBOSS {
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
 
+    static const std::vector<TAlphabet> kComplementCode;
+
     KmerExtractorBOSS();
 
     /**
@@ -90,7 +92,6 @@ class KmerExtractorBOSS {
 
   private:
     static const TAlphabet *kCharToNucleotide;
-    static const std::vector<TAlphabet> kComplementCode;
 };
 
 
@@ -171,6 +172,10 @@ class KmerExtractorT {
     std::string decode(const std::vector<TAlphabet> &sequence) const;
 
     std::vector<std::string> generate_suffixes(size_t len) const;
+
+    const std::vector<TAlphabet>& complement_code() {
+        return complement_code_;
+    }
 
   private:
     const TAlphabet *char_to_code_;
