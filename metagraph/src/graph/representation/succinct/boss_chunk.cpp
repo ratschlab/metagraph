@@ -24,10 +24,10 @@ template <typename Iterator>
 void initialize_chunk(uint64_t alph_size,
                       Iterator &it, const Iterator &end,
                       size_t k,
-                      sdsl::int_vector_mapper<> *W,
-                      sdsl::int_vector_mapper<1> *last,
+                      sdsl::int_vector_buffer<> *W,
+                      sdsl::int_vector_buffer<1> *last,
                       std::vector<uint64_t> *F,
-                      sdsl::int_vector_mapper<> *weights = nullptr) {
+                      sdsl::int_vector_buffer<> *weights = nullptr) {
     using T = std::decay_t<decltype(*it)>;
     using KMER = utils::get_first_type_t<T>;
     using CharType = typename KMER::CharType;
@@ -41,10 +41,10 @@ void initialize_chunk(uint64_t alph_size,
 
     uint64_t max_count __attribute__((unused)) = 0;
 
-    W->resize(0);
-    last->resize(0);
+    W->reset();
+    last->reset();
     if constexpr(utils::is_pair_v<T>) {
-        weights->resize(0);
+        weights->reset();
         weights->push_back(0);
         max_count = sdsl::bits::lo_set[weights->width()];
     }
@@ -118,21 +118,12 @@ void initialize_chunk(uint64_t alph_size,
     assert(!weights || weights->size() == curpos);
 }
 
-const std::string& create_int_vector(const std::string &filename) {
-    sdsl::int_vector<> int_vector;
-    std::ofstream out(filename, std::ios::binary);
-    int_vector.serialize(out);
-    return filename;
-}
-
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
                    const std::string &swap_dir)
       : alph_size_(alph_size), k_(k), canonical_(canonical),
         dir_(utils::create_temp_dir(swap_dir, "graph_chunk")),
-        W_(create_int_vector(dir_ + "/W"), false, false),
-        last_(create_int_vector(dir_ + "/last"), false, false),
-        weights_(create_int_vector(dir_ + "/weights"), false, false) {
-    W_.width(get_W_width());
+        W_(dir_ + "/W", std::ios::in | std::ios::out, 1024 * 1024, get_W_width()),
+        last_(dir_ + "/last", std::ios::in | std::ios::out, 1024 * 1024) {
     W_.push_back(0);
     last_.push_back(0);
     F_.assign(alph_size_, 0);
@@ -152,7 +143,10 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
                    const std::string &swap_dir)
       : Chunk(alph_size, k, canonical, swap_dir) {
 
-    weights_.width(bits_per_count);
+    weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
+                                         std::ios::in | std::ios::out,
+                                         1024 * 1024,
+                                         bits_per_count);
 
     if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
         initialize_chunk(alph_size_,
@@ -200,7 +194,7 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(k_);
 
     assert(last_.size() == W_.size());
-    assert(weights_.empty());
+    assert(weights_.size() == 0);
 
     W_.push_back(W);
     last_.push_back(last);
@@ -226,20 +220,20 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     if (other.size_ == 1)
         return;
 
-    if (weights_.empty() != other.weights_.empty()) {
+    if (bool(weights_.size()) != bool(other.weights_.size())) {
         std::cerr << "ERROR: trying to concatenate weighted and unweighted blocks" << std::endl;
         exit(1);
     }
 
-    W_.resize(size_ + other.size_ - 1);
-    std::copy(other.W_.begin() + 1,
-              other.W_.begin() + other.size_,
-              W_.begin() + size_);
+    auto &other_W = const_cast<sdsl::int_vector_buffer<>&>(other.W_);
+    for (auto it = other_W.begin() + 1; it != other_W.end(); ++it) {
+        W_.push_back(*it);
+    }
 
-    last_.resize(size_ + other.size_ - 1);
-    std::copy(other.last_.begin() + 1,
-              other.last_.begin() + other.size_,
-              last_.begin() + size_);
+    auto &other_last = const_cast<sdsl::int_vector_buffer<1>&>(other.last_);
+    for (auto it = other_last.begin() + 1; it != other_last.end(); ++it) {
+        last_.push_back(*it);
+    }
 
     assert(F_.size() == other.F_.size());
     for (size_t p = 0; p < other.F_.size(); ++p) {
@@ -247,10 +241,10 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     }
 
     if (other.weights_.size()) {
-        weights_.resize(size_ + other.size_ - 1);
-        std::copy(other.weights_.begin() + 1,
-                  other.weights_.begin() + other.size_,
-                  weights_.begin() + size_);
+        auto &other_weights = const_cast<sdsl::int_vector_buffer<>&>(other.weights_);
+        for (auto it = other_weights.begin() + 1; it != other_weights.end(); ++it) {
+            weights_.push_back(*it);
+        }
     }
 
     size_ += other.size_ - 1;
@@ -262,7 +256,7 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(size_ <= W_.size());
     assert(last_.size() == W_.size());
-    assert(weights_.empty() || weights_.size() == W_.size());
+    assert(weights_.size() == 0 || weights_.size() == W_.size());
 
     assert(graph->W_);
     delete graph->W_;
@@ -370,31 +364,43 @@ bool BOSS::Chunk::load(const std::string &infbase) {
                                std::ios::binary);
         size_ = load_number(instream);
 
-        sdsl::int_vector<> W_copy;
-        W_copy.load(instream);
-        W_.width(W_copy.width());
-        W_.resize(W_copy.size());
-        std::copy(W_copy.begin(), W_copy.end(), W_.begin());
-        W_copy = sdsl::int_vector<>();
+        {
+            W_ = sdsl::int_vector_buffer<>();
+            sdsl::int_vector<> W_copy;
+            W_copy.load(instream);
+            std::ofstream outstream(dir_ + "/W", std::ios::binary);
+            W_copy.serialize(outstream);
+            W_ = sdsl::int_vector_buffer<>(dir_ + "/W",
+                                           std::ios::in | std::ios::out,
+                                           1024 * 1024, W_copy.width());
+        }
 
-        sdsl::bit_vector last_copy;
-        last_copy.load(instream);
-        last_.width(last_copy.width());
-        last_.resize(last_copy.size());
-        std::copy(last_copy.begin(), last_copy.end(), last_.begin());
-        last_copy = sdsl::bit_vector();
+        {
+            last_ = sdsl::int_vector_buffer<1>();
+            sdsl::int_vector<1> last_copy;
+            last_copy.load(instream);
+            std::ofstream outstream(dir_ + "/last", std::ios::binary);
+            last_copy.serialize(outstream);
+            last_ = sdsl::int_vector_buffer<1>(dir_ + "/last",
+                                               std::ios::in | std::ios::out,
+                                               1024 * 1024, last_copy.width());
+        }
 
         if (!load_number_vector(instream, &F_)) {
             std::cerr << "ERROR: failed to load F vector" << std::endl;
             return false;
         }
 
-        sdsl::int_vector<> weights_copy;
-        weights_copy.load(instream);
-        weights_.width(weights_copy.width());
-        weights_.resize(weights_copy.size());
-        std::copy(weights_copy.begin(), weights_copy.end(), weights_.begin());
-        weights_copy = sdsl::int_vector<>();
+        {
+            weights_ = sdsl::int_vector_buffer<>();
+            sdsl::int_vector<> weights_copy;
+            weights_copy.load(instream);
+            std::ofstream outstream(dir_ + "/weights", std::ios::binary);
+            weights_copy.serialize(outstream);
+            weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
+                                                 std::ios::in | std::ios::out,
+                                                 1024 * 1024, weights_copy.width());
+        }
 
         alph_size_ = load_number(instream);
         k_ = load_number(instream);
@@ -421,19 +427,22 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
     serialize_number(outstream, size_);
 
     sdsl::int_vector<> W_copy(W_.size(), 0, W_.width());
-    std::copy(W_.begin(), W_.end(), W_copy.begin());
+    auto &W = const_cast<sdsl::int_vector_buffer<>&>(W_);
+    std::copy(W.begin(), W.end(), W_copy.begin());
     W_copy.serialize(outstream);
     W_copy = sdsl::int_vector<>();
 
     sdsl::bit_vector last_copy(last_.size(), 0, last_.width());
-    std::copy(last_.begin(), last_.end(), last_copy.begin());
+    auto &last = const_cast<sdsl::int_vector_buffer<1>&>(last_);
+    std::copy(last.begin(), last.end(), last_copy.begin());
     last_copy.serialize(outstream);
     last_copy = sdsl::bit_vector();
 
     serialize_number_vector(outstream, F_);
 
     sdsl::int_vector<> weights_copy(weights_.size(), 0, weights_.width());
-    std::copy(weights_.begin(), weights_.end(), weights_copy.begin());
+    auto &weights = const_cast<sdsl::int_vector_buffer<>&>(weights_);
+    std::copy(weights.begin(), weights.end(), weights_copy.begin());
     weights_copy.serialize(outstream);
     weights_copy = sdsl::int_vector<>();
 

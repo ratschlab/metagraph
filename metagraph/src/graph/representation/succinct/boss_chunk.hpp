@@ -3,7 +3,7 @@
 
 #include <type_traits>
 
-#include <sdsl/int_vector_mapper.hpp>
+#include <sdsl/int_vector_buffer.hpp>
 
 #include "boss.hpp"
 
@@ -92,10 +92,10 @@ class BOSS::Chunk {
     bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
     std::string dir_;
-    sdsl::int_vector_mapper<> W_;
-    sdsl::int_vector_mapper<1> last_;
+    sdsl::int_vector_buffer<> W_;
+    sdsl::int_vector_buffer<1> last_;
     std::vector<uint64_t> F_;
-    sdsl::int_vector_mapper<> weights_;
+    sdsl::int_vector_buffer<> weights_;
     uint64_t size_;
 };
 
