@@ -281,8 +281,12 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     graph->recompute_NF();
 
     graph->k_ = k_;
+    // TODO:
+    // graph->alph_size = alph_size_;
 
     graph->state = BOSS::State::SMALL;
+
+    assert(graph->is_valid());
 
     if (weights) {
         weights->resize(0);
@@ -290,10 +294,6 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
         weights->resize(weights_.size());
         std::copy(weights_.begin(), weights_.end(), weights->begin());
     }
-
-    size_ = 0;
-
-    assert(graph->is_valid());
 }
 
 std::pair<BOSS*, bool>
@@ -336,32 +336,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         }
     }
 
-    graph->k_ = full_chunk->k_;
-    // TODO:
-    // graph->alph_size = full_chunk->alph_size_;
-
-    delete graph->W_;
-    graph->W_ = new wavelet_tree_small(full_chunk->W_.width(), full_chunk->W_);
-
-    delete graph->last_;
-    sdsl::bit_vector last(full_chunk->last_.size());
-    std::copy(full_chunk->last_.begin(), full_chunk->last_.end(), last.begin());
-    graph->last_ = new bit_vector_stat(std::move(last));
-
-    graph->F_ = std::move(full_chunk->F_);
-    graph->recompute_NF();
-
-    graph->state = BOSS::State::SMALL;
-
-    assert(graph->is_valid());
-
-    if (weights) {
-        weights->resize(0);
-        weights->width(full_chunk->weights_.width());
-        weights->resize(full_chunk->weights_.size());
-        std::copy(full_chunk->weights_.begin(), full_chunk->weights_.end(),
-                  weights->begin());
-    }
+    full_chunk->initialize_boss(graph, weights);
 
     return std::make_pair(graph, full_chunk->canonical_);
 }
