@@ -49,8 +49,6 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
     }
 
     if (TMP_DIRS.empty()) {
-        logger->trace("Registered temporary directory {}", tmp_dir_str);
-
         if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
             logger->error("Couldn't reset the signal handler for SIGINT");
         if (std::signal(SIGTERM, cleanup_tmp_dir_on_signal) == SIG_ERR)
@@ -58,6 +56,8 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         if (std::atexit(cleanup_tmp_dir_on_exit))
             logger->error("Couldn't reset the atexit handler");
     }
+
+    logger->trace("Registered temporary directory {}", tmp_dir_str);
 
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
