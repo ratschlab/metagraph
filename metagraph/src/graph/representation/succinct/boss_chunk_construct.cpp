@@ -198,7 +198,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
         } else {
             if constexpr (utils::is_pair_v<T>) {
                 using C = typename T::second_type;
-                if (kmer->second & (C(1) << (sizeof(C) * 8 - 1))) {
+                if (kmer->second >> (sizeof(C) * 8 - 1)) {
                     kmer->second = std::numeric_limits<C>::max();
                 } else {
                     kmer->second *= 2;
@@ -512,7 +512,7 @@ void add_reverse_complements(size_t k,
         } else {
             if constexpr (utils::is_pair_v<T_REAL>) {
                 using C = typename T_REAL::second_type;
-                if (kmer.second & (C(1) << (sizeof(C) * 8 - 1))) {
+                if (kmer.second >> (sizeof(C) * 8 - 1)) {
                     original.add({ kmer.first.data(), std::numeric_limits<C>::max() });
                 } else {
                     original.add({ kmer.first.data(), 2 * kmer.second });
