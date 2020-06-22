@@ -11,6 +11,8 @@ using namespace mtg;
 using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
 
+const uint64_t BUFFER_SIZE = 5 * 1024 * 1024;
+
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer256, uint8_t>>);
@@ -118,12 +120,19 @@ void initialize_chunk(uint64_t alph_size,
     assert(!weights || weights->size() == curpos);
 }
 
+const std::string& create_int_vector(const std::string &filename) {
+    sdsl::int_vector<> int_vector;
+    std::ofstream out(filename, std::ios::binary);
+    int_vector.serialize(out);
+    return filename;
+}
+
 BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
                    const std::string &swap_dir)
       : alph_size_(alph_size), k_(k), canonical_(canonical),
         dir_(utils::create_temp_dir(swap_dir, "graph_chunk")),
-        W_(dir_ + "/W", std::ios::in | std::ios::out, 1024 * 1024, get_W_width()),
-        last_(dir_ + "/last", std::ios::in | std::ios::out, 1024 * 1024) {
+        W_(create_int_vector(dir_ + "/W"), std::ios::in | std::ios::out, BUFFER_SIZE, get_W_width()),
+        last_(create_int_vector(dir_ + "/last"), std::ios::in | std::ios::out, BUFFER_SIZE) {
     W_.push_back(0);
     last_.push_back(0);
     F_.assign(alph_size_, 0);
@@ -143,9 +152,9 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
                    const std::string &swap_dir)
       : Chunk(alph_size, k, canonical, swap_dir) {
 
-    weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
+    weights_ = sdsl::int_vector_buffer<>(create_int_vector(dir_ + "/weights"),
                                          std::ios::in | std::ios::out,
-                                         1024 * 1024,
+                                         BUFFER_SIZE,
                                          bits_per_count);
 
     if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
@@ -372,7 +381,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
             W_copy.serialize(outstream);
             W_ = sdsl::int_vector_buffer<>(dir_ + "/W",
                                            std::ios::in | std::ios::out,
-                                           1024 * 1024, W_copy.width());
+                                           BUFFER_SIZE, W_copy.width());
         }
 
         {
@@ -383,7 +392,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
             last_copy.serialize(outstream);
             last_ = sdsl::int_vector_buffer<1>(dir_ + "/last",
                                                std::ios::in | std::ios::out,
-                                               1024 * 1024, last_copy.width());
+                                               BUFFER_SIZE, last_copy.width());
         }
 
         if (!load_number_vector(instream, &F_)) {
@@ -399,7 +408,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
             weights_copy.serialize(outstream);
             weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
                                                  std::ios::in | std::ios::out,
-                                                 1024 * 1024, weights_copy.width());
+                                                 BUFFER_SIZE, weights_copy.width());
         }
 
         alph_size_ = load_number(instream);
