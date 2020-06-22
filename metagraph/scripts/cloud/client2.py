@@ -483,10 +483,10 @@ def check_status():
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
-            # estimated RAM needed for loading graph in memory; 1.3 bytes/kmer (for --small representation),
-            # 2 byte/kmer-count; the 3.5 comes from 2x canonical+non-canonical + ~1.5 for dummy kmers
-            # then multiply all by 2 to leave space for reallocation, except that I multiply by 1.5
-            required_ram_gb = round(1.5 * (num_kmers * 3.5 * (2 + 1.3)) / 1e9 + 0.5, 2)
+            # estimated RAM needed for loading graph in memory;  the 3.5 comes from
+            bytes_per_kmer = 2.6  # 0.6 bytes/kmer (for --small representation), 2 byte/kmer-count
+            kmer_count = 2.4 * num_kmers  # 2x canonical+non-canonical + 2 * 20% for dummy kmers
+            required_ram_gb = round(num_kmers * (2 + 1.5) * (2 + 0.6) / 1e9 + 0.5, 2)
             if required_ram_gb > total_ram_gb - 2:
                 download_path = download_dir(sra_id)
                 logging.warning(

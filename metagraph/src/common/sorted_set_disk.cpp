@@ -22,6 +22,15 @@ void SortedSetDisk<T>::sort_and_dedupe() {
 template class SortedSetDisk<uint64_t>;
 template class SortedSetDisk<sdsl::uint128_t>;
 template class SortedSetDisk<sdsl::uint256_t>;
+template class SortedSetDisk<std::pair<uint64_t, uint8_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint128_t, uint8_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint256_t, uint8_t>>;
+template class SortedSetDisk<std::pair<uint64_t, uint16_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint128_t, uint16_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint256_t, uint16_t>>;
+template class SortedSetDisk<std::pair<uint64_t, uint32_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint128_t, uint32_t>>;
+template class SortedSetDisk<std::pair<sdsl::uint256_t, uint32_t>>;
 
 } // namespace common
 } // namespace mtg
