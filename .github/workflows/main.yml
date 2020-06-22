@@ -83,7 +83,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install libomp cmake make htslib boost folly
+      run: brew install libomp cmake make htslib openssl boost folly
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
