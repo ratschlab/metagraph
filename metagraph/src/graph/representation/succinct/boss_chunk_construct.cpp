@@ -187,8 +187,14 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
         } else {
-            if constexpr (utils::is_pair_v<T>)
-                kmer->second *= 2;
+            if constexpr (utils::is_pair_v<T>) {
+                using C = typename T::second_type;
+                if (kmer->second & (C(1) << (sizeof(C) * 8 - 1))) {
+                    kmer->second = std::numeric_limits<C>::max();
+                } else {
+                    kmer->second *= 2;
+                }
+            }
         }
     }
     logger->trace("Sorting all real kmers...");
@@ -546,7 +552,12 @@ void add_reverse_complements(size_t k,
             original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
         } else {
             if constexpr (utils::is_pair_v<T_REAL>) {
-                original.add({kmer.first.data(), 2 * kmer.second });
+                using C = typename T_REAL::second_type;
+                if (kmer.second & (C(1) << (sizeof(C) * 8 - 1))) {
+                    original.add({ kmer.first.data(), std::numeric_limits<C>::max() });
+                } else {
+                    original.add({ kmer.first.data(), 2 * kmer.second });
+                }
             } else {
                 original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
             }
