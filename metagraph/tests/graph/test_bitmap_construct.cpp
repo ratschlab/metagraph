@@ -210,7 +210,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix, false
+        k, false, kmers, suffix
     );
     delete reads;
 }
