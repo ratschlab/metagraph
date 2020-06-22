@@ -83,7 +83,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp
+      run: brew install htslib libomp folly
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
@@ -91,7 +91,7 @@ jobs:
     - name: install libmaus2-lite
       run: |
         cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
+        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
         make -j 2
         make install
 
