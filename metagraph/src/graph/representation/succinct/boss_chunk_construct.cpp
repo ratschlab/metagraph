@@ -556,10 +556,10 @@ void add_reverse_complements(size_t k,
     original.finish();
     // start merging #original with #reverse_complements into #kmers
     kmers->reset();
-    async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers](){
-      ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
-      common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir/"original");
-      merge(original_kmers, reverse_complements, kmers);
+    async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers]() {
+        ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
+        common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir / "original");
+        merge(original_kmers, reverse_complements, kmers);
     });
 }
 
@@ -589,8 +589,8 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
 
-    // compute the reverse complements of #kmers to #rc_set, then merge back into #kmers
     if (kmer_collector.is_both_strands_mode()) {
+        // compute the reverse complements of #kmers, then merge back into #kmers
         add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
                                 async_worker, &kmers);
     }
