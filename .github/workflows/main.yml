@@ -91,7 +91,7 @@ jobs:
     - name: install libmaus2-lite
       run: |
         cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
+        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
         make -j 2
         make install
 
@@ -104,7 +104,7 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+        cmake -DCMAKE_BUILD_TYPE=Debug -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
