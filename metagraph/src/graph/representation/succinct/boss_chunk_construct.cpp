@@ -517,34 +517,48 @@ static void merge(common::EliasFanoDecoder<T_INT> &original_kmers,
 /**
  * Adds reverse complements
  */
-template <typename T, typename T_INT>
+template <typename T_REAL>
 void add_reverse_complements(size_t k,
+                             size_t num_threads,
+                             size_t buffer_size,
                              const std::filesystem::path &dir,
                              ThreadPool& async_worker,
-                             common::SortedSetDisk<T_INT> *rc_set,
-                             ChunkedWaitQueue<T> *kmers) {
+                             ChunkedWaitQueue<T_REAL> *kmers) {
+    using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
+
+    std::string rc_dir = dir/"rc";
+    std::filesystem::create_directory(rc_dir);
+    auto rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
+            num_threads, buffer_size, rc_dir, std::numeric_limits<size_t>::max());
     logger->trace("Adding reverse complements...");
-    common::EliasFanoEncoderBuffered<T_INT> original(dir/"original", ENCODER_BUFFER_SIZE);
+    common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
+    Vector<T_INT_REAL> buffer;
+    buffer.reserve(10'000);
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
-        const T &kmer = *it;
-        const T &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
+        const T_REAL &kmer = *it;
+        const T_REAL &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
         if (get_first(kmer) != get_first(reverse)) {
-            rc_set->add(reinterpret_cast<const T_INT &>(reverse));
-            original.add(reinterpret_cast<const T_INT &>(kmer));
+            buffer.push_back(reinterpret_cast<const T_INT_REAL &>(reverse));
+            if (buffer.size() == buffer.capacity()) {
+                rc_set->insert(buffer.begin(), buffer.end());
+                buffer.resize(0);
+            }
+            original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
         } else {
-            if constexpr (utils::is_pair_v<T>) {
+            if constexpr (utils::is_pair_v<T_REAL>) {
                 original.add({kmer.first.data(), 2 * kmer.second });
             } else {
-                original.add(reinterpret_cast<const T_INT &>(kmer));
+                original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
             }
         }
     }
+    rc_set->insert(buffer.begin(), buffer.end());
     original.finish();
     // start merging #original with #reverse_complements into #kmers
     kmers->reset();
-    async_worker.enqueue([rc_set, &dir, kmers](){
-      ChunkedWaitQueue<T_INT> &reverse_complements = rc_set->data(true);
-      common::EliasFanoDecoder<T_INT> original_kmers(dir/"original");
+    async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers](){
+      ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
+      common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir/"original");
       merge(original_kmers, reverse_complements, kmers);
     });
 }
@@ -575,13 +589,10 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
 
-    // compute the reverse complements of #kmers into #rc_set, then merge back into #kmers
-    std::string rc_dir = dir/"rc";
-    std::filesystem::create_directory(rc_dir);
-    common::SortedSetDisk<T_INT_REAL> rc_set(num_threads, kmer_collector.buffer_size(),
-                                             rc_dir, std::numeric_limits<size_t>::max());
+    // compute the reverse complements of #kmers to #rc_set, then merge back into #kmers
     if (kmer_collector.is_both_strands_mode()) {
-        add_reverse_complements(k, dir, async_worker, &rc_set, &kmers);
+        add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
+                                async_worker, &kmers);
     }
 
     std::string dummy_sink_name;
