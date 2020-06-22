@@ -22,15 +22,12 @@ static_assert(!utils::is_pair_v<KmerExtractorBOSS::Kmer256>);
 // k is node length
 template <typename Iterator>
 void initialize_chunk(uint64_t alph_size,
-                      Iterator *begin_ptr, Iterator *end_ptr,
+                      Iterator &it, const Iterator &end,
                       size_t k,
                       sdsl::int_vector_mapper<> *W,
                       sdsl::int_vector_mapper<1> *last,
                       std::vector<uint64_t> *F,
                       sdsl::int_vector_mapper<> *weights = nullptr) {
-    Iterator &it = *begin_ptr;
-    Iterator &end = *end_ptr;
-
     using T = std::decay_t<decltype(*it)>;
     using KMER = utils::get_first_type_t<T>;
     using CharType = typename KMER::CharType;
@@ -159,13 +156,13 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
 
     if constexpr(utils::is_instance_v<Array, common::ChunkedWaitQueue>) {
         initialize_chunk(alph_size_,
-                         &kmers_with_counts.begin(),
-                         &kmers_with_counts.end(),
+                         kmers_with_counts.begin(),
+                         kmers_with_counts.end(),
                          k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     } else {
         auto begin = kmers_with_counts.begin();
         auto end = kmers_with_counts.end();
-        initialize_chunk(alph_size_, &begin, &end,
+        initialize_chunk(alph_size_, begin, end,
                          k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     }
     size_ = W_.size();
