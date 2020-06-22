@@ -58,14 +58,14 @@ class BOSS::Chunk {
      */
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
-    TAlphabet get_W_back() const { return W_[size_ - 1]; }
-    void alter_W_back(TAlphabet W) { W_[size_ - 1] = W; }
+    TAlphabet get_W_back() const { return W_[size() - 1]; }
+    void alter_W_back(TAlphabet W) { W_[size() - 1] = W; }
 
-    void alter_last_back(bool last) { last_[size_ - 1] = last; }
+    void alter_last_back(bool last) { last_[size() - 1] = last; }
 
     void extend(const Chunk &other);
 
-    uint64_t size() const { return size_; }
+    uint64_t size() const { return W_.size(); }
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -96,7 +96,6 @@ class BOSS::Chunk {
     sdsl::int_vector_buffer<1> last_;
     std::vector<uint64_t> F_;
     sdsl::int_vector_buffer<> weights_;
-    uint64_t size_;
 };
 
 

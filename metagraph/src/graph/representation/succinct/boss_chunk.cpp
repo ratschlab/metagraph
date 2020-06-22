@@ -129,7 +129,6 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
     W_.push_back(0);
     last_.push_back(0);
     F_.assign(alph_size_, 0);
-    size_ = 1;
 }
 
 BOSS::Chunk::~Chunk() {
@@ -160,7 +159,6 @@ BOSS::Chunk::Chunk(uint64_t alph_size,
         initialize_chunk(alph_size_, begin, end,
                          k_, &W_, &last_, &F_, bits_per_count ? &weights_ : NULL);
     }
-    size_ = W_.size();
 }
 
 template <typename T>
@@ -202,11 +200,9 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     for (TAlphabet a = F + 1; a < F_.size(); ++a) {
         F_[a]++;
     }
-    size_++;
 }
 
 void BOSS::Chunk::extend(const BOSS::Chunk &other) {
-    assert(size_ && other.size_);
     assert(!weights_.size() || weights_.size() == W_.size());
     assert(!other.weights_.size() || other.weights_.size() == other.W_.size());
 
@@ -218,7 +214,7 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
         exit(1);
     }
 
-    if (other.size_ == 1)
+    if (other.W_.size() == 1)
         return;
 
     if (bool(weights_.size()) != bool(other.weights_.size())) {
@@ -248,14 +244,11 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
         }
     }
 
-    size_ += other.size_ - 1;
-
     assert(W_.size() == last_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
 }
 
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
-    assert(size_ <= W_.size());
     assert(last_.size() == W_.size());
     assert(weights_.size() == 0 || weights_.size() == W_.size());
 
@@ -338,8 +331,6 @@ bool BOSS::Chunk::load(const std::string &infbase) {
         std::ifstream instream(utils::remove_suffix(infbase, kFileExtension)
                                                                 + kFileExtension,
                                std::ios::binary);
-        size_ = load_number(instream);
-
         {
             W_.close(true);
             sdsl::int_vector<> W_copy;
@@ -380,7 +371,6 @@ bool BOSS::Chunk::load(const std::string &infbase) {
         canonical_ = load_number(instream);
 
         return k_ && alph_size_ && W_.size() == last_.size()
-                                && size_ <= W_.size()
                                 && F_.size() == alph_size_
                                 && (!weights_.size() || weights_.size() == W_.size());
 
@@ -397,7 +387,6 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(utils::remove_suffix(outbase, kFileExtension)
                                                                 + kFileExtension,
                             std::ios::binary);
-    serialize_number(outstream, size_);
 
     sdsl::int_vector<> W_copy(W_.size(), 0, W_.width());
     auto &W = const_cast<sdsl::int_vector_buffer<>&>(W_);
