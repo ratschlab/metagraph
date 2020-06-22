@@ -58,14 +58,6 @@ class SortedSetDiskBase {
 
     size_t buffer_size() const { return data_.capacity(); }
 
-    void add(const T& v) {
-        this->data_.push_back(v);
-        if (this->data_.size() == this->data_.capacity()) {
-            this->shrink_data();
-            this->dump_to_file(false /* is_done */);
-        }
-    }
-
     /**
      * Returns the globally sorted and counted data. Typically called once all the data
      * was inserted via insert().
