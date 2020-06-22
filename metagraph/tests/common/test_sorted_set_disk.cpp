@@ -14,6 +14,7 @@
 
 
 namespace {
+
 using namespace mtg;
 
 template <typename T>

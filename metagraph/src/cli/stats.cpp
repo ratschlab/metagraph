@@ -14,7 +14,10 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotation.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
@@ -277,3 +280,6 @@ int compare(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

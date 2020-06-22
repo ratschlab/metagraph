@@ -30,14 +30,13 @@ typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
  */
 template <typename KMER, class KmerExtractor, class Container>
 class KmerCollector {
-    using Extractor = KmerExtractor;
-    using Sequence = std::vector<typename Extractor::TAlphabet>;
-    Extractor kmer_extractor_;
+    KmerExtractor kmer_extractor_;
 
     static_assert(std::is_same_v<typename Container::key_type, typename KMER::WordType>);
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Extractor = KmerExtractor;
     using Key = typename Container::key_type;
     using Value = typename Container::value_type;
     using Data = typename Container::result_type;
@@ -56,7 +55,7 @@ class KmerCollector {
      */
     KmerCollector(size_t k,
                   bool both_strands_mode = false,
-                  Sequence&& filter_suffix_encoded = {},
+                  std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
                   const std::filesystem::path &tmp_dir = "/tmp/",
@@ -117,7 +116,7 @@ class KmerCollector {
 
     BatchAccumulator<std::pair<std::string, uint64_t>> batcher_;
 
-    Sequence filter_suffix_encoded_;
+    std::vector<typename Extractor::TAlphabet> filter_suffix_encoded_;
 
     bool both_strands_mode_;
 

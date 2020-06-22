@@ -13,6 +13,10 @@
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
 using namespace annotate;
@@ -255,22 +259,22 @@ int transform_annotation(Config *config) {
 
         switch (config->anno_type) {
             case Config::RowFlat: {
-                auto annotator = convert<RowFlatAnnotator>(files.at(0));
+                auto annotator = annotate::convert<RowFlatAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::RBFish: {
-                auto annotator = convert<RainbowfishAnnotator>(files.at(0));
+                auto annotator = annotate::convert<RainbowfishAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                auto annotator = convert<BinRelWT_sdslAnnotator>(files.at(0));
+                auto annotator = annotate::convert<BinRelWT_sdslAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT: {
-                auto annotator = convert<BinRelWTAnnotator>(files.at(0));
+                auto annotator = annotate::convert<BinRelWTAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
@@ -480,3 +484,6 @@ int relax_multi_brwt(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

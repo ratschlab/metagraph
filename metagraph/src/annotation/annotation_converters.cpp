@@ -211,6 +211,19 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
                                                   annotator.get_label_encoder());
 }
 
+template <>
+std::unique_ptr<UniqueRowAnnotator>
+convert<UniqueRowAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<UniqueRowBinmat>([&](auto callback) {
+        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+    }, num_columns);
+
+    return std::make_unique<UniqueRowAnnotator>(std::move(matrix),
+                                                annotator.get_label_encoder());
+}
+
 template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(ColumnCompressed<Label>&& annotator,

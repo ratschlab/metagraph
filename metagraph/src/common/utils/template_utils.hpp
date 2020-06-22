@@ -85,6 +85,19 @@ struct get_first_type<T, std::void_t<typename T::first_type>> {
 template <typename T>
 using get_first_type_t = typename get_first_type<T>::type;
 
+template <typename FIRST, typename T, typename = void>
+struct replace_first {
+    using type = FIRST;
+};
+
+template <typename FIRST, typename T>
+using replace_first_t = typename replace_first<FIRST, T>::type;
+
+template <typename FIRST, typename T>
+struct replace_first<FIRST, T, std::void_t<typename T::second_type>> {
+    using type = std::pair<FIRST, typename T::second_type>;
+};
+
 class GreaterFirst {
   public:
     template <typename T>

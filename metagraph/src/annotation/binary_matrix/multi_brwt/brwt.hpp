@@ -21,12 +21,6 @@ class BRWT : public BinaryMatrix {
   public:
     BRWT() : nonzero_rows_(new bit_vector_smallrank()) {}
 
-    BRWT(const BRWT &other) = delete;
-    BRWT& operator=(const BRWT &other) = delete;
-
-    BRWT(BRWT&& other) = default;
-    BRWT& operator=(BRWT&& other) = default;
-
     uint64_t num_columns() const { return assignments_.size(); }
     uint64_t num_rows() const { return nonzero_rows_->size(); }
 

@@ -14,7 +14,10 @@
 #include "align.hpp"
 #include "server_utils.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
@@ -22,6 +25,8 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
 const std::string SCORE_JSON_FIELD = "score";
 const std::string SEQUENCE_JSON_FIELD = "sequence";
+const std::string ALIGNMENT_JSON_FIELD = "alignments";
+const std::string CIGAR_JSON_FIELD = "cigar";
 
 // convert values into proper types, i.e. 'nan' -> null, strings representing numbers -> numbers
 Json::Value adjust_for_types(const std::string &v) {
@@ -62,6 +67,7 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
 
             res_obj[SEQUENCE_JSON_FIELD] = query_desc_parts[1];
             res_obj[SCORE_JSON_FIELD] = (int)atoi(query_desc_parts[2].c_str());
+            res_obj[CIGAR_JSON_FIELD] = query_desc_parts[3];
         }
 
         res_obj["results"] = Json::Value(Json::arrayValue);
@@ -118,7 +124,6 @@ std::string process_search_request(const std::string &received_message,
         throw std::domain_error("No input sequences received from client");
 
     Config config(config_orig);
-
     // discovery_fraction a proxy of 1 - %similarity
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
@@ -162,26 +167,42 @@ std::string process_search_request(const std::string &received_message,
 }
 
 std::string process_align_request(const std::string &received_message,
-                                  const IDBGAligner &aligner) {
+                                  const DeBruijnGraph &graph,
+                                  const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
 
     Json::Value root = Json::Value(Json::arrayValue);
 
+    Config config(config_orig);
+
+    if (json.isMember("max_alternative_alignments")) {
+        config.alignment_num_alternative_paths = json["max_alternative_alignments"].asInt();
+    }
+    std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
+
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const auto paths = aligner.align(read_stream->seq.s);
+        const QueryAlignment<IDBGAligner::node_index> paths = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
 
         // not supporting reverse complement yet
         if (!paths.empty()) {
-            auto path = paths.front();
+            Json::Value alignments = Json::Value(Json::arrayValue);
 
-            align_entry[SCORE_JSON_FIELD] = path.get_score();
-            align_entry[SEQUENCE_JSON_FIELD] = path.get_sequence();
+            for (const Alignment<IDBGAligner::node_index> &path : paths) {
+                Json::Value a;
+                a[SCORE_JSON_FIELD] = path.get_score();
+                a[SEQUENCE_JSON_FIELD] = path.get_sequence();
+                a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+
+                alignments.append(a);
+            };
+
+            align_entry[ALIGNMENT_JSON_FIELD] = alignments;
         } else {
             align_entry[SEQUENCE_JSON_FIELD] = "";
         }
@@ -207,11 +228,59 @@ std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
     return Json::writeString(builder, root);
 }
 
+std::string process_stats_request(const DeBruijnGraph &graph, const AnnotatedDBG &anno_graph,
+                                  const std::string &graph_filename, const std::string &annotation_filename) {
+    Json::Value root;
+
+    Json::Value graph_stats;
+    graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
+    graph_stats["k"] = (uint64_t) graph.get_k();
+    graph_stats["nodes"] = graph.num_nodes();
+    graph_stats["is_canonical_mode"] = graph.is_canonical_mode();
+    root["graph"] = graph_stats;
+
+    Json::Value annotation_stats;
+    const auto &annotation = anno_graph.get_annotation();
+    annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
+    annotation_stats["labels"] = (uint64_t) annotation.num_labels();
+    annotation_stats["objects"] = (uint64_t) annotation.num_objects();
+    annotation_stats["relations"] = (uint64_t) annotation.num_relations();
+
+    root["annotation"] = annotation_stats;
+
+    Json::StreamWriterBuilder builder;
+    return Json::writeString(builder, root);
+}
+
+std::thread start_server(HttpServer &server_startup, Config &config) {
+    server_startup.config.thread_pool_size = std::max(1u, get_num_threads());
+
+    if (config.host_address != "") {
+        server_startup.config.address = config.host_address;
+    }
+    server_startup.config.port = config.port;
+
+    logger->info("[Server] Will listen on {} port {}", config.host_address,
+                 server_startup.config.port);
+    return std::thread([&server_startup]() { server_startup.start(); });
+}
 
 int run_server(Config *config) {
     assert(config);
 
     assert(config->infbase_annotators.size() == 1);
+
+    HttpServer initial_server;
+    initial_server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
+                                                shared_ptr<HttpServer::Request> /* request */) {
+        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
+                        "Server is currently initializing, please come back later.");
+    };
+    initial_server.default_resource["POST"] = initial_server.default_resource["GET"];
+
+    // creating an initial server which informs the requester, that the server is initializing
+    // i.e. graphs are loaded from disk, which may take a while
+    std::thread initial_server_thread = start_server(initial_server, *config);
 
     logger->info("[Server] Loading graph...");
 
@@ -220,34 +289,25 @@ int run_server(Config *config) {
 
     logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
-    std::unique_ptr<IDBGAligner> aligner;
-    aligner.reset(build_aligner(*graph, *config).release());
+    std::unique_ptr<IDBGAligner> default_aligner = build_aligner(*graph, *config);
 
-    const size_t num_threads = std::max(1u, get_num_threads());
-
-    HttpServer server;
-    server.config.thread_pool_size = num_threads;
-    if (config->host_address != "") {
-        logger->info("[Server] Will listen on interface {}", config->host_address);
-        server.config.address = config->host_address;
-    }
-
-    server.config.port = config->port;
-
+    // defaults for the server
     config->num_top_labels = 10000;
     config->fast = true;
 
+    // the actual server
+    HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &content) {
-            return process_search_request(content, *anno_graph, *config, *aligner);
+            return process_search_request(content, *anno_graph, *config, *default_aligner);
         });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &content) {
-            return process_align_request(content, *aligner);
+            return process_align_request(content, *graph, *config);
         });
     };
 
@@ -255,6 +315,14 @@ int run_server(Config *config) {
                                                     shared_ptr<HttpServer::Request> request) {
         process_request(response, request, [&](const std::string &) {
             return process_column_label_request(*anno_graph);
+        });
+    };
+
+    server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                            shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, [&](const std::string &) {
+            return process_stats_request(*graph, *anno_graph, config->infbase,
+                                         config->infbase_annotators.front());
         });
     };
 
@@ -276,16 +344,15 @@ int run_server(Config *config) {
         }
     };
 
-    std::promise<unsigned short> server_port;
-    std::thread server_thread([&server, &server_port]() {
-        server.start([&server_port](unsigned short port) { server_port.set_value(port); });
-    });
+    // everything is ready, stopping initial server and start the actual server
+    initial_server.stop();
+    initial_server_thread.join();
 
-    logger->info("[Server] Initializing a HTTP server with {} threads"
-                 ", listening on port {}",
-                 num_threads, server_port.get_future().get());
-
+    std::thread server_thread = start_server(server, *config);
     server_thread.join();
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

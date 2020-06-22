@@ -32,10 +32,6 @@ void test_rainbowfish_buffer(const uint64_t num_rows) {
         build_matrix_from_columns<RainbowfishBuffer<BufferSize>>(copy, num_rows),
         columns
     );
-    test_matrix(
-        build_matrix_from_rows<RainbowfishBuffer<BufferSize>>(copy, num_rows),
-        columns
-    );
 }
 
 TEST(BinaryMatrixRainbowfishTest, BufferAllSizes) {

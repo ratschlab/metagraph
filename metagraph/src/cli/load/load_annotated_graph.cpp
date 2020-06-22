@@ -5,13 +5,17 @@
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
     auto annotation_temp = config.infbase_annotators.size()
-            ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
+            ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
             : initialize_annotation(config.anno_type, config, graph->max_index());
 
     if (config.infbase_annotators.size()
@@ -119,3 +123,6 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
         )
     );
 }
+
+} // namespace cli
+} // namespace mtg

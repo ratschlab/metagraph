@@ -19,8 +19,6 @@
 namespace mtg {
 namespace kmer {
 
-using namespace mtg;
-
 const size_t kLargeBufferSize = 1'000'000;
 const size_t kBufferSize = 100'000;
 
@@ -127,7 +125,7 @@ template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::KmerCollector(size_t k,
                 bool both_strands_mode,
-                Sequence&& filter_suffix_encoded,
+                std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
                 const std::filesystem::path &tmp_dir,
@@ -241,6 +239,10 @@ void KmerCollector<KMER, KmerExtractor, Container>::join() {
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer64)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer128)
 INSTANTIATE_KMER_STORAGE(KmerExtractorBOSS, KmerExtractorBOSS::Kmer256)
+
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS64)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS128)
+INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::KmerBOSS256)
 
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer64)
 INSTANTIATE_KMER_STORAGE(KmerExtractor2Bit, KmerExtractor2Bit::Kmer128)

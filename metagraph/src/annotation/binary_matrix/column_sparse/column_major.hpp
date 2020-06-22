@@ -12,12 +12,6 @@ class ColumnMajor : public BinaryMatrix {
     ColumnMajor() {}
     ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
 
-    ColumnMajor(const ColumnMajor &other) = default;
-    ColumnMajor& operator=(const ColumnMajor &other) = default;
-
-    ColumnMajor(ColumnMajor&& other) = default;
-    ColumnMajor& operator=(ColumnMajor&& other) = default;
-
     uint64_t num_columns() const { return columns_->size(); }
     uint64_t num_rows() const;
 

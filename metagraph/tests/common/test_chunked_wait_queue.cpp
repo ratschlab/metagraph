@@ -12,7 +12,7 @@
 namespace {
 
 using namespace mtg;
-using common::ChunkedWaitQueue;
+using mtg::common::ChunkedWaitQueue;
 
 TEST(WaitQueue, PushPop) {
     constexpr size_t buffer_size = 4;

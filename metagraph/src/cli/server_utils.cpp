@@ -5,6 +5,10 @@
 #include "common/logger.hpp"
 #include "server_utils.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 /**
@@ -61,16 +65,17 @@ void write_response(SimpleWeb::StatusCode status,
                     const std::string &msg,
                     std::shared_ptr<HttpServer::Response> response,
                     bool compress) {
+    auto header = SimpleWeb::CaseInsensitiveMultimap(
+            { { "Content-Type", "application/json" } });
+
+    std::string msg_send = msg;
     if (compress) {
-        auto compressed = compress_string(msg);
-        auto header = SimpleWeb::CaseInsensitiveMultimap({
-            { "Content-Encoding", "deflate" },
-            { "Content-Length", std::to_string(compressed.size()) }
-        });
-        response->write(status, compressed, header);
-    } else {
-        response->write(status, msg);
+        msg_send = compress_string(msg);
+        header.insert(std::make_pair("Content-Encoding", "deflate"));
+        header.insert(std::make_pair("Content-Length", std::to_string(msg_send.size())));
     }
+
+    response->write(status, msg_send, header);
 }
 
 Json::Value parse_json_string(const std::string &msg) {
@@ -114,3 +119,6 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                         json_str_with_error_msg("Internal server error"));
     }
 }
+
+} // namespace cli
+} // namespace mtg

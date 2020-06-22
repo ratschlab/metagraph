@@ -28,6 +28,7 @@
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
+#include "cli/load/load_annotation.hpp"
 #include "method_constructors.hpp"
 
 
@@ -46,6 +47,8 @@ using TCLAP::MultiArg;
 using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
+
+using mtg::cli::Config;
 
 
 // THINGS REPORTED:
@@ -288,79 +291,6 @@ void dump_column_slice(const bit_vector &column,
     column.call_ones_in_range(begin * column.size(),
                               end * column.size(),
                               [&](auto i) { out << i << "\n"; });
-}
-
-Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
-        return Config::AnnotationType::ColumnCompressed;
-
-    } else if (utils::ends_with(filename, annotate::RowCompressed<>::kExtension)) {
-        return Config::AnnotationType::RowCompressed;
-
-    } else if (utils::ends_with(filename, annotate::MultiBRWTAnnotator::kExtension)) {
-        return Config::AnnotationType::BRWT;
-
-    } else if (utils::ends_with(filename, annotate::BinRelWT_sdslAnnotator::kExtension)) {
-        return Config::AnnotationType::BinRelWT_sdsl;
-
-    } else if (utils::ends_with(filename, annotate::BinRelWTAnnotator::kExtension)) {
-        return Config::AnnotationType::BinRelWT;
-
-    } else if (utils::ends_with(filename, annotate::RowFlatAnnotator::kExtension)) {
-        return Config::AnnotationType::RowFlat;
-
-    } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
-        return Config::AnnotationType::RBFish;
-
-    } else {
-        std::cerr << "Error: unknown annotation format in "
-                  << filename << std::endl;
-        exit(1);
-    }
-}
-
-typedef annotate::MultiLabelEncoded<std::string> Annotator;
-
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
-    std::unique_ptr<Annotator> annotation;
-
-    switch (parse_annotation_type(filename)) {
-        case Config::ColumnCompressed: {
-            annotation.reset(new annotate::ColumnCompressed<>(1));
-            break;
-        }
-        case Config::RowCompressed: {
-            annotation.reset(new annotate::RowCompressed<>(1));
-            break;
-        }
-        case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator());
-            break;
-        }
-        case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
-            break;
-        }
-        case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator());
-            break;
-        }
-        case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator());
-            break;
-        }
-        case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator());
-            break;
-        }
-    }
-
-    if (annotation->load(filename))
-        return annotation;
-
-    std::cerr << "ERROR: can't load annotation "
-              << filename << std::endl;
-    exit(1);
 }
 
 } // namespace experiments
@@ -1144,7 +1074,13 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotation = initialize_annotation(annotation_arg.getValue());
+            auto annotation = cli::initialize_annotation(annotation_arg.getValue());
+
+            if (!annotation->load(annotation_arg.getValue())) {
+                std::cerr << "ERROR: can't load annotation "
+                          << annotation_arg.getValue() << std::endl;
+                exit(1);
+            }
 
             std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();

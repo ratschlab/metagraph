@@ -10,6 +10,10 @@
 #include "load/load_graph.hpp"
 #include "stats.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
@@ -58,7 +62,7 @@ int merge_graph(Config *config) {
         }
 
         for (size_t i = 1; i < graphs.size(); ++i) {
-            graph->merge(dbg_graphs.at(i)->get_boss());
+            graph->merge(dbg_graphs.at(i)->get_boss(), get_num_threads());
 
             logger->info("Graph '{}' merged in {} sec", files[i], timer.elapsed());
 
@@ -108,3 +112,6 @@ int merge_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

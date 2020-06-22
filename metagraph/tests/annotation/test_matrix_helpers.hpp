@@ -39,17 +39,8 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_matrix";
 typedef std::vector<std::unique_ptr<bit_vector>> BitVectorPtrArray;
 
 template <typename BinMat>
-BinMat build_matrix_from_columns(BitVectorPtrArray&& columns = {}, uint64_t num_rows = 0);
-
-template <typename BinMat>
-BinMat build_matrix_from_rows(BitVectorPtrArray&& columns = {}, uint64_t num_rows = 0);
-
-template <typename BinMat>
-BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
-
-template <typename BinMat>
-BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows = 0);
-
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns = {},
+                                 uint64_t num_rows = 0);
 
 template <typename TypeParam>
 void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns);

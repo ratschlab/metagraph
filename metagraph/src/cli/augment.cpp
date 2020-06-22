@@ -16,6 +16,10 @@
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
 
+
+namespace mtg {
+namespace cli {
+
 using mtg::common::logger;
 
 
@@ -172,3 +176,6 @@ int augment_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

@@ -16,12 +16,6 @@ class BinRelWT : public BinaryMatrix {
 
     BinRelWT(std::vector<std::unique_ptr<bit_vector>>&& columns);
 
-    BinRelWT(const BinRelWT &other) = default;
-    BinRelWT& operator=(const BinRelWT &other) = default;
-
-    BinRelWT(BinRelWT&& other) = default;
-    BinRelWT& operator=(BinRelWT&& other) = default;
-
     uint64_t num_columns() const;
     uint64_t num_rows() const;
 

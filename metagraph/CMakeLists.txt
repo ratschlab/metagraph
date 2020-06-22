@@ -311,6 +311,7 @@ if(FOLLY_LIBRARIES)
     set(METALIBS ${METALIBS}
       -lglog
       -lgflags
+      -ldouble-conversion
     )
   endif()
   find_library(LIBERTY
@@ -464,7 +465,7 @@ link_directories(
 )
 add_executable(run_experiments ${experiment_files})
 
-target_link_libraries(run_experiments metagraph-core)
+target_link_libraries(run_experiments metagraph-core metagraph-cli)
 
 #-------------------
 # install library

@@ -11,55 +11,12 @@
 
 All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
 
-#### For compiling with AppleClang:
+For compiling with **AppleClang**, the prerequisites can be installed as easy as:
 ```
 brew install libomp cmake make htslib boost folly
 ```
 
-#### For compiling with GNU GCC:
-```
-brew install gcc autoconf automake libtool cmake make htslib
-[[ "$OSTYPE" == "darwin"* ]] \
-    && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
-    && brew install --cc=gcc-7 boost folly \
-    && brew install gcc@9
-[[ "$OSTYPE" != "darwin"* ]] \
-    && brew install gcc@9 libomp \
-    && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
-    && brew install --cc=gcc-5 glog zstd \
-    && brew install --cc=gcc-9 openssl@1.1 boost folly
-```
-Then set the environment variables accordingly:
-```
-echo "\
-# Use gcc-9 with cmake
-export CC=\"\$(which gcc-9)\"
-export CXX=\"\$(which g++-9)\"
-" >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
-```
-
-#### For compiling with LLVM Clang:
-```
-brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
-```
-Then set the environment variables accordingly:
-```
-echo "\
-# OpenMP
-export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
-export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
-export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
-# Clang C++ flags
-export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
-export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
-export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
-# Path to Clang
-export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
-# Use Clang with cmake
-export CC=\"\$(which clang)\"
-export CXX=\"\$(which clang++)\"
-" >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
-```
+For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-Start).
 
 
 ### Compile
@@ -153,7 +110,14 @@ For real examples, see [scripts](./metagraph/scripts).
 2>&1 | tee <LOG_DIR>/log.txt
 ```
 
-* #### Chunking build
+* #### Build with disk swap (use to limit the RAM usage)
+```bash
+./metagraph build -v --parallel 30 -k 20 --mem-cap-gb 10 --disk-swap <GRAPH_DIR> \
+                        -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz \
+2>&1 | tee <LOG_DIR>/log.txt
+```
+
+* #### Build from chunks (use only for very large graphs)
 1) Build chunks
 ```bash
 for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do \
