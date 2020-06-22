@@ -311,6 +311,7 @@ if(FOLLY_LIBRARIES)
     set(METALIBS ${METALIBS}
       -lglog
       -lgflags
+      -ldouble-conversion
     )
   endif()
   find_library(LIBERTY

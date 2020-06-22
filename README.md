@@ -110,7 +110,14 @@ For real examples, see [scripts](./metagraph/scripts).
 2>&1 | tee <LOG_DIR>/log.txt
 ```
 
-* #### Chunking build
+* #### Build with disk swap (use to limit the RAM usage)
+```bash
+./metagraph build -v --parallel 30 -k 20 --mem-cap-gb 10 --disk-swap <GRAPH_DIR> \
+                        -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz \
+2>&1 | tee <LOG_DIR>/log.txt
+```
+
+* #### Build from chunks (use only for very large graphs)
 1) Build chunks
 ```bash
 for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do \

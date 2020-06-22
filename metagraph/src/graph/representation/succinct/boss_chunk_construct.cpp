@@ -201,6 +201,47 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
 }
 
+template <typename T>
+inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_code) {
+    if constexpr (utils::is_pair_v<T>) {
+        return T(kmer::reverse_complement(k, kmer.first, complement_code), kmer.second);
+    } else {
+        return kmer::reverse_complement(k, kmer, complement_code);
+    }
+}
+
+template <typename T>
+void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
+    logger->trace("Adding reverse-complement k-mers...");
+    size_t size = kmers->size();
+    if (size < 2) {
+        return;
+    }
+    // extra 20% for dummy kmers; better to waste some extra space now than to have a
+    // twice larger re-allocation after the reverse complements were added
+    kmers->reserve(2.4 * size);
+
+    T *kmer = kmers->data() + 1; // skip $$...$
+    const T *end = kmers->data() + size;
+    for( ; kmer != end; ++kmer) {
+        const T &rc = rev_comp(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
+        if (get_first(rc) != get_first(*kmer)) {
+            kmers->push_back(std::move(rc));
+        } else {
+            if constexpr (utils::is_pair_v<T>) {
+                using C = typename T::second_type;
+                if (kmer->second >> (sizeof(C) * 8 - 1)) {
+                    kmer->second = std::numeric_limits<C>::max();
+                } else {
+                    kmer->second *= 2;
+                }
+            }
+        }
+    }
+    logger->trace("Sorting all real kmers...");
+    ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 /**
