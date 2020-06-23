@@ -14,7 +14,6 @@ using namespace mtg;
 
 using TAlphabet = kmer::KmerExtractorBOSS::TAlphabet;
 constexpr auto &bits_per_char = kmer::KmerExtractorBOSS::bits_per_char;
-const auto complement_code = kmer::KmerExtractorBOSS::kComplementCode;
 
 using KmerTypes = ::testing::Types<kmer::KMerBOSS<uint64_t, bits_per_char>,
                                    kmer::KMerBOSS<sdsl::uint128_t, bits_per_char>,
@@ -28,10 +27,13 @@ TYPED_TEST_SUITE(ReverseComplement, KmerTypes);
 TYPED_TEST(ReverseComplement, Palindrome) {
     std::vector<uint8_t> seq = { 1, 2, 3, 4 };
     TypeParam kmer_boss(seq); // ACGT
-    EXPECT_EQ(kmer_boss, kmer::reverse_complement(4, kmer_boss, complement_code));
+    EXPECT_EQ(kmer_boss,
+              kmer::reverse_complement(4, kmer_boss,
+                                       kmer::KmerExtractorBOSS::kComplementCode));
 }
 
 TYPED_TEST(ReverseComplement, Random) {
+    const auto complement_code = kmer::KmerExtractorBOSS::kComplementCode;
     std::mt19937 gen(12345);
     std::uniform_int_distribution<uint64_t> dis(0, complement_code.size() - 1);
     for (uint32_t k = 2; k < sizeof(TypeParam) * 8 / TypeParam::kBitsPerChar; ++k) {
