@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <vector>
+#include <filesystem>
 
 
 namespace annotate {
@@ -41,6 +42,14 @@ convert_to_greedy_BRWT(ColumnCompressed<Label>&& annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
+
+template <class StaticAnnotation>
+typename std::unique_ptr<StaticAnnotation>
+convert_to_BRWT(const std::vector<std::string> &annotation_files,
+                const std::string &linkage_matrix_file,
+                size_t num_parallel_nodes = 1,
+                size_t num_threads = 1,
+                const std::filesystem::path &tmp_dir = "");
 
 template <class StaticAnnotation>
 void relax_BRWT(StaticAnnotation *annotation,

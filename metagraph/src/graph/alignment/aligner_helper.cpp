@@ -2,10 +2,7 @@
 
 #include <tsl/hopscotch_set.h>
 
-#include "common/algorithms.hpp"
-#include "common/logger.hpp"
-
-using mg::common::logger;
+#include "common/utils/simd_utils.hpp"
 
 
 template <typename NodeType>

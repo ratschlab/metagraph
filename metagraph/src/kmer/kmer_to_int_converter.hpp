@@ -4,6 +4,8 @@
 
 /** Compile-time utils for conversion between k-mers and integers. */
 
+namespace mtg {
+namespace kmer {
 
 template <typename T, typename = void>
 struct get_int { using type = typename T::WordType; };
@@ -31,3 +33,6 @@ struct get_kmer<KMER, T, std::void_t<typename T::second_type>> {
     static_assert(std::is_same_v<typename T::first_type, typename KMER::WordType>);
     using type = std::pair<KMER, typename T::second_type>;
 };
+
+} // namespace kmer
+} // namespace mtg

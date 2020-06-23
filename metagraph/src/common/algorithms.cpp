@@ -5,11 +5,6 @@
 
 namespace utils {
 
-static bool VERBOSE = false;
-
-bool get_verbose() { return VERBOSE; }
-void set_verbose(bool verbose) { VERBOSE = verbose; }
-
 std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                      uint64_t sample_size,
                                      std::mt19937 &gen) {

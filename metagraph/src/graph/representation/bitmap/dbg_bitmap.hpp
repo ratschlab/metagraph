@@ -7,7 +7,7 @@
 #include "kmer/kmer_extractor.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
-namespace mg {
+namespace mtg {
 namespace bitmap_graph {
 
 class DBGBitmapConstructor;
@@ -107,7 +107,7 @@ class DBGBitmap : public DeBruijnGraph {
     static constexpr auto kChunkFileExtension = ".dbgsdchunk";
 
   private:
-    using Kmer = KmerExtractor2Bit::Kmer64;
+    typedef mtg::kmer::KmerExtractor2Bit::Kmer64 Kmer;
 
     Vector<std::pair<Kmer, bool>> sequence_to_kmers(std::string_view sequence,
                                                     bool canonical = false) const;
@@ -118,7 +118,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     size_t k_;
     bool canonical_mode_;
-    KmerExtractor2Bit seq_encoder_;
+    mtg::kmer::KmerExtractor2Bit seq_encoder_;
 
     bit_vector_smart kmers_;
 
@@ -126,6 +126,6 @@ class DBGBitmap : public DeBruijnGraph {
 };
 
 } // namespace bitmap_graph
-} // namespace mg
+} // namespace mtg
 
 #endif // __DBG_BITMAP_HPP__

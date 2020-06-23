@@ -5,6 +5,9 @@
 #include "common/hash/bloom_filter.hpp"
 
 
+namespace mtg {
+namespace kmer {
+
 /**
  * BloomFilter for inserting and checking k-mers extracted from sequences.
  * When in canonical mode, all k-mers are converted to their canonical forms
@@ -65,5 +68,8 @@ class KmerBloomFilter {
  */
 std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_filter,
                                                std::string_view sequence);
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_BLOOM_FILTER_HPP__

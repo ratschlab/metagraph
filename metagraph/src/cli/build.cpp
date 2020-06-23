@@ -1,10 +1,8 @@
 #include "build.hpp"
 
-#include <csignal>
-
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
@@ -18,23 +16,18 @@
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
-using utils::get_verbose;
-using namespace mg::bitmap_graph;
-using namespace mg::succinct;
+
+namespace mtg {
+namespace cli {
+
+using mtg::succinct::IBOSSChunkConstructor;
+using mtg::bitmap_graph::DBGBitmap;
+using mtg::bitmap_graph::DBGBitmapConstructor;
+using mtg::common::logger;
+using mtg::common::get_verbose;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
 
-std::filesystem::path tmp_dir;
-
-
-void signal_handler(int sig) {
-    logger->trace("Got signal SIGINT, cleaning up temporary directory {}", tmp_dir);
-    if (!tmp_dir.empty())
-        std::filesystem::remove_all(tmp_dir);
-
-    std::exit(sig);
-}
 
 template <class GraphConstructor>
 void push_sequences(const std::vector<std::string> &files,
@@ -106,27 +99,12 @@ int build_graph(Config *config) {
         if (config->suffix.size()) {
             suffixes = { config->suffix };
         } else {
-            suffixes = KmerExtractorBOSS::generate_suffixes(config->suffix_len);
+            suffixes = kmer::KmerExtractorBOSS::generate_suffixes(config->suffix_len);
         }
 
-        BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(),
+        BOSS::Chunk graph_data(kmer::KmerExtractorBOSS::alphabet.size(),
                                boss_graph->get_k(),
                                config->canonical);
-
-        if (!config->tmp_dir.empty()) {
-            std::string tmp_dir_str(config->tmp_dir/"temp_dbg_XXXXXX");
-            if (!mkdtemp(tmp_dir_str.data())) {
-                logger->error("Failed to create a temporary directory in {}", config->tmp_dir);
-                exit(1);
-            }
-            tmp_dir = tmp_dir_str;
-            logger->trace("Setting temporary directory to {}", tmp_dir);
-
-            if (std::signal(SIGINT, signal_handler) == SIG_ERR)
-                logger->error("Couldn't reset the singal handler for SIGINT");
-            if (std::signal(SIGTERM, signal_handler) == SIG_ERR)
-                logger->error("Couldn't reset the singal handler for SIGTERM");
-        }
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -143,9 +121,9 @@ int build_graph(Config *config) {
                 suffix,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
-                tmp_dir.empty() ? mg::kmer::ContainerType::VECTOR
-                                : mg::kmer::ContainerType::VECTOR_DISK,
-                tmp_dir,
+                config->tmp_dir.empty() ? kmer::ContainerType::VECTOR
+                                        : kmer::ContainerType::VECTOR_DISK,
+                config->tmp_dir,
                 config->disk_cap_bytes
             );
 
@@ -162,15 +140,12 @@ int build_graph(Config *config) {
                 logger->info("Serialization done in {} sec", timer.elapsed());
             }
 
-            if (config->suffix.size()) {
-                std::filesystem::remove_all(tmp_dir);
+            if (config->suffix.size())
                 return 0;
-            }
 
             graph_data.extend(*next_chunk);
             delete next_chunk;
         }
-        std::filesystem::remove_all(tmp_dir);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
@@ -191,7 +166,7 @@ int build_graph(Config *config) {
         if (config->suffix.size()) {
             suffixes = { config->suffix };
         } else {
-            suffixes = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+            suffixes = kmer::KmerExtractor2Bit().generate_suffixes(config->suffix_len);
         }
 
         std::unique_ptr<DBGBitmapConstructor> constructor;
@@ -383,8 +358,8 @@ int concatenate_graph_chunks(Config *config) {
         assert(config->infbase.size());
 
         const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
-                ? KmerExtractorBOSS().generate_suffixes(config->suffix_len)
-                : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+                ? kmer::KmerExtractorBOSS().generate_suffixes(config->suffix_len)
+                : kmer::KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
         for (const std::string &suffix : sorted_suffixes) {
             assert(suffix.size() == config->suffix_len);
@@ -468,3 +443,6 @@ int concatenate_graph_chunks(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

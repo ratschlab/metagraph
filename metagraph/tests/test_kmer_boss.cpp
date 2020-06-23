@@ -13,6 +13,10 @@
 #include "kmer/kmer_extractor.hpp"
 
 
+namespace {
+
+using namespace mtg::kmer;
+
 template <typename T>
 T encode_c(char c, const T *char_map) {
     assert(static_cast<size_t>(c) < 128);
@@ -396,3 +400,5 @@ TEST(KmerBOSS, TestPrint256) {
     EXPECT_EQ("1249249249249249249249249249249249249249249249249249249249249249", out);
 #endif
 }
+
+} // namespace

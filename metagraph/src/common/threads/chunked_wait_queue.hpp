@@ -13,7 +13,7 @@
 #include "common/logger.hpp"
 #include "threading.hpp"
 
-namespace mg {
+namespace mtg {
 namespace common {
 
 /**
@@ -25,8 +25,7 @@ namespace common {
  * is far enough from the oldest element.
  *  2. The queue exposes a single iterator instance.  The Iterator instance allows
  * iterating the elements of the queue forward. The iterator will remove elements from the
- * queue as they become old. Limited iteration backwards is permitted with a maximum of
- * #fence_size elements from the most recently read element.
+ * queue as they become old.
  *  3. To reduce the amount of locking, the queue expects one reader and one writer
  *  thread.  Elements are "committed" (made visible to the reader thread) by the #push()
  *  method in batches. The writer thread will only lock once every
@@ -65,20 +64,13 @@ class ChunkedWaitQueue {
      * Constructs a WaitQueue with the given size parameters.
      * @param buffer_size the size of the buffer (number of elements) used internally by
      * the queue. The actual memory footprint is buffer_size*sizeof(T)
-     * @param fence_size the number of elements that can be iterated backwards. The queue
-     * will always keep at least fence_size elements behind the furthest iterator for this
-     * purpose. Must be smaller than #buffer_size, and in practice it's orders of
-     * magnitude smaller.
      */
-    explicit ChunkedWaitQueue(size_type buffer_size, size_type fence_size)
-        : chunk_size_(std::min(std::max(1UL, buffer_size / 3), buffer_size - fence_size)),
+    explicit ChunkedWaitQueue(size_type buffer_size)
+        : chunk_size_(std::max(1UL, buffer_size / 3)),
           buffer_size_(buffer_size),
-          fence_size_(fence_size),
           buffer_(buffer_size),
           end_iterator_(Iterator(this, std::min(WRITE_BUF_SIZE, chunk_size_), buffer_size)),
           is_shutdown_(false) {
-        assert(fence_size > 0);
-        assert(fence_size <= chunk_size_);
         write_buf_.reserve(std::min(WRITE_BUF_SIZE, chunk_size_));
     }
 
@@ -164,7 +156,6 @@ class ChunkedWaitQueue {
   private:
     const size_type chunk_size_;
     const size_type buffer_size_;
-    const size_type fence_size_;
 
     std::vector<T, Alloc> buffer_;
 
@@ -197,10 +188,7 @@ class ChunkedWaitQueue {
 
   private:
     /**
-     * Returns true if the queue is empty. This can happen only before an element is
-     * added. Once an element is added, the queue will never be empty again, because
-     * the queue will always keep at least #fence_size_ elements for backwards
-     * iteration.
+     * Returns true if the queue is empty.
      */
     bool empty() const { return last_ == buffer_size_; }
 
@@ -300,7 +288,6 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
      */
     Iterator(ChunkedWaitQueue *parent, size_t read_buf_size, size_t idx)
         : queue_(parent), idx_(idx), read_buf_size_(read_buf_size) {
-        assert(read_buf_size >= parent->fence_size_);
     }
 
     /**
@@ -312,9 +299,8 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
     /**
      * Moves the iterator to the next element in the queue.
      * Blocks if no elements are available. If the iterator moved past
-     * parent_->chunk_size_ + parent_->fence_size_ from the oldest element, the oldest
-     * parent_->chunk_size_ elements are cleaned up from the queue to make room for
-     * new elements.
+     * parent_->chunk_size_ from the oldest element, the oldest parent_->chunk_size_
+     * elements are cleaned up from the queue to make room for new elements.
      * @return a pointer to the next element or the special "end iterator" if there
      * are no elements left and the queue was shut down.
      */
@@ -323,11 +309,10 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         if (read_buf_idx_ < read_buf_.size()) {
             return *this;
         }
-        size_t fence_size = queue_->fence_size_;
-        read_buf_idx_ = fence_size; // moved here to reduce size of critical section
+        read_buf_idx_ = 0; // moved here to reduce size of critical section
         std::unique_lock<std::mutex> l(queue_->mutex_);
         // make some room, if possible
-        if (elements_read() > queue_->chunk_size_ + fence_size) {
+        if (elements_read() > queue_->chunk_size_) {
             queue_->pop_chunk();
         }
         if (!can_read_from_queue()) {
@@ -341,14 +326,13 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
                 return *this;
             }
             // the queue may have filled up while we were sleeping; make some room
-            if (elements_read() > queue_->chunk_size_ + fence_size) {
+            if (elements_read() > queue_->chunk_size_) {
                 queue_->pop_chunk();
             }
         }
-        std::move(read_buf_.end() - fence_size, read_buf_.end(), read_buf_.begin());
-        read_buf_.resize(read_buf_size_ + fence_size);
+        read_buf_.resize(read_buf_size_);
         size_t i;
-        for (i = read_buf_idx_; i < read_buf_.size() && idx_ != queue_->last_ ; ++i) {
+        for (i = 0; i < read_buf_.size() && idx_ != queue_->last_ ; ++i) {
             if (++idx_ == queue_->buffer_size_) {
                 idx_ = 0;
             }
@@ -357,23 +341,6 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
         if (i < read_buf_.size()) { // only happens if queue was shut down
             assert(queue_->is_shutdown_ && !can_increment());
             read_buf_.resize(i);
-        }
-        return *this;
-    }
-
-    /**
-     * Moves the iterator to the previous element in the queue.
-     * Stops execution if attempting to move before the first element
-     */
-    Iterator &operator--() {
-        assert(read_buf_idx_ > 0 && "Attempting to move before the first element.");
-        if (idx_ == queue_->buffer_size_) {
-            // we went back from past the end of the queue; set #read_buf_idx_ to the last
-            // element in the buffer and move idx_ back to the last element
-            read_buf_idx_ = read_buf_.size() - 1;
-            idx_ = queue_->last_;
-        } else {
-            read_buf_idx_--;
         }
         return *this;
     }
@@ -435,4 +402,4 @@ class ChunkedWaitQueue<T, Alloc>::Iterator {
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

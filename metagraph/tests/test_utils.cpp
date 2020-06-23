@@ -10,6 +10,12 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "seq_io/formats.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::seq_io;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 
@@ -945,3 +951,5 @@ TEST(Misc, drag_and_mark_segments) {
     EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }),
               utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 100));
 }
+
+} // namespace

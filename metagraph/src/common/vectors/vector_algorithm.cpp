@@ -1,6 +1,7 @@
 #include "vector_algorithm.hpp"
 
 #include <cmath>
+#include <mutex>
 
 #include <sdsl/uint128_t.hpp>
 
@@ -10,10 +11,6 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 using sdsl::uint128_t;
-
-const uint64_t kBlockSize = 1'000'000 & ~0x3Full;
-// Each block is a multiple of 64 bits for thread safety
-static_assert((kBlockSize % 64) == 0);
 
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
@@ -223,8 +220,8 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     assert(result);
     assert(result->size() == size);
 
-    const uint64_t block_size = std::max(kBlockSize, size / 100 / 64 * 64);
-
+    const uint64_t block_size
+        = std::max(size / 100, static_cast<uint64_t>(1'000'000)) & ~0x3Full;
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
@@ -262,6 +259,82 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 }
 
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       uint64_t *buffer,
+                                       ThreadPool &thread_pool) {
+    const uint64_t vector_size = columns.at(0)->size();
+    const uint64_t block_size = std::max(vector_size / 100,
+                                         static_cast<uint64_t>(100'000));
+
+    std::vector<std::pair<uint64_t *, uint64_t *>>
+            results((vector_size + block_size - 1) / block_size);
+
+    std::vector<std::future<void>> futures;
+    std::atomic<uint64_t> num_set_bits = 0;
+
+    for (uint64_t i = 0; i < vector_size; i += block_size) {
+        futures.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
+            // estimate the maximum number of set bits in the result
+            uint64_t buffer_size = 0;
+            for (size_t j = 0; j < columns.size(); ++j) {
+                buffer_size += columns[j]->rank1(end - 1)
+                                - (begin ? columns[j]->rank1(begin - 1) : 0);
+            }
+
+            std::pair<uint64_t *, uint64_t *> &result = results[begin / block_size];
+            std::pair<uint64_t *, uint64_t *> buffer_pos;
+            std::pair<uint64_t *, uint64_t *> buffer_merge;
+
+            #pragma omp critical
+            {
+                // reserve space for 3 buffers of size |buffer_size| each
+                result.first = result.second = buffer;
+                buffer_pos.first = buffer_pos.second = buffer + buffer_size;
+                buffer_merge.first = buffer_merge.second = buffer + 2 * buffer_size;
+                buffer += 3 * buffer_size;
+            }
+
+            // write the positions of ones in the first vector to |result|
+            columns[0]->call_ones_in_range(begin, end,
+                [&](uint64_t k) { *(result.second++) = k; }
+            );
+
+            // iterate through all other columns and merge them sequentially
+            //TODO: use multiway merge if there are more than two columns?
+            for (size_t j = 1; j < columns.size(); ++j) {
+                buffer_pos.second = buffer_pos.first;
+                columns[j]->call_ones_in_range(begin, end,
+                    [&](uint64_t k) { *(buffer_pos.second++) = k; }
+                );
+
+                std::merge(buffer_pos.first, buffer_pos.second,
+                           result.first, result.second, buffer_merge.first);
+                buffer_merge.second = buffer_merge.first
+                                        + (buffer_pos.second - buffer_pos.first)
+                                        + (result.second - result.first);
+                result.swap(buffer_merge);
+            }
+
+            result.second = std::unique(result.first, result.second);
+
+            num_set_bits += result.second - result.first;
+
+        }, i, std::min(i + block_size, vector_size)));
+    }
+
+    std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
+
+    return std::make_unique<bit_vector_smart>(
+        [&](const auto &callback) {
+            for (const auto &result : results) {
+                std::for_each(result.first, result.second, callback);
+            }
+        },
+        vector_size,
+        num_set_bits
+    );
+}
+
 void compute_subindex(const bit_vector &column,
                       const sdsl::bit_vector &reference,
                       uint64_t begin, uint64_t end,
@@ -292,6 +365,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
     uint64_t block_end = 0;
 
+    // Each block has |block_size| many bits in |reference| set to `1`
     for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
         // ........... [1     1       1    1  1] ............. //
         //              ^                     ^                //
@@ -314,6 +388,55 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
             },
             block_begin, block_end, offset
         ));
+    }
+
+    std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });
+
+    return subindex;
+}
+
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector &reference,
+                                   ThreadPool &thread_pool) {
+    assert(column.size() == reference.size());
+
+    uint64_t reference_num_set_bits = reference.num_set_bits();
+
+    // no shrinkage if vectors are the same
+    if (column.num_set_bits() == reference_num_set_bits)
+        return sdsl::bit_vector(reference_num_set_bits, true);
+
+    sdsl::bit_vector subindex(reference_num_set_bits, false);
+
+    const uint64_t block_size
+      = std::max(reference_num_set_bits / 100,
+                 static_cast<uint64_t>(1'000)) & ~0x3Full;
+    // Each block is a multiple of 64 bits for thread safety
+    assert(!(block_size & 0x3F));
+
+    std::vector<std::future<void>> futures;
+
+    uint64_t end = 0;
+
+    // Each block has |block_size| many bits in |reference| set to `1`
+    for (uint64_t offset = 0; offset < reference_num_set_bits; offset += block_size) {
+        // ........... [1     1       1    1  1] ............. //
+        //              ^                     ^                //
+        //          (rank = 1 mod 64)     (rank = 0 mod 64)    //
+        //              |                     |                //
+        //              |_______ BLOCK _______|                //
+
+        uint64_t begin = end;
+        end = offset + block_size < reference_num_set_bits
+                ? reference.select1(offset + block_size + 1)
+                : reference.size();
+
+        futures.push_back(thread_pool.enqueue([&,begin,end]() {
+            column.call_ones_in_range(begin, end, [&](uint64_t j) {
+                assert(reference[j]);
+                subindex[reference.rank1(j) - 1] = true;
+            });
+        }));
     }
 
     std::for_each(futures.begin(), futures.end(), [](auto &f) { f.wait(); });

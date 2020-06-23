@@ -12,6 +12,12 @@
 #include "kmer/alphabets.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+using namespace mtg::kmer;
+
 typedef DBGAligner<>::score_t score_t;
 
 int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
@@ -74,26 +80,6 @@ TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
     );
 }
 
-
-// TODO: REPLACE THIS
-#if _PROTEIN_GRAPH
-    const auto *alphabet = alphabets::kAlphabetProtein;
-    const auto *alphabet_encoding = alphabets::kCharToProtein;
-#elif _DNA_CASE_SENSITIVE_GRAPH
-    const auto *alphabet = alphabets::kAlphabetDNA;
-    const auto *alphabet_encoding = alphabets::kCharToDNA;
-#elif _DNA5_GRAPH
-    const auto *alphabet = alphabets::kAlphabetDNA;
-    const auto *alphabet_encoding = alphabets::kCharToDNA;
-#elif _DNA_GRAPH
-    const auto *alphabet = alphabets::kAlphabetDNA;
-    const auto *alphabet_encoding = alphabets::kCharToDNA;
-#else
-    static_assert(false,
-        "Define an alphabet: either "
-        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-    );
-#endif
 
 DBGAligner<>::DBGQueryAlignment
 get_extend(std::shared_ptr<const DeBruijnGraph> graph,
@@ -1570,3 +1556,5 @@ TEST(DBGAlignerTest, align_dummy) {
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
+
+} // namespace

@@ -28,7 +28,17 @@
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
+#include "cli/load/load_annotation.hpp"
 #include "method_constructors.hpp"
+
+
+int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
+                                 double *alpha_est_ptr, double *beta_est_ptr,
+                                 double *false_pos_ptr, double *false_neg_ptr);
+
+
+namespace mtg {
+namespace experiments {
 
 using namespace std::chrono_literals;
 
@@ -37,6 +47,8 @@ using TCLAP::MultiArg;
 using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
+
+using mtg::cli::Config;
 
 
 // THINGS REPORTED:
@@ -281,83 +293,12 @@ void dump_column_slice(const bit_vector &column,
                               [&](auto i) { out << i << "\n"; });
 }
 
-int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
-                                 double *alpha_est_ptr, double *beta_est_ptr,
-                                 double *false_pos_ptr, double *false_neg_ptr);
+} // namespace experiments
+} // namespace mtg
 
 
-Config::AnnotationType parse_annotation_type(const std::string &filename) {
-    if (utils::ends_with(filename, annotate::ColumnCompressed<>::kExtension)) {
-        return Config::AnnotationType::ColumnCompressed;
-
-    } else if (utils::ends_with(filename, annotate::RowCompressed<>::kExtension)) {
-        return Config::AnnotationType::RowCompressed;
-
-    } else if (utils::ends_with(filename, annotate::MultiBRWTAnnotator::kExtension)) {
-        return Config::AnnotationType::BRWT;
-
-    } else if (utils::ends_with(filename, annotate::BinRelWT_sdslAnnotator::kExtension)) {
-        return Config::AnnotationType::BinRelWT_sdsl;
-
-    } else if (utils::ends_with(filename, annotate::BinRelWTAnnotator::kExtension)) {
-        return Config::AnnotationType::BinRelWT;
-
-    } else if (utils::ends_with(filename, annotate::RowFlatAnnotator::kExtension)) {
-        return Config::AnnotationType::RowFlat;
-
-    } else if (utils::ends_with(filename, annotate::RainbowfishAnnotator::kExtension)) {
-        return Config::AnnotationType::RBFish;
-
-    } else {
-        std::cerr << "Error: unknown annotation format in "
-                  << filename << std::endl;
-        exit(1);
-    }
-}
-
-typedef annotate::MultiLabelEncoded<std::string> Annotator;
-
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename) {
-    std::unique_ptr<Annotator> annotation;
-
-    switch (parse_annotation_type(filename)) {
-        case Config::ColumnCompressed: {
-            annotation.reset(new annotate::ColumnCompressed<>(1));
-            break;
-        }
-        case Config::RowCompressed: {
-            annotation.reset(new annotate::RowCompressed<>(1));
-            break;
-        }
-        case Config::BRWT: {
-            annotation.reset(new annotate::MultiBRWTAnnotator());
-            break;
-        }
-        case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
-            break;
-        }
-        case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator());
-            break;
-        }
-        case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator());
-            break;
-        }
-        case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator());
-            break;
-        }
-    }
-
-    if (annotation->load(filename))
-        return annotation;
-
-    std::cerr << "ERROR: can't load annotation "
-              << filename << std::endl;
-    exit(1);
-}
+using namespace mtg;
+using namespace experiments;
 
 
 int main(int argc, char *argv[]) {
@@ -727,7 +668,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::COLUMN) {
-                    annotate::ColumnCompressed<> annotator(0, 1, false);
+                    annotate::ColumnCompressed<> annotator;
                     annotator.merge_load({ file });
                     const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());
@@ -964,7 +905,7 @@ int main(int argc, char *argv[]) {
 
                     std::vector<uint64_t> hist;
 
-                    kmc::read_kmers(file, [&](std::string_view, uint64_t count) {
+                    seq_io::read_kmers(file, [&](std::string_view, uint64_t count) {
                         min_count = std::min(min_count, count);
                         max_count = std::max(max_count, count);
                         sum_counts += count;
@@ -1035,11 +976,11 @@ int main(int argc, char *argv[]) {
             std::string align_regime = align_regime_arg.getValue();
             std::string cur_alphabet = alphabet_arg.getValue();
             const char *alphabet = cur_alphabet == "dna"
-                ? alphabets::kAlphabetDNA
-                : alphabets::kAlphabetProtein;
+                ? kmer::alphabets::kAlphabetDNA
+                : kmer::alphabets::kAlphabetProtein;
             const uint8_t *alphabet_encoding = cur_alphabet == "dna"
-                ? alphabets::kCharToDNA
-                : alphabets::kCharToProtein;
+                ? kmer::alphabets::kCharToDNA
+                : kmer::alphabets::kCharToProtein;
             std::string mode = mode_arg.getValue();
             std::string file = file_arg.getValue();
             cmd.reset();
@@ -1133,7 +1074,13 @@ int main(int argc, char *argv[]) {
 
             Timer timer;
 
-            auto annotation = initialize_annotation(annotation_arg.getValue());
+            auto annotation = cli::initialize_annotation(annotation_arg.getValue());
+
+            if (!annotation->load(annotation_arg.getValue())) {
+                std::cerr << "ERROR: can't load annotation "
+                          << annotation_arg.getValue() << std::endl;
+                exit(1);
+            }
 
             std::cout << "Annotation loaded in " << timer.elapsed() << " sec" << std::endl;
             timer.reset();

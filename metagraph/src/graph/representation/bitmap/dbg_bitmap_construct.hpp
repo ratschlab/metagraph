@@ -4,7 +4,7 @@
 #include "dbg_bitmap.hpp"
 #include "graph/representation/base/dbg_construct.hpp"
 
-namespace mg {
+namespace mtg {
 namespace bitmap_graph {
 
 
@@ -83,6 +83,6 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
 };
 
 } // namespace bitmap_graph
-} // namespace mg
+} // namespace mtg
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

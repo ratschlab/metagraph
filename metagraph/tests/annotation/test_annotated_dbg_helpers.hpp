@@ -20,7 +20,11 @@
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
 
-using namespace mg::bitmap_graph;
+
+namespace mtg {
+namespace test {
+
+using namespace mtg::bitmap_graph;
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
@@ -69,5 +73,8 @@ typedef ::testing::Types<std::pair<DBGHashString, annotate::ColumnCompressed<>>,
                          std::pair<DBGHashString, annotate::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
+
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_ANNOTATED_DBG_HELPERS_HPP__

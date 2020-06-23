@@ -6,8 +6,7 @@
 #include "common/data_generation.hpp"
 
 
-namespace mg {
-namespace bm {
+namespace {
 
 template <uint64_t size, uint8_t density_percent>
 static void BM_count_ones(benchmark::State& state) {
@@ -235,6 +234,4 @@ BENCHMARK_TEMPLATE(BM_subvector_via_pext, bit_vector_rrr<>, 100000, 50) -> Unit(
 
 #endif // __BMI2__
 
-
-} // namespace bm
-} // namespace mg
+} // namespace

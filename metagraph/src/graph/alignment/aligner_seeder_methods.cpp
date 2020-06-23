@@ -1,6 +1,5 @@
 #include "aligner_methods.hpp"
 
-#include "common/algorithms.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 

@@ -10,7 +10,8 @@
 #include "common/threads/threading.hpp"
 #include "common/batch_accumulator.hpp"
 
-namespace mg {
+
+namespace mtg {
 namespace kmer {
 
 typedef std::function<void(const std::string&)> CallString;
@@ -29,37 +30,38 @@ typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
  */
 template <typename KMER, class KmerExtractor, class Container>
 class KmerCollector {
-    using Extractor = KmerExtractor;
-    using Sequence = std::vector<typename Extractor::TAlphabet>;
-    Extractor kmer_extractor_;
+    KmerExtractor kmer_extractor_;
 
     static_assert(std::is_same_v<typename Container::key_type, typename KMER::WordType>);
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Extractor = KmerExtractor;
     using Key = typename Container::key_type;
     using Value = typename Container::value_type;
     using Data = typename Container::result_type;
     using Kmer = KMER;
 
     /**
-     * @param  k                      The k-mer length
-     * @param  both_strands_mode      If true, both a sequence and its
-     * reverse complement will be added (only makes sense for DNA sequences)
-     * @param  filter_suffix_encoded  Keep only k-mers with the given
-     * suffix. Useful for sharding the collection process.
-     * @param  num_threads            The number of threads in the pool
-     * processing incoming sequences
-     * @param  memory_preallocated    The number of bytes to reserve in
-     * the container
+     * @param  k The k-mer length
+     * @param  both_strands_mode If true, both a sequence and its reverse complement will
+     * be added (only makes sense for DNA sequences)
+     * @param  filter_suffix_encoded  Keep only k-mers with the given suffix. Useful for
+     * sharding the collection process.
+     * @param  num_threads The number of threads in the pool processing incoming sequences
+     * @param  memory_preallocated The number of bytes to reserve in the container
+     * @param canonical_only keep only canonical k-mers when in #both_strands_mode
      */
     KmerCollector(size_t k,
                   bool both_strands_mode = false,
-                  Sequence&& filter_suffix_encoded = {},
+                  std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
-                  const std::filesystem::path &tmp_dir = "/tmp",
-                  size_t max_disk_space = 1e9);
+                  const std::filesystem::path &tmp_dir = "/tmp/",
+                  size_t max_disk_space = 1e9,
+                  bool canonical_only = false);
+
+    ~KmerCollector();
 
     inline size_t get_k() const { return k_; }
 
@@ -114,9 +116,11 @@ class KmerCollector {
 
     BatchAccumulator<std::pair<std::string, uint64_t>> batcher_;
 
-    Sequence filter_suffix_encoded_;
+    std::vector<typename Extractor::TAlphabet> filter_suffix_encoded_;
 
     bool both_strands_mode_;
+
+    bool canonical_only_;
 
     std::filesystem::path tmp_dir_;
 
@@ -133,7 +137,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    bool both_strands_mode,
                    Container *kmers,
                    const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool remove_redundant = true);
+                   bool canonical_only = false);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
@@ -141,9 +145,10 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                 bool canonical_only = false);
 
 } // namespace kmer
-} // namespace mg
+} // namespace mtg
 
 #endif // __KMER_COLLECTOR_HPP__

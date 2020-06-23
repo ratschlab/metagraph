@@ -1,7 +1,6 @@
 #include "merge.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/boss.hpp"
@@ -11,8 +10,12 @@
 #include "load/load_graph.hpp"
 #include "stats.hpp"
 
-using mg::common::logger;
-using utils::get_verbose;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
+using mtg::common::get_verbose;
 
 
 int merge_graph(Config *config) {
@@ -59,7 +62,7 @@ int merge_graph(Config *config) {
         }
 
         for (size_t i = 1; i < graphs.size(); ++i) {
-            graph->merge(dbg_graphs.at(i)->get_boss());
+            graph->merge(dbg_graphs.at(i)->get_boss(), get_num_threads());
 
             logger->info("Graph '{}' merged in {} sec", files[i], timer.elapsed());
 
@@ -109,3 +112,6 @@ int merge_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

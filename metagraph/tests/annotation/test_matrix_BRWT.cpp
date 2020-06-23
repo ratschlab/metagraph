@@ -8,6 +8,11 @@
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <typename BinMat>
 class BinaryMatrixBRWTTest : public ::testing::Test { };
 typedef ::testing::Types<BRWT, BRWTOptimized> BinMatColumnTypes;
@@ -67,3 +72,5 @@ TYPED_TEST(BinaryMatrixBRWTTest, ArityTwoCol) {
         EXPECT_EQ(2u, matrix.avg_arity());
     }
 }
+
+} // namespace

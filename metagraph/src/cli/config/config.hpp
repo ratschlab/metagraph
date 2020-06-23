@@ -9,6 +9,9 @@
 #include "graph/representation/succinct/boss.hpp"
 
 
+namespace mtg {
+namespace cli {
+
 class Config {
   public:
     Config(int argc, char *argv[]);
@@ -45,6 +48,7 @@ class Config {
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
+    bool cluster_linkage = false;
     bool separately = false;
     bool files_sequentially = false;
     bool call_bubbles = false;
@@ -135,6 +139,7 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;
+    std::string host_address;
 
     std::filesystem::path tmp_dir;
 
@@ -198,5 +203,8 @@ class Config {
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);
 };
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __CONFIG_HPP__

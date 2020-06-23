@@ -252,11 +252,12 @@ include_directories(
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib
+  external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
 )
 
 # makes ASIO not depend on boost
-string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE")
+string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 
@@ -310,6 +311,7 @@ if(FOLLY_LIBRARIES)
     set(METALIBS ${METALIBS}
       -lglog
       -lgflags
+      -ldouble-conversion
     )
   endif()
   find_library(LIBERTY
@@ -463,7 +465,7 @@ link_directories(
 )
 add_executable(run_experiments ${experiment_files})
 
-target_link_libraries(run_experiments metagraph-core)
+target_link_libraries(run_experiments metagraph-core metagraph-cli)
 
 #-------------------
 # install library
@@ -540,10 +542,21 @@ target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 #-------------------
 find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 
+add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/test_venv/DONE
+  COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv
+)
+execute_process(COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv)
+
+# creating a make target, s.t. the environment can be set up explicitly
+add_custom_target(install_test_environment
+  DEPENDS ${PROJECT_BINARY_DIR}/test_venv/DONE
+)
+
 # --- integration tests ---
 add_custom_target(check
-  COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/integration_tests/main.py
+  COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
   DEPENDS metagraph
+  DEPENDS install_test_environment
 )
 # --- integration tests + unit tests ---
 add_custom_target(check_all
@@ -558,7 +571,7 @@ add_test(NAME unit_tests COMMAND unit_tests)
 get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
 file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
 file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  "\n${PythonPath} ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+  "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
 )
 file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
   DESTINATION "${PROJECT_BINARY_DIR}/"

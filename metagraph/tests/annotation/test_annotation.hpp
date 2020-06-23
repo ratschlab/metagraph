@@ -11,6 +11,9 @@
 #include "annotation/annotation_converters.hpp"
 
 
+namespace mtg {
+namespace test {
+
 template <typename... Args>
 class RowCompressedParallel : public annotate::RowCompressed<Args...> {
   public:
@@ -136,6 +139,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
+                         annotate::UniqueRowAnnotator,
                          annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -145,6 +149,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
+                         annotate::UniqueRowAnnotator,
                          annotate::MultiBRWTAnnotator> AnnotatorStaticTypes;
 typedef ::testing::Types<annotate::MultiBRWTAnnotator> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
@@ -166,5 +171,8 @@ TYPED_TEST_SUITE(AnnotatorStaticTest, AnnotatorStaticTypes);
 TYPED_TEST_SUITE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
+
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_ANNOTATION_HPP__

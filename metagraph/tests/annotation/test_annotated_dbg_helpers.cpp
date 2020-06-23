@@ -5,8 +5,11 @@
 #include "annotation/annotation_converters.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 
-using namespace mg::bitmap_graph;
 
+namespace mtg {
+namespace test {
+
+using namespace mtg::bitmap_graph;
 
 template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG>
@@ -90,3 +93,6 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
         )
     );
 }
+
+} // namespace test
+} // namespace mtg

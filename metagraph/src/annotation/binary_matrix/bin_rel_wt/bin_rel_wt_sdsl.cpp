@@ -4,7 +4,6 @@
 #include <iterator>
 #include <cmath>
 
-#include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 

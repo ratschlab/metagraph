@@ -3,13 +3,37 @@
 
 #include <benchmark/benchmark.h>
 
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
-#include "../benchmark_graph_helpers.hpp"
+
+namespace {
+
+using namespace mtg;
 
 const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
+
+
+std::shared_ptr<DeBruijnGraph> build_graph(const std::string &filename) {
+    std::vector<std::string> sequences;
+    seq_io::read_fasta_file_critical(filename,
+                                     [&](seq_io::kseq_t *stream) {
+                                         sequences.emplace_back(stream->seq.s);
+                                     },
+                                     true);
+
+    size_t k = 12;
+
+    BOSSConstructor constructor(k - 1);
+    constructor.add_sequences(std::move(sequences));
+    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
+    dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
+
+    return graph;
+}
 
 
 template <size_t max_size>
@@ -31,7 +55,7 @@ static void BM_WriteRandomSequences(benchmark::State& state) {
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
+        seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &sequence : sequences) {
             writer.write(sequence);
         }
@@ -50,13 +74,13 @@ BENCHMARK_TEMPLATE(BM_WriteRandomSequences, 200000000)
 
 static void BM_WriteContigs(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto graph = mg::bm::build_graph(graph_file);
+    auto graph = build_graph(graph_file);
     std::vector<std::string> contigs;
     graph->call_sequences([&](const auto &contig, auto&&) { contigs.push_back(contig); });
 
     set_num_threads(state.range(0));
     for (auto _ : state) {
-        FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
+        seq_io::FastaWriter writer(file_prefix, "", false, state.range(0) - 1);
         for (const auto &contig : contigs) {
             writer.write(contig);
         }
@@ -67,3 +91,5 @@ static void BM_WriteContigs(benchmark::State& state) {
 BENCHMARK(BM_WriteContigs)
     ->Unit(benchmark::kMillisecond)
     ->DenseRange(1, 2, 1);
+
+} // namespace

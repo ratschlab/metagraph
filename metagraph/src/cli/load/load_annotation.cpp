@@ -3,11 +3,16 @@
 #include <string>
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/config/config.hpp"
+
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
 
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
@@ -33,28 +38,27 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
         return Config::AnnotationType::RBFish;
 
     } else {
-        mg::common::logger->error("Unknown annotation format in '{}'", filename);
+        logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
     }
 }
 
 std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
-                      const Config &config,
+                      size_t column_compressed_num_columns_cached,
+                      bool row_compressed_sparse,
                       uint64_t num_rows) {
     std::unique_ptr<annotate::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
-                new annotate::ColumnCompressed<>(
-                    num_rows, config.num_columns_cached, utils::get_verbose()
-                )
+                new annotate::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached)
             );
             break;
         }
         case Config::RowCompressed: {
-            annotation.reset(new annotate::RowCompressed<>(num_rows, config.sparse));
+            annotation.reset(new annotate::RowCompressed<>(num_rows, row_compressed_sparse));
             break;
         }
         case Config::BRWT: {
@@ -81,3 +85,6 @@ initialize_annotation(Config::AnnotationType anno_type,
 
     return annotation;
 }
+
+} // namespace cli
+} // namespace mtg

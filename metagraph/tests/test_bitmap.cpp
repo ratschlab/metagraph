@@ -13,6 +13,11 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
 
@@ -1011,3 +1016,5 @@ TEST(sdsl_bit_vector, count_ones_every_third_zero) {
         ASSERT_EQ(size - (size + 2) / 3 - (size / 2 - (size / 2 + 2) / 3), count_ones(bv, size / 2, size));
     }
 }
+
+} // namespace

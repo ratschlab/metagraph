@@ -10,6 +10,10 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+
+namespace mtg {
+namespace kmer {
+
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer) that is stored in a BOSS table.
  * Just like #KMer, each character in the k-mer uses L bits of the internal representation
@@ -28,6 +32,7 @@ class KMerBOSS {
     typedef G WordType;
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
+    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
 
     /** Construct a default, uninitialized, BOSS k-mer. */
     KMerBOSS() {}
@@ -59,8 +64,8 @@ class KMerBOSS {
     bool operator!=(const KMerBOSS &other) const { return seq_ != other.seq_; }
 
     /**
-     * Returns the character at position i. For the k-mer ACGT, which is laid out in
-     * memory as GCAT, kmer[0]=T, kmer[1]=C, kmer[2]=A, kmer[3]=G.
+     * Returns the character at position i. For the k-mer a_1|a_2|...|a_(k-1)|a_k, which is laid out
+     * in memory as a_(k-1)|a_(k-2)|...|a_1|a_k, kmer[0]=a_k, kmer[1]=a_1, ..., kmer[k-1]=a_(k-1)
      */
     inline CharType operator[](size_t i) const;
 
@@ -109,7 +114,6 @@ class KMerBOSS {
     void print_hex(std::ostream &os) const;
 
   private:
-    static constexpr CharType kFirstCharMask = (1ull << kBitsPerChar) - 1;
     static inline const WordType kAllButFirstCharMask = ~(WordType(kFirstCharMask));
     static inline const WordType kAllSetMask = ~(WordType(0ull));
     WordType seq_; // kmer sequence
@@ -213,5 +217,8 @@ std::ostream& operator<<(std::ostream &os, const KMerBOSS<G, L> &kmer) {
     kmer.print_hex(os);
     return os;
 }
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_BOSS_HPP__

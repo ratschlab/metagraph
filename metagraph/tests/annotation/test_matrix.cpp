@@ -7,7 +7,13 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
 
 template <typename BinMat>
 class BinaryMatrixTest : public ::testing::Test { };
@@ -17,6 +23,7 @@ typedef ::testing::Types<BRWT,
                          BinRelWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
+                         UniqueRowBinmat,
                          Rainbowfish> BinMatTypes;
 TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
 
@@ -39,46 +46,35 @@ TYPED_TEST(BinaryMatrixTest, BuildEmpty) {
         EXPECT_EQ(0u, matrix.num_columns());
         EXPECT_EQ(0u, matrix.num_rows());
     }
-    {
-        auto matrix = build_matrix_from_rows<TypeParam>();
-        EXPECT_EQ(0u, matrix.num_columns());
-        EXPECT_EQ(0u, matrix.num_rows());
-    }
 }
 
 TYPED_TEST(BinaryMatrixTest, BuildOneColumn) {
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
     columns.emplace_back(new bit_vector_stat(10, true));
-    copy1.emplace_back(new bit_vector_stat(10, true));
-    copy2.emplace_back(new bit_vector_stat(10, true));
+    copy.emplace_back(new bit_vector_stat(10, true));
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), 10), columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), 10), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), 10), columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, BuildOneBigColumn) {
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
     columns.emplace_back(new bit_vector_stat(100'000, true));
-    copy1.emplace_back(new bit_vector_stat(100'000, true));
-    copy2.emplace_back(new bit_vector_stat(100'000, true));
+    copy.emplace_back(new bit_vector_stat(100'000, true));
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), 100'000), columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), 100'000), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), 100'000), columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, AllZero) {
     for (size_t num_rows = 1; num_rows < 20; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 20; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
                 columns.emplace_back(new bit_vector_stat(num_rows, 0));
-                copy1.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
-                copy2.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+                copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -86,16 +82,14 @@ TYPED_TEST(BinaryMatrixTest, AllZero) {
 TYPED_TEST(BinaryMatrixTest, AllOne) {
     for (size_t num_rows = 1; num_rows < 20; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 20; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
                 columns.emplace_back(new bit_vector_stat(num_rows, 1));
-                copy1.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
-                copy2.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+                copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -103,16 +97,14 @@ TYPED_TEST(BinaryMatrixTest, AllOne) {
 TYPED_TEST(BinaryMatrixTest, AllOne100Rows) {
     for (size_t num_rows = 1; num_rows < 100; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 5; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
                 columns.emplace_back(new bit_vector_stat(num_rows, 1));
-                copy1.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
-                copy2.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+                copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -120,7 +112,7 @@ TYPED_TEST(BinaryMatrixTest, AllOne100Rows) {
 TYPED_TEST(BinaryMatrixTest, AllMixed1) {
     for (size_t num_rows = 1; num_rows < 20; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 20; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
 
@@ -132,12 +124,10 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1) {
 
                 columns.emplace_back(new bit_vector_stat(std::move(bv)));
 
-                copy1.push_back(columns.back()->copy());
-                copy2.push_back(columns.back()->copy());
+                copy.push_back(columns.back()->copy());
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -145,7 +135,7 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1) {
 TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsOdd) {
     for (size_t num_rows = 1; num_rows < 100; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 8; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
 
@@ -157,12 +147,10 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsOdd) {
 
                 columns.emplace_back(new bit_vector_stat(std::move(bv)));
 
-                copy1.push_back(columns.back()->copy());
-                copy2.push_back(columns.back()->copy());
+                copy.push_back(columns.back()->copy());
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -170,7 +158,7 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsOdd) {
 TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsEven) {
     for (size_t num_rows = 1; num_rows < 100; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 8; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             for (size_t j = 0; j < num_columns; ++j) {
 
@@ -182,12 +170,10 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsEven) {
 
                 columns.emplace_back(new bit_vector_stat(std::move(bv)));
 
-                copy1.push_back(columns.back()->copy());
-                copy2.push_back(columns.back()->copy());
+                copy.push_back(columns.back()->copy());
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -195,7 +181,7 @@ TYPED_TEST(BinaryMatrixTest, AllMixed1ManyRowsEven) {
 TYPED_TEST(BinaryMatrixTest, AllMixed2) {
     for (size_t num_rows = 1; num_rows < 20; ++num_rows) {
         for (size_t num_columns = 1; num_columns < 20; ++num_columns) {
-            BitVectorPtrArray columns, copy1, copy2;
+            BitVectorPtrArray columns, copy;
 
             columns.emplace_back(new bit_vector_stat(num_rows));
 
@@ -208,12 +194,10 @@ TYPED_TEST(BinaryMatrixTest, AllMixed2) {
             }
 
             for (const auto &column : columns) {
-                copy1.push_back(column->copy());
-                copy2.push_back(column->copy());
+                copy.push_back(column->copy());
             }
 
-            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-            test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+            test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
         }
     }
 }
@@ -221,7 +205,7 @@ TYPED_TEST(BinaryMatrixTest, AllMixed2) {
 TYPED_TEST(BinaryMatrixTest, AllMixed3) {
     size_t num_rows = 7;
     std::vector<sdsl::bit_vector> bvs(2, sdsl::bit_vector(num_rows, 0));
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
 
     bvs[0][1] = true;
     bvs[0][2] = true;
@@ -236,18 +220,16 @@ TYPED_TEST(BinaryMatrixTest, AllMixed3) {
     columns.emplace_back(new bit_vector_stat(std::move(bvs[1])));
 
     for (const auto &column : columns) {
-        copy1.push_back(column->copy());
-        copy2.push_back(column->copy());
+        copy.push_back(column->copy());
     }
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, AllMixed4) {
     size_t num_rows = 4;
     std::vector<sdsl::bit_vector> bvs(2, sdsl::bit_vector(num_rows, 0));
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
 
     bvs[0][0] = true;
     bvs[0][1] = true;
@@ -262,18 +244,16 @@ TYPED_TEST(BinaryMatrixTest, AllMixed4) {
     columns.emplace_back(new bit_vector_stat(std::move(bvs[1])));
 
     for (const auto &column : columns) {
-        copy1.push_back(column->copy());
-        copy2.push_back(column->copy());
+        copy.push_back(column->copy());
     }
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows),columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows),columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, AllMixed5) {
     size_t num_rows = 4;
     std::vector<sdsl::bit_vector> bvs(2, sdsl::bit_vector(num_rows, 0));
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
 
     bvs[0][0] = true;
     bvs[0][1] = true;
@@ -284,18 +264,16 @@ TYPED_TEST(BinaryMatrixTest, AllMixed5) {
     columns.emplace_back(new bit_vector_stat(std::move(bvs[1])));
 
     for (const auto &column : columns) {
-        copy1.push_back(column->copy());
-        copy2.push_back(column->copy());
+        copy.push_back(column->copy());
     }
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, AllMixed6) {
     size_t num_rows = 4;
     std::vector<sdsl::bit_vector> bvs(8, sdsl::bit_vector(num_rows, 0));
-    BitVectorPtrArray columns, copy1, copy2;
+    BitVectorPtrArray columns, copy;
 
     bvs[0][0] = true;
     bvs[0][1] = true;
@@ -308,10 +286,10 @@ TYPED_TEST(BinaryMatrixTest, AllMixed6) {
     }
 
     for (const auto &column : columns) {
-        copy1.push_back(column->copy());
-        copy2.push_back(column->copy());
+        copy.push_back(column->copy());
     }
 
-    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy1), num_rows), columns);
-    test_matrix(build_matrix_from_rows<TypeParam>(std::move(copy2), num_rows), columns);
+    test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), num_rows), columns);
 }
+
+} // namespace

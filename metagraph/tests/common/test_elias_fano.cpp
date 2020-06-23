@@ -12,14 +12,15 @@
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+
 namespace {
 
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class EliasFanoTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint32_t, uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
+typedef ::testing::Types<uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoTest, ValueTypes);
 
@@ -103,7 +104,7 @@ TYPED_TEST(EliasFanoTest, ReadTwo) {
 }
 
 template <typename T>
-size_t encode(const Vector<T> &values, const std::string &file_name) {
+size_t encode(const std::vector<T> &values, const std::string &file_name) {
     common::EliasFanoEncoder<T> encoder(values.size(), values.front(), values.back(),
                                         file_name);
     for (const auto &v : values) {
@@ -113,7 +114,7 @@ size_t encode(const Vector<T> &values, const std::string &file_name) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
-    Vector<TypeParam> values(100);
+    std::vector<TypeParam> values(100);
     std::iota(values.begin(), values.end(), 0);
     utils::TempFile file;
     size_t file_size = encode(values, file.name());
@@ -133,7 +134,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
-    Vector<TypeParam> values(100);
+    std::vector<TypeParam> values(100);
     uint32_t i = 0;
     std::for_each(values.begin(), values.end(), [&i](TypeParam &v) { v = 2 * i++; });
     utils::TempFile file;
@@ -153,7 +154,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
 
 TYPED_TEST(EliasFanoTest, VariousSizes) {
     for (uint32_t size = 1012; size < 1036; ++size) {
-        Vector<TypeParam> values(size);
+        std::vector<TypeParam> values(size);
         std::iota(values.begin(), values.end(), 0);
         utils::TempFile file;
         size_t file_size = encode(values, file.name());
@@ -178,7 +179,7 @@ TYPED_TEST(EliasFanoTest, VariousSizes) {
  * border-case is handled correctly by the algorithm.
  */
 TYPED_TEST(EliasFanoTest, ReadWriteExactly64LowBits) {
-    Vector<TypeParam> values = { 1,   5,   7,   12,  16,  17,  25,  31,  32,  37,  40,
+    std::vector<TypeParam> values = { 1,   5,   7,   12,  16,  17,  25,  31,  32,  37,  40,
                                  50,  53,  62,  71,  74,  82,  92,  97,  103, 104, 105,
                                  107, 114, 122, 123, 125, 129, 130, 139, 147, 150, 153 };
     utils::TempFile file;
@@ -198,7 +199,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly64LowBits) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
-    Vector<TypeParam> values
+    std::vector<TypeParam> values
             = { 1,   5,   7,   12,  16,  16,  25,  31,  32,  37,  40,  50,  53,
                 62,  71,  74,  82,  92,  97,  103, 104, 105, 107, 114, 122, 123,
                 125, 129, 129, 139, 147, 150, 153, 161, 169, 174, 184, 194, 203,
@@ -225,7 +226,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
  * 8*n+1.
  */
 TYPED_TEST(EliasFanoTest, LastByteRead) {
-    Vector<TypeParam> values
+    std::vector<TypeParam> values
             = { 0,    585,  587,  588,  601,  604,  609,  612,  650,  651,  658,
                 676,  713,  715,  737,  739,  777,  780,  787,  801,  804,  1105,
                 1169, 1170, 1172, 1178, 1228, 1242, 1297, 1300, 1313, 1316, 1611,
@@ -250,7 +251,7 @@ TYPED_TEST(EliasFanoTest, LastByteRead) {
 
 TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<TypeParam> values(size);
+        std::vector<TypeParam> values(size);
         std::mt19937 rng(123457);
         std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
@@ -283,7 +284,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandomLargerThanBuffer) {
         const uint64_t buf_size_bits = common::EliasFanoEncoder<uint32_t>::WRITE_BUF_SIZE
                 * sizeof(TypeParam) * 8;
         uint64_t upper_bound = 1ULL << (buf_size_bits / size + sdsl::bits::hi(size) + 2);
-        Vector<TypeParam> values(size);
+        std::vector<TypeParam> values(size);
         std::mt19937 rng(123457);
         std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
@@ -388,7 +389,7 @@ TEST(EliasFanoTest128, ReadWriteRandomLarge) {
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<sdsl::uint128_t> values(size);
+        std::vector<sdsl::uint128_t> values(size);
         for (uint32_t trial = 0; trial < 16; ++trial) {
             sdsl::uint128_t i = 0;
             std::for_each(values.begin(), values.end(), [&](sdsl::uint128_t &v) {
@@ -422,7 +423,7 @@ TEST(EliasFanoTest256, ReadWriteRandomLarge) {
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<sdsl::uint256_t> values(size);
+        std::vector<sdsl::uint256_t> values(size);
         for (uint32_t trial = 0; trial < 16; ++trial) {
             sdsl::uint256_t i = 0;
             std::for_each(values.begin(), values.end(), [&](sdsl::uint256_t &v) {

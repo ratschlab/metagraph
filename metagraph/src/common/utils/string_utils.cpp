@@ -44,7 +44,8 @@ std::string join_strings(const std::vector<std::string> &strings,
 }
 
 std::vector<std::string> split_string(const std::string &string,
-                                      const std::string &delimiter) {
+                                      const std::string &delimiter,
+                                      bool skip_empty_parts) {
     if (!string.size())
         return {};
 
@@ -58,7 +59,7 @@ std::vector<std::string> split_string(const std::string &string,
 
     while ((delimiter_pos = string.find(delimiter, current_pos))
                                              != std::string::npos) {
-        if (delimiter_pos > current_pos)
+        if (delimiter_pos > current_pos || !skip_empty_parts)
             result.push_back(string.substr(current_pos, delimiter_pos - current_pos));
         current_pos = delimiter_pos + delimiter.size();
     }

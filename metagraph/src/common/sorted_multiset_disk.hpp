@@ -1,16 +1,9 @@
 #pragma once
 
-#include <cassert>
-#include <functional>
-#include <optional>
-#include <shared_mutex>
-#include <string>
-
-#include <ips4o.hpp>
-
 #include "common/sorted_set_disk_base.hpp"
 
-namespace mg {
+
+namespace mtg {
 namespace common {
 
 /**
@@ -35,27 +28,20 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
     /**
      * Constructs a SortedMultisetDisk instance and initializes its buffers sizes to the
      * value specified in #reserved_num_elements.
-     * @param cleanup function to run each time a chunk is written to disk; typically
-     * performs cleanup operations, such as removing redundant dummy source k-mers
      * @param num_threads the number of threads to use by the sorting algorithm
      * @param tmp_dir the prefix of the temporary files where chunks are
      * written before being merged
      * @param container_size the size of the in-memory container that is written
      * to disk when full
      */
-    SortedMultisetDisk(
-            std::function<void(storage_type *)> cleanup = [](storage_type *) {},
-            size_t num_threads = 1,
-            size_t reserved_num_elements = 1e6,
-            const std::filesystem::path &tmp_dir = "/tmp/",
-            size_t max_disk_space_bytes = 1e9,
-            size_t num_last_elements_cached = 100)
-        : SortedSetDiskBase<value_type>(cleanup,
-                                        num_threads,
+    SortedMultisetDisk(size_t num_threads = 1,
+                       size_t reserved_num_elements = 1e6,
+                       const std::filesystem::path &tmp_dir = "/tmp/",
+                       size_t max_disk_space_bytes = 1e9)
+        : SortedSetDiskBase<value_type>(num_threads,
                                         reserved_num_elements,
                                         tmp_dir,
-                                        max_disk_space_bytes,
-                                        num_last_elements_cached) {}
+                                        max_disk_space_bytes) {}
 
     static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
@@ -90,38 +76,8 @@ class SortedMultisetDisk : public SortedSetDiskBase<std::pair<T, C>> {
     }
 
   private:
-    virtual void sort_and_remove_duplicates(storage_type *vector,
-                                            size_t num_threads) const override {
-        assert(vector);
-        ips4o::parallel::sort(
-                vector->begin(), vector->end(),
-                [](const value_type &first, const value_type &second) {
-                    return first.first < second.first;
-                },
-                num_threads);
-
-        auto first = vector->begin();
-        auto last = vector->end();
-
-        auto dest = first;
-
-        while (++first != last) {
-            if (first->first == dest->first) {
-                if (first->second < max_count() - dest->second) {
-                    dest->second += first->second;
-                } else {
-                    dest->second = max_count();
-                }
-            } else {
-                *++dest = std::move(*first);
-            }
-        }
-
-        vector->erase(++dest, this->data_.end());
-
-        this->cleanup_(vector);
-    }
+    virtual void sort_and_dedupe() override;
 };
 
 } // namespace common
-} // namespace mg
+} // namespace mtg

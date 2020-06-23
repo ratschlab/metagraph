@@ -1,55 +1,208 @@
 # -*- coding: utf-8 -*-
 
-import time
-import sys
-import os
-import traceback
-import json
-import pandas as pd
-from socket import error as socket_error
-from .client_annotator import RemoteEngine
-from .helpers import get_js_sample_list
+from typing import Dict, Tuple, List, Iterable, Union, Any
 
+import pandas as pd
+import requests
 
 """Metagraph client."""
 
+DEFAULT_TOP_LABELS = 10000
+DEFAULT_DISCOVERY_THRESHOLD = 1.0
 
-class Client:
+JsonDict = Dict[str, Any]
+JsonStrList = List[str]
+
+
+class GraphClientJson:
+    """
+    Relatively low level version of the client API. Client returning results
+    from the server as json objects. If there was an error,
+    returning error message in the second element of the tuple returned.
+    """
+
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+        self.host = host
+        self.port = port
+        self.label = label
+        self.api_path = api_path
+
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> Tuple[JsonDict, str]:
+        if discovery_threshold < 0.0 or discovery_threshold > 1.0:
+            raise ValueError(
+                f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+
+        param_dict = {"count_labels": True,
+                      "discovery_fraction": discovery_threshold,
+                      "num_labels": top_labels,
+                      "align": align}
+
+        return self._json_seq_query(sequence, param_dict, "search")
+
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Tuple[JsonDict, str]:
+        params = {'max_alternative_alignments' : max_alternative_alignments}
+        return self._json_seq_query(sequence, params, "align")
+
+    # noinspection PyTypeChecker
+    def column_labels(self) -> Tuple[JsonStrList, str]:
+        return self._do_request("column_labels", {}, False)
+
+    def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
+                        endpoint: str) -> Tuple[JsonDict, str]:
+        if isinstance(sequence, str):
+            fasta_str = f">query\n{sequence}"
+        else:
+            seqs = list(sequence)
+            fasta_str = '\n'.join(
+                [f">{i}\n{seq}" for (i, seq) in enumerate(seqs)])
+
+        payload_dict = {"FASTA": fasta_str}
+        payload_dict.update(param_dict)
+        payload = payload_dict
+
+        return self._do_request(endpoint, payload)
+
+    def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
+        endpoint_path = endpoint
+
+        if self.api_path:
+            endpoint_path = f"{self.api_path.lstrip('/')}/{endpoint}"
+
+        url = f'http://{self.host}:{self.port}/{endpoint_path}'
+        if post_req:
+            ret = requests.post(url=url, json=payload)
+        else:
+            ret = requests.get(url=url)
+
+        json_obj = ret.json()
+        if not ret.ok:
+            error_msg = json_obj[
+                'error'] if 'error' in json_obj.keys() else str(json_obj)
+            return {}, str(ret.status_code) + " " + error_msg
+
+        return json_obj, ""
+
+    def stats(self) -> Tuple[dict, str]:
+        return self._do_request("stats", {}, post_req=False)
+
+
+class GraphClient:
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+        self._json_client = GraphClientJson(host, port, api_path=api_path)
+        self.label = label
+
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> pd.DataFrame:
+        (json_obj, err) = self._json_client.search(sequence, top_labels,
+                                                   discovery_threshold, align)
+
+        if err:
+            raise RuntimeError(
+                f"Error while calling the server API {str(err)}")
+
+        def _build_dict(row):
+            d = dict(row)
+            if 'properties' in d.keys():
+                props = d.pop('properties')
+            else:
+                props = {}
+            return {**d, **props}
+
+        def _build_df_from_json(j):
+            return pd.DataFrame([_build_dict(r) for r in j['results']])
+
+        def _build_df_per_result(res):
+            df = _build_df_from_json(res)
+
+            if not isinstance(sequence, str):
+                # only add sequence description if several queries are being made
+                df['seq_description'] = res['seq_description']
+
+            if align:
+                df['sequence'] = res['sequence']
+                df['score'] = res['score']
+                df['cigar'] = res['cigar']
+
+            return df
+
+        def build_df_from_json(j):
+            if j:
+                return pd.concat(_build_df_per_result(query_res) for query_res in j)
+            return pd.DataFrame()
+
+        return build_df_from_json(json_obj)
+
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> pd.DataFrame:
+        json_obj, err = self._json_client.align(sequence, max_alternative_alignments)
+
+        if err:
+            raise RuntimeError(f"Error while calling the server API {str(err)}")
+
+        def _df_per_seq_res(seq_res):
+            df = pd.DataFrame(seq_res['alignments'])
+            df['seq_description'] = seq_res['seq_description']
+            return df
+
+        if not json_obj:
+            return pd.DataFrame({})
+
+        return (pd.concat([ _df_per_seq_res(a) for a in json_obj]).
+                 reset_index(drop=True))
+
+
+    def column_labels(self) -> List[str]:
+        json_obj, err = self._json_client.column_labels()
+
+        if err:
+            raise RuntimeError(f"Error while calling the server API {str(err)}")
+        return json_obj
+
+
+class MultiGraphClient:
+    # TODO: make things asynchronously. this should be the added value of this class
     def __init__(self):
-        self.servers = []
+        self.graphs = {}
 
-    def connect(self, host, port, server_name=""):
-        print("Trying to connect to Metagraph server {}:{}".format(host, port))
-        annotated_dbg = RemoteEngine(host, port)
-        self.servers.append((host, port, server_name))
+    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
+        if not label:
+            label = f"{host}:{port}"
 
-    def search(self, sequence='AACGCTAATGTAGATTGAT', discovery_threshold=1.0):
-        if len(self.servers) == 0:
-            print("Error: connect to a database first")
+        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
 
-        results = []
+    def list_graphs(self) -> Dict[str, Tuple[str, int]]:
+        return {lbl: (inst.host, inst.port) for (lbl, inst) in
+                self.graphs.items()}
 
-        for (host, port, server_name) in self.servers:
-            try:
-                annotated_dbg = RemoteEngine(host, port)
+    def search(self, sequence: Union[str, Iterable[str]],
+               top_labels: int = DEFAULT_TOP_LABELS,
+               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               align: bool = False) -> \
+            Dict[str, pd.DataFrame]:
 
-                task_context = json.dumps({
-                    "FASTA": "\n".join([ ">query",
-                                            sequence,
-                    ]),
-                    "count_labels": True,
-                    "discovery_fraction": discovery_threshold / 100,
-                    "num_labels": 10000
-                })
+        result = {}
+        for label, graph_client in self.graphs.items():
+            result[label] = graph_client.search(sequence, top_labels,
+                                                discovery_threshold, align)
 
-                annotations = annotated_dbg.compute(task_context)
+        return result
 
-                js_sample_list = get_js_sample_list(annotations)
+    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Dict[
+        str, pd.DataFrame]:
+        result = {}
+        for label, graph_client in self.graphs.items():
+            # TODO: do this async
+            result[label] = graph_client.align(sequence, max_alternative_alignments)
 
-                results.append(pd.DataFrame(json.loads(js_sample_list)))
+        return result
 
-            except socket_error as e:
-                traceback.print_exc(limit=20, file=sys.stderr)
-                output = "Error: Server does not respond"
+    def column_labels(self) -> Dict[str, List[str]]:
+        ret = {}
+        for label, graph_client in self.graphs.items():
+            ret[label] = graph_client.column_labels()
 
-        return results
+        return ret

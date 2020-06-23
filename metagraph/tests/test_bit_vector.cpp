@@ -13,6 +13,11 @@
 #include "common/threads/threading.hpp"
 #include "common/data_generation.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
@@ -804,3 +809,5 @@ TYPED_TEST(BitVectorTest, operator_neq) {
         }
     }
 }
+
+} // namespace

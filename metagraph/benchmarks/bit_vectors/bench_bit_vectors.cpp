@@ -4,8 +4,7 @@
 #include "common/data_generation.hpp"
 
 
-namespace mg {
-namespace bm {
+namespace {
 
 #define DEFINE_BV_QUERY_BENCHMARK(NAME, OPERATION, MIN_INDEX, RANGE) \
 template <class bit_vector_type, uint64_t size, uint8_t density_percent> \
@@ -101,5 +100,4 @@ INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, next);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, prev);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, cond_rank);
 
-} // namespace bm
-} // namespace mg
+} // namespace

@@ -10,6 +10,10 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+
+namespace mtg {
+namespace kmer {
+
 /**
  * Models a kmer (https://en.wikipedia.org/wiki/K-mer). Each character in the k-mer
  * uses L bits of the internal representation type G (typically a 64, 128 or 256 bit
@@ -154,5 +158,8 @@ std::ostream& operator<<(std::ostream &os, const KMer<G, L> &kmer) {
     kmer.print_hex(os);
     return os;
 }
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_HPP__

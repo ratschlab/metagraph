@@ -7,12 +7,17 @@
 #include "common/seq_tools/reverse_complement.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using mtg::kmer::KmerExtractor2Bit;
+
 template <typename Kmer>
 class ExtractKmers2Bit : public ::testing::Test { };
 
-typedef ::testing::Types<KMer<uint64_t, KmerExtractor2Bit::bits_per_char>,
-                         KMer<sdsl::uint128_t, KmerExtractor2Bit::bits_per_char>,
-                         KMer<sdsl::uint256_t, KmerExtractor2Bit::bits_per_char>> KmerTypes;
+typedef ::testing::Types<kmer::KMer<uint64_t, KmerExtractor2Bit::bits_per_char>,
+                         kmer::KMer<sdsl::uint128_t, KmerExtractor2Bit::bits_per_char>,
+                         kmer::KMer<sdsl::uint256_t, KmerExtractor2Bit::bits_per_char>> KmerTypes;
 
 TYPED_TEST_SUITE(ExtractKmers2Bit, KmerTypes);
 
@@ -333,3 +338,5 @@ TYPED_TEST(ExtractKmers2Bit, ExtractKmersFromStringAppend) {
     );
     ASSERT_EQ(499u * 2, result.size());
 }
+
+} // namespace

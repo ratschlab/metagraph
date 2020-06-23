@@ -6,6 +6,8 @@
 #include "common/ring_buffer.hpp"
 
 
+namespace {
+
 void test_buffer_back(RingBuffer<int> &buffer, size_t size) {
     EXPECT_EQ(size, buffer.capacity());
     std::deque<int> reference;
@@ -133,3 +135,5 @@ TEST(RingBuffer, PushAllCases) {
         test_buffer_front_and_back(buffer, i);
     }
 }
+
+} // namespace

@@ -10,6 +10,9 @@
 #include <iostream>
 
 
+namespace mtg {
+namespace seq_io {
+
 class VCFParser {
   public:
     // reference_file -- file name of the FASTA file
@@ -51,5 +54,8 @@ class VCFParser {
 
     void parse_annotation_from_vcf(const std::vector<std::string> &annots);
 };
+
+} // namespace seq_io
+} // namespace mtg
 
 #endif // __METAGRAPH_VCFPARSER__

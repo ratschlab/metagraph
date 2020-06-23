@@ -7,16 +7,33 @@
 #include "cli/config/config.hpp"
 
 
+namespace mtg {
+namespace cli {
+
 Config::AnnotationType parse_annotation_type(const std::string &filename);
 
 std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
-                      const Config &config,
-                      uint64_t num_rows);
+                      size_t column_compressed_num_columns_cached = 1,
+                      bool row_compressed_sparse = false,
+                      uint64_t num_rows = 0);
 
-inline auto initialize_annotation(const std::string &filename,
-                                  const Config &config) {
-    return initialize_annotation(parse_annotation_type(filename), config, 0);
+inline auto initialize_annotation(Config::AnnotationType anno_type,
+                                  const Config &config,
+                                  uint64_t num_rows = 0) {
+    return initialize_annotation(anno_type,
+                                 config.num_columns_cached,
+                                 config.sparse,
+                                 num_rows);
 }
+
+template <typename... Args>
+inline auto initialize_annotation(const std::string &filename,
+                                  const Args&... args) {
+    return initialize_annotation(parse_annotation_type(filename), args...);
+}
+
+} // namespace cli
+} // namespace mtg
 
 #endif // __LOAD_ANNOTATION_HPP__

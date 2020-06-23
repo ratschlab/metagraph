@@ -3,21 +3,28 @@
 
 #include <gtest/gtest.h>
 
+#include "tests/utils/gtest_patch.hpp"
+
 #include <array>
+#include <numeric>
 #include <filesystem>
 
+#include <sdsl/uint128_t.hpp>
+#include <sdsl/uint256_t.hpp>
+
+
 namespace {
-using namespace mg;
+
+using namespace mtg;
 
 template <typename T>
 class SortedMultisetDiskTest : public ::testing::Test {};
 
-typedef ::testing::Types<uint64_t, uint32_t> SortedDiskElementTypes;
+typedef ::testing::Types<uint64_t,
+                         sdsl::uint128_t,
+                         sdsl::uint256_t> SortedDiskElementTypes;
 
 TYPED_TEST_SUITE(SortedMultisetDiskTest, SortedDiskElementTypes);
-
-template <typename T>
-static void nocleanup(T *) {}
 
 template <typename TypeParam>
 void expect_equals(common::SortedMultisetDisk<TypeParam, uint8_t> &underTest,
@@ -33,14 +40,13 @@ void expect_equals(common::SortedMultisetDisk<TypeParam, uint8_t> &underTest,
 }
 
 template <typename T>
-common::SortedMultisetDisk<T, uint8_t>
-create_sorted_set_disk(size_t container_size = 8, size_t num_elements_cached = 2) {
+common::SortedMultisetDisk<T, uint8_t> create_sorted_set_disk(size_t container_size = 8) {
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
+    std::filesystem::create_directory("./test_chunk_");
+    std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     return common::SortedMultisetDisk<T, uint8_t>(
-            nocleanup<typename common::SortedMultisetDisk<T>::storage_type>, thread_count,
-            container_size, "/tmp/test_chunk_", max_disk_space,
-            num_elements_cached);
+            thread_count, container_size, "./test_chunk_", max_disk_space);
 }
 
 TYPED_TEST(SortedMultisetDiskTest, Empty) {
@@ -64,7 +70,7 @@ TYPED_TEST(SortedMultisetDiskTest, InsertOneRange) {
 
 TYPED_TEST(SortedMultisetDiskTest, InsertOneRangeLargerThanBuffer) {
     common::SortedMultisetDisk<TypeParam> underTest
-            = create_sorted_set_disk<TypeParam>(3, 1);
+            = create_sorted_set_disk<TypeParam>(3);
     std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
     underTest.insert(elements.begin(), elements.end());
     expect_equals(underTest, { { 42, 2 }, { 43, 2 }, { 44, 1 }, { 45, 2 } });
@@ -155,7 +161,7 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
  */
 TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
     common::SortedMultisetDisk<TypeParam> underTest
-            = create_sorted_set_disk<TypeParam>(100, 3);
+            = create_sorted_set_disk<TypeParam>(100);
     std::vector<std::thread> workers;
     std::vector<std::pair<TypeParam, uint8_t>> expected_result;
     for (uint32_t i = 0; i < 100; ++i) {
@@ -172,39 +178,6 @@ TYPED_TEST(SortedMultisetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDup
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
     expect_equals(underTest, expected_result);
-}
-
-TYPED_TEST(SortedMultisetDiskTest, IterateBackwards) {
-    common::SortedMultisetDisk<TypeParam, uint8_t> underTest
-            = create_sorted_set_disk<TypeParam>(100, 10);
-    using Pair = std::pair<TypeParam, uint8_t>;
-    std::vector<Pair> expected_result;
-    for (uint32_t i = 0; i < 100; ++i) {
-        std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
-                                              TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
-        underTest.insert(elements.begin(), elements.end());
-        for (const auto &el : elements) {
-            expected_result.push_back(std::make_pair(el, 1));
-        }
-    }
-
-    uint32_t size = 0;
-    using ChunkedQueueIterator = typename common::ChunkedWaitQueue<Pair>::Iterator;
-    common::ChunkedWaitQueue<Pair> &merge_queue = underTest.data();
-    for (ChunkedQueueIterator &iterator = merge_queue.begin();
-         iterator != merge_queue.end(); ++iterator) {
-        EXPECT_EQ((TypeParam)size, (*iterator).first);
-        for (uint32_t idx = 0; idx < 10 && size - idx > 0; ++idx) {
-            EXPECT_EQ((TypeParam)(size - idx), (*iterator).first);
-            --iterator;
-        }
-        Pair value = *iterator;
-        for (uint32_t idx = 0; idx < 10 && size - idx > 0; ++idx) {
-            EXPECT_EQ((TypeParam)(value.first + idx), (*iterator).first);
-            ++iterator;
-        }
-        size++;
-    }
 }
 
 /**
@@ -245,9 +218,10 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
 
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
+    std::filesystem::create_directory("./test_chunk_");
+    std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
-            thread_count, container_size, "/tmp/test_chunk_", max_disk_space, 2);
+            thread_count, container_size, "./test_chunk_", max_disk_space);
     // make sure we correctly count up to the max value of the counter
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
         std::vector<TypeParam> values = { TypeParam(value) };
@@ -276,9 +250,10 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space
             = container_size * sizeof(std::pair<uint32_t, uint8_t>) * 2;
+    std::filesystem::create_directory("./test_chunk_");
+    std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            nocleanup<typename common::SortedMultisetDisk<TypeParam>::storage_type>,
-            thread_count, container_size, "/tmp/test_chunk_", max_disk_space, 2);
+            thread_count, container_size, "./test_chunk_", max_disk_space);
     std::vector<TypeParam> values(container_size / 1.5);
     std::iota(values.begin(), values.end(), 0);
     // these values will fill the buffer and write to disk filling half the allowed space

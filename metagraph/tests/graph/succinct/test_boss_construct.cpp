@@ -19,11 +19,12 @@
 #include "kmer/kmer_collector.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
-namespace {
-using namespace mg;
-using namespace mg::succinct;
 
-KSEQ_INIT(gzFile, gzread);
+namespace {
+
+using namespace mtg;
+using namespace mtg::succinct;
+using mtg::kmer::KmerExtractorBOSS;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -67,9 +68,9 @@ TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
 
 #define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
+typedef ::testing::Types<kmer::KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
+                         kmer::KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
+                         kmer::KMerBOSS<sdsl::uint256_t, KmerExtractorBOSS::bits_per_char>> KmerTypes;
 
 TYPED_TEST_SUITE(CollectKmers, KmerTypes);
 TYPED_TEST_SUITE(CountKmers, KmerTypes);
@@ -306,71 +307,75 @@ TYPED_TEST(BOSSConstruct, ConstructionShort) {
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
-    for (size_t k = 1; k < kMaxK; k += 6) {
-        BOSS boss_dynamic(k);
-        boss_dynamic.add_sequence(std::string(100, 'A'));
-        boss_dynamic.add_sequence(std::string(100, 'C'));
-        boss_dynamic.add_sequence(std::string(100, 'T') + "A"
-                                        + std::string(100, 'G'));
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; k += 6) {
+            BOSS boss_dynamic(k);
+            boss_dynamic.add_sequence(std::string(100, 'A'));
+            boss_dynamic.add_sequence(std::string(100, 'C'));
+            boss_dynamic.add_sequence(std::string(100, 'T') + "A"
+                                            + std::string(100, 'G'));
 
-        for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-            BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
-            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
-                std::unique_ptr<IBOSSChunkConstructor> constructor(
-                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                          suffix));
+                for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
+                    std::unique_ptr<IBOSSChunkConstructor> constructor(
+                            IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
+                                                              suffix, 1, 20000, container));
 
-                constructor->add_sequence(std::string(100, 'A'));
-                constructor->add_sequence(std::string(100, 'C'));
-                constructor->add_sequence(std::string(100, 'T') + "A"
-                                                + std::string(100, 'G'));
+                    constructor->add_sequence(std::string(100, 'A'));
+                    constructor->add_sequence(std::string(100, 'C'));
+                    constructor->add_sequence(std::string(100, 'T') + "A"
+                                                    + std::string(100, 'G'));
 
-                auto next_block = constructor->build_chunk();
-                graph_data.extend(*next_block);
-                delete next_block;
+                    auto next_block = constructor->build_chunk();
+                    graph_data.extend(*next_block);
+                    delete next_block;
+                }
+
+                BOSS boss;
+                graph_data.initialize_boss(&boss);
+
+                EXPECT_EQ(boss_dynamic, boss);
             }
-
-            BOSS boss;
-            graph_data.initialize_boss(&boss);
-
-            EXPECT_EQ(boss_dynamic, boss);
         }
-}
+    }
 }
 
 TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
     const uint64_t num_threads = 4;
 
-    for (size_t k = 1; k < kMaxK; k += 6) {
-        BOSS boss_dynamic(k);
-        boss_dynamic.add_sequence(std::string(100, 'A'));
-        boss_dynamic.add_sequence(std::string(100, 'C'));
-        boss_dynamic.add_sequence(std::string(100, 'T') + "A"
-                                        + std::string(100, 'G'));
+    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+        for (size_t k = 1; k < kMaxK; k += 6) {
+            BOSS boss_dynamic(k);
+            boss_dynamic.add_sequence(std::string(100, 'A'));
+            boss_dynamic.add_sequence(std::string(100, 'C'));
+            boss_dynamic.add_sequence(std::string(100, 'T') + "A"
+                                            + std::string(100, 'G'));
 
-        for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-            BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+                BOSS::Chunk graph_data(KmerExtractorBOSS::alphabet.size(), k, false);
 
-            for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
-                std::unique_ptr<IBOSSChunkConstructor> constructor(
-                        IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                          suffix, num_threads));
+                for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
+                    std::unique_ptr<IBOSSChunkConstructor> constructor(
+                            IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
+                                                              suffix, num_threads, 20000, container));
 
-                constructor->add_sequence(std::string(100, 'A'));
-                constructor->add_sequence(std::string(100, 'C'));
-                constructor->add_sequence(std::string(100, 'T') + "A"
-                                                + std::string(100, 'G'));
+                    constructor->add_sequence(std::string(100, 'A'));
+                    constructor->add_sequence(std::string(100, 'C'));
+                    constructor->add_sequence(std::string(100, 'T') + "A"
+                                                    + std::string(100, 'G'));
 
-                auto next_block = constructor->build_chunk();
-                graph_data.extend(*next_block);
-                delete next_block;
+                    auto next_block = constructor->build_chunk();
+                    graph_data.extend(*next_block);
+                    delete next_block;
+                }
+
+                BOSS boss;
+                graph_data.initialize_boss(&boss);
+
+                EXPECT_EQ(boss_dynamic, boss);
             }
-
-            BOSS boss;
-            graph_data.initialize_boss(&boss);
-
-            EXPECT_EQ(boss_dynamic, boss);
         }
     }
 }
@@ -382,14 +387,13 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         common::SortedSet<typename KMER::WordType> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
-                                        bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     kmer::extract_kmers<KMER, KmerExtractorBOSS, common::SortedSet<typename KMER::WordType>>(
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix, remove_redundant
+        k, false, kmers, suffix
     );
     delete reads;
 }
@@ -400,40 +404,40 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, false, 100'000
+        2, &result, {}, 100'000
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 #else
-    ASSERT_EQ(4u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #endif
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, false, 100'000
+        2, &result, { 1, }, 100'000
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 #else
-    ASSERT_EQ(4u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #endif
 }
 
@@ -443,133 +447,31 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, false, 0
+        2, &result, {}, 0
     );
     sequence_to_kmers_parallel_wrapper<TypeParam>(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, false, 0
+        2, &result, { 1, }, 0
     );
 #if _DNA_GRAPH
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 #else
-    ASSERT_EQ(4u, result.data().size());
+    ASSERT_EQ(2u, result.data().size());
 #endif
-}
-
-TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {
-    common::SortedSet<typename TypeParam::WordType> result;
-
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, true, 100'000
-    );
-    // AA, A$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, true, 100'000
-    );
-    // AAA, AA$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, true, 100'000
-    );
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, true, 100'000
-    );
-    // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, true, 100'000
-    );
-    // AAAA, AAA$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, true, 100'000
-    );
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, true, 100'000
-    );
-    // $$$A, $$AA, $AAA, AAAA, AAA$
-    ASSERT_EQ(5u, result.data().size());
-}
-
-TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
-    common::SortedSet<typename TypeParam::WordType> result;
-
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, true, 0
-    );
-    // AA, A$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, true, 0
-    );
-    // AAA, AA$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, true, 0
-    );
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, true, 0
-    );
-    // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, true, 0
-    );
-    // AAAA, AAA$
-    ASSERT_EQ(2u, result.data().size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, true, 0
-    );
-    sequence_to_kmers_parallel_wrapper<TypeParam>(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, true, 0
-    );
-    // $$$A, $$AA, $AAA, AAAA, AAA$
-    ASSERT_EQ(5u, result.data().size());
 }
 
 // TODO: k is node length
@@ -581,7 +483,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     static_assert(std::is_same_v<typename Container::key_type, typename KMER::WordType>);
     // kmers->try_reserve(reserved_capacity);
     kmer::count_kmers<KMER, KmerExtractorBOSS, Container>(
-            [reads](kmer::CallStringCount callback) {
+        [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
                 callback(read, 1);
             }
@@ -609,8 +511,7 @@ void assert_contents(Container &c, const std::initializer_list<size_t> &expected
 
 template <typename KMER, typename Container>
 void check_counts() {
-    auto cleanup = [](typename Container::storage_type *) {};
-    Container result(cleanup, 1, 100'000);
+    Container result(1, 100'000);
     size_t sequence_size = 500;
     size_t max_value = std::numeric_limits<typename Container::count_type>::max();
     const size_t five_times = std::min(5 * (sequence_size - 2 + 1), max_value);
@@ -619,35 +520,35 @@ void check_counts() {
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, five_times }); // A$ - 5 times, AA - #five_times
+    assert_contents(result, { five_times }); // AA - #five_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 10u, ten_times }); // A$ - 10 times, AA - #ten_times
+    assert_contents(result, { ten_times }); // AA - #ten_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 15u, fifteen_times }); // A$ - 15 times, AA - #fifteen_times
+    assert_contents(result, { fifteen_times }); // AA - #fifteen_times
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, {});
-    // A$ - 15, AA - fifteen_times, C$ - 5, CC - five_times
-    assert_contents(result, { 15u, fifteen_times, 5u, five_times });
+    // AA - fifteen_times, CC - five_times
+    assert_contents(result, { fifteen_times, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, { 1 });
     // same as before, as no k-mers end with 'A'
-    assert_contents(result, { 15u, fifteen_times, 5u, five_times });
+    assert_contents(result, { fifteen_times, five_times });
 
 
     sequence_to_kmers_parallel_wrapper<KMER, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'C')), 2, &result, { 0 });
-    // $C - 5 (matches the given suffix), A$ - 15, AA - fifteen_times, C$ - 5, CC - five_times
-    assert_contents(result, { 5u, 15u, fifteen_times, 5u, five_times });
+    // $C - 5 (matches the given suffix), AA - fifteen_times, CC - five_times
+    assert_contents(result, { 5u, fifteen_times, five_times });
 }
 
 TYPED_TEST(CountKmers, CountKmers8bits) {
@@ -662,24 +563,22 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint8_t>;
-    auto cleanup = [](typename Container::storage_type *) {};
-    Container result(cleanup, 1, 100'000);
+    Container result(1, 100'000);
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, 255u });
+    assert_contents(result, { 255u });
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint32_t>;
-    auto cleanup = [](typename Container::storage_type *) {};
-    Container result(cleanup, 1, 100'000);
+    Container result(1, 100'000);
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5u, 5 * (sequence_size - 2 + 1) });
+    assert_contents(result, { 5 * (sequence_size - 2 + 1) });
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
@@ -693,17 +592,18 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    // A$ and AA
-    ASSERT_EQ(2u, result.data().size());
+    // AA
+    ASSERT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, {});
     sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
             new std::vector<std::string>(5, std::string(sequence_size, 'B')), 2, &result, { 1 });
 #if _DNA_GRAPH
-    ASSERT_EQ(2u, result.data().size());
+    ASSERT_EQ(1u, result.data().size());
 #else
-    ASSERT_EQ(4u, result.data().size());
+    // AA, $B, BB
+    ASSERT_EQ(3u, result.data().size());
 #endif
 }
 

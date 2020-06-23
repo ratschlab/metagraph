@@ -5,7 +5,8 @@
 #include "common/utils/string_utils.hpp"
 
 
-namespace kmc {
+namespace mtg {
+namespace seq_io {
 
 const auto kFileSuffixes = { ".kmc_suf", ".kmc_pre" };
 
@@ -60,4 +61,5 @@ void read_kmers(const std::string &kmc_filename,
     kmc_database.Close();
 }
 
-} // namespace kmc
+} // namespace seq_io
+} // namespace mtg

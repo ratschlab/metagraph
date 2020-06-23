@@ -5,6 +5,12 @@
 
 #include "seq_io/sequence_io.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::seq_io;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
 const std::string dump_filename = test_data_dir + "/dump.fasta.gz";
@@ -752,3 +758,25 @@ TEST(FastaFileWithCanonical, iterator_read_1M_multiple_copies) {
 
     std::filesystem::remove(dump_filename);
 }
+
+TEST(FastaFromString, read_fasta_from_string) {
+    std::string fasta_str = "";
+
+    int nr_seqs = 20'000;
+    for (int i = 0; i < nr_seqs; i++) {
+        fasta_str.append(">hello\nAAA\n");
+    }
+
+    // precondition for test, want to test for larger fasta strings
+    EXPECT_GT(fasta_str.size(), 65536);
+
+    int seqs_cnt = 0;
+    read_fasta_from_string(fasta_str,
+                           [&](kseq_t*) {
+                               seqs_cnt++;
+                           });
+
+    EXPECT_EQ(seqs_cnt, nr_seqs);
+}
+
+} // namespace

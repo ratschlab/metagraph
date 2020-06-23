@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 
+namespace {
+
 TEST(SIMDUtils, restrict_to) {
     // test multiples of powers of two, and powers of two minus 1
     for (uint64_t i = 0; i < 64; ++i) {
@@ -31,3 +33,5 @@ TEST(SIMDUtils, restrict_to) {
         }
     }
 }
+
+} // namespace

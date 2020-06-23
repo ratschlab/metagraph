@@ -5,7 +5,12 @@
 
 #include "seq_io/kmc_parser.hpp"
 
-using kmc::read_kmers;
+
+namespace {
+
+using namespace mtg;
+
+using mtg::seq_io::read_kmers;
 
 const std::string kTestDataDir = "../tests/data";
 // constructed with '-b' flag in KMC
@@ -339,3 +344,5 @@ TEST(kmc_parser, ReadKmersBothStrandsMaxCountThreshold) {
         }
     }
 }
+
+} // namespace

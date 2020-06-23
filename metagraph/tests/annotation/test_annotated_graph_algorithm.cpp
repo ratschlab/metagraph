@@ -7,6 +7,11 @@
 #include "graph/annotated_graph_algorithm.hpp"
 
 
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
@@ -172,3 +177,5 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
     test_mask_unitigs<typename TypeParam::first_type,
                       typename TypeParam::second_type>(1.0, 1.0, 0.0, ref_kmers);
 }
+
+} // namespace

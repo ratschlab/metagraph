@@ -8,7 +8,7 @@
 #include "common/utils/simd_utils.hpp"
 #include "common/vectors/aligned_vector.hpp"
 
-using mg::common::logger;
+using mtg::common::logger;
 
 
 template <typename NodeType>

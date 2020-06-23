@@ -9,6 +9,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace test {
+
 template <typename NodeType>
 void check_json_dump_load(const DeBruijnGraph &graph,
                           const Alignment<NodeType> &alignment,
@@ -47,5 +50,7 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_query() << "\n";
 }
 
+} // namespace test
+} // namespace mtg
 
 #endif // __TEST_DBG_ALIGNER_HELPERS_HPP__

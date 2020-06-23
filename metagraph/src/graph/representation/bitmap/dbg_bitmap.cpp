@@ -7,7 +7,7 @@
 #include "common/serialization.hpp"
 #include "dbg_bitmap_construct.hpp"
 
-namespace mg {
+namespace mtg {
 namespace bitmap_graph {
 
 // Assume all k-mers present
@@ -412,4 +412,4 @@ void DBGBitmap::print(std::ostream &out) const {
 }
 
 } // namespace bitmap_graph
-} // namespace mg
+} // namespace mtg

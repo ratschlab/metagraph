@@ -32,6 +32,84 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
                                uint8_t bits_per_number);
 
 
+/**
+ * Atomic bit fetching, setting, and unsetting on packed vectors.
+ * fetch_and_* return the old values. The default memorder __ATOMIC_SEQ_CST
+ * enforces the ordering of writes and reads across threads. See
+ * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
+ * for more details.
+ */
+
+inline bool fetch_and_set_bit(uint64_t *v,
+                              uint64_t i,
+                              bool atomic = false,
+                              int mo = __ATOMIC_SEQ_CST) {
+    const uint64_t mask = (1llu << (i & 0x3F));
+
+    if (atomic) {
+        return __atomic_fetch_or(&v[i >> 6], mask, mo) & mask;
+    } else {
+        uint64_t &word = v[i >> 6];
+        if (word & mask) {
+            return true;
+        } else {
+            word |= mask;
+            return false;
+        }
+    }
+}
+
+inline bool fetch_and_unset_bit(uint64_t *v,
+                                uint64_t i,
+                                bool atomic = false,
+                                int mo = __ATOMIC_SEQ_CST) {
+    const uint64_t mask = (1llu << (i & 0x3F));
+
+    if (atomic) {
+        return __atomic_fetch_and(&v[i >> 6], ~mask, mo) & mask;
+    } else {
+        uint64_t &word = v[i >> 6];
+        if (word & mask) {
+            word &= ~mask;
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+inline bool fetch_bit(const uint64_t *v,
+                      uint64_t i,
+                      bool atomic = false,
+                      int mo = __ATOMIC_SEQ_CST) {
+    return atomic
+        ? ((__atomic_load_n(&v[i >> 6], mo) >> (i & 0x3F)) & 1)
+        : ((v[i >> 6] >> (i & 0x3F)) & 1);
+}
+
+inline void set_bit(uint64_t *v,
+                    uint64_t i,
+                    bool atomic = false,
+                    int mo = __ATOMIC_SEQ_CST) {
+    if (atomic) {
+        __atomic_or_fetch(&v[i >> 6], 1llu << (i & 0x3F), mo);
+    } else {
+        v[i >> 6] |= (1llu << (i & 0x3F));
+    }
+}
+
+inline void unset_bit(uint64_t *v,
+                      uint64_t i,
+                      bool atomic = false,
+                      int mo = __ATOMIC_SEQ_CST) {
+    if (atomic) {
+        __atomic_and_fetch(&v[i >> 6], ~(1llu << (i & 0x3F)), mo);
+    } else {
+        v[i >> 6] &= ~(1llu << (i & 0x3F));
+    }
+}
+
+
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
                uint64_t begin, uint64_t end,
@@ -40,7 +118,7 @@ void call_ones(const Bitmap &vector,
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
+    for ( ; i < end && (i & 0x3F); ++i) {
         if (vector[i])
             callback(i);
     }
@@ -55,13 +133,54 @@ void call_ones(const Bitmap &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
+        for ( ; i < j; ++i) {
             if (vector[i])
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
+    for ( ; i < end; ++i) {
         if (vector[i])
+            callback(i);
+    }
+}
+
+template <class Callback>
+void call_ones(const sdsl::bit_vector &vector,
+               uint64_t begin, uint64_t end,
+               Callback callback,
+               bool atomic,
+               int mo = __ATOMIC_SEQ_CST) {
+    if (!atomic) {
+        call_ones(vector, begin, end, callback);
+        return;
+    }
+
+    assert(begin <= end);
+    assert(end <= vector.size());
+
+    uint64_t i = begin;
+    for ( ; i < end && (i & 0x3F); ++i) {
+        if (fetch_bit(vector.data(), i, true))
+            callback(i);
+    }
+    uint64_t word;
+    for (uint64_t j = i + 64; j <= end; j += 64) {
+        word = __atomic_load_n(&vector.data()[i >> 6], mo);
+        if (!word) {
+            i += 64;
+            continue;
+        }
+
+        i += sdsl::bits::lo(word);
+        callback(i++);
+
+        for ( ; i < j; ++i) {
+            if (fetch_bit(vector.data(), i, true))
+                callback(i);
+        }
+    }
+    for ( ; i < end; ++i) {
+        if (fetch_bit(vector.data(), i, true))
             callback(i);
     }
 }
@@ -69,6 +188,14 @@ void call_ones(const Bitmap &vector,
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector, Callback callback) {
     call_ones(vector, 0, vector.size(), callback);
+}
+
+template <class Callback>
+void call_ones(const sdsl::bit_vector &vector,
+               Callback callback,
+               bool atomic,
+               int mo = __ATOMIC_SEQ_CST) {
+    call_ones(vector, 0, vector.size(), callback, atomic, mo);
 }
 
 template <class Bitmap, class Callback>
@@ -79,7 +206,7 @@ void call_zeros(const Bitmap &vector,
     assert(end <= vector.size());
 
     uint64_t i = begin;
-    for (; i < end && i & 0x3F; ++i) {
+    for ( ; i < end && (i & 0x3F); ++i) {
         if (!vector[i])
             callback(i);
     }
@@ -94,13 +221,54 @@ void call_zeros(const Bitmap &vector,
         i += sdsl::bits::lo(word);
         callback(i++);
 
-        for (; i < j; ++i) {
+        for ( ; i < j; ++i) {
             if (!vector[i])
                 callback(i);
         }
     }
-    for (; i < end; ++i) {
+    for ( ; i < end; ++i) {
         if (!vector[i])
+            callback(i);
+    }
+}
+
+template <class Callback>
+void call_zeros(const sdsl::bit_vector &vector,
+                uint64_t begin, uint64_t end,
+                Callback callback,
+                bool atomic,
+                int mo = __ATOMIC_SEQ_CST) {
+    if (!atomic) {
+        call_zeros(vector, begin, end, callback);
+        return;
+    }
+
+    assert(begin <= end);
+    assert(end <= vector.size());
+
+    uint64_t i = begin;
+    for ( ; i < end && (i & 0x3F); ++i) {
+        if (!fetch_bit(vector.data(), i, true))
+            callback(i);
+    }
+    uint64_t word;
+    for (uint64_t j = i + 64; j <= end; j += 64) {
+        word = ~__atomic_load_n(&vector.data()[i >> 6], mo);
+        if (!word) {
+            i += 64;
+            continue;
+        }
+
+        i += sdsl::bits::lo(word);
+        callback(i++);
+
+        for ( ; i < j; ++i) {
+            if (!fetch_bit(vector.data(), i, true))
+                callback(i);
+        }
+    }
+    for ( ; i < end; ++i) {
+        if (!fetch_bit(vector.data(), i, true))
             callback(i);
     }
 }
@@ -108,6 +276,14 @@ void call_zeros(const Bitmap &vector,
 template <class Bitmap, class Callback>
 void call_zeros(const Bitmap &vector, Callback callback) {
     call_zeros(vector, 0, vector.size(), callback);
+}
+
+template <class Callback>
+void call_zeros(const sdsl::bit_vector &vector,
+                Callback callback,
+                bool atomic,
+                int mo = __ATOMIC_SEQ_CST) {
+    call_zeros(vector, 0, vector.size(), callback, atomic, mo);
 }
 
 uint64_t count_ones(const sdsl::bit_vector &vector, uint64_t begin, uint64_t end);
@@ -118,10 +294,21 @@ void compute_or(const std::vector<const bit_vector *> &columns,
                 sdsl::bit_vector *result,
                 ThreadPool &thread_pool);
 
-// assumes that all bits that are set in |column| are set in |reference| too.
+// Call this version only for sparse vectors (with the density about 1% or less).
+// The buffer must have capacity to store 3 x (number of set bits in all columns)
+// 64-bit integers.
+std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
+                                       uint64_t *buffer,
+                                       ThreadPool &thread_pool);
+
+// Assumes that all bits that are set in |column| are set in |reference| too
 sdsl::bit_vector generate_subindex(const bit_vector &column,
                                    const sdsl::bit_vector &reference,
                                    uint64_t reference_num_set_bits,
+                                   ThreadPool &thread_pool);
+// Assumes that all bits that are set in |column| are set in |reference| too
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const bit_vector &reference,
                                    ThreadPool &thread_pool);
 
 // Apply the bitwise AND of vector with right-shifts of itself. Only works for

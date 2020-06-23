@@ -13,6 +13,10 @@
 #include "kmer/kmer_extractor.hpp"
 
 
+namespace {
+
+using namespace mtg::kmer;
+
 typedef uint8_t TAlphabet;
 
 const size_t kBitsPerChar = KmerExtractor2Bit::bits_per_char;
@@ -404,7 +408,22 @@ TEST(Kmer, TestPrint256) {
 
 
 template <typename T>
-std::vector<T> encode_c(const std::string &sequence, const T *char_map);
+T encode_c(char c, const T *char_map) {
+    assert(static_cast<size_t>(c) < 128);
+    return char_map[static_cast<size_t>(c)];
+}
+
+template <typename T>
+std::vector<T> encode_c(const std::string &sequence, const T *char_map) {
+    std::vector<T> encoded;
+    std::transform(sequence.begin(), sequence.end(),
+                   std::back_inserter(encoded),
+                   [&](char c) { return encode_c(c, char_map); });
+    assert(encoded.size() == sequence.size());
+
+    return encoded;
+}
+
 
 // Nucleotide 2 bit
 std::vector<TAlphabet> encode(const std::string &sequence) {
@@ -467,3 +486,5 @@ TYPED_TEST(Kmer, nucleotide_alphabet_pack_6) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
     test_kmer_codec<typename TypeParam::type, 3>(sequence);
 }
+
+} // namespace

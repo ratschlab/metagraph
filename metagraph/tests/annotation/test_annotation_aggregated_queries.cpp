@@ -5,6 +5,12 @@
 #include "../test_helpers.hpp"
 #include "test_annotation.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 template <typename Key, typename T>
 using VectorOrderedMap = tsl::ordered_map<Key, T,
                                           std::hash<Key>, std::equal_to<Key>,
@@ -362,3 +368,5 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels_by_label) {
                              std::make_pair("Label0", 1) }),
               get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 1000));
 }
+
+} // namespace

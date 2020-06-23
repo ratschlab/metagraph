@@ -10,7 +10,7 @@
 #include "graph/representation/base/dbg_construct.hpp"
 #include "boss_chunk.hpp"
 
-namespace mg {
+namespace mtg {
 namespace succinct {
 
 
@@ -25,8 +25,8 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                const std::string &filter_suffix = "",
                size_t num_threads = 1,
                double memory_preallocated = 0,
-               mg::kmer::ContainerType container_type = mg::kmer::ContainerType::VECTOR,
-               const std::filesystem::path &tmp_dir = "/tmp",
+               mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
+               const std::filesystem::path &tmp_dir = "/tmp/",
                size_t max_disk_space_bytes = 1e9);
 
     virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
@@ -39,6 +39,6 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 };
 
 } // namespace succinct
-} // namespace mg
+} // namespace mtg
 
 #endif // __BOSS_CHUNK_CONSTRUCT_HPP__

@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <filesystem>
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/threads/threading.hpp"
@@ -24,6 +25,15 @@ class BRWTBottomUpBuilder {
                       size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
+    using CallColumn
+        = std::function<void(uint64_t, std::unique_ptr<bit_vector>&&)>;
+
+    static BRWT build(const std::function<void(const CallColumn &)> &get_columns,
+                      const std::vector<std::vector<uint64_t>> &linkage,
+                      const std::filesystem::path &tmp_dir,
+                      size_t num_nodes_parallel = 1,
+                      size_t num_threads = 1);
+
     // Merge multiple binary matrices compressed with Multi-BRWT
     static BRWT merge(std::vector<BRWT>&& matrices,
                       Partitioner partitioner = get_basic_partitioner(),
@@ -35,6 +45,10 @@ class BRWTBottomUpBuilder {
     static BRWT concatenate(std::vector<BRWT>&& submatrices,
                             sdsl::bit_vector *buffer,
                             ThreadPool &thread_pool);
+    // Concatenate multiple Multi-BRWT submatrices
+    static BRWT concatenate_sparse(std::vector<BRWT>&& submatrices,
+                                   sdsl::bit_vector *buffer,
+                                   ThreadPool &thread_pool);
 };
 
 

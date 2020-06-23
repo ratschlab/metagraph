@@ -1,5 +1,7 @@
 #include "clean.hpp"
 
+#include <ips4o.hpp>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -14,7 +16,13 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::common::logger;
+using mtg::seq_io::FastaWriter;
+using mtg::seq_io::ExtendedFastaWriter;
 
 
 int clean_graph(Config *config) {
@@ -99,7 +107,7 @@ int clean_graph(Config *config) {
 
     timer.reset();
 
-    auto call_clean_contigs = [&](auto callback) {
+    auto call_clean_contigs = [&](auto callback, size_t num_threads) {
         if (config->min_unitig_median_kmer_abundance != 1) {
             assert(node_weights);
             if (!node_weights->is_compatible(*graph)) {
@@ -115,17 +123,21 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, config->min_tip_size, graph->is_canonical_mode());
+            }, num_threads, config->min_tip_size, graph->is_canonical_mode());
 
         } else if (config->unitigs || config->min_tip_size > 1) {
-            graph->call_unitigs(callback, config->min_tip_size, graph->is_canonical_mode());
+            graph->call_unitigs(callback,
+                                num_threads,
+                                config->min_tip_size,
+                                graph->is_canonical_mode());
 
         } else {
-            graph->call_sequences(callback, graph->is_canonical_mode());
+            graph->call_sequences(callback, num_threads, graph->is_canonical_mode());
         }
     };
 
     auto dump_contigs_to_fasta = [&](const std::string &outfbase, auto call_contigs) {
+        std::mutex seq_mutex;
         if (node_weights) {
             if (!node_weights->is_compatible(*graph)) {
                 logger->error("k-mer counts are not compatible with the subgraph");
@@ -138,15 +150,16 @@ int clean_graph(Config *config) {
                                                  config->header,
                                                  config->enumerate_out_sequences,
                                                  get_num_threads() > 1);
-            std::vector<uint32_t> kmer_counts;
-
             call_contigs([&](const std::string &contig, const auto &path) {
+                std::vector<uint32_t> kmer_counts;
+                kmer_counts.reserve(path.size());
                 for (auto node : path) {
                     kmer_counts.push_back((*node_weights)[node]);
                 }
+
+                std::lock_guard<std::mutex> lock(seq_mutex);
                 writer.write(contig, kmer_counts);
-                kmer_counts.resize(0);
-            });
+            }, get_num_threads());
 
         } else {
             FastaWriter writer(outfbase, config->header,
@@ -154,8 +167,9 @@ int clean_graph(Config *config) {
                                get_num_threads() > 1);
 
             call_contigs([&](const std::string &contig, const auto &) {
+                std::lock_guard<std::mutex> lock(seq_mutex);
                 writer.write(contig);
-            });
+            }, get_num_threads());
         }
     };
 
@@ -189,7 +203,7 @@ int clean_graph(Config *config) {
                     count_hist[weights[i]]++;
                     removed_nodes[i] = 0;
                 }
-            });
+            }, get_num_threads());
 
             call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
 
@@ -226,7 +240,7 @@ int clean_graph(Config *config) {
                     + "." + std::to_string(config->count_slice_quantiles[i]);
 
             if (!count_hist_v.size()) {
-                dump_contigs_to_fasta(filebase, [](auto) {});
+                dump_contigs_to_fasta(filebase, [](auto, auto) {});
                 continue;
             }
 
@@ -249,8 +263,10 @@ int clean_graph(Config *config) {
                 graph->is_canonical_mode()
             );
 
-            dump_contigs_to_fasta(filebase, [&](auto dump_sequence) {
-                graph_slice.call_sequences(dump_sequence, graph_slice.is_canonical_mode());
+            // the outer for loop is parallelized, so don't start another thread
+            // pool here
+            dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
+                graph_slice.call_sequences(dump_sequence, 1, graph_slice.is_canonical_mode());
             });
         }
     }
@@ -259,3 +275,6 @@ int clean_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

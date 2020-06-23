@@ -4,6 +4,11 @@
 #include "common/vectors/wavelet_tree.hpp"
 #include "common/threads/threading.hpp"
 
+
+namespace {
+
+using namespace mtg;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
@@ -507,3 +512,5 @@ TYPED_TEST(WaveletTreeTest, width) {
         EXPECT_EQ(width, wt.logsigma());
     }
 }
+
+} // namespace

@@ -118,6 +118,7 @@ class BOSS {
      */
     void call_paths(Call<std::vector<edge_index>&&,
                          std::vector<TAlphabet>&&> callback,
+                    size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
@@ -127,6 +128,7 @@ class BOSS {
      * Call contigs (dummy edges are skipped).
      */
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
+                        size_t num_threads = 1,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
 
@@ -134,6 +136,7 @@ class BOSS {
      * Call unitigs (dummy edges are skipped).
      */
     void call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
+                      size_t num_threads = 1,
                       size_t max_pruned_dead_end_size = 0,
                       bool kmers_in_single_form = false,
                       const bitmap *subgraph_mask = NULL) const;
@@ -213,7 +216,7 @@ class BOSS {
     * The edges of `other` are fully traversed and nodes are added if not existing yet.
     * This function is well suited to merge small graphs into large ones.
     */
-    void merge(const BOSS &other);
+    void merge(const BOSS &other, size_t num_threads = 1);
 
     /**
      * Using the offset structure F this function returns the value of the last
@@ -435,7 +438,7 @@ class BOSS {
     // file dump extension
     static constexpr auto kExtension = ".dbg";
 
-    const KmerExtractorBOSS kmer_extractor_;
+    const mtg::kmer::KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size

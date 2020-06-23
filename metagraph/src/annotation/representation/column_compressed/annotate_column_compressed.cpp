@@ -1,18 +1,20 @@
 #include "annotate_column_compressed.hpp"
 
 #include <string>
+#include <numeric>
 #include <algorithm>
 #include <stdexcept>
 
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
-#include "common/algorithms.hpp"
+#include "common/logger.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/threads/threading.hpp"
 
 using utils::remove_suffix;
+using mtg::common::logger;
 
 size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 
@@ -21,8 +23,7 @@ namespace annotate {
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
-                                          size_t num_columns_cached,
-                                          bool verbose)
+                                          size_t num_columns_cached)
       : num_rows_(num_rows),
         cached_columns_(num_columns_cached,
                         caches::LRUCachePolicy<size_t>(),
@@ -30,8 +31,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                             assert(column_builder);
                             this->flush(j, *column_builder);
                             delete column_builder;
-                        }),
-        verbose_(verbose) {
+                        }) {
     assert(num_columns_cached > 0);
 }
 
@@ -115,9 +115,84 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     label_encoder_.clear();
 
+    bool no_errors = true;
+
+    bool merge_successful = merge_load(filenames,
+        [&](uint64_t, const Label &label, std::unique_ptr<bit_vector>&& column) {
+            #pragma omp critical
+            {
+                uint64_t num_set_bits = column->num_set_bits();
+                logger->trace("Column: {}, Density: {}, Set bits: {}", label,
+                              static_cast<double>(num_set_bits) / column->size(),
+                              num_set_bits);
+
+                // set |num_rows_| with the first column inserted
+                if (!bitmatrix_.size())
+                    num_rows_ = column->size();
+
+                if (column->size() == num_rows_) {
+                    size_t col = label_encoder_.insert_and_encode(label);
+                    assert(col <= bitmatrix_.size());
+
+                    if (col == bitmatrix_.size()) {
+                        bitmatrix_.emplace_back(std::move(column));
+                    } else {
+                        assert(bitmatrix_.at(col).get());
+                        decompress_bitmap(col) |= *column;
+                    }
+                } else {
+                    no_errors = false;
+                }
+            }
+        },
+        get_num_threads()
+    );
+
+    if (merge_successful && no_errors) {
+        logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
+        return true;
+    } else {
+        return false;
+    }
+}
+
+template <typename Label>
+bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
+                                         const ColumnCallback &callback,
+                                         size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
-    #pragma omp parallel for num_threads(get_num_threads())
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+
+        std::ifstream instream(filename, std::ios::binary);
+        if (!instream.good()) {
+            logger->error("Can't read from {}", filename);
+            error_occurred = true;
+        }
+        std::ignore = load_number(instream);
+
+        LabelEncoder<Label> label_encoder;
+        if (!label_encoder.load(instream)) {
+            logger->error("Can't load label encoder from {}", filename);
+            error_occurred = true;
+        }
+
+        offsets[i] = label_encoder.size();
+    }
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
         if (error_occurred)
             continue;
@@ -125,9 +200,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         try {
             auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
 
-            if (verbose_) {
-                std::cout << "Loading annotations from file " + filename + "\n" << std::flush;
-            }
+            logger->trace("Loading annotations from file {}", filename);
 
             std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
@@ -140,7 +213,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size())
-                std::cerr << "No labels in " << filename << "\n" << std::flush;
+                logger->warn("No labels in {}", filename);
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
@@ -159,52 +232,16 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 if (new_column->size() != num_rows)
                     throw std::ifstream::failure("inconsistent column size");
 
-                if (verbose_) {
-                    auto num_set_bits = new_column->num_set_bits();
-
-                    std::cout << "Column <" + label_encoder_load.decode(c) + ">"
-                                + ", density: "
-                                + std::to_string(static_cast<double>(num_set_bits) / new_column->size())
-                                + ", set bits: " + std::to_string(num_set_bits) + "\n" << std::flush;
-                }
-
-                #pragma omp critical
-                {
-                    size_t col = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
-
-                    // set |num_rows_| with the first column inserted
-                    if (!col)
-                        num_rows_ = num_rows;
-
-                    if (num_rows == num_rows_) {
-                        assert(col <= bitmatrix_.size());
-
-                        if (col == bitmatrix_.size()) {
-                            bitmatrix_.emplace_back(std::move(new_column));
-                        } else if (!bitmatrix_.at(col).get()) {
-                            bitmatrix_.at(col) = std::move(new_column);
-                        } else {
-                            decompress_bitmap(col) |= *new_column;
-                        }
-                    } else {
-                        error_occurred = true;
-                    }
-                }
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
+                         std::move(new_column));
             }
         } catch (...) {
             error_occurred = true;
         }
     }
 
-    if (error_occurred)
-        return false;
-
-    if (verbose_) {
-        std::cout << "Annotation loading finished ("
-                  << bitmatrix_.size() << " columns)" << std::endl;
-    }
-
-    return true;
+    return !error_occurred;
 }
 
 template <typename Label>
@@ -289,10 +326,9 @@ void ColumnCompressed<Label>
         try {
             index_to_label[label_encoder_.encode(pair.first)] = pair.second;
         } catch (const std::out_of_range &) {
-            std::cerr << "Warning: label '" << pair.first << "' not"
-                      << " found in annotation. Skipping instruction"
-                      << " '" << pair.first << " -> " << pair.second << "'."
-                      << std::endl;
+            logger->warn("Label '{}' not found in annotation."
+                         " Skipping instruction '{} -> {}'.",
+                         pair.first, pair.first, pair.second);
         }
     }
 
@@ -521,7 +557,7 @@ bool ColumnCompressed<Label>
         );
 
         if (!outstream.good()) {
-            std::cerr << "ERROR: dumping column " << j << " failed" << std::endl;
+            logger->error("Dumping column {} failed", j);
             success = false;
             continue;
         }

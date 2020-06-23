@@ -11,27 +11,32 @@
 // Note: if testing with many chunks use 'ulimit -n <max_files>' to increase the maxium
 // number of files the system allows you to open. On mac the default is only 256!
 
+namespace {
+
+using namespace mtg;
+
+
 constexpr size_t ITEM_COUNT = 10'000;
 const std::string chunk_prefix = "/tmp/bm_chunk_";
 std::vector<std::string> sources;
 
-std::vector<std::string> create_sources(size_t count) {
+std::vector<std::string> create_sources(size_t num_sources) {
     std::mt19937 rng(123457);
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
-    std::vector<std::string> result;
-    result.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
+    std::vector<std::string> sources;
+    sources.reserve(num_sources);
+    for (uint32_t i = 0; i < num_sources; ++i) {
         std::vector<uint64_t> els(ITEM_COUNT);
         for (uint64_t j = 0; j < ITEM_COUNT; ++j) {
-            els[i] = j + dist10(rng);
+            els[i] = j * 20 + dist10(rng);
         }
-        result.push_back(chunk_prefix + std::to_string(i));
-        std::ofstream f(result.back(), std::ios::binary);
+        sources.push_back(chunk_prefix + std::to_string(i));
+        std::ofstream f(sources.back(), std::ios::binary);
         f.write(reinterpret_cast<char *>(els.data()), els.size() * sizeof(uint64_t));
         f.close();
     }
-    return result;
+    return sources;
 }
 
 static void BM_merge_files(benchmark::State &state) {
@@ -45,7 +50,7 @@ static void BM_merge_files(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
+        common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
@@ -63,7 +68,7 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        mg::common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
+        common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
@@ -71,3 +76,5 @@ static void BM_merge_files_pairs(benchmark::State &state) {
 
 BENCHMARK(BM_merge_files)->DenseRange(10, 100, 10);
 BENCHMARK(BM_merge_files_pairs)->DenseRange(10, 100, 10);
+
+} // namespace

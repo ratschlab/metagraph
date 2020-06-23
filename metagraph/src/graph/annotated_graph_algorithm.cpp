@@ -4,7 +4,6 @@
 
 #include <tsl/ordered_map.h>
 
-#include "common/algorithms.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "kmer/alphabets.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -32,13 +31,15 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const KeepUnitigPath &keep_unitig) {
     sdsl::bit_vector unitig_mask(graph.max_index() + 1, false);
 
+    const bool atomic = get_num_threads() > 1;
+
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
             for (DeBruijnGraph::node_index node : path) {
-                unitig_mask[node] = true;
+                set_bit(unitig_mask.data(), node, atomic);
             }
         }
-    });
+    }, get_num_threads());
 
     return std::make_unique<bitmap_vector>(std::move(unitig_mask));
 }

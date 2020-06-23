@@ -10,6 +10,10 @@
 #include "common/vectors/aligned_vector.hpp"
 #include "kmer/kmer_extractor.hpp"
 
+
+namespace mtg {
+namespace kmer {
+
 // TODO: switch to KmerExtractor once it supports all alphabets
 typedef KmerExtractorBOSS KmerDef;
 typedef KmerDef::TAlphabet TAlphabet;
@@ -235,3 +239,6 @@ std::function<bool()> get_missing_kmer_skipper(const KmerBloomFilter<> *bloom_fi
         return !in_bloom;
     };
 }
+
+} // namespace kmer
+} // namespace mtg

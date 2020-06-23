@@ -4,13 +4,12 @@
 #include <progress_bar.hpp>
 #include <sdsl/int_vector.hpp>
 
+#include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-namespace utils {
-    bool get_verbose();
-}
+using namespace mtg;
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -109,9 +108,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
                          ProgressBar &progress_bar,
-                         bool call_unitigs = false,
-                         uint64_t min_tip_size = 0,
-                         bool kmers_in_single_form = false) {
+                         bool call_unitigs,
+                         uint64_t min_tip_size,
+                         bool kmers_in_single_form) {
     assert(start >= 1 && start <= graph.max_index());
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
@@ -268,16 +267,20 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
 void call_sequences(const DeBruijnGraph &graph,
                     const DeBruijnGraph::CallPath &callback,
+                    size_t num_threads,
                     bool call_unitigs,
-                    uint64_t min_tip_size = 0,
-                    bool kmers_in_single_form = false) {
+                    uint64_t min_tip_size,
+                    bool kmers_in_single_form) {
+    // TODO: port over the implementation from BOSS once it's finalized
+    std::ignore = num_threads;
+
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
     sdsl::bit_vector visited = discovered;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph",
-                             std::cerr, !utils::get_verbose());
+                             std::cerr, !common::get_verbose());
 
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
@@ -342,14 +345,16 @@ void call_sequences(const DeBruijnGraph &graph,
 }
 
 void DeBruijnGraph::call_sequences(const CallPath &callback,
+                                   size_t num_threads,
                                    bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, false, 0, kmers_in_single_form);
+    ::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
+                                 size_t num_threads,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, true, min_tip_size, kmers_in_single_form);
+    ::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
 }
 
 /**

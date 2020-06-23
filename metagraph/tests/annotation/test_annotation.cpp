@@ -9,6 +9,9 @@
 #include "common/data_generation.hpp"
 
 
+namespace mtg {
+namespace test {
+
 TYPED_TEST(AnnotatorTest, EmptyConstructor) {
     EXPECT_EQ(0u, this->annotation->num_labels());
     EXPECT_EQ(0u, this->annotation->num_objects());
@@ -747,3 +750,6 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
     }
 }
 */
+
+} // namespace test
+} // namespace mtg

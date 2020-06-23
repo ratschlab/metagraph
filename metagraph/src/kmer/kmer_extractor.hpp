@@ -15,6 +15,9 @@
 #include "alphabets.hpp"
 
 
+namespace mtg {
+namespace kmer {
+
 /**
  * Extracts k-mers to be placed in a BOSS table from sequences. Each sequence is
  * prepended with (k-1) $ characters (aka 'dummy prefix') and terminated with a $ to
@@ -47,6 +50,8 @@ class KmerExtractorBOSS {
 
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
+
+    static const std::vector<TAlphabet> kComplementCode;
 
     KmerExtractorBOSS();
 
@@ -87,12 +92,11 @@ class KmerExtractorBOSS {
 
   private:
     static const TAlphabet *kCharToNucleotide;
-    static const std::vector<TAlphabet> kComplementCode;
 };
 
 
 template <const uint8_t BitsPerChar>
-class KmerExtractor2BitT {
+class KmerExtractorT {
   public:
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
@@ -100,27 +104,47 @@ class KmerExtractor2BitT {
     static constexpr uint8_t bits_per_char = BitsPerChar;
     const std::string alphabet;
 
-    // k-mer
-    template <class T>
-    using Kmer = KMer<T, bits_per_char>;
+    // k-mers
+    typedef KMer<uint64_t, bits_per_char> Kmer64;
+    typedef KMer<sdsl::uint128_t, bits_per_char> Kmer128;
+    typedef KMer<sdsl::uint256_t, bits_per_char> Kmer256;
+    // k-mers with the BOSS layout
+    typedef KMerBOSS<uint64_t, bits_per_char> KmerBOSS64;
+    typedef KMerBOSS<sdsl::uint128_t, bits_per_char> KmerBOSS128;
+    typedef KMerBOSS<sdsl::uint256_t, bits_per_char> KmerBOSS256;
 
-    typedef Kmer<uint64_t> Kmer64;
-    typedef Kmer<sdsl::uint128_t> Kmer128;
-    typedef Kmer<sdsl::uint256_t> Kmer256;
-
-    KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA,
-                       const uint8_t CharToCode[128] = alphabets::kCharToDNA,
-                       const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
+    #if _PROTEIN_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetProtein,
+                   const uint8_t CharToCode[128] = alphabets::kCharToProtein,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapProtein);
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNACaseSent,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNACaseSent,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNACaseSent);
+    #elif _DNA5_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA5,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNA5,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA5);
+    #elif _DNA_GRAPH
+    KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA,
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
+    #else
+    static_assert(false,
+        "Define an alphabet: either "
+        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+    );
+    #endif
 
     /**
      * Break the sequence into kmers and add them to the kmer collector. If suffix is
      * not empty, only kmers with the given suffix are added.
      */
-    template <class T>
+    template <class KMER>
     void sequence_to_kmers(std::string_view sequence,
                            size_t k,
                            const std::vector<TAlphabet> &suffix,
-                           Vector<Kmer<T>> *kmers,
+                           Vector<KMER> *kmers,
                            bool canonical_mode = false) const;
 
     /**
@@ -135,8 +159,8 @@ class KmerExtractor2BitT {
                       bool canonical_mode = false,
                       const std::vector<TAlphabet> &suffix = {}) const;
 
-    template <class T>
-    std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {
+    template <class KMER>
+    std::string kmer_to_sequence(const KMER &kmer, size_t k) const {
         return kmer.to_string(k, alphabet);
     }
 
@@ -149,11 +173,31 @@ class KmerExtractor2BitT {
 
     std::vector<std::string> generate_suffixes(size_t len) const;
 
+    const std::vector<TAlphabet>& complement_code() {
+        return complement_code_;
+    }
+
   private:
     const TAlphabet *char_to_code_;
     const std::vector<TAlphabet> complement_code_;
 };
 
-typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
+#if _PROTEIN_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharProtein> KmerExtractor2Bit;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharDNACaseSent> KmerExtractor2Bit;
+#elif _DNA5_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharDNA5> KmerExtractor2Bit;
+#elif _DNA_GRAPH
+typedef KmerExtractorT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
+#else
+static_assert(false,
+    "Define an alphabet: either "
+    "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+);
+#endif
+
+} // namespace kmer
+} // namespace mtg
 
 #endif // __KMER_EXTRACTOR_HPP__

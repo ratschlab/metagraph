@@ -1,7 +1,6 @@
 #include "align.hpp"
 
 #include "common/logger.hpp"
-#include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -11,7 +10,12 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
-using mg::common::logger;
+
+namespace mtg {
+namespace cli {
+
+using mtg::seq_io::kseq_t;
+using mtg::common::logger;
 
 
 DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Config &config) {
@@ -106,8 +110,8 @@ void map_sequences_in_file(const std::string &file,
 
     Timer data_reading_timer;
 
-    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        if (utils::get_verbose())
+    seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+        if (common::get_verbose())
             std::cout << "Sequence: " << read_stream->seq.s << "\n";
 
         if (config.query_presence
@@ -218,7 +222,7 @@ int align_to_graph(Config *config) {
         dbg->reset_mask();
 
     Timer timer;
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
+    ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
     if (config->map_sequences) {
@@ -267,11 +271,11 @@ int align_to_graph(Config *config) {
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+        seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
             thread_pool.enqueue([&](const std::string &query, const std::string &header) {
                 auto paths = aligner->align(query);
 
-                std::unique_lock<std::mutex> lock(print_mutex);
+                std::lock_guard<std::mutex> lock(print_mutex);
                 if (!config->output_json) {
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()
@@ -341,3 +345,6 @@ int align_to_graph(Config *config) {
 
     return 0;
 }
+
+} // namespace cli
+} // namespace mtg

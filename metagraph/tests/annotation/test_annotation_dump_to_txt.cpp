@@ -3,6 +3,12 @@
 #include "test_annotation.hpp"
 #include "common/serialization.hpp"
 
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::test;
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
@@ -17,6 +23,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::MultiBRWTAnnotator,
                          annotate::RainbowfishAnnotator,
                          annotate::RowFlatAnnotator,
+                         annotate::UniqueRowAnnotator,
                          annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
 TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
@@ -124,3 +131,5 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
     EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(3)));
     EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get(4)));
 }
+
+} // namespace

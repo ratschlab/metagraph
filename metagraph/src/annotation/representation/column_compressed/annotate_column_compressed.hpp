@@ -26,8 +26,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
     ColumnCompressed(uint64_t num_rows = 0,
-                     size_t num_columns_cached = 1,
-                     bool verbose = false);
+                     size_t num_columns_cached = 1);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
@@ -44,6 +43,12 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
+    using ColumnCallback = std::function<void(uint64_t offset,
+                                              const Label &,
+                                              std::unique_ptr<bit_vector>&&)>;
+    static bool merge_load(const std::vector<std::string> &filenames,
+                           const ColumnCallback &callback,
+                           size_t num_threads = 1);
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
@@ -98,8 +103,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
-
-    bool verbose_;
 };
 
 } // namespace annotate

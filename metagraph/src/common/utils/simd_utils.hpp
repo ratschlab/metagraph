@@ -9,8 +9,14 @@
 #include <emmintrin.h>
 #endif
 
-#include "common/algorithms.hpp"
+#include <cassert>
+#include <cstdint>
 
+// Branch prediction helper macros
+#ifndef LIKELY
+#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
+#endif
 
 /**
  * Helpers for fast map of h uniformly to the region [0, size)

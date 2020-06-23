@@ -10,125 +10,33 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
+
+namespace mtg {
+namespace test {
+
 typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
-
-
-// Used to generate a set of columns from a row generator
-template <typename BinMat>
-BinMat
-build_matrix_from_columns(const std::function<void(const RowCallback &)> &generate_rows,
-                          uint64_t num_columns,
-                          uint64_t num_rows,
-                          uint64_t) {
-    std::vector<sdsl::bit_vector> columns;
-    while (num_columns--) {
-        columns.emplace_back(num_rows, false);
-    }
-
-    uint64_t cur_row = 0;
-    generate_rows([&](auto row) {
-        for (const auto &column : row) {
-            columns.at(column)[cur_row] = true;
-        }
-        cur_row++;
-    });
-
-    BitVectorPtrArray data;
-    for (auto &bv : columns) {
-        data.emplace_back(new bit_vector_stat(std::move(bv)));
-    }
-
-    return build_matrix_from_columns<BinMat>(std::move(data), num_rows);
-}
-
-template <typename BinMat>
-BinMat build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t) {
-    return BinMat(std::move(columns));
-}
-
-template BinRelWT build_matrix_from_columns<BinRelWT>(BitVectorPtrArray&&, uint64_t);
-
-template <>
-Rainbowfish build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t num_rows) {
-    return build_matrix_from_rows<Rainbowfish>(std::move(columns), num_rows);
-}
-
-#define RBFBufferCol(n) \
-template <> \
-RainbowfishBuffer<n> build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t num_rows) { \
-    return build_matrix_from_rows<RainbowfishBuffer<n>>(std::move(columns), num_rows); \
-}
-RBFBufferCol(1)
-RBFBufferCol(2)
-RBFBufferCol(3)
-RBFBufferCol(4)
-RBFBufferCol(5)
-RBFBufferCol(6)
-
-template <>
-RowConcatenated<> build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t num_rows) {
-    return build_matrix_from_rows<RowConcatenated<>>(std::move(columns), num_rows);
-}
-
-template <>
-BinRelWT_sdsl build_matrix_from_columns(BitVectorPtrArray&& columns, uint64_t) {
-    return build_matrix_from_rows<BinRelWT_sdsl>(std::move(columns));
-}
-
-template <>
-BRWT build_matrix_from_columns<BRWT>(BitVectorPtrArray&& columns, uint64_t) {
-    BRWT matrix(BRWTBottomUpBuilder::build(std::move(columns)));
-    EXPECT_TRUE(matrix.avg_arity() <= 2) << matrix.avg_arity();
-    return matrix;
-}
-
-template <>
-BRWTOptimized build_matrix_from_columns<BRWTOptimized>(BitVectorPtrArray&& columns, uint64_t) {
-    return BRWTOptimized(BRWTBottomUpBuilder::build(std::move(columns)));
-}
-
-template <>
-ColumnMajor build_matrix_from_columns<ColumnMajor>(BitVectorPtrArray&& columns, uint64_t) {
-    std::vector<std::unique_ptr<bit_vector>> columns_sd;
-    columns_sd.reserve(columns.size());
-    for (auto&& column : columns) {
-        columns_sd.emplace_back(new bit_vector_sd(column->convert_to<bit_vector_sd>()));
-    }
-    return ColumnMajor(std::move(columns_sd));
-}
-
-
-template <typename BinMat>
-BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t) {
-    return BinMat(columns);
-}
-
-#define RBFBufferColConst(n) \
-template <> \
-RainbowfishBuffer<n> build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows) { \
-    return build_matrix_from_rows<RainbowfishBuffer<n>>(columns, num_rows); \
-}
-RBFBufferColConst(1)
-RBFBufferColConst(2)
-RBFBufferColConst(3)
-RBFBufferColConst(4)
-RBFBufferColConst(5)
-RBFBufferColConst(6)
-
 
 
 template <typename BinMat>
 BinMat
 build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
                        uint64_t num_columns,
-                       uint64_t num_rows,
-                       uint64_t num_relations) {
-    return BinMat(generate_rows, num_columns, num_rows, num_relations);
+                       uint64_t,
+                       uint64_t) {
+    return BinMat(generate_rows, num_columns);
 }
 
-template RowConcatenated<> build_matrix_from_rows<RowConcatenated<>>(const std::function<void(const RowCallback &)> &, uint64_t, uint64_t, uint64_t);
+template <>
+RowConcatenated<>
+build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
+                       uint64_t num_columns,
+                       uint64_t num_rows,
+                       uint64_t num_relations) {
+    return RowConcatenated<>(generate_rows, num_columns, num_rows, num_relations);
+}
 
 template <>
 BinRelWT
@@ -148,69 +56,9 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
     return BinRelWT_sdsl(generate_rows, num_relations, num_columns);
 }
 
-template <>
-Rainbowfish
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
-                       uint64_t num_columns,
-                       uint64_t,
-                       uint64_t) {
-    return Rainbowfish(generate_rows, num_columns);
-}
-
-#define RBFBufferRow(n) \
-template <> \
-RainbowfishBuffer<n> \
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows, \
-                       uint64_t num_columns, \
-                       uint64_t, \
-                       uint64_t) { \
-    return RainbowfishBuffer<n>(generate_rows, num_columns); \
-}
-RBFBufferRow(1)
-RBFBufferRow(2)
-RBFBufferRow(3)
-RBFBufferRow(4)
-RBFBufferRow(5)
-RBFBufferRow(6)
-
-template <>
-BRWT
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
-                       uint64_t num_columns,
-                       uint64_t num_rows,
-                       uint64_t num_relations) {
-    return build_matrix_from_columns<BRWT>(generate_rows,
-                                           num_columns,
-                                           num_rows,
-                                           num_relations);
-}
-
-template <>
-BRWTOptimized
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
-                       uint64_t num_columns,
-                       uint64_t num_rows,
-                       uint64_t num_relations) {
-    return build_matrix_from_columns<BRWTOptimized>(generate_rows,
-                                                    num_columns,
-                                                    num_rows,
-                                                    num_relations);
-}
-
-template <>
-ColumnMajor
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
-                       uint64_t num_columns,
-                       uint64_t num_rows,
-                       uint64_t num_relations) {
-    return build_matrix_from_columns<ColumnMajor>(generate_rows,
-                                                  num_columns,
-                                                  num_rows,
-                                                  num_relations);
-}
 
 template <typename BinMat>
-BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
+BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows) {
     auto num_columns = columns.size();
     auto num_set_bits = 0;
     for (const auto &column : columns) {
@@ -224,43 +72,43 @@ BinMat build_matrix_from_rows(BitVectorPtrArray&& columns, uint64_t num_rows) {
         num_columns, num_rows, num_set_bits
     );
 }
-template BRWT build_matrix_from_rows<BRWT>(BitVectorPtrArray&&, uint64_t);
-template BRWTOptimized build_matrix_from_rows<BRWTOptimized>(BitVectorPtrArray&&, uint64_t);
-template ColumnMajor build_matrix_from_rows<ColumnMajor>(BitVectorPtrArray&&, uint64_t);
-template BinRelWT build_matrix_from_rows<BinRelWT>(BitVectorPtrArray&&, uint64_t);
-template BinRelWT_sdsl build_matrix_from_rows<BinRelWT_sdsl>(BitVectorPtrArray&&, uint64_t);
-template RowConcatenated<> build_matrix_from_rows<RowConcatenated<>>(BitVectorPtrArray&&, uint64_t);
-template Rainbowfish build_matrix_from_rows<Rainbowfish>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<1> build_matrix_from_rows<RainbowfishBuffer<1>>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<2> build_matrix_from_rows<RainbowfishBuffer<2>>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(BitVectorPtrArray&&, uint64_t);
-template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(BitVectorPtrArray&&, uint64_t);
-
-template <typename BinMat>
-BinMat build_matrix_from_rows(const BitVectorPtrArray &columns, uint64_t num_rows) {
-    auto num_columns = columns.size();
-    auto num_set_bits = 0;
-    for (const auto &column : columns) {
-        num_set_bits += column->num_set_bits();
+template BinRelWT build_matrix_from_columns<BinRelWT>(const BitVectorPtrArray&, uint64_t);
+template BinRelWT_sdsl build_matrix_from_columns<BinRelWT_sdsl>(const BitVectorPtrArray&, uint64_t);
+template RowConcatenated<> build_matrix_from_columns<RowConcatenated<>>(const BitVectorPtrArray&, uint64_t);
+template UniqueRowBinmat build_matrix_from_columns<UniqueRowBinmat>(const BitVectorPtrArray&, uint64_t);
+template Rainbowfish build_matrix_from_columns<Rainbowfish>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<1> build_matrix_from_columns<RainbowfishBuffer<1>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<2> build_matrix_from_columns<RainbowfishBuffer<2>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<3> build_matrix_from_columns<RainbowfishBuffer<3>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<4> build_matrix_from_columns<RainbowfishBuffer<4>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<5> build_matrix_from_columns<RainbowfishBuffer<5>>(const BitVectorPtrArray&, uint64_t);
+template RainbowfishBuffer<6> build_matrix_from_columns<RainbowfishBuffer<6>>(const BitVectorPtrArray&, uint64_t);
+template <>
+ColumnMajor build_matrix_from_columns<ColumnMajor>(const BitVectorPtrArray &columns, uint64_t) {
+    BitVectorPtrArray columns_copy;
+    for (const auto &col_ptr : columns) {
+        columns_copy.emplace_back(new bit_vector_sd(col_ptr->copy_to<bit_vector_sd>()));
     }
-
-    return build_matrix_from_rows<BinMat>(
-        [&](auto row_callback) {
-            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
-        },
-        num_columns, num_rows, num_set_bits
-    );
+    return ColumnMajor(std::move(columns_copy));;
 }
-template Rainbowfish build_matrix_from_rows<Rainbowfish>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<1> build_matrix_from_rows<RainbowfishBuffer<1>>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<2> build_matrix_from_rows<RainbowfishBuffer<2>>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<3> build_matrix_from_rows<RainbowfishBuffer<3>>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<4> build_matrix_from_rows<RainbowfishBuffer<4>>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<5> build_matrix_from_rows<RainbowfishBuffer<5>>(const BitVectorPtrArray&, uint64_t);
-template RainbowfishBuffer<6> build_matrix_from_rows<RainbowfishBuffer<6>>(const BitVectorPtrArray&, uint64_t);
-
+template <>
+BRWT build_matrix_from_columns<BRWT>(const BitVectorPtrArray &columns, uint64_t) {
+    BitVectorPtrArray columns_copy;
+    for (const auto &col_ptr : columns) {
+        columns_copy.push_back(col_ptr->copy());
+    }
+    BRWT matrix(BRWTBottomUpBuilder::build(std::move(columns_copy)));
+    EXPECT_TRUE(matrix.avg_arity() <= 2) << matrix.avg_arity();
+    return matrix;
+}
+template <>
+BRWTOptimized build_matrix_from_columns<BRWTOptimized>(const BitVectorPtrArray &columns, uint64_t) {
+    BitVectorPtrArray columns_copy;
+    for (const auto &col_ptr : columns) {
+        columns_copy.push_back(col_ptr->copy());
+    }
+    return BRWTOptimized(BRWTBottomUpBuilder::build(std::move(columns_copy)));
+}
 
 template <typename TypeParam>
 void test_serialization(const TypeParam &matrix) {
@@ -288,6 +136,7 @@ void test_serialization(const TypeParam &matrix) {
 
     ASSERT_EQ(matrix.num_columns(), loaded.num_columns());
     ASSERT_EQ(matrix.num_rows(), loaded.num_rows());
+    ASSERT_EQ(matrix.num_relations(), loaded.num_relations());
     for (size_t j = 0; j < loaded.num_columns(); ++j) {
         EXPECT_EQ(matrix.get_column(j), loaded.get_column(j));
     }
@@ -426,6 +275,7 @@ template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArr
 template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
 template void test_matrix<RowConcatenated<>>(const RowConcatenated<>&, const BitVectorPtrArray &);
+template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);
 template void test_matrix<Rainbowfish>(const Rainbowfish&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<1>>(const RainbowfishBuffer<1>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<2>>(const RainbowfishBuffer<2>&, const BitVectorPtrArray &);
@@ -433,3 +283,6 @@ template void test_matrix<RainbowfishBuffer<3>>(const RainbowfishBuffer<3>&, con
 template void test_matrix<RainbowfishBuffer<4>>(const RainbowfishBuffer<4>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<5>>(const RainbowfishBuffer<5>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<6>>(const RainbowfishBuffer<6>&, const BitVectorPtrArray &);
+
+} // namespace test
+} // namespace mtg

@@ -12,14 +12,15 @@
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+
 namespace {
 
-using namespace mg;
+using namespace mtg;
 
 template <typename T>
 class EliasFanoTestPair : public ::testing::Test {};
 
-typedef ::testing::Types<uint32_t, uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
+typedef ::testing::Types<uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoTestPair, ValueTypes);
 
@@ -113,7 +114,7 @@ TYPED_TEST(EliasFanoTestPair, ReadTwo) {
 
 
 template <typename T, typename C>
-size_t encode(const Vector<std::pair<T, C>> &values, const std::string &file_name) {
+size_t encode(const std::vector<std::pair<T, C>> &values, const std::string &file_name) {
     common::EliasFanoEncoder<std::pair<T, C>> encoder(values.size(), values.front().first,
                                                       values.back().first, file_name);
     for (const auto &v : values) {
@@ -123,7 +124,7 @@ size_t encode(const Vector<std::pair<T, C>> &values, const std::string &file_nam
 }
 
 TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementOne) {
-    Vector<std::pair<TypeParam, uint8_t>> values(100);
+    std::vector<std::pair<TypeParam, uint8_t>> values(100);
     for (uint32_t i = 0; i < 100; ++i) {
         values[i] = { i, 100 + i };
     }
@@ -148,7 +149,7 @@ TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementOne) {
 
 
 TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementTwo) {
-    Vector<std::pair<TypeParam, uint8_t>> values(100);
+    std::vector<std::pair<TypeParam, uint8_t>> values(100);
     uint32_t i = 0;
     std::for_each(values.begin(), values.end(), [&i](std::pair<TypeParam, uint8_t> &v) {
         v = { 2 * i, i };
@@ -173,7 +174,7 @@ TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementTwo) {
 
 TYPED_TEST(EliasFanoTestPair, VariousSizes) {
     for (uint32_t size = 100; size < 116; ++size) {
-        Vector<std::pair<TypeParam, uint8_t>> values(size);
+        std::vector<std::pair<TypeParam, uint8_t>> values(size);
         for (uint32_t i = 0; i < size; ++i) {
             values[i] = { i, size + i };
         }
@@ -198,7 +199,7 @@ TYPED_TEST(EliasFanoTestPair, VariousSizes) {
 
 TYPED_TEST(EliasFanoTestPair, ReadWriteRandom) {
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<std::pair<TypeParam, uint16_t>> values(size);
+        std::vector<std::pair<TypeParam, uint16_t>> values(size);
         for (uint32_t trial = 0; trial < 16; ++trial) {
             std::mt19937 rng(123457);
             std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
@@ -316,7 +317,7 @@ TEST(EliasFanoTestPair128, ReadWriteRandom) {
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<std::pair<sdsl::uint128_t, uint16_t>> values(size);
+        std::vector<std::pair<sdsl::uint128_t, uint16_t>> values(size);
         for (uint32_t trial = 0; trial < 16; ++trial) {
             uint32_t i = 0;
             std::for_each(values.begin(), values.end(),
@@ -350,7 +351,7 @@ TEST(EliasFanoTestPair128, ReadWriteRandomLarge) {
     std::uniform_int_distribution<std::mt19937::result_type> dist10(0, 10);
 
     for (uint32_t size = 1000; size < 1016; ++size) {
-        Vector<std::pair<sdsl::uint128_t, uint16_t>> values(size);
+        std::vector<std::pair<sdsl::uint128_t, uint16_t>> values(size);
         for (uint32_t trial = 0; trial < 16; ++trial) {
             sdsl::uint128_t i = 0;
             std::for_each(values.begin(), values.end(),
