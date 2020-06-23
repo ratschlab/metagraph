@@ -483,10 +483,10 @@ def check_status():
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
-            # estimated RAM needed for loading graph in memory;  the 3.5 comes from
+            # estimate RAM needed for loading graph in memory;
             bytes_per_kmer = 2.6  # 0.6 bytes/kmer (for --small representation), 2 byte/kmer-count
-            kmer_count = 2.4 * num_kmers  # 2x canonical+non-canonical + 2 * 20% for dummy kmers
-            required_ram_gb = round(num_kmers * (2 + 1.5) * (2 + 0.6) / 1e9 + 0.5, 2)
+            kmer_count = 2.6 * num_kmers  # 2x canonical+non-canonical +  ~30% for dummy kmers (typically it's 10%)
+            required_ram_gb = round(num_kmers * kmer_count * bytes_per_kmer / 1e9 + 0.5, 2)
             if required_ram_gb > total_ram_gb - 2:
                 download_path = download_dir(sra_id)
                 logging.warning(
