@@ -34,7 +34,7 @@ waiting_cleans = collections.OrderedDict()
 CORES = multiprocessing.cpu_count()
 MAX_DOWNLOAD_PROCESSES = CORES / 4
 MAX_BUILD_PROCESSES = CORES / 4
-MAX_CLEAN_PROCESSES = CORES
+MAX_CLEAN_PROCESSES = CORES / 4
 
 downloads_done = False
 must_quit = False
@@ -455,7 +455,7 @@ def check_status():
     # for cleaning we allow using all the available RAM
     total_ram_gb = psutil.virtual_memory().total / 1e9
     available_ram_gb = total_ram_gb - total_reserved_ram_gb
-    if 3 * len(build_processes) + len(clean_processes) + 1 <= CORES and waiting_cleans:
+    if 3 * len(build_processes) + 4 * (len(clean_processes) + 1) <= CORES and waiting_cleans:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
@@ -479,7 +479,7 @@ def check_status():
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
                          f'Have {round(available_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
-    if 3 * (len(build_processes) + 1) + len(clean_processes) <= CORES and waiting_builds:
+    if 3 * (len(build_processes) + 1) + 4 * len(clean_processes) <= CORES and waiting_builds:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
@@ -499,9 +499,10 @@ def check_status():
             elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
                 logging.info(
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {available_ram_gb} GB')
-                # how much memory does it take to load all unique kmers into RAM
-                required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9;  # also account for dummy kmers
-                if required_ram_all_mem_gb < 2:
+                # how much memory does it take to load all unique kmers into RAM: 8B for the kmer, 2B for the count
+                required_ram_all_mem_gb = num_kmers * (8 + 2) * 3.5 / 1e9;  # also account for dummy kmers
+                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < available_ram_gb:
+                    required_ram_gb = max(required_ram_gb, required_ram_all_mem_gb)
                     start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
                                 required_ram_gb, available_ram_gb)
                 else:
