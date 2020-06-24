@@ -486,7 +486,7 @@ def check_status():
             # estimate RAM needed for loading graph in memory;
             bytes_per_kmer = 2.6  # 0.6 bytes/kmer (for --small representation), 2 byte/kmer-count
             kmer_count = 2.6 * num_kmers  # 2x canonical+non-canonical +  ~30% for dummy kmers (typically it's 10%)
-            required_ram_gb = round(num_kmers * kmer_count * bytes_per_kmer / 1e9 + 0.5, 2)
+            required_ram_gb = round(kmer_count * bytes_per_kmer / 1e9 + 0.5, 2)
             if required_ram_gb > total_ram_gb - 2:
                 download_path = download_dir(sra_id)
                 logging.warning(
@@ -662,7 +662,7 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default=None,  # TODO make the default empty
+    parser.add_argument('--destination', default=None,
                         help='Host/directory where the cleaned BOSS graphs are copied to')
     parser.add_argument('--log_destination', default=None,
                         help='GS folder where client logs are collected')
