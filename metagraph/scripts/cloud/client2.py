@@ -34,7 +34,7 @@ waiting_cleans = collections.OrderedDict()
 CORES = multiprocessing.cpu_count()
 MAX_DOWNLOAD_PROCESSES = CORES / 4
 MAX_BUILD_PROCESSES = CORES / 4
-MAX_CLEAN_PROCESSES = CORES
+MAX_CLEAN_PROCESSES = CORES / 4
 
 downloads_done = False
 must_quit = False
@@ -177,14 +177,15 @@ def write_log_header(log_file_name, operation, sra_id, required_ram_gb, availabl
 def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_gb, available_ram_gb):
     input_dir = download_dir(sra_id)
     output_dir = build_dir(sra_id)
-    logging.info(f'[{sra_id}] Starting build from {input_dir} to {output_dir}, buffer={round(buffer_size_gb, 2)}GB')
-
+    num_cores = max(4, round(required_ram_gb / 3.75))
+    logging.info(f'[{sra_id}] Starting build from {input_dir} to {output_dir}, buffer={round(buffer_size_gb, 2)}GB '
+                 f'on {num_cores} cores')
     util.make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
     write_log_header(log_file_name, 'build', sra_id, required_ram_gb, available_ram_gb)
     log_file = util.TeeLogger(log_file_name)
     build_processes[sra_id] = (subprocess.Popen(
-        ['./build.sh', sra_id, input_dir, output_dir, str(buffer_size_gb), container_type], stdout=log_file,
+        ['./build.sh', sra_id, input_dir, output_dir, str(buffer_size_gb), str(num_cores), container_type], stdout=log_file,
         stderr=log_file), time.time(), wait_time, required_ram_gb)
     return True
 
@@ -192,13 +193,15 @@ def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_
 def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram_gb, available_ram_gb):
     input_file = build_file(sra_id)
     output_file = os.path.join(clean_dir(sra_id), sra_id)
-    logging.info(f'[{sra_id}] Starting clean from {input_file} to {output_file}')
+    num_cores = max(4, round(required_ram_gb / 3.75))
+    logging.info(f'[{sra_id}] Starting clean from {input_file} to {output_file} on {num_cores} cores')
     log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
     write_log_header(log_file_name, 'clean', sra_id, required_ram_gb, available_ram_gb)
     log_file = util.TeeLogger(log_file_name, '%,')  # %, eliminates the progress bar spam
     clean_processes[sra_id] = (
         subprocess.Popen(
-            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback)], stdout=log_file,
+            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback), str(num_cores)],
+            stdout=log_file,
             stderr=log_file),
         time.time(), wait_time, required_ram_gb)
     return True
@@ -455,7 +458,8 @@ def check_status():
     # for cleaning we allow using all the available RAM
     total_ram_gb = psutil.virtual_memory().total / 1e9
     available_ram_gb = total_ram_gb - total_reserved_ram_gb
-    if 3 * len(build_processes) + len(clean_processes) + 1 <= CORES and waiting_cleans:
+    used_cores = max(4 * (len(clean_processes) + len(build_processes)), math.ceil(total_reserved_ram_gb / 3.75));
+    if used_cores <= CORES and waiting_cleans:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
@@ -479,14 +483,14 @@ def check_status():
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
                          f'Have {round(available_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
-    if 3 * (len(build_processes) + 1) + len(clean_processes) <= CORES and waiting_builds:
+    if used_cores <= CORES and waiting_builds:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
-            # estimated RAM needed for loading graph in memory;  the 3.5 comes from
+            # estimate RAM needed for loading graph in memory;
             bytes_per_kmer = 2.6  # 0.6 bytes/kmer (for --small representation), 2 byte/kmer-count
-            kmer_count = 2.4 * num_kmers  # 2x canonical+non-canonical + 2 * 20% for dummy kmers
-            required_ram_gb = round(num_kmers * (2 + 1.5) * (2 + 0.6) / 1e9 + 0.5, 2)
+            kmer_count = 2.6 * num_kmers  # 2x canonical+non-canonical +  ~30% for dummy kmers (typically it's 10%)
+            required_ram_gb = round(kmer_count * bytes_per_kmer / 1e9 + 0.5, 2)
             if required_ram_gb > total_ram_gb - 2:
                 download_path = download_dir(sra_id)
                 logging.warning(
@@ -499,9 +503,10 @@ def check_status():
             elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
                 logging.info(
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {available_ram_gb} GB')
-                # how much memory does it take to load all unique kmers into RAM
-                required_ram_all_mem_gb = num_kmers * (16 + 2) * 3.5 / 1e9;  # also account for dummy kmers
-                if required_ram_all_mem_gb < 2:
+                # how much memory does it take to load all unique kmers into RAM: 8B for the kmer, 2B for the count
+                required_ram_all_mem_gb = num_kmers * (8 + 2) * 3.5 / 1e9;  # also account for dummy kmers
+                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < available_ram_gb:
+                    required_ram_gb = max(required_ram_gb, required_ram_all_mem_gb)
                     start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
                                 required_ram_gb, available_ram_gb)
                 else:
@@ -661,7 +666,7 @@ if __name__ == '__main__':
         '--output_dir',
         default=os.path.expanduser('~/.metagraph/'),
         help='Location of the directory containing the input data')
-    parser.add_argument('--destination', default=None,  # TODO make the default empty
+    parser.add_argument('--destination', default=None,
                         help='Host/directory where the cleaned BOSS graphs are copied to')
     parser.add_argument('--log_destination', default=None,
                         help='GS folder where client logs are collected')
