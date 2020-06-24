@@ -706,14 +706,14 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated,
-                         const std::filesystem::path &tmp_dir,
+                         const std::filesystem::path &swap_dir,
                          size_t max_disk_space)
         : kmer_collector_(k + 1,
                           both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
-                          tmp_dir,
+                          swap_dir,
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
@@ -770,7 +770,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
-                                     bits_per_count_);
+                                     bits_per_count_,
+                                     kmer_collector_.tmp_dir().parent_path());
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
@@ -794,7 +795,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                              kmer_collector_.get_k() - 1, \
                              kmer_collector_.is_both_strands_mode(), \
                              queue, \
-                             bits_per_count_)
+                             bits_per_count_, \
+                             kmer_collector_.tmp_dir().parent_path())
 
                 if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
                     INIT_CHUNK(KmerExtractorBOSS::Kmer64);

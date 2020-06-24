@@ -57,7 +57,7 @@ class KmerCollector {
                   std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
-                  const std::filesystem::path &tmp_dir = "/tmp/",
+                  const std::filesystem::path &swap_dir = "/tmp/",
                   size_t max_disk_space = 1e9,
                   bool canonical_only = false);
 
