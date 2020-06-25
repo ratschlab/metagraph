@@ -493,6 +493,8 @@ class DPTable {
                 gap_scores(size + 8, min_score),
                 ops(scores.size()),
                 prev_nodes(scores.size()),
+                gap_prev_nodes(scores.size()),
+                gap_count(scores.size()),
                 last_char(start_char),
                 best_pos(pos),
                 last_priority_pos(priority_pos) {}
@@ -502,6 +504,8 @@ class DPTable {
         std::vector<score_t> gap_scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
+        std::vector<NodeType> gap_prev_nodes;
+        std::vector<int32_t> gap_count;
         char last_char;
         size_t best_pos;
         size_t last_priority_pos;
