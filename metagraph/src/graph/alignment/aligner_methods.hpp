@@ -26,6 +26,7 @@ class Seeder {
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
     virtual const std::string_view get_query() const = 0;
+    virtual bool get_orientation() const = 0;
 };
 
 
@@ -47,6 +48,7 @@ class SuffixSeeder : public Seeder<NodeType> {
     const DeBruijnGraph& get_graph() const { return base_seeder_->get_graph(); }
     virtual const std::string_view get_query() const { return base_seeder_->get_query(); }
     const DBGAlignerConfig& get_config() const { return base_seeder_->get_config(); }
+    bool get_orientation() const { return base_seeder_->get_orientation(); }
 
   private:
     std::unique_ptr<ExactMapSeeder<NodeType>> base_seeder_;
@@ -75,7 +77,7 @@ class ExactMapSeeder : public Seeder<NodeType> {
     const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
     const std::vector<uint8_t>& get_offsets() const { return offsets_; }
     const std::vector<score_t>& get_partial_sums() const { return partial_sum_; }
-    bool get_orientation() const { return orientation_; }
+    bool get_orientation() const override { return orientation_; }
 
     virtual void initialize(std::string_view query, bool orientation) override;
 
