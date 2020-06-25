@@ -74,22 +74,40 @@ class DBGAligner : public IDBGAligner {
         auto extend = build_extender();
         extend.initialize_query(query);
 
+        std::vector<DBGAlignment> seeds;
         seed_generator([&](DBGAlignment&& seed) {
             assert(seed.is_valid(graph_, &config_));
+            seeds.emplace_back(std::move(seed));
+        });
 
+        for (auto &seed : seeds) {
             score_t min_path_score = get_min_path_score(seed);
 
-            if (seed.get_score() >= min_path_score) {
-                DBGAlignment path(seed);
-                path.extend_query_end(query.data() + query.size());
-                callback(std::move(path));
+            if (seed.get_query_end() == query.data() + query.size()) {
+                if (seed.get_score() >= min_path_score) {
+                    seed.trim_offset();
+                    assert(seed.is_valid(graph_, &config_));
+                    callback(std::move(seed));
+                }
+
+                continue;
             }
 
-            if (seed.get_query_end() == query.data() + query.size())
-                return;
-
+            bool extended = false;
             extend.initialize(seed);
             extend([&](DBGAlignment&& extension, auto start_node) {
+                if (!start_node && !extended) {
+                    // no good extension found
+                    if (seed.get_score() >= min_path_score) {
+                        seed.extend_query_end(query.data() + query.size());
+                        seed.trim_offset();
+                        assert(seed.is_valid(graph_, &config_));
+                        callback(std::move(seed));
+                    }
+                    extended = true;
+                    return;
+                }
+
                 assert(extension.is_valid(graph_, &config_));
                 extension.extend_query_end(query.data() + query.size());
 
@@ -110,8 +128,11 @@ class DBGAligner : public IDBGAligner {
                 assert(next_path.is_valid(graph_, &config_));
 
                 callback(std::move(next_path));
+                extended = true;
             }, min_path_score);
-        });
+
+            // if !extended, then the seed was not extended because of early cutoff
+        }
     }
 
   private:
