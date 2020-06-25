@@ -111,8 +111,7 @@ void map_sequences_in_file(const std::string &file,
     Timer data_reading_timer;
 
     seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        if (common::get_verbose())
-            std::cout << "Sequence: " << read_stream->seq.s << "\n";
+        logger->trace("Sequence: {}", read_stream->seq.s);
 
         if (config.query_presence
                 && config.alignment_length == graph.get_k()) {
@@ -141,6 +140,7 @@ void map_sequences_in_file(const std::string &file,
                                });
         } else if (config.query_presence || config.count_kmers) {
             // TODO: make more efficient
+            // TODO: canonicalization
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 dbg->call_nodes_with_suffix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
@@ -153,8 +153,7 @@ void map_sequences_in_file(const std::string &file,
             }
         }
 
-        size_t num_discovered = std::count_if(graphindices.begin(),
-                                              graphindices.end(),
+        size_t num_discovered = std::count_if(graphindices.begin(), graphindices.end(),
                                               [](const auto &x) { return x > 0; });
 
         const size_t num_kmers = graphindices.size();
@@ -173,7 +172,19 @@ void map_sequences_in_file(const std::string &file,
         }
 
         if (config.count_kmers) {
-            std::cout << num_discovered << "/" << num_kmers << "\n";
+            std::sort(graphindices.begin(), graphindices.end());
+            size_t num_unique_matching_kmers = std::inner_product(
+                graphindices.begin() + 1, graphindices.end(),
+                graphindices.begin(),
+                size_t(graphindices.front() != DeBruijnGraph::npos),
+                std::plus<size_t>(),
+                [](DeBruijnGraph::node_index next, DeBruijnGraph::node_index prev) {
+                    return next != DeBruijnGraph::npos && next != prev;
+                }
+            );
+            std::cout << read_stream->name.s << "\t"
+                      << num_discovered << "/" << num_kmers << "/"
+                      << num_unique_matching_kmers << "\n";
             return;
         }
 
@@ -277,22 +288,17 @@ int align_to_graph(Config *config) {
 
                 std::lock_guard<std::mutex> lock(print_mutex);
                 if (!config->output_json) {
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        *out << header << "\t"
-                             << path_query << "\t"
-                             << path << "\n";
-                    }
-
+                    *out << header << "\t" << paths.get_query();
                     if (paths.empty()) {
-                        *out << header << "\t"
-                             << query << "\t"
-                             << "*\t*\t"
-                             << config->alignment_min_path_score << "\t*\t*\t*\n";
+                        *out << "\t*\t*\t" << config->alignment_min_path_score
+                             << "\t*\t*\t*";
+                    } else {
+                        for (const auto &path : paths) {
+                            std::cout << "\t" << path;
+                        }
                     }
+
+                    std::cout << "\n";
                 } else {
                     Json::StreamWriterBuilder builder;
                     builder["indentation"] = "";
