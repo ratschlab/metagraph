@@ -647,6 +647,18 @@ bool spell_path(const DeBruijnGraph &graph,
     if (path.empty())
         return "";
 
+    if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) {
+        std::cerr << "ERROR: path has invalid nodes\n";
+
+        for (NodeType node : path) {
+            std::cerr << node << " ";
+        }
+
+        std::cerr << std::endl;
+
+        return false;
+    }
+
     seq.clear();
     seq.reserve(path.size() + graph.get_k() - 1 - offset);
 
@@ -689,7 +701,13 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
     if (path != sequence_) {
         std::cerr << "ERROR: stored sequence is incorrect" << std::endl
+                  << path << "\t"
                   << *this << std::endl;
+        return false;
+    }
+
+    if (!cigar_.is_valid(sequence_, get_query())) {
+        std::cerr << *this << std::endl;
         return false;
     }
 
@@ -699,11 +717,6 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
                   << "CIGAR score: " << cigar_score << std::endl
                   << get_query() << "\t"
                   << *this << std::endl;
-        return false;
-    }
-
-    if (!cigar_.is_valid(sequence_, get_query())) {
-        std::cerr << *this << std::endl;
         return false;
     }
 
