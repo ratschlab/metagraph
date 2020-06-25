@@ -103,11 +103,7 @@ bool DefaultColumnExtender<NodeType>
     assert(path_->get_cigar().back().first == Cigar::Operator::MATCH
         || path_->get_cigar().back().first == Cigar::Operator::MISMATCH);
 
-    return dp_table.add_seed(start_node, *(align_start - 1),
-                             config_.get_row(*(align_start - 1))[path_->get_sequence().back()],
-                             path_->get_score(), config_.min_cell_score, size, 0,
-                             config_.gap_opening_penalty, config_.gap_extension_penalty,
-                             clipping);
+    return dp_table.add_seed(*path_, config_, size, 0, clipping);
 }
 
 template <typename NodeType>
