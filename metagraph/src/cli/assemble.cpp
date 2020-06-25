@@ -1,5 +1,7 @@
 #include "assemble.hpp"
 
+#include <fmt/format.h>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -56,13 +58,30 @@ int assemble(Config *config) {
         std::mutex str_mutex;
 
         gfa_file << "H\tVN:Z:1.0" << std::endl;
+        size_t k = graph->get_k();
+        size_t overlap = k - 1;
         graph->call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 std::ostringstream ostr;
-                ostr << "S\t" << path.back() << "\t" << unitig << "\n";
-                graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                    ostr << "L\t" << node << "\t+\t" << path.back() << "\t+\t0M\n";
-                });
+                if (config->output_compacted) {
+                    ostr << fmt::format("S\t{}\t{}\n", path.back(), unitig);
+                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
+                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
+                                            node, path.back(), overlap);
+                    });
+                } else {
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        ostr << fmt::format("S\t{}\t{}\n", path[i],
+                                            std::string_view(unitig.data() + i, k));
+                        if (i)
+                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
+                                                path[i - 1], path[i], overlap);
+                    }
+                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
+                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
+                                            node, path.front(), overlap);
+                    });
+                }
                 std::lock_guard<std::mutex> lock(str_mutex);
                 gfa_file << ostr.str();
             },
