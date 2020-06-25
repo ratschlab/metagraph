@@ -1,9 +1,10 @@
 #include "aligner_helper.hpp"
 
 #include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
 
-#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/logger.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 using mtg::common::logger;
 
@@ -306,6 +307,7 @@ void Alignment<NodeType>::append(Alignment&& other) {
 
     cigar_.append(std::move(other.cigar_));
     query_end_ = other.query_end_;
+    labels_ = std::move(other.labels_);
 }
 
 template <typename NodeType>
@@ -430,8 +432,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
-Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           const std::string &label) const {
+Json::Value Alignment<NodeType>::path_json(size_t node_size) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -582,8 +583,8 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
 
-    if (label.size())
-        path["name"] = label;
+    // if (label_.size())
+        // path["name"] = label_;
 
     return path;
 }
@@ -592,8 +593,7 @@ template <typename NodeType>
 Json::Value Alignment<NodeType>::to_json(const std::string &query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
-                                         const std::string &read_name,
-                                         const std::string &label) const {
+                                         const std::string &read_name) const {
     assert(is_valid(graph));
 
     // encode alignment
@@ -616,7 +616,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
 
     // encode path
     if (nodes_.size())
-        alignment["path"] = path_json(graph.get_k(), label);
+        alignment["path"] = path_json(graph.get_k());
 
     alignment["score"] = static_cast<int32_t>(score_);
 
@@ -901,6 +901,70 @@ void QueryAlignment<NodeType>
         assert(alignment.get_query().begin() >= this_query.c_str());
         assert(alignment.get_query().end() <= this_query.c_str() + this_query.size());
     }
+}
+
+template <typename NodeType>
+std::vector<std::tuple<std::string, Cigar, score_t>> QueryAlignment<NodeType>
+::get_top_label_cigars(size_t num_top_labels, double presence_ratio) {
+    tsl::hopscotch_map<std::string, std::pair<size_t, std::vector<value_type>>> matches;
+    size_t min_count = presence_ratio * query_.size();
+
+    for (const auto &path : *this) {
+        size_t num_matches = path.get_num_matches();
+        for (const auto &label : path.get_labels()) {
+            auto emplace = matches.emplace(label,
+                                           std::make_pair(num_matches, std::vector<value_type>()));
+            if (!emplace.second)
+                emplace.first.value().first += num_matches;
+
+            emplace.first.value().second.push_back(path);
+        }
+    }
+
+    std::vector<std::tuple<std::string, Cigar, score_t>> top_labels;
+    for (auto it = matches.begin(); it != matches.end(); ++it) {
+        if (it->second.first >= min_count) {
+            score_t score_sum = 0;
+            // Cigar combined_cigar;
+            // size_t end = 0;
+            for (auto &path : it.value().second) {
+                // std::cout << "test\t" << path << std::endl;
+                score_sum += path.get_score();
+                // if (path.get_clipping() > end) {
+                //     size_t diff = path.get_clipping() - end;
+                //     combined_cigar.append(Cigar::Operator::CLIPPED, diff);
+                //     end += diff;
+                // }
+                // auto next_cigar = path.get_cigar();
+                // next_cigar.pop_front();
+                // combined_cigar.append(std::move(next_cigar));
+            }
+            top_labels.emplace_back(it->first, Cigar(), score_sum);
+        }
+    }
+    // VectorOrderedMap<std::tuple<std::string, Cigar, score_t>> top_labels;
+    // top_labels.reserve(size());
+
+    // for (const auto &path : *this) {
+    //     for (const auto &label)
+    //     size_t num_matches = path.get_num_matches();
+    //     if (num_matches >= presence_ratio * query_.size()) {
+    //         for (const auto &label : path.get_labels()) {
+    //             top_labels.emplace_back(label, path.get_cigar(), path.get_score());
+    //         }
+    //     }
+    // }
+
+    if (top_labels.size() > num_top_labels) {
+        std::sort(top_labels.begin(), top_labels.end(),
+                  [&](const auto &a, const auto &b) {
+            return std::get<2>(a) > std::get<2>(b);
+        });
+
+        top_labels.resize(num_top_labels);
+    }
+
+    return top_labels;
 }
 
 

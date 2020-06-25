@@ -29,7 +29,8 @@ using namespace mtg::bitmap_graph;
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels);
+                                               const std::vector<std::string> &labels,
+                                               bool canonical = false);
 
 MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,

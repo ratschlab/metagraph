@@ -7,7 +7,7 @@
 #include <string>
 
 class AnnotatedDBG;
-class IDBGAligner;
+class DBGAlignerConfig;
 class ThreadPool;
 
 namespace mtg {
@@ -36,12 +36,7 @@ class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
                   const AnnotatedDBG &anno_graph,
-                  const IDBGAligner *aligner,
-                  ThreadPool &thread_pool)
-      : config_(config),
-        anno_graph_(anno_graph),
-        aligner_(aligner),
-        thread_pool_(thread_pool) {}
+                  ThreadPool &thread_pool);
 
     void query_fasta(const std::string &file_path,
                      const std::function<void(const std::string &)> &callback);
@@ -54,12 +49,13 @@ class QueryExecutor {
                                      size_t num_top_labels,
                                      double discovery_fraction,
                                      std::string anno_labels_delimiter,
-                                     const AnnotatedDBG &anno_graph);
+                                     const AnnotatedDBG &anno_graph,
+                                     const DBGAlignerConfig *aligner_config = nullptr);
 
   private:
     const Config &config_;
     const AnnotatedDBG &anno_graph_;
-    const IDBGAligner *aligner_;
+    std::unique_ptr<DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,

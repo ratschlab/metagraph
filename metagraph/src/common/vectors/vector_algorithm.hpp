@@ -531,6 +531,32 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
     }
 };
 
+namespace util {
+
+template <class t_int_vec>
+typename t_int_vec::size_type next_zero(const t_int_vec& v, uint64_t idx)
+{
+    uint64_t pos = idx>>6;
+    uint64_t node = ~v.data()[pos];
+    node >>= (idx&0x3F);
+    if (node) {
+        return idx+bits::lo(node);
+    } else {
+        ++pos;
+        while ((pos<<6) < v.bit_size()) {
+            node = ~v.data()[pos];
+            if (node) {
+                return (pos<<6)|bits::lo(node);
+            }
+            ++pos;
+        }
+        return v.bit_size();
+    }
+
+}
+
+} // namespace util
+
 } // namespace sdsl
 
 // Predict the memory footprint in bits for sdsl::sd_vector<>

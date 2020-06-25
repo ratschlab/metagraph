@@ -320,6 +320,9 @@ class Alignment {
     const Cigar& get_cigar() const { return cigar_; }
     void set_cigar(Cigar&& cigar) { cigar_ = std::move(cigar); }
 
+    const std::vector<std::string>& get_labels() const { return labels_; }
+    std::vector<std::string>& get_labels() { return labels_; }
+
     bool get_orientation() const { return orientation_; }
     size_t get_offset() const { return offset_; }
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
@@ -356,8 +359,7 @@ class Alignment {
     Json::Value to_json(const std::string &query,
                         const DeBruijnGraph &graph,
                         bool is_secondary = false,
-                        const std::string &name = "",
-                        const std::string &label = "") const;
+                        const std::string &name = "") const;
 
     std::shared_ptr<const std::string>
     load_from_json(const Json::Value &alignment,
@@ -383,7 +385,7 @@ class Alignment {
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
-    Json::Value path_json(size_t node_size, const std::string &label = "") const;
+    Json::Value path_json(size_t node_size) const;
 
     const char* query_begin_;
     const char* query_end_;
@@ -393,6 +395,7 @@ class Alignment {
     Cigar cigar_;
     bool orientation_;
     size_t offset_;
+    std::vector<std::string> labels_;
 };
 
 template <typename NodeType>
@@ -447,8 +450,11 @@ class QueryAlignment {
     const value_type& back() const { return alignments_.back(); }
     const value_type& operator[](size_t i) const { return alignments_[i]; }
 
+    typedef typename std::vector<value_type>::iterator iterator;
     typedef typename std::vector<value_type>::const_iterator const_iterator;
 
+    iterator begin() { return alignments_.begin(); }
+    iterator end() { return alignments_.end(); }
     const_iterator begin() const { return alignments_.cbegin(); }
     const_iterator end() const { return alignments_.cend(); }
     const_iterator cbegin() const { return alignments_.cbegin(); }
@@ -462,6 +468,51 @@ class QueryAlignment {
     }
 
     bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
+
+
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(size_t num_top_labels, double presence_ratio = 0.0) {
+        std::vector<std::pair<std::string, size_t>> top_labels;
+        top_labels.reserve(size());
+
+        for (const auto &path : *this) {
+            size_t num_matches = path.get_num_matches();
+            if (num_matches >= presence_ratio * query_.size()) {
+                for (const auto &label : path.get_labels()) {
+                    top_labels.emplace_back(label, num_matches);
+                }
+            }
+        }
+
+        if (top_labels.size() > num_top_labels) {
+            std::sort(top_labels.begin(), top_labels.end(),
+                      [&](const auto &a, const auto &b) {
+                return a.second > b.second;
+            });
+
+            top_labels.resize(num_top_labels);
+        }
+
+        return top_labels;
+    }
+
+    std::vector<std::tuple<std::string, Cigar, score_t>>
+    get_top_label_cigars(size_t num_top_labels, double presence_ratio = 0.0);
+
+    std::vector<std::string> get_labels(double presence_ratio = 0.0) {
+        std::vector<std::string> labels;
+        labels.reserve(size());
+
+        for (const auto &path : *this) {
+            if (path.get_num_matches() >= presence_ratio * query_.size()) {
+                for (const auto &label : path.get_labels()) {
+                    labels.push_back(label);
+                }
+            }
+        }
+
+        return labels;
+    }
 
   private:
     // When a QueryAlignment is copied or moved, the pointers in the alignment

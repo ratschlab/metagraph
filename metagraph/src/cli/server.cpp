@@ -62,14 +62,6 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
         if (!query_desc_parts.empty())
             res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0];
 
-        if (query_desc_parts.size() > 1) {
-            // we aligned first, so extracting aligned sequence and score:
-
-            res_obj[SEQUENCE_JSON_FIELD] = query_desc_parts[1];
-            res_obj[SCORE_JSON_FIELD] = (int)atoi(query_desc_parts[2].c_str());
-            res_obj[CIGAR_JSON_FIELD] = query_desc_parts[3];
-        }
-
         res_obj["results"] = Json::Value(Json::arrayValue);
 
         for (size_t i = 2; i < parts.size(); ++i) {
@@ -140,17 +132,7 @@ std::string process_search_request(const std::string &received_message,
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
-
-    std::unique_ptr<IDBGAligner> aligner;
-    if (json.get("align", false).asBool()) {
-        aligner = build_aligner(anno_graph.get_graph(), config);
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        const_cast<DBGAlignerConfig&>(aligner->get_config()).forward_and_reverse_complement
-                = false;
-    }
+    config.align_sequences = json.get("align", false).asBool();
 
     std::ostringstream oss;
     std::mutex oss_mutex;
@@ -165,7 +147,7 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, aligner.get(), dummy_pool);
+    QueryExecutor engine(config, anno_graph, dummy_pool);
 
     engine.query_fasta(tf.name(),
         [&](const std::string &res) {
