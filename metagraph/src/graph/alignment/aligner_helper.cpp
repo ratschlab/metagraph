@@ -3,6 +3,9 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/logger.hpp"
+
+using mtg::common::logger;
 
 
 template <typename NodeType>
@@ -26,12 +29,14 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         table_init.scores[start_pos] = seed.get_score();
         table_init.ops[start_pos] = last_op;
         table_init.prev_nodes[start_pos] = SequenceGraph::npos;
+        table_init.gap_prev_nodes[start_pos] = SequenceGraph::npos;
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::Operator::INSERTION
                 ? table_init.scores[start_pos]
                 : table_init.scores[start_pos] - last_char_score + config.gap_opening_penalty,
             config.min_cell_score
         );
+        table_init.gap_count[start_pos] = 1;
         update = true;
     }
 
@@ -181,75 +186,85 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     assert(start_node);
 
     auto i = start_pos;
-    const auto* op = &column->second.ops.at(i);
-    const auto* prev_node = &column->second.prev_nodes.at(i);
+    Cigar::Operator op = column->second.ops.at(i);
+    NodeType prev_node = column->second.prev_nodes.at(i);
+    NodeType prev_gap_node = column->second.gap_prev_nodes.at(i);
+    uint8_t gap_count = op == Cigar::Operator::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
 
-    if (!i && *prev_node == SequenceGraph::npos)
+    if (!i && prev_node == SequenceGraph::npos)
         return;
 
     // use config to recompute CIGAR score in DEBUG mode
-    std::ignore = config;
-#ifndef NDEBUG
     score_t score_track = score_;
     Cigar::Operator last_op = Cigar::Operator::CLIPPED;
-#endif
 
     std::vector<typename DPTable::const_iterator> out_columns;
-    while (*prev_node != SequenceGraph::npos) {
-        auto prev_column = dp_table.find(*prev_node);
-        switch (*op) {
+    while (prev_node != SequenceGraph::npos) {
+        auto prev_column = dp_table.find(op == Cigar::Operator::INSERTION ? prev_gap_node : prev_node);
+        if (prev_column == dp_table.end())
+            break;
+
+        switch (op) {
             case Cigar::Operator::MATCH:
             case Cigar::Operator::MISMATCH: {
                 --i;
                 out_columns.emplace_back(column);
 
-#ifndef NDEBUG
                 if (last_op == Cigar::Operator::INSERTION || last_op == Cigar::Operator::DELETION)
                     score_track -= config.gap_opening_penalty - config.gap_extension_penalty;
 
                 score_track -= config.get_row(column->second.last_char)[query_view[i]];
-                assert(score_track == prev_column->second.scores.at(i));
-#endif
+                assert(score_track <= prev_column->second.scores.at(i));
 
             } break;
-            case Cigar::Operator::INSERTION:
-            case Cigar::Operator::DELETION: {
-                if (*op != Cigar::Operator::INSERTION)
-                    --i;
+            case Cigar::Operator::INSERTION: {
+                out_columns.emplace_back(column);
 
-                if (*op != Cigar::Operator::DELETION)
-                    out_columns.emplace_back(column);
-
-#ifndef NDEBUG
-                assert(score_track - config.gap_extension_penalty == prev_column->second.scores.at(i)
-                    || score_track - config.gap_opening_penalty == prev_column->second.scores.at(i));
+                assert((gap_count && (score_track - config.gap_extension_penalty <= prev_column->second.gap_scores.at(i)))
+                    || (!gap_count && score_track - config.gap_opening_penalty <= prev_column->second.scores.at(i)));
 
                 score_track -= config.gap_extension_penalty;
-#endif
+
+            } break;
+            case Cigar::Operator::DELETION: {
+                --i;
+
+                assert(score_track - config.gap_extension_penalty <= prev_column->second.scores.at(i)
+                    || score_track - config.gap_opening_penalty <= prev_column->second.scores.at(i));
+
+                score_track -= config.gap_extension_penalty;
 
             } break;
             case Cigar::Operator::CLIPPED: { assert(false); }
         }
 
-        cigar_.append(*op);
+        cigar_.append(op);
 
-#ifndef NDEBUG
-        last_op = *op;
-#endif
+        last_op = op;
 
         column = prev_column;
-        op = &column->second.ops.at(i);
-        prev_node = &column->second.prev_nodes.at(i);
+        if (gap_count) {
+            --gap_count;
+        } else {
+            op = column->second.ops.at(i);
+            if (op == Cigar::Operator::INSERTION)
+                gap_count = column->second.gap_count.at(i) - 1;
+        }
+        prev_node = column->second.prev_nodes.at(i);
+        prev_gap_node = column->second.gap_prev_nodes.at(i);
     }
 
-#ifndef NDEBUG
+    const auto &score_col = op == Cigar::Operator::INSERTION ? column->second.gap_scores : column->second.scores;
+
     if (last_op == Cigar::Operator::INSERTION || last_op == Cigar::Operator::DELETION)
         score_track -= config.gap_opening_penalty - config.gap_extension_penalty;
 
-    assert(score_track == column->second.scores.at(i));
-#endif
+    score_t correction = score_col.at(i) - score_track;
+    assert(correction >= 0);
+    if (correction > 0)
+        logger->trace("Fixing outdated score: {} -> {}", score_, score_ + correction);
 
-    score_ -= column->second.scores.at(i);
+    score_ -= score_col.at(i) - correction;
 
     *start_node = column->first;
 

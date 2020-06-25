@@ -226,16 +226,16 @@ inline void compute_HE_avx2(size_t length,
                             int32_t *update_gap_scores,
                             long long int *update_prevs,
                             int32_t *update_ops,
+                            int32_t *update_gap_count,
+                            long long int *update_gap_prevs,
                             const int32_t *incoming_scores,
                             const int32_t *incoming_gap_scores,
-                            const int32_t *incoming_ops,
                             const int32_t *profile_scores,
                             const int32_t *profile_ops,
-                            int32_t *updated_mask,
-                            __m256i min_cell_score) {
+                            const int32_t *incoming_gap_count,
+                            int32_t *updated_mask) {
     assert(update_scores != incoming_scores);
     assert(update_gap_scores != incoming_gap_scores);
-    assert(update_ops != incoming_ops);
 
     __m256i insert_p = _mm256_set1_epi32(Cigar::Operator::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
@@ -251,18 +251,27 @@ inline void compute_HE_avx2(size_t length,
         __m256i H = _mm256_max_epi32(H_orig, match_score);
 
         // check insert
-        __m256i update_score = _mm256_max_epi32(min_cell_score, _mm256_max_epi32(
-            _mm256_add_epi32(rshiftpushback_epi32(incoming_p, incoming_scores[i + 7]),
-                             gap_opening_penalty),
-            _mm256_blendv_epi8(
-                min_cell_score,
-                _mm256_add_epi32(_mm256_loadu_si256((__m256i*)&incoming_gap_scores[i]),
-                                 gap_extension_penalty),
-                _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i*)&incoming_ops[i]),
-                                   insert_p)
-            )
+        __m256i update_score_open = _mm256_add_epi32(
+            rshiftpushback_epi32(incoming_p, incoming_scores[i + 7]),
+            gap_opening_penalty
+        );
+        __m256i update_score_extend = _mm256_add_epi32(
+            _mm256_loadu_si256((__m256i*)&incoming_gap_scores[i]),
+            gap_extension_penalty
+        );
+        __m256i update_score = _mm256_max_epi32(update_score_open, update_score_extend);
+        __m256i ones = _mm256_set1_epi32(1);
+        __m256i incoming_count = _mm256_add_epi32(
+            _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]),
+            ones
+        );
+        _mm256_storeu_si256((__m256i*)&update_gap_count[i], _mm256_blendv_epi8(
+            ones,
+            incoming_count,
+            _mm256_cmpeq_epi32(update_score, update_score_extend)
         ));
-
+        _mm256_storeu_si256((__m256i*)&update_gap_prevs[i], prev_node);
+        _mm256_storeu_si256((__m256i*)&update_gap_prevs[i + 4], prev_node);
 
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
         H = _mm256_max_epi32(H, update_score);
@@ -280,7 +289,7 @@ inline void compute_HE_avx2(size_t length,
 
         _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
 
-        __m128i *cmp = (__m128i*)&both_cmp;
+        const __m128i *cmp = (__m128i*)&both_cmp;
         _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
         _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
     }
@@ -294,26 +303,25 @@ inline void compute_updates(const DBGAlignerConfig &config,
                             score_t *update_scores,
                             score_t *update_gap_scores,
                             NodeType *update_prevs,
+                            int32_t *update_gap_count,
+                            NodeType *update_gap_prevs,
                             Cigar::Operator *update_ops,
                             const NodeType &prev_node,
                             const NodeType &node,
                             const score_t *incoming_scores,
                             const score_t *incoming_gap_scores,
-                            const Cigar::Operator *incoming_ops,
+                            const int32_t *incoming_gap_count,
                             const score_t *profile_scores,
                             const Cigar::Operator *profile_ops,
                             AlignedVector<int32_t> &updated_mask,
                             size_t length) {
     assert(length);
-    score_t min_cell_score = config.min_cell_score;
 
     // handle first element (i.e., no match update possible)
-    score_t update_score = std::max(min_cell_score, std::max(
+    score_t update_score = std::max(
         incoming_scores[0] + config.gap_opening_penalty,
-        incoming_ops[0] == Cigar::Operator::INSERTION
-            ? incoming_gap_scores[0] + config.gap_extension_penalty
-            : min_cell_score
-    ));
+        incoming_gap_scores[0] + config.gap_extension_penalty
+    );
 
     if (update_score > update_scores[0]) {
         update_scores[0] = update_score;
@@ -323,6 +331,10 @@ inline void compute_updates(const DBGAlignerConfig &config,
     }
 
     update_gap_scores[0] = update_score;
+    update_gap_prevs[0] = prev_node;
+    update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
+        ? incoming_gap_count[0] + 1
+        : 1;
 
     size_t i = 1;
 
@@ -342,13 +354,14 @@ inline void compute_updates(const DBGAlignerConfig &config,
                         update_gap_scores,
                         reinterpret_cast<long long int*>(update_prevs),
                         reinterpret_cast<int32_t*>(update_ops),
+                        update_gap_count,
+                        reinterpret_cast<long long int*>(update_gap_prevs),
                         incoming_scores,
                         incoming_gap_scores,
-                        reinterpret_cast<const int32_t*>(incoming_ops),
                         reinterpret_cast<const int32_t*>(profile_scores),
                         reinterpret_cast<const int32_t*>(profile_ops),
-                        updated_mask.data(),
-                        _mm256_set1_epi32(min_cell_score));
+                        incoming_gap_count,
+                        updated_mask.data());
         i = length;
     }
 
@@ -369,12 +382,10 @@ inline void compute_updates(const DBGAlignerConfig &config,
         }
 
         // check insert
-        score_t update_score = std::max(min_cell_score, std::max(
+        score_t update_score = std::max(
             incoming_scores[i] + config.gap_opening_penalty,
-            incoming_ops[i] == Cigar::Operator::INSERTION
-                ? incoming_gap_scores[i] + config.gap_extension_penalty
-                : min_cell_score
-        ));
+            incoming_gap_scores[i] + config.gap_extension_penalty
+        );
 
         if (update_score > H) {
             H = update_score;
@@ -383,6 +394,10 @@ inline void compute_updates(const DBGAlignerConfig &config,
         }
 
         update_gap_scores[i] = update_score;
+        update_gap_prevs[i] = prev_node;
+        update_gap_count[i] = update_score == incoming_gap_scores[i] + config.gap_extension_penalty
+            ? incoming_gap_count[i] + 1
+            : 1;
 
         // update scores
         if (H_prev != DeBruijnGraph::npos) {
@@ -476,24 +491,22 @@ void DefaultColumnExtender<NodeType>
 
     while (columns_to_update.size()) {
         ColumnRef top = columns_to_update.top();
+        columns_to_update.pop();
+
         NodeType node = std::get<0>(top);
         score_t best_score_update = std::get<1>(top);
         const auto &cur_col = dp_table.find(node)->second;
 
         // if this happens, then it means that the column was in the priority
         // queue multiple times, so we don't need to consider it again
-        if (best_score_update != cur_col.last_priority_value()) {
-            columns_to_update.pop();
+        if (best_score_update != cur_col.last_priority_value())
             continue;
-        }
 
         auto out_columns = fork_extension(node, callback, min_path_score);
 
         assert(std::all_of(out_columns.begin(), out_columns.end(), [&](const auto &pair) {
             return graph_->traverse(node, pair.second) == pair.first;
         }));
-
-        columns_to_update.pop();
 
         update_columns(node, out_columns, min_path_score);
     }
@@ -564,17 +577,20 @@ void DefaultColumnExtender<NodeType>
 
         assert(next_column.scores.size() == next_column.gap_scores.size());
         assert(incoming->scores.size() == incoming->gap_scores.size());
+
         compute_updates(
             config_,
             next_column.scores.data() + begin,
             next_column.gap_scores.data() + begin,
             next_column.prev_nodes.data() + begin,
+            next_column.gap_count.data() + begin,
+            next_column.gap_prev_nodes.data() + begin,
             next_column.ops.data() + begin,
             incoming_node,
             next_node,
             incoming->scores.data() + begin,
             incoming->gap_scores.data() + begin,
-            incoming->ops.data() + begin,
+            incoming->gap_count.data() + begin,
             profile_score[next_column.last_char].data() + query.size() - size + begin,
             profile_op[next_column.last_char].data() + query.size() - size + begin,
             updated_mask,
