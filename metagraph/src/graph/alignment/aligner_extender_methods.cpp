@@ -502,8 +502,11 @@ void DefaultColumnExtender<NodeType>
     // no good path found
     if (start_node == SequenceGraph::npos
             || start_score == get_seed().get_score()
-            || score_cutoff > start_score)
+            || score_cutoff > start_score) {
+        reset();
+        callback(Alignment<NodeType>(), NodeType());
         return;
+    }
 
     // check to make sure that start_node stores the best starting point
     assert(start_score == dp_table.best_score().second);
@@ -526,6 +529,9 @@ void DefaultColumnExtender<NodeType>
 ::update_columns(NodeType incoming_node,
                  const std::deque<std::pair<NodeType, char>> &out_columns,
                  score_t min_path_score) {
+    if (out_columns.empty())
+        return;
+
     // set boundaries for vertical band
     auto *incoming = &dp_table.find(incoming_node).value();
 
