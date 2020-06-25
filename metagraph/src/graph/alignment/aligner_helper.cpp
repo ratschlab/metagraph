@@ -6,40 +6,34 @@
 
 
 template <typename NodeType>
-bool DPTable<NodeType>::add_seed(NodeType start_node,
-                                 char start_char,
-                                 score_t last_char_score,
-                                 score_t initial_score,
-                                 score_t min_score,
+bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
+                                 const DBGAlignerConfig &config,
                                  size_t size,
                                  size_t start_pos,
-                                 int8_t gap_opening_penalty,
-                                 int8_t gap_extension_penalty,
                                  size_t query_offset) {
-    assert(start_pos < size);
-
     query_offset_ = query_offset;
-    start_node_ = start_node;
+    char start_char = *(seed.get_query_end() - 1);
+    score_t last_char_score = config.get_row(start_char)[seed.get_sequence().back()];
 
-    // Initialize first column
-    auto &table_init = dp_table_[start_node];
+    auto &table_init = dp_table_[seed.back()];
     if (!table_init.size())
-        table_init = Column(size, min_score, start_char, start_pos);
+        table_init = Column(size, config.min_cell_score, start_char, start_pos);
 
     bool update = false;
 
-    if (table_init.best_score() < initial_score) {
-        table_init.scores[start_pos] = initial_score;
-        table_init.ops[start_pos] = Cigar::Operator::MATCH;
+    if (table_init.best_score() < seed.get_score()) {
+        auto last_op = seed.get_cigar().back().first;
+        table_init.scores[start_pos] = seed.get_score();
+        table_init.ops[start_pos] = last_op;
         table_init.prev_nodes[start_pos] = SequenceGraph::npos;
         table_init.gap_scores[start_pos] = std::max(
-            table_init.scores[start_pos] + gap_opening_penalty - gap_extension_penalty,
-            min_score
+            last_op == Cigar::Operator::INSERTION
+                ? table_init.scores[start_pos]
+                : table_init.scores[start_pos] - last_char_score + config.gap_opening_penalty,
+            config.min_cell_score
         );
         update = true;
     }
-
-    std::ignore = last_char_score;
 
     return update;
 }
