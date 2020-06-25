@@ -59,15 +59,42 @@ void DefaultColumnExtender<NodeType>
     }
 }
 
-std::pair<size_t, size_t> get_band(size_t size, size_t best_pos, size_t bandwidth) {
+template <class Vector>
+std::pair<size_t, size_t> get_column_boundaries(const Vector &scores,
+                                                size_t size,
+                                                size_t best_pos,
+                                                score_t xdrop_cutoff,
+                                                size_t bandwidth) {
+    if (xdrop_cutoff > scores[best_pos])
+        return std::make_pair(best_pos, best_pos);
+
     assert(best_pos < size);
-    auto begin = best_pos >= bandwidth ? best_pos - bandwidth : 0;
+    size_t begin = best_pos >= bandwidth ? best_pos - bandwidth : 0;
+    size_t end = bandwidth <= size - best_pos ? best_pos + bandwidth : size;
+
+    while (begin < end && scores[begin] < xdrop_cutoff) {
+        ++begin;
+    }
+
+    if (begin == size)
+        return std::make_pair(begin, begin);
+
+    size_t cur_end = best_pos;
+    while (cur_end < end && scores[cur_end] >= xdrop_cutoff) {
+        ++cur_end;
+    }
+    end = cur_end;
+
+    assert(end > best_pos);
+
+    if (begin >= end)
+        return std::make_pair(begin, begin);
 
     // align begin + 1 to 32-byte boundary
     if (begin > 7)
         begin = (begin & 0xFFFFFFFFFFFFFFF8) - 1;
 
-    auto end = bandwidth <= size - best_pos ? best_pos + bandwidth : size;
+    // round up to nearest multiple of 8
     end = std::min(begin + ((end - begin + 7) / 8) * 8, size);
 
     assert(begin <= best_pos);
@@ -90,12 +117,14 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
                                     last_priority_pos
                                 ));
     } else {
-        auto [node_begin, node_end] = get_band(size,
-                                               find->second.best_pos,
-                                               config_.bandwidth);
+        auto [node_begin, node_end] = get_column_boundaries(find->second.scores,
+                                                            size,
+                                                            find->second.best_pos,
+                                                            xdrop_cutoff,
+                                                            config_.bandwidth);
 
-        overlapping_range_ |= ((begin <= node_begin && end > node_begin)
-            || (begin < node_end && end >= node_end));
+        if (node_begin != node_end)
+            overlapping_range_ |= (begin < node_end && end > node_begin);
     }
 
     return std::make_pair(find, false);
@@ -146,7 +175,7 @@ void DefaultColumnExtender<NodeType>::check_and_push(ColumnRef&& next_column) {
     const auto &column = dp_table.find(next_node)->second;
 
     // Ignore if there is no way it can be extended to an optimal alignment.
-    if (xdrop_cutoff - column.best_score() > config_.xdrop
+    if (xdrop_cutoff > column.best_score()
             || std::equal(match_score_begin + begin,
                           match_score_begin + end,
                           column.scores.data() + begin,
@@ -191,7 +220,8 @@ inline void update_del_scores(const DBGAlignerConfig &config,
                               Cigar::Operator *update_ops,
                               const NodeType &node,
                               int32_t *updated_mask,
-                              size_t length) {
+                              size_t length,
+                              score_t xdrop_cutoff) {
     for (size_t i = 1; i < length; ++i) {
         score_t del_score = std::max(config.min_cell_score,
             update_scores[i - 1] + (update_ops[i - 1] == Cigar::Operator::DELETION
@@ -199,7 +229,7 @@ inline void update_del_scores(const DBGAlignerConfig &config,
                 : config.gap_opening_penalty
         ));
 
-        if (del_score > update_scores[i]) {
+        if (del_score >= xdrop_cutoff && del_score > update_scores[i]) {
             while (i < length && del_score > update_scores[i]) {
                 update_scores[i] = del_score;
                 update_ops[i] = Cigar::Operator::DELETION;
@@ -233,7 +263,8 @@ inline void compute_HE_avx2(size_t length,
                             const int32_t *profile_scores,
                             const int32_t *profile_ops,
                             const int32_t *incoming_gap_count,
-                            int32_t *updated_mask) {
+                            int32_t *updated_mask,
+                            __m256i xdrop_cutoff) {
     assert(update_scores != incoming_scores);
     assert(update_gap_scores != incoming_gap_scores);
 
@@ -276,6 +307,9 @@ inline void compute_HE_avx2(size_t length,
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
         H = _mm256_max_epi32(H, update_score);
 
+        // apply x-drop
+        H = _mm256_blendv_epi8(H_orig, H, _mm256_cmpgt_epi32(H, xdrop_cutoff));
+
         // update scores
         _mm256_storeu_si256((__m256i*)&update_scores[i], H);
         _mm256_storeu_si256((__m256i*)&update_gap_scores[i], update_score);
@@ -314,7 +348,8 @@ inline void compute_updates(const DBGAlignerConfig &config,
                             const score_t *profile_scores,
                             const Cigar::Operator *profile_ops,
                             AlignedVector<int32_t> &updated_mask,
-                            size_t length) {
+                            size_t length,
+                            score_t xdrop_cutoff) {
     assert(length);
 
     // handle first element (i.e., no match update possible)
@@ -323,7 +358,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
         incoming_gap_scores[0] + config.gap_extension_penalty
     );
 
-    if (update_score > update_scores[0]) {
+    if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
         update_scores[0] = update_score;
         update_ops[0] = Cigar::Operator::INSERTION;
         update_prevs[0] = prev_node;
@@ -361,7 +396,8 @@ inline void compute_updates(const DBGAlignerConfig &config,
                         reinterpret_cast<const int32_t*>(profile_scores),
                         reinterpret_cast<const int32_t*>(profile_ops),
                         incoming_gap_count,
-                        updated_mask.data());
+                        updated_mask.data(),
+                        _mm256_set1_epi32(xdrop_cutoff - 1));
         i = length;
     }
 
@@ -375,7 +411,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
 
         // check match
         score_t match_score = incoming_scores[i - 1] + profile_scores[i];
-        if (match_score > H) {
+        if (match_score >= xdrop_cutoff && match_score > H) {
             H = match_score;
             H_op = profile_ops[i];
             H_prev = prev_node;
@@ -387,7 +423,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
             incoming_gap_scores[i] + config.gap_extension_penalty
         );
 
-        if (update_score > H) {
+        if (update_score >= xdrop_cutoff && update_score > H) {
             H = update_score;
             H_op = Cigar::Operator::INSERTION;
             H_prev = prev_node;
@@ -414,7 +450,8 @@ inline void compute_updates(const DBGAlignerConfig &config,
                       update_ops,
                       node,
                       updated_mask.data(),
-                      length);
+                      length,
+                      xdrop_cutoff);
 }
 
 
@@ -452,7 +489,7 @@ void DefaultColumnExtender<NodeType>
     score_cutoff = std::max(start_score, min_path_score);
     begin = 0;
     end = size;
-    xdrop_cutoff = start_score;
+    xdrop_cutoff = score_cutoff - config_.xdrop;
 
     check_and_push(ColumnRef(start_node, start_score, false));
 
@@ -556,10 +593,18 @@ void DefaultColumnExtender<NodeType>
                           incoming->ops.data(),
                           incoming_node,
                           nullptr,
-                          size);
+                          size,
+                          xdrop_cutoff);
     }
 
-    std::tie(begin, end) = get_band(size, incoming->best_pos, config_.bandwidth);
+    std::tie(begin, end) = get_column_boundaries(incoming->scores,
+                                                 size,
+                                                 incoming->best_pos,
+                                                 xdrop_cutoff,
+                                                 config_.bandwidth);
+
+    if (begin >= end)
+        return;
 
     for (const auto &[next_node, c] : out_columns) {
         auto emplace = emplace_node(next_node, incoming_node, c, size);
@@ -594,7 +639,8 @@ void DefaultColumnExtender<NodeType>
             profile_score[next_column.last_char].data() + query.size() - size + begin,
             profile_op[next_column.last_char].data() + query.size() - size + begin,
             updated_mask,
-            end - begin
+            end - begin,
+            xdrop_cutoff
         );
 
         // Find the maximum changed value
@@ -627,7 +673,7 @@ void DefaultColumnExtender<NodeType>
             if (*best_update > start_score) {
                 start_node = next_node;
                 start_score = *best_update;
-                xdrop_cutoff = std::max(start_score, xdrop_cutoff);
+                xdrop_cutoff = std::max(start_score - config_.xdrop, xdrop_cutoff);
                 assert(start_score == dp_table.best_score().second);
                 score_cutoff = std::max(start_score, min_path_score);
             }

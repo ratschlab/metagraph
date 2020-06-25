@@ -104,7 +104,7 @@ class Config {
     int32_t alignment_xdrop = 30;
 
     size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = 16;
+    size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
