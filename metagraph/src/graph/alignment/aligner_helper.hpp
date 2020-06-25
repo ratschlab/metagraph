@@ -307,6 +307,7 @@ class Alignment {
             cigar_.pop_back();
     }
 
+    void trim_offset();
     void reverse_complement(const DeBruijnGraph &graph,
                             const std::string_view query_rev_comp) {
         assert(query_end_ + get_end_clipping()

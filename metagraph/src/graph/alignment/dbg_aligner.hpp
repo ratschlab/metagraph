@@ -97,12 +97,16 @@ class DBGAligner : public IDBGAligner {
                     // if the extension starts at a different position
                     // from the seed end, then it's a new alignment
                     extension.extend_query_begin(query.data());
+                    extension.trim_offset();
+                    assert(extension.is_valid(graph_, &config_));
                     callback(std::move(extension));
                     return;
                 }
 
+                assert(extension.get_offset() == graph_.get_k() - 1);
                 auto next_path = seed;
                 next_path.append(std::move(extension));
+                next_path.trim_offset();
                 assert(next_path.is_valid(graph_, &config_));
 
                 callback(std::move(next_path));

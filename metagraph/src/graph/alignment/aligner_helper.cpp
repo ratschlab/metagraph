@@ -301,6 +301,44 @@ void Alignment<NodeType>::append(Alignment&& other) {
     query_end_ = other.query_end_;
 }
 
+template <typename NodeType>
+void Alignment<NodeType>::trim_offset() {
+    if (!offset_ || empty() || cigar_.empty())
+        return;
+
+    auto it = cigar_.begin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
+
+    if (it == cigar_.end())
+        return;
+
+    auto jt = nodes_.begin();
+    size_t counter = 0;
+    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
+        if (counter == it->second
+                || it->first == Cigar::Operator::CLIPPED
+                || it->first == Cigar::Operator::DELETION) {
+            ++it;
+            counter = 0;
+            continue;
+        }
+
+        size_t jump = std::min(std::min(offset_, size_t(it->second)),
+                               static_cast<size_t>(nodes_.end() - jt));
+        offset_ -= jump;
+        counter += jump;
+        jt += jump;
+    }
+
+    if (jt == nodes_.end()) {
+        --jt;
+        ++offset_;
+    }
+
+    nodes_.erase(nodes_.begin(), jt);
+}
+
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>

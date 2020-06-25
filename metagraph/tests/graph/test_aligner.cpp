@@ -1039,7 +1039,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(9, path.size());
+    EXPECT_EQ(6, path.size());
     EXPECT_EQ(reference.substr(10), path.get_sequence());
     EXPECT_EQ(config.match_score(query.substr(4)), path.get_score());
     EXPECT_EQ("4S9=", path.get_cigar().to_string());
@@ -1047,7 +1047,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(4u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
-    EXPECT_EQ(3u, path.get_offset());
+    EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
@@ -1387,7 +1387,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
 
-        EXPECT_EQ(15u, path.size()); // includes dummy k-mers
+        EXPECT_EQ(9u, path.size()); // includes dummy k-mers
         EXPECT_EQ(reference.substr(3), path.get_sequence());
         EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
         EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
@@ -1395,7 +1395,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         EXPECT_FALSE(path.is_exact_match());
         EXPECT_EQ(0u, path.get_clipping());
         EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(6u, path.get_offset());
+        EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
         check_json_dump_load(*graph,
                              path,
@@ -1424,7 +1424,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(15u, path.size()); // includes dummy k-mers
+    EXPECT_EQ(9u, path.size()); // includes dummy k-mers
     EXPECT_EQ(reference.substr(3), path.get_sequence());
     EXPECT_EQ(config.score_sequences(query, reference.substr(3)), path.get_score());
     EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
@@ -1432,7 +1432,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
-    EXPECT_EQ(6u, path.get_offset());
+    EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
@@ -1539,7 +1539,7 @@ TEST(DBGAlignerTest, align_dummy) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(14u, path.size());
+    EXPECT_EQ(12u, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
@@ -1547,7 +1547,7 @@ TEST(DBGAlignerTest, align_dummy) {
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
-    EXPECT_EQ(2u, path.get_offset());
+    EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,
                          path,
