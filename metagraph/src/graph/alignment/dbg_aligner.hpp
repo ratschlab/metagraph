@@ -178,75 +178,80 @@ class DBGAligner : public IDBGAligner {
         DBGQueryAlignment paths(query);
 
         seeder.initialize(paths.get_query(), false);
+        std::vector<DBGAlignment> reverse_seeds;
 
         align_aggregate([&](const auto &alignment_callback,
                             const auto &get_min_path_score) {
-            // The outer loop generates uses the reverse complements of the forward alignments
-            // as seeds for extension
+            // First get forward alignments
+            align(paths.get_query(),
+                [&](const auto &forward_seed_callback) {
+                    seeder.call_seeds([&](DBGAlignment&& seed) {
+                        forward_seed_callback(std::move(seed));
+                    });
+                },
+                [&](DBGAlignment&& path) {
+                    score_t min_path_score = get_min_path_score(path);
+
+                    // If the alignment starts from the beginning of the query,
+                    // there's no sequence left for aligning backwards.
+                    if (!path.get_clipping()) {
+                        if (path.get_score() >= min_path_score)
+                            alignment_callback(std::move(path));
+
+                        return;
+                    }
+
+                    auto rev = path;
+                    rev.reverse_complement(graph_, paths.get_query_reverse_complement());
+                    if (rev.empty()) {
+                        if (path.get_score() >= min_path_score)
+                            alignment_callback(std::move(path));
+
+                        return;
+                    }
+
+                    // Remove any character skipping from the end so that the
+                    // alignment can proceed
+                    assert(rev.get_end_clipping());
+                    rev.trim_end_clipping();
+                    assert(rev.is_valid(graph_, &config_));
+
+                    // Pass the reverse complement of the forward alignment
+                    // as a seed for extension
+                    reverse_seeds.emplace_back(std::move(rev));
+                },
+                [&](const auto&) {
+                    // ignore the min path score for the forward alignment,
+                    // since it may have a score that is too low before it is
+                    // extended backwards
+                    return config_.min_cell_score;
+                }
+            );
+
+            // Then use the reverse complements of the forward alignments as seeds
             align(paths.get_query_reverse_complement(),
                 [&](const auto &reverse_seed_callback) {
+                    for (auto&& path : reverse_seeds) {
+                        reverse_seed_callback(std::move(path));
+                    }
+                },
+                [&](DBGAlignment&& path) {
+                    // If the path originated from a backwards alignment (forward alignment
+                    // of a reverse complement) and did not skip the first characters
+                    // (so it is unable to be reversed), change back to the forward orientation
+                    if (!path.get_offset() && path.get_orientation()) {
+                        path.reverse_complement(seeder.get_graph(), paths.get_query());
+                        if (path.empty())
+                            return;
+                    }
 
-                    // Inner loop aligns the forward strand of the query
-                    align(paths.get_query(),
-                        [&](const auto &forward_seed_callback) {
-                            seeder.call_seeds([&](DBGAlignment&& seed) {
-                                forward_seed_callback(std::move(seed));
-                            });
-                        },
-                        [&](DBGAlignment&& path) {
-                            if (!path.get_clipping()) {
-                                // If the alignment starts from the beginning of the query,
-                                // there's no sequence left for aligning backwards
-                                if (path.get_score() >= get_min_path_score(path))
-                                    alignment_callback(std::move(path));
-
-                            } else {
-                                // Add seed to the list of alignments
-                                if (path.get_score() >= get_min_path_score(path))
-                                    alignment_callback(DBGAlignment(path));
-
-                                // If the alignment skipped the first characters in the first
-                                // node of its path, then don't align backwards
-                                if (path.get_offset())
-                                    return;
-
-                                path.reverse_complement(
-                                    seeder.get_graph(),
-                                    paths.get_query_reverse_complement()
-                                );
-
-                                // Remove any character skipping from the end so that the
-                                // alignment can proceed
-                                assert(path.get_end_clipping());
-                                path.trim_end_clipping();
-                                assert(path.is_valid(graph_, &config_));
-
-                                // Pass the reverse complement of the forward alignment
-                                // as a seed for extension
-                                reverse_seed_callback(std::move(path));
-                            }
-                        },
-                        [&](const auto&) {
-                            // ignore the min path score for the forward alignment,
-                            // since it may have a score that is too low before it is
-                            // extended backwards
-                            return config_.min_cell_score;
-                        }
-                    );
-
-                }, alignment_callback, get_min_path_score);
-            },
-            [&](DBGAlignment&& path) {
-                // If the path originated from a backwards alignment (forward alignment
-                // of a reverse complement) and did not skip the first characters
-                // (so it is unable to be reversed), change back to the forward orientation
-                if (!path.get_offset() && path.get_orientation())
-                    path.reverse_complement(seeder.get_graph(), paths.get_query());
-
-                assert(path.is_valid(graph_, &config_));
-                paths.emplace_back(std::move(path));
-            }
-        );
+                    assert(path.is_valid(graph_, &config_));
+                    alignment_callback(std::move(path));
+                },
+                get_min_path_score
+            );
+        },
+        [&](DBGAlignment&& path) { paths.emplace_back(std::move(path)); });
 
         return paths;
     }
