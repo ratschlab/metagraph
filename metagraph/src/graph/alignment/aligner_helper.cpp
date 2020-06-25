@@ -2,7 +2,7 @@
 
 #include <tsl/hopscotch_set.h>
 
-#include "common/utils/simd_utils.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 template <typename NodeType>
@@ -68,9 +68,8 @@ void DPTable<NodeType>
                                       &start_node,
                                       seed);
 
-        if (UNLIKELY(alignment.empty() && !alignment.get_query().data())) {
+        if (alignment.empty() && !alignment.get_query().data())
             return;
-        }
 
         assert(alignment.is_valid(graph, &config));
 
@@ -117,9 +116,8 @@ void DPTable<NodeType>
                                  &start_node,
                                  seed);
 
-        if (UNLIKELY(next.empty() && !next.get_query().data())) {
+        if (next.empty() && !next.get_query().data())
             continue;
-        }
 
         assert(next.is_valid(graph, &config));
         visited_nodes.insert(next.begin(), next.end());
@@ -261,9 +259,8 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
 
     *start_node = column->first;
 
-    if (UNLIKELY(i > std::numeric_limits<Cigar::LengthType>::max())) {
+    if (i > std::numeric_limits<Cigar::LengthType>::max())
         throw std::runtime_error("Error: clipping length can't be stored in CIGAR");
-    }
 
     cigar_.append(Cigar::Operator::CLIPPED, i);
     assert(cigar_.size());
@@ -337,6 +334,87 @@ void Alignment<NodeType>::trim_offset() {
     }
 
     nodes_.erase(nodes_.begin(), jt);
+}
+
+template <typename NodeType>
+void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
+                                             const std::string_view query_rev_comp) {
+    if (empty())
+        return;
+
+    assert(query_end_ + get_end_clipping()
+        == query_begin_ - get_clipping() + query_rev_comp.size());
+    assert(is_valid(graph));
+
+    trim_offset();
+    assert(is_valid(graph));
+
+    if (!offset_) {
+        ::reverse_complement(sequence_.begin(), sequence_.end());
+        nodes_ = map_sequence_to_nodes(graph, sequence_);
+    } else {
+        // extract target sequence prefix
+        std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
+            + sequence_;
+
+        // if the alignment starts from a source k-mer, then this alignment can't
+        // be reversed
+        if (dynamic_cast<const DBGSuccinct*>(&graph) && rev_seq[0] == BOSS::kSentinel) {
+            *this = Alignment();
+            return;
+        }
+
+        assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
+
+        // get reverse complement path
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        auto rev_nodes = map_sequence_to_nodes(graph, rev_seq);
+        assert(std::find(rev_nodes.begin(),
+                         rev_nodes.end(),
+                         DeBruijnGraph::npos) == rev_nodes.end());
+
+        // trim off ending from reverse complement (corresponding to the added prefix)
+        size_t trim_left = offset_;
+        while (trim_left && rev_nodes.size() > 1) {
+            rev_nodes.pop_back();
+            rev_seq.pop_back();
+            --trim_left;
+        }
+
+        for (size_t i = 0; i < trim_left; ++i) {
+            size_t indegree = 0;
+            graph.call_incoming_kmers(rev_nodes[0], [&](NodeType prev, char) {
+                ++indegree;
+                if (indegree > 1)
+                    return;
+
+                rev_nodes[0] = prev;
+            });
+
+            if (!indegree) {
+                *this = Alignment();
+                return;
+            }
+
+            rev_seq.pop_back();
+        }
+
+        nodes_ = rev_nodes;
+        sequence_ = rev_seq;
+        offset_ = trim_left;
+        assert(!trim_left
+                || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+    }
+
+    std::reverse(cigar_.begin(), cigar_.end());
+
+    orientation_ = !orientation_;
+
+    query_begin_ = query_rev_comp.data() + get_clipping();
+    query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
+
+    assert(query_end_ >= query_begin_);
+    assert(is_valid(graph));
 }
 
 // derived from:

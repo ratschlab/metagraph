@@ -308,24 +308,9 @@ class Alignment {
     }
 
     void trim_offset();
+
     void reverse_complement(const DeBruijnGraph &graph,
-                            const std::string_view query_rev_comp) {
-        assert(query_end_ + get_end_clipping()
-            == query_begin_ - get_clipping() + query_rev_comp.size());
-
-        assert(!offset_);
-
-        std::reverse(cigar_.begin(), cigar_.end());
-        ::reverse_complement(sequence_.begin(), sequence_.end());
-        nodes_ = map_sequence_to_nodes(graph, sequence_);
-
-        orientation_ = !orientation_;
-
-        query_begin_ = query_rev_comp.data() + get_clipping();
-        query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
-
-        assert(query_end_ >= query_begin_);
-    }
+                            const std::string_view query_rev_comp);
 
     const std::string& get_sequence() const { return sequence_; }
 
