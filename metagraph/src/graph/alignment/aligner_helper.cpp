@@ -198,6 +198,8 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     score_t score_track = score_;
     Cigar::Operator last_op = Cigar::Operator::CLIPPED;
 
+    score_t gap_diff = config.gap_opening_penalty - config.gap_extension_penalty;
+
     std::vector<typename DPTable::const_iterator> out_columns;
     while (prev_node != SequenceGraph::npos) {
         auto prev_column = dp_table.find(op == Cigar::Operator::INSERTION ? prev_gap_node : prev_node);
@@ -210,18 +212,18 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                 --i;
                 out_columns.emplace_back(column);
 
-                if (last_op == Cigar::Operator::INSERTION || last_op == Cigar::Operator::DELETION)
-                    score_track -= config.gap_opening_penalty - config.gap_extension_penalty;
+                if (last_op == Cigar::INSERTION || last_op == Cigar::DELETION)
+                    score_track -= gap_diff;
 
                 score_track -= config.get_row(column->second.last_char)[query_view[i]];
-                assert(score_track <= prev_column->second.scores.at(i));
+                assert(prev_column->second.scores.at(i) >= score_track);
 
             } break;
             case Cigar::Operator::INSERTION: {
                 out_columns.emplace_back(column);
 
-                assert((gap_count && (score_track - config.gap_extension_penalty <= prev_column->second.gap_scores.at(i)))
-                    || (!gap_count && score_track - config.gap_opening_penalty <= prev_column->second.scores.at(i)));
+                assert(prev_column->second.scores.at(i)
+                        >= score_track - config.gap_extension_penalty - !gap_count * gap_diff);
 
                 score_track -= config.gap_extension_penalty;
 
@@ -229,8 +231,8 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
             case Cigar::Operator::DELETION: {
                 --i;
 
-                assert(score_track - config.gap_extension_penalty <= prev_column->second.scores.at(i)
-                    || score_track - config.gap_opening_penalty <= prev_column->second.scores.at(i));
+                assert(prev_column->second.scores.at(i)
+                        >= std::min(config.gap_opening_penalty, config.gap_extension_penalty));
 
                 score_track -= config.gap_extension_penalty;
 
@@ -254,10 +256,12 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
         prev_gap_node = column->second.gap_prev_nodes.at(i);
     }
 
-    const auto &score_col = op == Cigar::Operator::INSERTION ? column->second.gap_scores : column->second.scores;
+    const auto &score_col = op == Cigar::INSERTION
+        ? column->second.gap_scores
+        : column->second.scores;
 
-    if (last_op == Cigar::Operator::INSERTION || last_op == Cigar::Operator::DELETION)
-        score_track -= config.gap_opening_penalty - config.gap_extension_penalty;
+    if (last_op == Cigar::INSERTION || last_op == Cigar::DELETION)
+        score_track -= gap_diff;
 
     score_t correction = score_col.at(i) - score_track;
     assert(correction >= 0);
