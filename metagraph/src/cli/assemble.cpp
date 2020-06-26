@@ -128,6 +128,8 @@ int assemble(Config *config) {
             get_num_threads(),
             config->min_tip_size
         );
+
+        return 0;
     }
 
     if (config->unitigs || config->min_tip_size > 1) {
