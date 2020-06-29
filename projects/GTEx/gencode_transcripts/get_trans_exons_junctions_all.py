@@ -4,8 +4,8 @@ import scipy as sp
 genome_file = '/cluster/work/grlab/projects/metagenome/raw_data/ref_genomes/gencode_v30/GRCh38.p12.genome.fa'
 annotation = '/cluster/work/grlab/projects/metagenome/raw_data/ref_genomes/gencode_v30/gencode.v30.annotation.gtf' 
 
-trans_exons_out = '/cluster/work/grlab/projects/metagenome/data/gtex/queries/gencode.v30.trans_exons_all.fa'
-trans_exons_len_out = '/cluster/work/grlab/projects/metagenome/data/gtex/queries/gencode.v30.trans_exons_all.len.tsv'
+trans_exons_out = '/cluster/work/grlab/projects/metagenome/data/gtex/queries/trans_exons/gencode.v30.trans_exons_all.fa'
+trans_exons_len_out = '/cluster/work/grlab/projects/metagenome/data/gtex/queries/trans_exons/gencode.v30.trans_exons_all.len.tsv'
 
 K=41
 
