@@ -169,8 +169,8 @@ def write_log_header(log_file, operation, sra_id, required_ram_gb, available_ram
     free_ram_gb = psutil.virtual_memory().available / 1e9
     log_file.write(
         f'[{sra_id}] Starting {operation} on {util.internal_ip()}, required RAM {round(required_ram_gb, 2)}, free RAM '
-        f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB')
-    log_file.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{util.internal_ip()}/client.log"')
+        f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB\n')
+    log_file.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{util.internal_ip()}/client.log"\n')
 
 
 def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_gb, available_ram_gb):
@@ -291,6 +291,7 @@ def check_status():
     global must_quit
     if must_quit:
         return False
+    total_reserved_ram_gb = 0  # how much memory all active processes need
     completed_downloads = set()
     for sra_id, (download_process, start_time) in download_processes.items():
         return_code = download_process.poll()
@@ -358,11 +359,12 @@ def check_status():
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': sra_size_mb,
                           'download_size_mb': download_size_mb, 'kmc_size_mb': kmc_size_mb, 'exit_code': return_code}
                 nack('download', params)
+        else:
+            total_reserved_ram_gb += 2  # approximate 2GB of RAM for each download process (bc of KMC)
     for d in completed_downloads:
         del download_processes[d]
 
     completed_builds = set()
-    total_reserved_ram_gb = 0  # how much memory all active processes need
     used_cores = 0
     for sra_id, (build_process, start_time, wait_time, reserved_ram_gb) in build_processes.items():
         return_code = build_process.poll()
@@ -466,7 +468,7 @@ def check_status():
             # remove the old clean waiting and append the new one after
             build_path = build_dir(sra_id)
             build_size_gb = util.dir_size_MB(build_path) / 1e3
-            required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
+            required_ram_gb = max(build_size_gb * 2, build_size_gb + 1)
             if not_reserved_ram_gb > required_ram_gb:
                 logging.info(
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {not_reserved_ram_gb} GB')
