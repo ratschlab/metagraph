@@ -102,9 +102,7 @@ int build_graph(Config *config) {
             suffixes = kmer::KmerExtractorBOSS::generate_suffixes(config->suffix_len);
         }
 
-        BOSS::Chunk graph_data(kmer::KmerExtractorBOSS::alphabet.size(),
-                               boss_graph->get_k(),
-                               config->canonical);
+        std::unique_ptr<BOSS::Chunk> graph_data;
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -143,18 +141,24 @@ int build_graph(Config *config) {
             if (config->suffix.size())
                 return 0;
 
-            graph_data.extend(*next_chunk);
-            delete next_chunk;
+            if (graph_data) {
+                graph_data->extend(*next_chunk);
+                delete next_chunk;
+            } else {
+                graph_data.reset(next_chunk);
+            }
         }
+
+        assert(graph_data);
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
-            graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
+            graph_data->initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
             graph->add_extension(std::make_shared<NodeWeights>(std::move(kmer_counts)));
             assert(graph->get_extension<NodeWeights>()->is_compatible(*graph));
         } else {
-            graph_data.initialize_boss(boss_graph.get());
+            graph_data->initialize_boss(boss_graph.get());
             graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
         }
 
