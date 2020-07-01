@@ -126,7 +126,7 @@ def send_create_request(compute, project, zone, name, script_dir, server_host, n
     """ Send a request to creates a new instance with the given parameters """
     print(f'Creating instance {name} ...')
     # Get the metagraph Ubuntu 18.04 TLS image
-    image_response = compute.images().get(project='metagraph', image='mg-image-33').execute()
+    image_response = compute.images().get(project='metagraph', image='mg-image-40').execute()
     # image_response = compute.snapshots().get(project='metagraph', snapshot='metagraph7').execute()
     source_disk_image = image_response['selfLink']
 
@@ -255,7 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--project_id', default='metagraph', help='Google Cloud project ID.')
     parser.add_argument(
         '--zone',
-        default='us-east1-b',  # Belgium; this seems to be the cheapest in EU; 107USD/4vCPU instance/month
+        default='us-east1-b',
         help='Compute Engine zone to deploy to.')
     parser.add_argument(
         '--name', default='', help='Name (or prefix) of instances to perform the action on')
