@@ -11,8 +11,8 @@
 #  - the location where the graph will be placed
 
 # check the command-line arguments
-if [ "$#" -ne 5 ]; then
-	    echo_err "Usage: build.sh <sra_id> <input_dir> <output_dir> <memory_in_GB> <container_type"
+if [ "$#" -ne 6 ]; then
+	    echo_err "Usage: build.sh <sra_id> <input_dir> <output_dir> <memory_in_GB> <cores> <container_type>"
 	    exit 1
 fi
 
@@ -23,7 +23,8 @@ sra_id=$1
 download_dir=$2
 output_dir=$3
 mem_cap_gb=$4
-container_type=$5
+cores=$5
+container_type=$6
 input_dir="${download_dir}/kmc"
 
 mkdir -p "${output_dir}"
@@ -38,7 +39,7 @@ fi
 
 exit_code=0
 set +e
-if execute metagraph build -v -p 4 -k 31 --canonical --state small --count-kmers -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --disk-swap ${tmp_dir} --disk-cap-gb 400 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
+if execute metagraph build -v -p "$cores" -k 31 --canonical --state small --count-kmers -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --disk-swap ${tmp_dir} --disk-cap-gb 400 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
   exit_code=0
 else
   exit_code=1
@@ -51,7 +52,7 @@ fi
 execute rm -rf ${tmp_dir}
 mkdir -p "${tmp_dir}"
 
-execute metagraph stats -p 4 --count-dummy "${output_dir}/${sra_id}.dbg" | grep "edges" > "${output_dir}/${sra_id}.stats"
+execute metagraph stats -p "$cores" --count-dummy "${output_dir}/${sra_id}.dbg" | grep "edges" > "${output_dir}/${sra_id}.stats"
 
 execute rm -rf "${input_dir}"
 if (( exit_code == 0 )); then
