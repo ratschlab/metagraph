@@ -70,30 +70,28 @@ void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *d
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
                                  KMER_REAL(zeros, k + 1), // the AA...c->A k-mer
                                  [](const T_REAL &a, const KMER_REAL &b) -> bool {
-                                   return get_first(a) < b;
+                                     return get_first(a) < b;
                                  }) - kmers.data();
         max_it[c - 1] = it[c];
     }
     max_it[alphabet_size - 1] = kmers.size();
 
-    std::vector<KMER_REAL> last_dummy(alphabet_size, KMER_REAL(1));
+    std::vector<KMER_REAL> last_shifted(alphabet_size, KMER_REAL(1));
     size_t size = kmers.size();
     for (size_t i = 0; i < size; ++i) {
-        const KMER_REAL &kmer = get_first(kmers[i]);
+        TAlphabet last_char = get_first(kmers[i])[0];
+        KMER_REAL shifted = get_first(kmers[i]);
+        shifted.to_next(k + 1, 0);
 
-        KMER_REAL shifted = kmer;
-        shifted.to_next(k + 1, BOSS::kSentinelCode);
-
-        TAlphabet last_char = kmer[0];
         while (it[last_char] < max_it[last_char]
                 && KMER_REAL::less(get_first(kmers[it[last_char]]), shifted)) {
             it[last_char]++;
         }
-        if (last_dummy[last_char] != shifted
+        if (last_shifted[last_char] != shifted
             && (it[last_char] == max_it[last_char]
                 || !KMER_REAL::compare_suffix(get_first(kmers[it[last_char]]), shifted))) {
             dummy_kmers->emplace_back(kmer::transform<KMER>(shifted, k + 1) + kmer_delta);
-            last_dummy[last_char] = shifted;
+            last_shifted[last_char] = shifted;
         }
     }
 }
@@ -122,7 +120,9 @@ void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *d
  * being added to #dummy_kmers.
  */
 template <typename T_REAL, typename KMER>
-void add_dummy_source_kmers(size_t k, const Vector<T_REAL> kmers, Vector<KMER> *dummy_kmers) {
+void add_dummy_source_kmers(size_t k,
+                            const Vector<T_REAL> &kmers,
+                            Vector<KMER> *dummy_kmers) {
     using KMER_REAL = get_first_type_t<T_REAL>;
     using KMER_INT = typename KMER::WordType;
 
@@ -145,7 +145,7 @@ void add_dummy_source_kmers(size_t k, const Vector<T_REAL> kmers, Vector<KMER> *
             continue; // i would generate the same dummy-1 k-mer as i-1, skip
 
         KMER_REAL prev_kmer = kmer;
-        prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
+        prev_kmer.to_prev(k + 1, 0);
 
         while (real_it < kmers.size()
                 && KMER_REAL::less(get_first(kmers[real_it]), prev_kmer, 1)) {
@@ -201,47 +201,6 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
 }
 
-template <typename T>
-inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_code) {
-    if constexpr (utils::is_pair_v<T>) {
-        return T(kmer::reverse_complement(k, kmer.first, complement_code), kmer.second);
-    } else {
-        return kmer::reverse_complement(k, kmer, complement_code);
-    }
-}
-
-template <typename T>
-void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
-    logger->trace("Adding reverse-complement k-mers...");
-    size_t size = kmers->size();
-    if (size < 2) {
-        return;
-    }
-    // extra 20% for dummy kmers; better to waste some extra space now than to have a
-    // twice larger re-allocation after the reverse complements were added
-    kmers->reserve(2.4 * size);
-
-    T *kmer = kmers->data() + 1; // skip $$...$
-    const T *end = kmers->data() + size;
-    for( ; kmer != end; ++kmer) {
-        const T &rc = rev_comp(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
-        if (get_first(rc) != get_first(*kmer)) {
-            kmers->push_back(std::move(rc));
-        } else {
-            if constexpr (utils::is_pair_v<T>) {
-                using C = typename T::second_type;
-                if (kmer->second >> (sizeof(C) * 8 - 1)) {
-                    kmer->second = std::numeric_limits<C>::max();
-                } else {
-                    kmer->second *= 2;
-                }
-            }
-        }
-    }
-    logger->trace("Sorting all real kmers...");
-    ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
-}
-
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 /**
@@ -278,77 +237,77 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
 
     logger->trace("Total number of real k-mers: {}", kmers.size());
 
-    auto dummy_kmers = std::make_unique<Vector<KMER>>();
-    dummy_kmers->reserve(0.1 * kmers.size()); // usually, ~10-20% of k-mers are dummy
-    add_dummy_sink_kmers(k, kmers, dummy_kmers.get());
-    logger->trace("Added {} dummy sink k-mers", dummy_kmers->size());
+    Vector<KMER> dummy_kmers;
+    dummy_kmers.reserve(0.1 * kmers.size()); // usually, ~10-20% of k-mers are dummy
+    add_dummy_sink_kmers(k, kmers, &dummy_kmers);
+    logger->trace("Added {} dummy sink k-mers", dummy_kmers.size());
 
+    size_t dummy_source_begin = dummy_kmers.size();
+    add_dummy_source_kmers(k, kmers, &dummy_kmers);
 
-    size_t dummy_source_begin = dummy_kmers->size();
-    add_dummy_source_kmers(k, kmers, dummy_kmers.get());
-
-    ips4o::parallel::sort(dummy_kmers->begin() + dummy_source_begin, dummy_kmers->end(),
+    ips4o::parallel::sort(dummy_kmers.begin() + dummy_source_begin, dummy_kmers.end(),
                           utils::LessFirst(), num_threads);
 
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                  dummy_kmers->size() - dummy_source_begin);
+                  dummy_kmers.size() - dummy_source_begin);
 
     for (size_t c = 2; c < k + 1; ++c) {
-        size_t dummy_end = dummy_kmers->size();
+        size_t dummy_end = dummy_kmers.size();
 
         for (size_t i = dummy_source_begin; i < dummy_end; ++i) {
-            KMER kmer = (*dummy_kmers)[i];
-            if (i> 0 && KMER::compare_suffix(kmer, (*dummy_kmers)[i - 1]))
+            KMER kmer = dummy_kmers[i];
+            if (i> 0 && KMER::compare_suffix(kmer, dummy_kmers[i - 1]))
                 continue; // i would generate the same dummy source k-mer as i-1, skip
 
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
-            dummy_kmers->push_back(kmer);
+            dummy_kmers.push_back(kmer);
         }
         dummy_source_begin = dummy_end;
-        ips4o::parallel::sort(dummy_kmers->begin() + dummy_source_begin, dummy_kmers->end(),
+        ips4o::parallel::sort(dummy_kmers.begin() + dummy_source_begin, dummy_kmers.end(),
                               utils::LessFirst(), num_threads);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
-                      dummy_kmers->size() - dummy_source_begin);
+                      dummy_kmers.size() - dummy_source_begin);
     }
 
-    ips4o::parallel::sort(dummy_kmers->begin(), dummy_kmers->end(),
+    ips4o::parallel::sort(dummy_kmers.begin(), dummy_kmers.end(),
                           utils::LessFirst(), num_threads);
 
     // add the main dummy source k-mer
     if constexpr (utils::is_pair_v<T>) {
-        kmers_out->push({KMER(0), 0});
+        kmers_out->push({ KMER(0), 0 });
     } else {
         kmers_out->push(KMER(0));
     }
 
-    async_worker.enqueue([k, &kmers, dummy_kmers = std::move(dummy_kmers), kmers_out]() {
-      size_t di = 0;
-      const KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
-      for(const auto& kmer : kmers) {
-          KMER lifted = KMER(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
-          if constexpr (utils::is_pair_v<T>) {
-              while (di < dummy_kmers->size() && lifted > (*dummy_kmers)[di]) {
-                  kmers_out->push({(*dummy_kmers)[di], 0});
-                  di++;
-              }
-              kmers_out->push({lifted, kmer.second});
-          } else {
-              while (di < dummy_kmers->size() && lifted > (*dummy_kmers)[di]) {
-                  kmers_out->push((*dummy_kmers)[di]);
-                  di++;
-              }
-              kmers_out->push(lifted);
-          }
-      }
-      for (size_t i = di; i < dummy_kmers->size(); ++i) {
-          if constexpr (utils::is_pair_v<T>) {
-              kmers_out->push({ (*dummy_kmers)[i], 0 });
-          } else {
-              kmers_out->push((*dummy_kmers)[i]);
-          }
-      }
-      kmers_out->shutdown();
+    async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out]() {
+        // merge #kmers and #dummy_kmers into #kmers_out
+        size_t di = 0;
+        const KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+        for(const auto& kmer : kmers) {
+            KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
+            if constexpr (utils::is_pair_v<T>) {
+                while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
+                    kmers_out->push({ dummy_kmers[di], 0 });
+                    di++;
+                }
+                kmers_out->push({lifted, kmer.second});
+            } else {
+                while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
+                    kmers_out->push(dummy_kmers[di]);
+                    di++;
+                }
+                kmers_out->push(lifted);
+            }
+        }
+        for (size_t i = di; i < dummy_kmers.size(); ++i) {
+            if constexpr (utils::is_pair_v<T>) {
+                kmers_out->push({ dummy_kmers[i], 0 });
+            } else {
+                kmers_out->push(dummy_kmers[i]);
+            }
+        }
+        kmers_out->shutdown();
     });
 }
 
@@ -798,8 +757,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
-        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
-            && !filter_suffix.empty()) {
+        if (filter_suffix.size()
+                && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
@@ -826,7 +785,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
         if constexpr(std::is_same_v<typename KmerCollector::Extractor,
                                     KmerExtractorBOSS>) {
-
             assert(kmer_collector_.suffix_length());
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
@@ -841,15 +799,16 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
+
 #define INIT_CHUNK(KMER) \
-            ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
-            recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_); \
-            logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
-            result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
-                                     kmer_collector_.get_k() - 1, \
-                                     kmer_collector_.is_both_strands_mode(), \
-                                     queue, \
-                                     bits_per_count_)
+    ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
+    recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_); \
+    logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
+    result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
+                             kmer_collector_.get_k() - 1, \
+                             kmer_collector_.is_both_strands_mode(), \
+                             queue, \
+                             bits_per_count_)
 
             if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
                 INIT_CHUNK(KmerExtractorBOSS::Kmer64);
@@ -887,32 +846,33 @@ initialize_boss_chunk_constructor(size_t k,
         exit(1);
     }
 
-#define boss_all_args k, canonical_mode, bits_per_count, filter_suffix, args...
+#define ARGS k, canonical_mode, bits_per_count, filter_suffix, args...
+
     // collect real k-mers in tight layout only if suffix is empty
     if (filter_suffix.empty()) {
         if ((k + 1) * KmerExtractor2Bit::bits_per_char <= 64) {
             using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS64, KmerExtractor2Bit>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else if ((k + 1) * KmerExtractor2Bit::bits_per_char <= 128) {
             using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS128, KmerExtractor2Bit>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else {
             using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS256, KmerExtractor2Bit>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         }
     } else {
         if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 64) {
             using Container = KmerContainer<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 128) {
             using Container = KmerContainer<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         } else {
             using Container = KmerContainer<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS>;
-            return std::make_unique<BOSSChunkConstructor<Container>>(boss_all_args);
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         }
     }
 }
