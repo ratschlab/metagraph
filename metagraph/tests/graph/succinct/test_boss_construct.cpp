@@ -315,7 +315,7 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
             boss_dynamic.add_sequence(std::string(100, 'T') + "A"
                                             + std::string(100, 'G'));
 
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
                 std::unique_ptr<BOSS::Chunk> graph_data;
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
@@ -357,7 +357,7 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
             boss_dynamic.add_sequence(std::string(100, 'T') + "A"
                                             + std::string(100, 'G'));
 
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
                 std::unique_ptr<BOSS::Chunk> graph_data;
 
                 for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
