@@ -280,7 +280,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
-    async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out]() {
+    async_worker.enqueue([k, &kmers, dummy_kmers = std::move(dummy_kmers), kmers_out]() {
         // merge #kmers and #dummy_kmers into #kmers_out
         size_t di = 0;
         const KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
