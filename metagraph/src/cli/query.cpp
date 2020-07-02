@@ -119,9 +119,9 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         // shortcut construction for Rainbow<> annotation
         std::vector<uint64_t> row_indexes;
         row_indexes.reserve(index_in_full.size());
-        for (uint64_t i = 0; i < index_in_full.size(); ++i) {
-            if (index_in_full[i] != npos) {
-                row_indexes.push_back(index_in_full[i]);
+        for (uint64_t i : index_in_full) {
+            if (i != npos) {
+                row_indexes.push_back(i);
             } else {
                 row_indexes.push_back(0);
             }
@@ -137,7 +137,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // if the 0-th row is not empty, we must insert an empty unique row
         // and reassign those indexes pointing to npos in |index_in_full|.
-        if (full_annotation.get_matrix().get_row(0).size()) {
+        if (rb->get_row(0).size()) {
             logger->trace("Add empty row");
             unique_rows.emplace_back();
             for (uint64_t i = 0; i < index_in_full.size(); ++i) {

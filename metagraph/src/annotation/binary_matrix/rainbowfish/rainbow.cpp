@@ -98,7 +98,7 @@ Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t i = 0; i < unique_row_codes.size(); i += batch_size) {
         std::vector<uint64_t> indexes(unique_row_codes.begin() + i,
-                                      std::min(unique_row_codes.begin() + batch_size,
+                                      std::min(unique_row_codes.begin() + i + batch_size,
                                                unique_row_codes.end()));
         auto rows = reduced_matrix_.get_rows(indexes);
         for (size_t j = 0; j < rows.size(); ++j) {
