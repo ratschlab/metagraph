@@ -222,7 +222,7 @@ int align_to_graph(Config *config) {
         dbg->reset_mask();
 
     Timer timer;
-    ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1);
+    ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
     if (config->map_sequences) {
@@ -275,7 +275,7 @@ int align_to_graph(Config *config) {
             thread_pool.enqueue([&](const std::string &query, const std::string &header) {
                 auto paths = aligner->align(query);
 
-                std::unique_lock<std::mutex> lock(print_mutex);
+                std::lock_guard<std::mutex> lock(print_mutex);
                 if (!config->output_json) {
                     for (const auto &path : paths) {
                         const auto& path_query = path.get_orientation()

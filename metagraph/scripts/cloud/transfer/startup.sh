@@ -38,39 +38,40 @@ function get_chunk {
 
 # make sure subprocesses are killed on exit
 function start() {
-if (( "$#" == 2 )); then
-  echo "Using command line parameters."
-  num_instances=$1
-  current_instance=$2
-else
-  if (( "$#" != 0 )); then
-          echo "Usage: dbg.sh [<chunk_count> <current_chunk>]"
-          exit 1
+  if (( "$#" == 2 )); then
+    echo "Using command line parameters."
+    num_instances=$1
+    current_instance=$2
+  else
+    if (( "$#" != 0 )); then
+            echo "Usage: dbg.sh [<chunk_count> <current_chunk>]"
+            exit 1
+    fi
+    echo "No parameters specified, assuming Google Cloud Instance. Retrieving params from the cloud."
+    curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" > /tmp/instance_id
+    curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/num_instances -H "Metadata-Flavor: Google" > /tmp/num_instances
+    num_instances=$(cat /tmp/num_instances)
+    current_instance=$(cat /tmp/instance_id)
   fi
-  echo "No parameters specified, assuming Google Cloud Instance. Retrieving params from the cloud."
-  curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance_id -H "Metadata-Flavor: Google" > /tmp/instance_id
-  curl http://metadata.google.internal/computeMetadata/v1/instance/attributes/num_instances -H "Metadata-Flavor: Google" > /tmp/num_instances
-  num_instances=$(cat /tmp/num_instances)
-  current_instance=$(cat /tmp/instance_id)
-fi
-PATH=$PATH:/snap/bin:/usr/local/bin
-gsutil cp gs://mg36/files /tmp
-echo "Getting chunk $current_instance out of $num_instances"
-get_chunk /tmp/files $num_instances $current_instance
-cd /tmp
-rm -rf /tmp/sync
-mkdir /tmp/sync
-cat $INPUT_CHUNK_FILE | gsutil -m cp -r -I  /tmp/sync/
+  PATH=$PATH:/snap/bin:/usr/local/bin
+  gsutil cp gs://mg38/files /tmp
+  echo "Getting chunk $current_instance out of $num_instances"
+  get_chunk /tmp/files $num_instances $current_instance
+  cd /tmp
+  rm -rf /tmp/sync
+  mkdir /tmp/sync
+  # copy  data from Google Storage to a local directory
+  cat $INPUT_CHUNK_FILE | gsutil -m cp -r -I  /tmp/sync/
+  # leomed:/cluster/work/grlab/projects/metagenome/data/cloudcompute
+  rsync -avzm --stats --safe-links --ignore-existing --dry-run --human-readable /tmp/sync/ hex:/cluster/project/raetsch/lab/01/projects/metagraph > /tmp/transfer.log
+  sed -i 1d /tmp/transfer.log
+  head -n -17 /tmp/transfer.log > /tmp/transf.log
 
-rsync -azm --info=name --stats --safe-links --ignore-existing --dry-run --human-readable /tmp/sync/ leomed:/cluster/work/grlab/projects/metagenome/data/cloudcompute > /tmp/transfer.log
-sed -i 1d /tmp/transfer.log
-head -n -17 /tmp/transfer.log > /tmp/transf.log
-
-lines=$(( wc -l ))
-echo "Transferring $lines files"
-rm -rf /tmp/transfers*
-split -l 100 /tmp/transf.log /tmp/transfers
-ls /tmp/transfers* | parallel --line-buffer --verbose -j 5 rsync --progress -av -r --files-from {} /tmp/sync/ leomed:/cluster/work/grlab/projects/metagenome/data/cloudcompute
+  lines=$(( wc -l ))
+  echo "Transferring $lines files"
+  rm -rf /tmp/transfers*
+  split -l 100 /tmp/transf.log /tmp/transfers
+  ls /tmp/transfers* | parallel --line-buffer --verbose -j 5 rsync --progress -av -r --files-from {} /tmp/sync/ hex:/cluster/project/raetsch/lab/01/projects/metagraph
 }
 
 export -f start
