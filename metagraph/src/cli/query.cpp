@@ -117,7 +117,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
     if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
         // shortcut construction for Rainbow<> annotation
-        std::vector<uint64_t> row_indexes(index_in_full.size());
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(index_in_full.size());
         for (uint64_t i = 0; i < index_in_full.size(); ++i) {
             if (index_in_full[i] != npos) {
                 row_indexes.push_back(index_in_full[i]);
