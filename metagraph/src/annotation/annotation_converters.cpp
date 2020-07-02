@@ -389,16 +389,16 @@ void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
 
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 
-std::vector<uint32_t>
+std::vector<uint64_t>
 get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
                 size_t num_columns) {
-    std::vector<uint32_t> row_classes;
+    std::vector<uint64_t> row_classes;
     uint64_t max_class = 0;
 
     ProgressBar progress_bar(num_columns, "Columns iterated",
                              std::cerr, !common::get_verbose());
 
-    tsl::hopscotch_map<uint32_t, uint32_t> new_class;
+    tsl::hopscotch_map<uint64_t, uint64_t> new_class;
 
     call_columns([&](const auto &col_ptr) {
         new_class.clear();
@@ -421,13 +421,13 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
             #pragma omp critical
             {
                 for (uint64_t i : pos) {
-                    uint32_t &row_class = row_classes[i];
+                    uint64_t &row_class = row_classes[i];
 
                     auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
                     if (inserted) {
                         ++max_class;
 
-                        if (max_class == std::numeric_limits<uint32_t>::max()) {
+                        if (max_class == std::numeric_limits<uint64_t>::max()) {
                             logger->error("Too many distinct rows");
                             exit(1);
                         }
@@ -457,15 +457,15 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
         return std::make_unique<Rainbow<BRWT>>();
 
     logger->trace("Identifying unique rows");
-    std::vector<uint32_t> row_classes = get_row_classes(call_columns, num_columns);
+    std::vector<uint64_t> row_classes = get_row_classes(call_columns, num_columns);
 
-    VectorMap<uint32_t /* class */,
+    VectorMap<uint64_t /* class */,
               uint64_t /* count */,
-              uint32_t /* index type */> row_counter;
+              uint64_t /* index type */> row_counter;
     {
         ProgressBar progress_bar(row_classes.size(), "Counting row classes",
                                  std::cerr, !common::get_verbose());
-        for (uint32_t row_class : row_classes) {
+        for (uint64_t row_class : row_classes) {
             row_counter[row_class]++;
             ++progress_bar;
         }
@@ -473,7 +473,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
     logger->trace("Number of unique rows: {}", row_counter.size());
 
-    auto &pairs = const_cast<std::vector<std::pair<uint32_t, uint64_t>>&>(
+    auto &pairs = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
                     row_counter.values_container());
 
     ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
@@ -498,8 +498,8 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
         logger->trace("<Row multiplicity: num unique rows>: {}", mult_log_message.str());
     }
 
-    tsl::hopscotch_map<uint32_t, uint32_t> class_to_code;
-    for (uint32_t i = 0; i < pairs.size(); ++i) {
+    tsl::hopscotch_map<uint64_t, uint64_t> class_to_code;
+    for (size_t i = 0; i < pairs.size(); ++i) {
         class_to_code.emplace(pairs[i].first, i);
     }
 
@@ -508,7 +508,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
     uint64_t total_code_length = 0;
     for (size_t i = 0; i < row_classes.size(); ++i) {
-        uint32_t row_code = class_to_code[row_classes[i]];
+        uint64_t row_code = class_to_code[row_classes[i]];
         row_classes[i] = row_code;
         row_pointers[row_code] = i;
         total_code_length += sdsl::bits::hi(row_code) + 1;
@@ -541,7 +541,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     sdsl::bit_vector boundary_bv(total_code_length, false);
 
     uint64_t pos = 0;
-    for (uint32_t code : row_classes) {
+    for (uint64_t code : row_classes) {
         uint8_t code_length = sdsl::bits::hi(code) + 1;
         code_bv.set_int(pos, code, code_length);
         boundary_bv[pos + code_length - 1] = true;
