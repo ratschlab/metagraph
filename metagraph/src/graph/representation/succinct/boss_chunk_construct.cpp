@@ -238,7 +238,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     logger->trace("Total number of real k-mers: {}", kmers.size());
 
     Vector<KMER> dummy_kmers;
-    dummy_kmers.reserve(0.1 * kmers.size()); // usually, ~10-20% of k-mers are dummy
+    dummy_kmers.reserve(0.2 * kmers.size()); // usually, ~10-20% of k-mers are dummy
     add_dummy_sink_kmers(k, kmers, &dummy_kmers);
     logger->trace("Added {} dummy sink k-mers", dummy_kmers.size());
 
