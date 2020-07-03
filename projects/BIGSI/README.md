@@ -275,6 +275,21 @@ for i in {33..1}; do
                 --parallel 20 \
                 2>&1"; \
 done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "to_rbbrwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rbbrwt_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=$((14 * N / 9 + 1000))] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+                --anno-type rb_brwt --greedy \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.column.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
 ```
 
 ## Query graph

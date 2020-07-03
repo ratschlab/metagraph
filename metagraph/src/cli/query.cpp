@@ -115,6 +115,48 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads) {
     const uint64_t npos = -1;
 
+    if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
+        // shortcut construction for Rainbow<> annotation
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(index_in_full.size());
+        for (uint64_t i : index_in_full) {
+            if (i != npos) {
+                row_indexes.push_back(i);
+            } else {
+                row_indexes.push_back(0);
+            }
+        }
+
+        // get unique rows and set pointers to them in |row_indexes|
+        auto unique_rows = rb->get_rows(&row_indexes, num_threads);
+
+        if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("There must be less than 2^32 unique rows."
+                                     " Reduce the query batch size.");
+        }
+
+        // if the 0-th row is not empty, we must insert an empty unique row
+        // and reassign those indexes pointing to npos in |index_in_full|.
+        if (rb->get_row(0).size()) {
+            logger->trace("Add empty row");
+            unique_rows.emplace_back();
+            for (uint64_t i = 0; i < index_in_full.size(); ++i) {
+                if (index_in_full[i] == npos) {
+                    row_indexes[i] = unique_rows.size() - 1;
+                }
+            }
+        }
+
+        // copy annotations from the full graph to the query graph
+        return std::make_unique<annotate::UniqueRowAnnotator>(
+            std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
+                                              std::vector<uint32_t>(row_indexes.begin(),
+                                                                    row_indexes.end()),
+                                              full_annotation.num_labels()),
+            full_annotation.get_label_encoder()
+        );
+    }
+
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
     for (uint64_t i = 0; i < index_in_full.size(); ++i) {
@@ -125,13 +167,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     ips4o::parallel::sort(from_full_to_small.begin(), from_full_to_small.end(),
                           utils::LessFirst(), num_threads);
 
-    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
+    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
                                     utils::VectorHash,
-                                    std::equal_to<SmallVector<uint32_t>>,
-                                    std::allocator<SmallVector<uint32_t>>,
-                                    std::vector<SmallVector<uint32_t>>,
+                                    std::equal_to<BinaryMatrix::SetBitPositions>,
+                                    std::allocator<BinaryMatrix::SetBitPositions>,
+                                    std::vector<BinaryMatrix::SetBitPositions>,
                                     uint32_t>;
-    RowSet unique_rows { SmallVector<uint32_t>() };
+    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
     std::vector<uint32_t> row_rank(index_in_full.size(), 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -158,7 +200,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         {
             for (uint64_t i = batch_begin; i < batch_end; ++i) {
                 const auto &row = rows[i - batch_begin];
-                auto it = unique_rows.emplace(row.begin(), row.end()).first;
+                auto it = unique_rows.emplace(row).first;
                 row_rank[from_full_to_small[i].second] = it - unique_rows.begin();
                 if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
                     throw std::runtime_error("There must be less than 2^32 unique rows."
@@ -167,7 +209,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
     }
 
-    auto &annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&>(
+    auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
         unique_rows.values_container()
     );
 

@@ -8,11 +8,9 @@
 
 class UniqueRowBinmat : public BinaryMatrix {
   public:
-    typedef SmallVector<uint32_t> row_type;
-
     explicit UniqueRowBinmat(uint64_t num_rows = 0);
 
-    UniqueRowBinmat(std::vector<row_type>&& unique_rows,
+    UniqueRowBinmat(std::vector<SetBitPositions>&& unique_rows,
                     std::vector<uint32_t>&& row_rank,
                     uint32_t num_columns);
 
@@ -38,7 +36,7 @@ class UniqueRowBinmat : public BinaryMatrix {
   private:
     uint32_t num_columns_ = 0;
     uint32_t num_relations_ = 0;
-    std::vector<row_type> unique_rows_;
+    std::vector<SetBitPositions> unique_rows_;
     std::vector<uint32_t> row_rank_;
 };
 

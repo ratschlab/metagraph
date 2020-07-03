@@ -152,4 +152,6 @@ template class StaticBinRelAnnotator<BinRelWT, std::string>;
 
 template class StaticBinRelAnnotator<UniqueRowBinmat, std::string>;
 
+template class StaticBinRelAnnotator<Rainbow<BRWT>, std::string>;
+
 } // namespace annotate

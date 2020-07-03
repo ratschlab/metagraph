@@ -106,6 +106,14 @@ class GreaterFirst {
     }
 };
 
+class GreaterSecond {
+  public:
+    template <typename T>
+    bool operator()(const T &p1, const T &p2) const {
+        return get_second(p1) > get_second(p2);
+    }
+};
+
 struct LessFirst {
     template <typename T>
     bool operator()(const T &p1, const T &p2) const {
