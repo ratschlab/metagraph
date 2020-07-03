@@ -81,7 +81,7 @@ class Config {
     // unsigned int row_cache_size = 0;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
-    unsigned int fallback_abundance_cutoff = 1;
+    int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
