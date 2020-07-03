@@ -7,6 +7,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 template <typename RowType = SmallVector<uint32_t>>
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
   public:
@@ -45,5 +49,9 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     uint64_t num_columns_ = 0;
     std::vector<RowType> vector_;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

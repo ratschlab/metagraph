@@ -51,7 +51,7 @@ void AnnotatedSequenceGraph
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (force_fast_) {
-        auto row_major = dynamic_cast<annotate::RowCompressed<std::string>*>(annotator_.get());
+        auto row_major = dynamic_cast<anno::RowCompressed<std::string>*>(annotator_.get());
         if (row_major) {
             row_major->add_labels_fast(indices, labels);
             return;

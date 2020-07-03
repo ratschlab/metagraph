@@ -10,17 +10,18 @@
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
-namespace annotate {
+namespace mtg {
+namespace anno {
 
-typedef StaticBinRelAnnotator<RowConcatenated<>, std::string> RowFlatAnnotator;
+typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnnotator;
 
-typedef StaticBinRelAnnotator<Rainbowfish, std::string> RainbowfishAnnotator;
+typedef StaticBinRelAnnotator<binmat::Rainbowfish, std::string> RainbowfishAnnotator;
 
-typedef StaticBinRelAnnotator<BRWT, std::string> MultiBRWTAnnotator;
+typedef StaticBinRelAnnotator<binmat::BRWT, std::string> MultiBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
+typedef StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
 
-typedef StaticBinRelAnnotator<BinRelWT, std::string> BinRelWTAnnotator;
+typedef StaticBinRelAnnotator<binmat::BinRelWT, std::string> BinRelWTAnnotator;
 
 typedef StaticBinRelAnnotator<UniqueRowBinmat, std::string> UniqueRowAnnotator;
 
@@ -42,6 +43,7 @@ inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg
 
 #endif // __STATIC_ANNOTATOR_DEFS_HPP__

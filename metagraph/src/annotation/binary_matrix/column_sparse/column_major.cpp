@@ -4,6 +4,10 @@
 #include "common/serialization.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
       : data_(std::move(columns)) {}
 
@@ -121,3 +125,7 @@ uint64_t ColumnMajor::num_relations() const {
     }
     return num_set_bits;
 }
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg

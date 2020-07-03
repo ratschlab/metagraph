@@ -7,6 +7,10 @@
 #include "common/serialization.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());
     assert(column < num_columns());
@@ -364,3 +368,7 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
         nodes_queue.pop();
     }
 }
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg

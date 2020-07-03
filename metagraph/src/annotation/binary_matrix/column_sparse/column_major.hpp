@@ -7,6 +7,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
@@ -41,5 +45,9 @@ class ColumnMajor : public BinaryMatrix {
     std::vector<std::unique_ptr<bit_vector>> data_;
     const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __COLUMN_MAJOR_HPP__

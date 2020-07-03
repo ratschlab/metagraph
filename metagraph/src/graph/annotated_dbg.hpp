@@ -10,10 +10,12 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 
+using namespace mtg;
+
 
 class AnnotatedSequenceGraph {
   public:
-    typedef annotate::MultiLabelEncoded<std::string> Annotator;
+    typedef anno::MultiLabelEncoded<std::string> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -62,7 +64,7 @@ class AnnotatedSequenceGraph {
 
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
-    typedef annotate::MultiLabelEncoded<std::string> Annotator;
+    typedef anno::MultiLabelEncoded<std::string> Annotator;
     using node_index = DeBruijnGraph::node_index;
     using row_index = Annotator::Index;
 

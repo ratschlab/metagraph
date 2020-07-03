@@ -259,22 +259,22 @@ int transform_annotation(Config *config) {
 
         switch (config->anno_type) {
             case Config::RowFlat: {
-                auto annotator = annotate::convert<RowFlatAnnotator>(files.at(0));
+                auto annotator = anno::convert<RowFlatAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::RBFish: {
-                auto annotator = annotate::convert<RainbowfishAnnotator>(files.at(0));
+                auto annotator = anno::convert<RainbowfishAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                auto annotator = annotate::convert<BinRelWT_sdslAnnotator>(files.at(0));
+                auto annotator = anno::convert<BinRelWT_sdslAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT: {
-                auto annotator = annotate::convert<BinRelWTAnnotator>(files.at(0));
+                auto annotator = anno::convert<BinRelWTAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
@@ -475,7 +475,7 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    auto annotator = std::make_unique<annotate::MultiBRWTAnnotator>();
+    auto annotator = std::make_unique<anno::MultiBRWTAnnotator>();
 
     logger->trace("Loading annotator...");
 
@@ -487,9 +487,9 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    annotate::relax_BRWT<annotate::MultiBRWTAnnotator>(annotator.get(),
-                                                       config->relax_arity_brwt,
-                                                       get_num_threads());
+    anno::relax_BRWT<anno::MultiBRWTAnnotator>(annotator.get(),
+                                               config->relax_arity_brwt,
+                                               get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

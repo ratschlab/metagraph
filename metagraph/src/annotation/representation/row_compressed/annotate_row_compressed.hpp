@@ -6,7 +6,11 @@
 #include "annotation/representation/base/annotation.hpp"
 
 
-namespace annotate {
+namespace mtg {
+namespace anno {
+
+using mtg::anno::binmat::BinaryMatrix;
+using mtg::anno::binmat::BinaryMatrixRowDynamic;
 
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
@@ -53,7 +57,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(const std::string &filename);
 
-    static StreamRows<BinaryMatrix::SetBitPositions>
+    static binmat::StreamRows<BinaryMatrix::SetBitPositions>
     get_row_streamer(const std::string &filename);
 
     /*****************************************************************/
@@ -73,6 +77,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     load_label_encoder(std::istream &instream);
 };
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg
 
 #endif // __ANNOTATE_ROW_COMPRESSED_HPP__

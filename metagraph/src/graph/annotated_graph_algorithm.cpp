@@ -146,7 +146,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                              anno_graph.get_graph().max_index() + 1,
                                              0);
 
-    const auto *columns = dynamic_cast<const annotate::ColumnCompressed<>*>(
+    const auto *columns = dynamic_cast<const anno::ColumnCompressed<>*>(
         &anno_graph.get_annotation()
     );
 

@@ -14,6 +14,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                          uint64_t num_columns,
                          uint64_t buffer_size)
@@ -297,3 +301,7 @@ void Rainbowfish::serialize(std::ostream &out) const {
 uint64_t Rainbowfish::num_relations() const {
     return num_relations_;
 }
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg

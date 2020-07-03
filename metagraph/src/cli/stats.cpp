@@ -21,7 +21,7 @@ namespace cli {
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef annotate::MultiLabelEncoded<std::string> Annotator;
+typedef anno::MultiLabelEncoded<std::string> Annotator;
 
 
 void print_boss_stats(const BOSS &boss_graph,
@@ -146,7 +146,15 @@ void print_stats(const Annotator &annotation) {
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
     }
 
-    if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
+    if (dynamic_cast<const anno::ColumnCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::ColumnCompressed) << std::endl;
+
+    } else if (dynamic_cast<const anno::RowCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
+
+    } else if (dynamic_cast<const anno::MultiBRWTAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
+        const auto &brwt = dynamic_cast<const anno::MultiBRWTAnnotator &>(annotation).get_matrix();
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt->num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt->avg_arity() << std::endl;
@@ -155,6 +163,23 @@ void print_stats(const Annotator &annotation) {
             std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
             brwt->print_tree_structure(std::cout);
         }
+
+    } else if (dynamic_cast<const anno::BinRelWT_sdslAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
+
+    } else if (dynamic_cast<const anno::BinRelWTAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT) << std::endl;
+
+    } else if (dynamic_cast<const anno::RowFlatAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowFlat) << std::endl;
+
+    } else if (dynamic_cast<const anno::RainbowfishAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RBFish) << std::endl;
+
+    } else {
+        assert(false);
+        throw std::runtime_error("Unknown annotator");
+>>>>>>> Stashed changes
     }
 
     std::cout << "========================================================" << std::endl;
@@ -199,7 +224,7 @@ int print_stats(Config *config) {
         auto annotation = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
-            annotate::LabelEncoder<std::string> label_encoder;
+            anno::LabelEncoder<std::string> label_encoder;
 
             logger->info("Scanning annotation '{}'", file);
 
@@ -207,7 +232,7 @@ int print_stats(Config *config) {
                 std::ifstream instream(file, std::ios::binary);
 
                 // TODO: make this more reliable
-                if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                if (dynamic_cast<const anno::ColumnCompressed<> *>(annotation.get())) {
                     // Column compressed dumps the number of rows first
                     // skipping it...
                     load_number(instream);

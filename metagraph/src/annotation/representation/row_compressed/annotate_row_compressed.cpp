@@ -10,10 +10,15 @@
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "annotation/binary_matrix/row_vector/eigen_spmat.hpp"
 
+
+namespace mtg {
+namespace anno {
+
 using utils::remove_suffix;
-
-
-namespace annotate {
+using mtg::anno::binmat::BinaryMatrix;
+using mtg::anno::binmat::StreamRows;
+using mtg::anno::binmat::EigenSpMat;
+using mtg::anno::binmat::VectorRowBinMat;
 
 
 template <typename Label>
@@ -297,9 +302,10 @@ void RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    append_row_major(filename, call_rows, label_encoder.size());
+    binmat::append_row_major(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg

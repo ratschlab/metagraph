@@ -7,6 +7,11 @@
 
 class bit_vector;
 
+
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 class BinRelWT : public BinaryMatrix {
   public:
     BinRelWT() {}
@@ -39,5 +44,9 @@ class BinRelWT : public BinaryMatrix {
     uint64_t max_used_object = 0;
     uint64_t num_objects = 0;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __BIN_REL_WT_HPP__

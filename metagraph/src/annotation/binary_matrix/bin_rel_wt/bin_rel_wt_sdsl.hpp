@@ -7,6 +7,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 class BinRelWT_sdsl : public BinaryMatrix {
   public:
     BinRelWT_sdsl() : delimiters_(1, 1) {};
@@ -33,5 +37,9 @@ class BinRelWT_sdsl : public BinaryMatrix {
     bit_vector_rrr<> delimiters_;
     uint64_t num_columns_ = 0;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __BIN_REL_WT_SDSL_HPP__

@@ -12,7 +12,11 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
 
-namespace annotate {
+namespace mtg {
+namespace anno {
+
+using mtg::anno::binmat::ColumnMajor;
+
 
 /**
  * Multithreading:
@@ -105,6 +109,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using MultiLabelEncoded<Label>::label_encoder_;
 };
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg
 
 #endif // __ANNOTATE_COLUMN_COMPRESSED_HPP__

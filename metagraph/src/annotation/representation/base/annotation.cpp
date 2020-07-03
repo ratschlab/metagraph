@@ -5,11 +5,13 @@
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 
+
+namespace mtg {
+namespace anno {
+
 using libmaus2::util::StringSerialisation;
 using mtg::common::logger;
 
-
-namespace annotate {
 
 template <typename Label>
 size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
@@ -171,4 +173,5 @@ template class MultiLabelEncoded<std::string>;
 
 template class LabelEncoder<std::string>;
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg

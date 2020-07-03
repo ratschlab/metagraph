@@ -6,6 +6,11 @@
 #include "common/serialization.hpp"
 #include "common/vectors/bit_vector.hpp"
 
+
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;
 
@@ -209,3 +214,7 @@ void BinRelWT::serialize(std::ostream &out) const {
 uint64_t BinRelWT::num_relations() const {
     return binary_relation_.size();
 }
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg

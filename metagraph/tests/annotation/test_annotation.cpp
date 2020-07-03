@@ -100,7 +100,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
 }
 
 TYPED_TEST(AnnotatorTest, GetLabelsOneRow) {
-    annotate::ColumnCompressed<> column_annotator(5);
+    anno::ColumnCompressed<> column_annotator(5);
     column_annotator.add_labels({ 0 }, {"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"});
     this->set(std::move(column_annotator));
     EXPECT_EQ(convert_to_set({"Label 0", "Label 1", "Label 2", "Label 3", "Label 4"}),
@@ -112,7 +112,7 @@ TYPED_TEST(AnnotatorPresetTest, NumObjects) {
 }
 
 TYPED_TEST(AnnotatorStaticTest, NumLabelsOneEmptyRow) {
-    annotate::ColumnCompressed<> column_annotator(5);
+    anno::ColumnCompressed<> column_annotator(5);
     column_annotator.add_labels({ 0 }, {});
     this->set(std::move(column_annotator));
     EXPECT_EQ(0u, this->annotation->num_labels());
@@ -121,7 +121,7 @@ TYPED_TEST(AnnotatorStaticTest, NumLabelsOneEmptyRow) {
 }
 
 TYPED_TEST(AnnotatorTest, NumLabelsOneRow) {
-    annotate::ColumnCompressed<> column_annotator(5);
+    anno::ColumnCompressed<> column_annotator(5);
     column_annotator.add_labels({0}, {"Label 0", "Label 1", "Label 2",
                                       "Label 3", "Label 4"});
     this->set(std::move(column_annotator));
@@ -629,7 +629,7 @@ TYPED_TEST(AnnotatorPreset2Test, SwapColumns) {
 }
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
-    annotate::ColumnCompressed<> column_annotator(5);
+    anno::ColumnCompressed<> column_annotator(5);
     column_annotator.set(0, { "Label0", "Label2", "Label8" });
     column_annotator.set(2, { "Label1", "Label2" });
     column_annotator.set(4, { "Label8" });
@@ -643,7 +643,7 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
 }
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
-    annotate::ColumnCompressed<> column_annotator(5);
+    anno::ColumnCompressed<> column_annotator(5);
     column_annotator.set(0, { "Label0", "Label2", "Label8" });
     column_annotator.set(2, { "Label1", "Label2" });
     column_annotator.set(4, { "Label8" });
@@ -663,7 +663,7 @@ TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
     size_t num_rows = 20000;
     size_t num_columns = 200;
     BitVectorPtrArray columns, copy;
-    annotate::LabelEncoder label_encoder;
+    anno::LabelEncoder label_encoder;
 
     DataGenerator random_generator;
 
@@ -703,7 +703,7 @@ TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
     size_t num_rows = 2000000;
     size_t num_columns = 200;
     BitVectorPtrArray columns, copy;
-    annotate::LabelEncoder label_encoder;
+    anno::LabelEncoder label_encoder;
 
     DataGenerator random_generator;
 

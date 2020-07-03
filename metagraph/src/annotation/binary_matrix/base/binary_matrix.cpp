@@ -3,6 +3,10 @@
 #include "common/serialization.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
@@ -104,3 +108,7 @@ void append_row_major(const std::string &filename,
     outstream.seekp(header_offs);
     serialize_number(outstream, num_rows);
 }
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg

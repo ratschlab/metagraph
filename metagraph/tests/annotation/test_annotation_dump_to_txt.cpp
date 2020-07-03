@@ -18,14 +18,14 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_matrix";
 template <typename Annotator>
 class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
-typedef ::testing::Types<annotate::BinRelWTAnnotator,
-                         annotate::BinRelWT_sdslAnnotator,
-                         annotate::RbBRWTAnnotator,
-                         annotate::MultiBRWTAnnotator,
-                         annotate::RainbowfishAnnotator,
-                         annotate::RowFlatAnnotator,
-                         annotate::UniqueRowAnnotator,
-                         annotate::ColumnCompressed<>> AnnotatorDumpTestTypes;
+typedef ::testing::Types<anno::BinRelWTAnnotator,
+                         anno::BinRelWT_sdslAnnotator,
+                         anno::RbBRWTAnnotator,
+                         anno::MultiBRWTAnnotator,
+                         anno::RainbowfishAnnotator,
+                         anno::RowFlatAnnotator,
+                         anno::UniqueRowAnnotator,
+                         anno::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
 TYPED_TEST_SUITE(AnnotatorPresetDumpTest, AnnotatorDumpTestTypes);
 
@@ -35,7 +35,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
 
     ASSERT_TRUE(this->annotation->dump_columns(test_dump_basename_vec_good));
 
-    annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
+    anno::ColumnCompressed<> loaded(this->annotation->num_objects());
 
     std::vector<std::string> labels;
     const auto& label_encoder = this->annotation->get_label_encoder();
@@ -66,7 +66,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextEmpty) {
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
     ASSERT_TRUE(this->annotation->dump_columns(test_dump_basename_vec_good));
 
-    annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
+    anno::ColumnCompressed<> loaded(this->annotation->num_objects());
 
     std::vector<std::string> labels;
     const auto& label_encoder = this->annotation->get_label_encoder();
@@ -101,7 +101,7 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
     ASSERT_TRUE(this->annotation->dump_columns(test_dump_basename_vec_good, 3));
 
-    annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
+    anno::ColumnCompressed<> loaded(this->annotation->num_objects());
 
     std::vector<std::string> labels;
     const auto& label_encoder = this->annotation->get_label_encoder();

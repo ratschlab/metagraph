@@ -8,6 +8,10 @@
 class bit_vector_sd;
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 template <typename BitVector = bit_vector_sd>
 class RowConcatenated : public BinaryMatrix {
   public:
@@ -37,5 +41,9 @@ class RowConcatenated : public BinaryMatrix {
     uint64_t num_columns_ = 0;
     uint64_t num_rows_ = 0;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __FLAT_MATRIX_HPP__

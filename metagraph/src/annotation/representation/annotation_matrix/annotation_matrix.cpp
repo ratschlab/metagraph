@@ -4,10 +4,12 @@
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
 
+
+namespace mtg {
+namespace anno {
+
 using utils::remove_suffix;
 
-
-namespace annotate {
 
 template <class BinaryMatrixType, typename Label>
 std::string
@@ -140,18 +142,19 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     label_encoder_ = label_encoder;
 }
 
-template class StaticBinRelAnnotator<RowConcatenated<>, std::string>;
+template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;
 
-template class StaticBinRelAnnotator<Rainbowfish, std::string>;
+template class StaticBinRelAnnotator<binmat::Rainbowfish, std::string>;
 
-template class StaticBinRelAnnotator<BRWT, std::string>;
+template class StaticBinRelAnnotator<binmat::BRWT, std::string>;
 
-template class StaticBinRelAnnotator<BinRelWT_sdsl, std::string>;
+template class StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string>;
 
-template class StaticBinRelAnnotator<BinRelWT, std::string>;
+template class StaticBinRelAnnotator<binmat::BinRelWT, std::string>;
 
 template class StaticBinRelAnnotator<UniqueRowBinmat, std::string>;
 
 template class StaticBinRelAnnotator<Rainbow<BRWT>, std::string>;
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg

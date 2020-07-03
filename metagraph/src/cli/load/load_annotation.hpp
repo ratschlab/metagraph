@@ -12,7 +12,7 @@ namespace cli {
 
 Config::AnnotationType parse_annotation_type(const std::string &filename);
 
-std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
+std::unique_ptr<anno::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
                       size_t column_compressed_num_columns_cached = 1,
                       bool row_compressed_sparse = false,

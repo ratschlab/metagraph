@@ -6,7 +6,8 @@
 #include <filesystem>
 
 
-namespace annotate {
+namespace mtg {
+namespace anno {
 
 template <typename Label>
 class RowCompressed;
@@ -75,6 +76,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
-} // namespace annotate
+} // namespace anno
+} // namespace mtg
 
 #endif // __ANNOTATION_CONVERTERS_HPP__

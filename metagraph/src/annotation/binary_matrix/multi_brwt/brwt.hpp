@@ -10,6 +10,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace anno {
+namespace binmat {
+
 // The Multi-BRWT compressed binary matrix representation
 class BRWT : public BinaryMatrix {
     friend class BRWTBuilder;
@@ -55,5 +59,9 @@ class BRWT : public BinaryMatrix {
     std::unique_ptr<bit_vector> nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
 };
+
+} // namespace binmat
+} // namespace anno
+} // namespace mtg
 
 #endif // __BRWT_HPP__

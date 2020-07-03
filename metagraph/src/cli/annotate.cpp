@@ -317,7 +317,7 @@ int annotate_graph_with_genome_coordinates(Config *config) {
     auto graph_temp = load_critical_dbg(config->infbase);
 
     auto annotation_temp
-        = std::make_unique<annotate::RowCompressed<>>(graph_temp->max_index());
+        = std::make_unique<anno::RowCompressed<>>(graph_temp->max_index());
 
     if (config->infbase_annotators.size()
             && !annotation_temp->load(config->infbase_annotators.at(0))) {

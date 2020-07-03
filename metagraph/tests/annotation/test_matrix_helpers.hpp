@@ -12,17 +12,20 @@
 
 
 namespace mtg {
-namespace test {
 
-class BRWTOptimized : public BRWT {
+namespace anno {
+namespace binmat {
+
+class BRWTOptimized : public anno::binmat::BRWT {
   public:
     template <typename... Args>
-    BRWTOptimized(Args&&... args)
-          : BRWT(std::forward<Args>(args)...) { BRWTOptimizer::relax(this); }
+    BRWTOptimized(Args&&... args) : BRWT(std::forward<Args>(args)...) {
+        anno::binmat::BRWTOptimizer::relax(this);
+    }
 };
 
 template <int BufferSize>
-class RainbowfishBuffer : public Rainbowfish {
+class RainbowfishBuffer : public anno::binmat::Rainbowfish {
   public:
     template <typename... Args>
     RainbowfishBuffer(Args&... args)
@@ -30,6 +33,11 @@ class RainbowfishBuffer : public Rainbowfish {
     RainbowfishBuffer()
           : Rainbowfish() {}
 };
+
+} // namespace binmat
+} //namespace anno
+
+namespace test {
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
