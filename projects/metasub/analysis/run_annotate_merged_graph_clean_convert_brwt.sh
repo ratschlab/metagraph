@@ -10,7 +10,7 @@ fi
 K=$1
 
 basedir=/cluster/work/grlab/projects/metagenome/data
-graphbase=${basedir}/metasub/graphs/output_k${K}_cleaned_graph_annotation_clean.collect.relabeled
+graphbase=${basedir}/metasub/graphs/output_k${K}_cleaned_graph_annotation.collect.relabeled
 metagraph=/cluster/home/akahles/git/software/metagraph_current/metagraph/build/metagraph
 mem=700000
 threads=20

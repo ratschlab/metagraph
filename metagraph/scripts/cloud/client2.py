@@ -461,8 +461,9 @@ def check_status():
 
     # for cleaning we allow using all the available RAM
     total_ram_gb = psutil.virtual_memory().total / 1e9
-    not_reserved_ram_gb = total_ram_gb - total_reserved_ram_gb
-    if used_cores < CORES and waiting_cleans:
+    available_ram_gb = total_ram_gb - total_reserved_ram_gb
+    used_cores = max(4 * (len(clean_processes) + len(build_processes)), math.ceil(total_reserved_ram_gb / 3.75));
+    if used_cores <= CORES and waiting_cleans:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
@@ -486,7 +487,7 @@ def check_status():
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
                          f'Have {round(not_reserved_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
-    if used_cores < CORES and waiting_builds:
+    if used_cores <= CORES and waiting_builds:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
@@ -505,10 +506,10 @@ def check_status():
                 break
             elif required_ram_gb < not_reserved_ram_gb and not_reserved_ram_gb > 2:
                 logging.info(
-                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {not_reserved_ram_gb} GB')
+                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {available_ram_gb} GB')
                 # how much memory does it take to load all unique kmers into RAM: 8B for the kmer, 2B for the count
                 required_ram_all_mem_gb = num_kmers * (8 + 2) * 3.5 / 1e9;  # also account for dummy kmers
-                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < not_reserved_ram_gb:
+                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < available_ram_gb:
                     required_ram_gb = max(required_ram_gb, required_ram_all_mem_gb)
                     start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
                                 required_ram_gb, not_reserved_ram_gb)
