@@ -252,9 +252,12 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
-                      size_t num_threads) {
+                      size_t num_threads,
+                      bool canonical) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
+
+    canonical |= full_dbg.is_canonical_mode();
 
     Timer timer;
 
@@ -294,7 +297,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                               contigs.emplace_back(std::move(contig_args)...);
                           },
                           get_num_threads(),
-                          full_dbg.is_canonical_mode());
+                          canonical);  // pull only primary contigs when building canonical query graph
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
@@ -302,17 +305,35 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map contigs onto the full graph
     std::vector<uint64_t> index_in_full_graph;
 
-    if (full_dbg.is_canonical_mode()) {
+    if (canonical) {
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
+            std::string &contig = contigs[i].first;
             auto &nodes_in_full = contigs[i].second;
 
-            size_t j = 0;
-            full_dbg.map_to_nodes(contig,
-                [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-            );
-            assert(j == nodes_in_full.size());
+            if (full_dbg.is_canonical_mode()) {
+                size_t j = 0;
+                full_dbg.map_to_nodes(contig,
+                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
+                );
+            } else {
+                size_t j = 0;
+                // TODO: if a k-mer is found, don't search its reverse-complement
+                // TODO: add `primary/canonical` mode to DBGSuccinct?
+                full_dbg.map_to_nodes_sequentially(contig,
+                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
+                );
+                reverse_complement(contig.begin(), contig.end());
+                full_dbg.map_to_nodes_sequentially(contig,
+                    [&](auto node_in_full) {
+                        --j;
+                        if (node_in_full)
+                            nodes_in_full[j] = node_in_full;
+                    }
+                );
+                reverse_complement(contig.begin(), contig.end());
+                assert(j == 0);
+            }
         }
 
         logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
@@ -636,7 +657,8 @@ void QueryExecutor
             anno_graph_,
             generate_batch,
             config_.count_labels ? 0 : config_.discovery_fraction,
-            get_num_threads()
+            get_num_threads(),
+            anno_graph_.get_graph().is_canonical_mode() || config_.canonical
         );
 
         logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
