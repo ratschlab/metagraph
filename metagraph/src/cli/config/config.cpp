@@ -609,6 +609,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "flat";
         case RBFish:
             return "rbfish";
+        case RbBRWT:
+            return "rb_brwt";
         default:
             assert(false);
             return "Never happens";
@@ -630,6 +632,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowFlat;
     } else if (string == "rbfish") {
         return AnnotationType::RBFish;
+    } else if (string == "rb_brwt") {
+        return AnnotationType::RbBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -662,7 +666,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
+    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -752,7 +756,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
                             "\t                         \t\tthan this value (0: auto) [1]\n");
-            fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be\n"
+                            "\t                         \t\tdetermined (-1: disables fallback) [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"

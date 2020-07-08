@@ -5,9 +5,13 @@
 #include <functional>
 #include <filesystem>
 
+#include <ips4o.hpp>
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
+#include "common/vector_map.hpp"
+#include "common/algorithms.hpp"
+#include "common/hash/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -383,6 +387,241 @@ void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
                              num_threads);
 }
 
+using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
+
+std::vector<uint64_t>
+get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
+                size_t num_columns) {
+    std::vector<uint64_t> row_classes;
+    uint64_t max_class = 0;
+
+    ProgressBar progress_bar(num_columns, "Columns iterated",
+                             std::cerr, !common::get_verbose());
+
+    tsl::hopscotch_map<uint64_t, uint64_t> new_class;
+
+    call_columns([&](const auto &col_ptr) {
+        new_class.clear();
+
+        if (row_classes.empty())
+            row_classes.assign(col_ptr->size(), 0);
+
+        const size_t batch_size = 5'000'000;
+        #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic)
+        for (uint64_t begin = 0; begin < col_ptr->size(); begin += batch_size) {
+            uint64_t end = std::min(begin + batch_size, col_ptr->size());
+
+            std::vector<uint64_t> pos;
+            pos.reserve(batch_size);
+
+            col_ptr->call_ones_in_range(begin, end, [&](uint64_t i) {
+                pos.push_back(i);
+            });
+
+            #pragma omp critical
+            {
+                for (uint64_t i : pos) {
+                    uint64_t &row_class = row_classes[i];
+
+                    auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
+                    if (inserted) {
+                        ++max_class;
+
+                        if (max_class == std::numeric_limits<uint64_t>::max()) {
+                            logger->error("Too many distinct rows");
+                            exit(1);
+                        }
+                    }
+
+                    row_class = it->second;
+                }
+            }
+        }
+
+        ++progress_bar;
+    });
+
+    return row_classes;
+}
+
+std::unique_ptr<Rainbow<BRWT>>
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns) {
+    uint64_t num_columns = 0;
+    uint64_t num_ones = 0;
+    call_columns([&](const auto &col_ptr) {
+        num_columns++;
+        num_ones += col_ptr->num_set_bits();
+    });
+
+    if (!num_columns)
+        return std::make_unique<Rainbow<BRWT>>();
+
+    logger->trace("Identifying unique rows");
+    std::vector<uint64_t> row_classes = get_row_classes(call_columns, num_columns);
+
+    VectorMap<uint64_t /* class */,
+              uint64_t /* count */,
+              uint64_t /* index type */> row_counter;
+    {
+        ProgressBar progress_bar(row_classes.size(), "Counting row classes",
+                                 std::cerr, !common::get_verbose());
+        for (uint64_t row_class : row_classes) {
+            row_counter[row_class]++;
+            ++progress_bar;
+        }
+    }
+
+    logger->trace("Number of unique rows: {}", row_counter.size());
+
+    auto &pairs = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
+                    row_counter.values_container());
+
+    ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
+                          get_num_threads());
+
+    if (common::get_verbose()) {
+        // print historgram of row multiplicities
+        std::stringstream mult_log_message;
+        uint64_t multiplicity = pairs[0].second;
+        uint64_t num_unique_rows = 0;
+        for (const auto &[row_class, count] : pairs) {
+            assert(count <= multiplicity);
+            if (count == multiplicity) {
+                num_unique_rows++;
+            } else {
+                mult_log_message << multiplicity << ": " << num_unique_rows << ", ";
+                multiplicity = count;
+                num_unique_rows = 1;
+            }
+        }
+        mult_log_message << multiplicity << ": " << num_unique_rows;
+        logger->trace("<Row multiplicity: num unique rows>: {}", mult_log_message.str());
+    }
+
+    tsl::hopscotch_map<uint64_t, uint64_t> class_to_code;
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        class_to_code.emplace(pairs[i].first, i);
+    }
+
+    // maps unique row ids to the respective rows of the original matrix
+    std::vector<uint64_t> row_pointers(class_to_code.size());
+
+    uint64_t total_code_length = 0;
+    for (size_t i = 0; i < row_classes.size(); ++i) {
+        uint64_t row_code = class_to_code[row_classes[i]];
+        row_classes[i] = row_code;
+        row_pointers[row_code] = i;
+        total_code_length += sdsl::bits::hi(row_code) + 1;
+    }
+    class_to_code.clear();
+
+    logger->trace("Started matrix reduction");
+
+    ProgressBar progress_bar(num_columns, "Columns reduced",
+                             std::cerr, !common::get_verbose());
+
+    std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
+    size_t j = 0;
+    ThreadPool thread_pool(get_num_threads());
+    call_columns([&](auto &&col_ptr) {
+        thread_pool.enqueue([&](size_t j, const auto &col_ptr) {
+            sdsl::bit_vector reduced_column(row_pointers.size(), false);
+            for (size_t r = 0; r < row_pointers.size(); ++r) {
+                reduced_column[r] = (*col_ptr)[row_pointers[r]];
+            }
+            columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
+            ++progress_bar;
+        }, j++, std::move(col_ptr));
+    });
+    thread_pool.join();
+
+    logger->trace("Compressing assignment vector");
+
+    sdsl::bit_vector code_bv(total_code_length);
+    sdsl::bit_vector boundary_bv(total_code_length, false);
+
+    uint64_t pos = 0;
+    for (uint64_t code : row_classes) {
+        uint8_t code_length = sdsl::bits::hi(code) + 1;
+        code_bv.set_int(pos, code, code_length);
+        boundary_bv[pos + code_length - 1] = true;
+        pos += code_length;
+    }
+    assert(pos == code_bv.size());
+
+    bit_vector_rrr<> row_codes(std::move(code_bv));
+    bit_vector_rrr<> row_code_delimiters(std::move(boundary_bv));
+
+    logger->trace("Building Multi-BRWT");
+
+    size_t num_threads = get_num_threads();
+    size_t num_rows_subsampled = 1'000'000;
+    size_t num_parallel_nodes = num_threads;
+
+    auto partitioning = [num_threads,num_rows_subsampled](const auto &columns) {
+        std::vector<sdsl::bit_vector> subvectors
+            = random_submatrix(columns, num_rows_subsampled, num_threads);
+        return greedy_matching(subvectors, num_threads);
+    };
+
+    BRWT reduced_matrix = BRWTBottomUpBuilder::build(std::move(columns),
+                                                     partitioning,
+                                                     num_parallel_nodes,
+                                                     num_threads);
+
+    return std::make_unique<Rainbow<BRWT>>(std::move(reduced_matrix),
+                                           std::move(row_codes),
+                                           std::move(row_code_delimiters),
+                                           num_ones);
+}
+
+template <>
+std::unique_ptr<RbBRWTAnnotator>
+convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files) {
+    LEncoder label_encoder;
+
+    auto call_columns = [&](const CallColumn &call_column) {
+        label_encoder.clear();
+
+        bool success = ColumnCompressed<>::merge_load(
+            annotation_files,
+            [&](uint64_t /*column_index*/,
+                    const std::string &label,
+                    std::unique_ptr<bit_vector>&& column) {
+                call_column(std::move(column));
+                label_encoder.insert_and_encode(label);
+            },
+            1
+        );
+        if (!success) {
+            logger->error("Can't load annotation columns");
+            exit(1);
+        }
+    };
+
+    auto matrix = convert_to_RainbowBRWT(call_columns);
+
+    assert(matrix->num_columns() == label_encoder.size());
+
+    return std::make_unique<RbBRWTAnnotator>(std::move(matrix), label_encoder);
+}
+
+template <>
+std::unique_ptr<RbBRWTAnnotator>
+convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    auto &columns = const_cast<std::vector<std::unique_ptr<bit_vector>>&>(
+        annotator.get_matrix().data()
+    );
+    auto matrix = convert_to_RainbowBRWT(
+        [&](const auto &callback) {
+            for (auto &column : columns) {
+                callback(std::move(column));
+            }
+        }
+    );
+    return std::make_unique<RbBRWTAnnotator>(std::move(matrix),
+                                             annotator.get_label_encoder());
+}
 
 template <>
 std::unique_ptr<BinRelWT_sdslAnnotator>

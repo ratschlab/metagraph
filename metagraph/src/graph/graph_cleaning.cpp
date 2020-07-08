@@ -4,6 +4,8 @@
 
 #include "common/logger.hpp"
 
+using mtg::common::logger;
+
 
 bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
                           const NodeWeights &node_weights,
@@ -30,9 +32,9 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
+// returns -1 if the automatic estimation fails
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
-                                     uint64_t fallback_cutoff,
                                      uint64_t num_singleton_kmers) {
     std::vector<uint64_t> hist;
     graph.call_nodes([&](auto i) {
@@ -47,23 +49,15 @@ uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
     hist.resize(std::max((uint64_t)hist.size(), (uint64_t)10), 0);
 
     if (num_singleton_kmers) {
-        std::cout << "The count for singleton k-mers in histogram is reset"
-                  << " from " << hist[1] << " to " << num_singleton_kmers << std::endl;
+        logger->info("The count for singleton k-mers in histogram is reset from {} to {}",
+                     hist[1], num_singleton_kmers);
         hist[1] = num_singleton_kmers;
     }
 
     double alpha_est_ptr, beta_est_ptr, false_pos_ptr, false_neg_ptr;
-    auto cutoff = cleaning_pick_kmer_threshold(hist.data(), hist.size(),
-                                               &alpha_est_ptr, &beta_est_ptr,
-                                               &false_pos_ptr, &false_neg_ptr);
-
-    if (cutoff != -1)
-        return cutoff;
-
-    std::cerr << "Warning: Cannot estimate expected minimum k-mer abundance."
-              << " Use fallback value." << std::endl;
-
-    return fallback_cutoff;
+    return cleaning_pick_kmer_threshold(hist.data(), hist.size(),
+                                        &alpha_est_ptr, &beta_est_ptr,
+                                        &false_pos_ptr, &false_neg_ptr);
 }
 
 

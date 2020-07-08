@@ -20,7 +20,7 @@ anno_out=${basedir}/metasub/graphs/output_k${K}_cleaned_graph_annotation.collect
 metagraph=/cluster/home/akahles/git/software/metagraph_current_dev/metagraph/build/metagraph
 
 ### generate label map
-$metagraph stats -a ${anno_in} --print-col-names | grep -v INFO > ${anno_in}.labels
+$metagraph stats -a ${anno_in} --print-col-names | grep -v info | grep -v Number > ${anno_in}.labels
 rev ${anno_in}.labels | cut -f 1 -d '/' | rev | cut -f 1 -d '.' > k${K}_labels_new
 paste ${anno_in}.labels k${K}_labels_new > k${K}_labels_map_
 python augment_relabel_map.py ../complete_metadata_extended.clean.csv k${K}_labels_map_ > k${K}_labels_map && rm k${K}_labels_map_

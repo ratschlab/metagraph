@@ -195,6 +195,10 @@ void RowsFromColumnsTransformer
 template void RowsFromColumnsTransformer::call_rows<Vector<uint64_t>>(
         const std::function<void(const Vector<uint64_t> &)> &callback);
 
+template void RowsFromColumnsTransformer::call_rows<SmallVector<uint32_t>>(
+        const std::function<void(const SmallVector<uint32_t> &)> &callback);
+
+
 template <class BitVectorType>
 std::vector<std::unique_ptr<bit_vector>>
 transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
