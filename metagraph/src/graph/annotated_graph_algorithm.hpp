@@ -21,6 +21,8 @@ class Alignment;
 typedef std::function<bool(const std::string&,
                            const std::vector<DeBruijnGraph::node_index>&)> KeepUnitigPath;
 
+typedef AnnotatedDBG::Annotator::Label Label;
+
 // Given a DeBruijnGraph and a bool-returning string callback, return a bitmap of
 // length graph.max_index() + 1. An index is set to 1 if it is contained in a
 // unitig satisfying keep_unitig(unitig).
@@ -28,20 +30,21 @@ std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const KeepUnitigPath &keep_unitig);
 
+
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
 // return a bitmap of length anno_graph.get_graph().max_index() + 1. An index i
 // is set to 1 if there is a unitig containing i such that
 // at least (label_mask_in_fraction * 100)% of the total possible number of in labels is present,
 // at most (label_mask_out_fraction * 100)% of the total possible number of out labels is present,
 // and (label_other_fraction * 100)% of the labels are neither in or out masked.
-std::unique_ptr<bitmap_vector>
-mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
-                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
-                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                            double label_mask_in_fraction = 1.0,
-                            double label_mask_out_fraction = 0.0,
-                            double label_other_fraction = 1.0,
-                            bool mark_canonical = false);
+MaskedDeBruijnGraph
+make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
+                                   const std::vector<Label> &labels_in,
+                                   const std::vector<Label> &labels_out,
+                                   double label_mask_in_fraction = 1.0,
+                                   double label_mask_out_fraction = 0.0,
+                                   double label_other_fraction = 1.0,
+                                   bool add_complement = false);
 
 // Given an AnnotatedDBG and vectors of foreground (labels_in) and
 // background (labels_out) labels, construct a bitmap of length
@@ -59,8 +62,8 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
 // nodes, precompute the numbers of overlapping labels.
 std::unique_ptr<bitmap>
 mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
-                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
-                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                         const std::vector<Label> &labels_in,
+                         const std::vector<Label> &labels_out,
                          const std::function<bool(DeBruijnGraph::node_index,
                                                   const LabelCountCallback & /* get_num_labels_in */,
                                                   const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,

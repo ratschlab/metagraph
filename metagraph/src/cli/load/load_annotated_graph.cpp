@@ -85,8 +85,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
 
     if (!config->filter_by_kmer) {
         return std::make_unique<MaskedDeBruijnGraph>(
-            graph,
-            mask_nodes_by_unitig_labels(
+            make_masked_graph_by_unitig_labels(
                 anno_graph,
                 label_mask_in,
                 label_mask_out,
@@ -94,9 +93,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                 config->label_mask_out_fraction,
                 config->label_other_fraction,
                 config->canonical
-            ),
-            false,
-            graph->is_canonical_mode()
+            )
         );
     }
 

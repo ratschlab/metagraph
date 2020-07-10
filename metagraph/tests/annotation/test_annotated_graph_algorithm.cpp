@@ -133,17 +133,12 @@ test_mask_unitigs(double inlabel_fraction,
 
             std::unordered_set<std::string> obs_kmers;
 
-            MaskedDeBruijnGraph masked_dbg(
-                std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
-                mask_nodes_by_unitig_labels(
-                    *anno_graph,
-                    ingroup,
-                    outgroup,
-                    inlabel_fraction,
-                    outlabel_fraction,
-                    other_label_fraction
-                )
-            );
+            auto masked_dbg = make_masked_graph_by_unitig_labels(*anno_graph,
+                                                                 ingroup,
+                                                                 outgroup,
+                                                                 inlabel_fraction,
+                                                                 outlabel_fraction,
+                                                                 other_label_fraction);
 
             EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 

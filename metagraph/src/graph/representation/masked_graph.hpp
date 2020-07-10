@@ -23,8 +23,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                         bool only_valid_nodes_in_mask = false,
                         bool canonical = false);
 
-    virtual ~MaskedDeBruijnGraph() {}
-
     virtual void add_sequence(std::string_view,
                               const std::function<void(node_index)> &) override {
         throw std::runtime_error("Not implemented");
