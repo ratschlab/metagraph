@@ -141,9 +141,11 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     };
 
     if (add_complement && !graph_ptr->is_canonical_mode()) {
+        std::mutex add_mutex;
         BOSSConstructor constructor(graph_ptr->get_k() - 1, true);
         constructor.add_sequences([&](const CallString &callback) {
             masked_graph->call_sequences([&](const std::string &seq, const auto &) {
+                std::lock_guard<std::mutex> lock(add_mutex);
                 callback(seq);
             }, get_num_threads(), true);
         });
