@@ -6,6 +6,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/vector_map.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/masked_graph.hpp"
 
@@ -29,19 +30,21 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
     std::atomic<size_t> total_unitigs(0);
     std::atomic<size_t> num_kept_nodes(0);
     bool parallel = get_num_threads() > 1;
+    auto order = std::memory_order_relaxed;
+    //auto order = std::memory_order_seq_cst;
 
     std::atomic_thread_fence(std::memory_order_release);
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
-            kept_unitigs.fetch_add(1, std::memory_order_relaxed);
+            kept_unitigs.fetch_add(1, order);
             for (node_index node : path) {
                 num_kept_nodes.fetch_add(
                     !fetch_and_set_bit(unitig_mask.data(), node, parallel),
-                    std::memory_order_relaxed
+                    order
                 );
             }
         }
-        total_unitigs.fetch_add(1, std::memory_order_relaxed);
+        total_unitigs.fetch_add(1, order);
     }, get_num_threads());
     std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -59,7 +62,8 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             const std::vector<Label> &labels_out,
                             double label_mask_in_fraction,
                             double label_mask_out_fraction,
-                            double label_other_fraction) {
+                            double label_other_fraction,
+                            bool mark_canonical) {
     const auto &graph = anno_graph.get_graph();
 
     logger->trace("Generating initial mask");
@@ -67,6 +71,8 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     sdsl::bit_vector union_mask(anno_graph.get_graph().max_index() + 1, false);
 
     bool parallel = get_num_threads() > 1;
+    int order = __ATOMIC_RELAXED;
+    //int order = __ATOMIC_SEQ_CST;
 
     __atomic_thread_fence(__ATOMIC_RELEASE);
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -74,14 +80,14 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         const std::string &label = labels_in[i];
         logger->trace("Adding label: {}", label);
         anno_graph.call_annotated_nodes(label, [&](node_index node) {
-            set_bit(union_mask.data(), node, parallel, __ATOMIC_RELAXED);
+            set_bit(union_mask.data(), node, parallel, order);
         });
     }
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     std::unique_ptr<MaskedDeBruijnGraph> masked_graph;
 
-    if (graph.is_canonical_mode()) {
+    if (graph.is_canonical_mode() || mark_canonical) {
         __atomic_thread_fence(__ATOMIC_RELEASE);
         masked_graph = std::make_unique<MaskedDeBruijnGraph>(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
@@ -89,14 +95,16 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
             true // only_valid_nodes_in_mask
         );
 
+        logger->trace("Starting with {} nodes", masked_graph->num_nodes());
         logger->trace("Adding reverse complements");
 
         masked_graph->call_unitigs([&](const std::string &unitig, const auto &) {
             auto rev = unitig;
             reverse_complement(rev.begin(), rev.end());
             graph.map_to_nodes_sequentially(rev, [&](node_index node) {
-                assert(node);
-                set_bit(union_mask.data(), node, parallel, __ATOMIC_RELAXED);
+                assert(node || mark_canonical);
+                if (node)
+                    set_bit(union_mask.data(), node, parallel, order);
             });
         }, get_num_threads());
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
@@ -108,17 +116,18 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         true, // only_valid_nodes_in_mask
         graph.is_canonical_mode()
     );
+    logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
 
-    const auto &annotation = anno_graph.get_annotation();
-    const auto &matrix = annotation.get_matrix();
-    const auto &label_encoder = annotation.get_label_encoder();
+    //const auto &annotation = anno_graph.get_annotation();
+    //const auto &matrix = annotation.get_matrix();
+    //const auto &label_encoder = annotation.get_label_encoder();
 
-    tsl::hopscotch_set<uint64_t> label_in_codes;
-    tsl::hopscotch_set<uint64_t> label_out_codes;
-
+    tsl::hopscotch_set<std::string> label_in_set(labels_in.begin(), labels_in.end());
+    tsl::hopscotch_set<std::string> label_out_set(labels_out.begin(), labels_out.end());
+    /*
     for (const std::string &label : labels_in) {
         label_in_codes.emplace(label_encoder.encode(label));
     }
@@ -126,21 +135,137 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     for (const std::string &label : labels_out) {
         label_out_codes.emplace(label_encoder.encode(label));
     }
+    */
+
+    size_t num_labels = anno_graph.get_annotation().num_labels();
+    double min_frac = std::min(std::min(label_mask_in_fraction, label_mask_out_fraction), label_other_fraction);
+
+    auto check = [&](size_t path_size, const std::string &label, size_t count, size_t *in_label_counter) {
+        if (label_in_set.count(label)) {
+            if (count < label_mask_in_fraction * path_size) {
+                logger->trace("WWWWWmissing");
+                return false;
+            } else {
+                ++(*in_label_counter);
+            }
+        } else if (label_out_set.count(label)) {
+            if (count > label_mask_out_fraction * path_size) {
+                logger->trace("WWWWWout");
+                return false;
+            }
+        } else if (count > label_other_fraction * path_size) {
+            logger->trace("WWWWWother");
+            return false;
+        }
+
+        return true;
+    };
 
     return mask_nodes_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
+        if (!mark_canonical || graph.is_canonical_mode()) {
+            size_t in_label_counter = 0;
+            for (const auto &[label, count] : anno_graph.get_top_labels(unitig, num_labels, min_frac)) {
+                if (!check(path.size(), label, count, &in_label_counter))
+                    return false;
+            }
+
+            if (in_label_counter != labels_in.size()) {
+                logger->trace("WWWWWnot");
+            } else {
+                logger->trace("WWWWWgood");
+            }
+            return in_label_counter == labels_in.size();
+
+        } else {
+            VectorMap<std::string, std::pair<sdsl::bit_vector, sdsl::bit_vector>> label_signatures;
+            for (auto&& [label, signature] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
+                label_signatures.emplace(std::move(label),
+                                         std::make_pair(std::move(signature),
+                                                        sdsl::bit_vector()));
+            }
+
+            std::string rev = unitig;
+            reverse_complement(rev.begin(), rev.end());
+            for (auto&& [label, signature] : anno_graph.get_top_label_signatures(rev, num_labels)) {
+                if (label_signatures.count(label)) {
+                    label_signatures[label].second = std::move(signature);
+                } else {
+                    label_signatures.emplace(std::move(label),
+                                             std::make_pair(sdsl::bit_vector(),
+                                                            std::move(signature)));
+                }
+            }
+
+            size_t in_label_counter = 0;
+            for (const auto &[label, sig_pair] : label_signatures) {
+                const auto &[sig, rev_sig] = sig_pair;
+                size_t count = 0;
+                if (sig.size() && rev_sig.size()) {
+                    auto it = sig.begin();
+                    auto jt = rev_sig.end();
+                    for (--jt; it != sig.end(); ++it, --jt) {
+                        count += (*it) || (*jt);
+                    }
+                } else if (sig.size()) {
+                    count = sdsl::util::cnt_one_bits(sig);
+                } else {
+                    count = sdsl::util::cnt_one_bits(rev_sig);
+                }
+
+                if (!check(path.size(), label, count, &in_label_counter))
+                    return false;
+            }
+
+            if (in_label_counter != labels_in.size()) {
+                logger->trace("WWWWWnot");
+            } else {
+                logger->trace("WWWWWgood");
+            }
+
+            return in_label_counter == labels_in.size();
+        }
+
         // get rows in annotation matrix
+        /*
+        std::vector<node_index> rev_path;
         std::vector<BinaryMatrix::Row> rows;
-        rows.reserve(path.size());
         if (graph.is_canonical_mode()) {
+            // map each node in the unitig to its canonical node
+            rows.reserve(path.size());
             graph.map_to_nodes(unitig, [&](node_index i) {
                 rows.push_back(anno_graph.graph_to_anno_index(i));
             });
+            mark_canonical = false;
+        } else if (mark_canonical) {
+            // interleave the nodes of the unitig and its reverse complement
+            rows.resize(path.size() * 2);
+            std::string rev = unitig;
+            reverse_complement(rev.begin(), rev.end());
+            rev_path.resize(path.size());
+            auto it = rows.rbegin();
+            auto jt = rev_path.rbegin();
+            graph.map_to_nodes_sequentially(rev, [&](node_index i) {
+                *jt = i;
+                ++jt;
+
+                *it = i ? AnnotatedDBG::graph_to_anno_index(i) : 0;
+                it += 2;
+            });
+            size_t j = 0;
+            for (node_index i : path) {
+                assert(i);
+                rows[j] = AnnotatedDBG::graph_to_anno_index(i);
+                j += 2;
+            }
         } else {
+            // keep nodes as-is
+            rows.reserve(path.size());
             std::transform(path.begin(), path.end(), std::back_inserter(rows),
                            AnnotatedDBG::graph_to_anno_index);
         }
 
         size_t i = 0;
+        size_t row_count = 0;
         size_t other_label_count = 0;
         size_t in_count = 0;
         size_t out_count = 0;
@@ -152,7 +277,8 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
 
         size_t cutoff_in_count = std::ceil(label_mask_in_fraction * path.size());
         size_t cutoff_out_count = std::floor(label_mask_out_fraction * path.size());
-        size_t cutoff_other_count = std::floor(label_other_fraction * (slice.size() - path.size()));
+        size_t cutoff_other_count = std::floor(label_other_fraction * (slice.size() / (1 + mark_canonical) - path.size()));
+        bool fwd = true;
 
         assert(slice.size());
         BinaryMatrix::Column delimiter = slice.back();
@@ -160,14 +286,17 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         for (size_t j = 0; j < slice.size(); ++j) {
             BinaryMatrix::Column label_code = slice[j];
 
-            // if the end of a row was reached
-            if (label_code == delimiter) {
+            if (label_code == delimiter)
                 ++i;
+
+            if (!mark_canonical || (i && !(i % 2))) {
+                ++row_count;
+                fwd = true;
 
                 if (cur_in_count == label_in_codes.size())
                     ++in_count;
 
-                size_t rows_left = rows.size() - i;
+                size_t rows_left = path.size() - row_count;
 
                 // if the in label criterion cannot be fulfilled
                 if (in_count + rows_left < cutoff_in_count)
@@ -181,7 +310,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                         return false;
                 }
 
-                size_t labels_left = slice.size() - (j + 1) - rows_left;
+                size_t labels_left = (slice.size() - (j + 1) - rows_left) / (1 + mark_canonical);
 
                 if (in_count >= cutoff_in_count
                         && out_count + rows_left <= cutoff_out_count
@@ -191,7 +320,12 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                 cur_in_count = 0;
                 cur_out_count = 0;
                 continue;
+            } else if (mark_canonical) {
+                fwd = false;
             }
+
+            if (!fwd && !rev_path[row_count])
+                continue;
 
             // add label counts
             if (label_out_codes.count(label_code)) {
@@ -205,11 +339,14 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                 if (other_label_count > cutoff_other_count)
                     return false;
             }
+            assert(cur_in_count <= label_in_codes.size());
+            assert(cur_out_count <= label_out_codes.size());
         }
 
-        assert(i == rows.size());
+        assert(row_count == path.size());
         assert(in_count >= cutoff_in_count);
         return true;
+    */
     });
 }
 

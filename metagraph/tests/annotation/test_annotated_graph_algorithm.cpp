@@ -114,15 +114,15 @@ test_mask_unitigs(double inlabel_fraction,
         size_t k = 3;
 
         {
-            /*
+            /*  B                  AB  AB
                CGA                 GCC-CCT
-                  \               /
+                  \ BC  BC  BC ABC/
                    GAA-AAT-ATG-TGC
-                  /               \
+                 C/               \  C   C
                GGA                 GCA-CAC
             */
             const std::vector<std::string> sequences {
-                "TGCCT",
+                    "TGCCT",
                 "CGAATGCCT",
                 "GGAATGCAC",
                 "TTTTTTTTTTTTTT"

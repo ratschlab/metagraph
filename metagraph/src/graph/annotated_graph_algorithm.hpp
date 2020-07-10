@@ -40,7 +40,8 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
                             double label_mask_in_fraction = 1.0,
                             double label_mask_out_fraction = 0.0,
-                            double label_other_fraction = 1.0);
+                            double label_other_fraction = 1.0,
+                            bool mark_canonical = false);
 
 // Given an AnnotatedDBG and vectors of foreground (labels_in) and
 // background (labels_out) labels, construct a bitmap of length
