@@ -13,10 +13,12 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
+
 #include "align.hpp"
 
 
@@ -221,6 +223,34 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     );
 }
 
+template <class Contigs>
+std::shared_ptr<DBGSuccinct> convert_to_succinct(const DeBruijnGraph &full_dbg,
+                                                 const Contigs &contigs,
+                                                 bool canonical = false,
+                                                 size_t num_threads = 1) {
+    BOSSConstructor constructor(full_dbg.get_k() - 1, canonical, 0, "", num_threads);
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        const std::string &contig = contigs[i].first;
+        const auto &nodes_in_full = contigs[i].second;
+        constructor.add_sequences([&](const CallString &callback) {
+            auto it = nodes_in_full.begin();
+            while ((it = std::find_if(it, nodes_in_full.end(), [&](auto i) { return i; }))
+                    < nodes_in_full.end()) {
+                auto next = std::find(it, nodes_in_full.end(), 0);
+                assert(full_dbg.find(std::string_view(
+                    contig.data() + (it - nodes_in_full.begin()),
+                    next - it + full_dbg.get_k() - 1
+                )));
+                callback(std::string(contig.data() + (it - nodes_in_full.begin()),
+                                     next - it + full_dbg.get_k() - 1));
+                it = next;
+            }
+        });
+    }
+
+    return std::make_shared<DBGSuccinct>(new BOSS(&constructor), canonical);
+}
+
 /**
  * Construct a de Bruijn graph from the query sequences
  * fetched in |call_sequences|.
@@ -252,7 +282,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
                       size_t num_threads,
-                      bool canonical) {
+                      bool canonical,
+                      size_t sub_k) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
@@ -339,16 +370,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         // construct canonical graph storing all k-mers found in the full graph
-        graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), true);
+        if (sub_k >= full_dbg.get_k()) {
+            graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), true);
 
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &nodes_in_full = contigs[i].second;
-            size_t j = 0;
-            graph_init->add_sequence(contig, [&]() { return nodes_in_full[j++] == 0; });
+            for (size_t i = 0; i < contigs.size(); ++i) {
+                const std::string &contig = contigs[i].first;
+                const auto &nodes_in_full = contigs[i].second;
+                size_t j = 0;
+                graph_init->add_sequence(contig, [&]() { return nodes_in_full[j++] == 0; });
+            }
+
+            graph = std::move(graph_init);
+        } else {
+            graph = convert_to_succinct(full_dbg, contigs, true, num_threads);
         }
-
-        graph = std::move(graph_init);
 
         logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
                       timer.elapsed());
@@ -373,18 +408,32 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
     } else {
-        index_in_full_graph.assign(graph->max_index() + 1, 0);
+        if (sub_k >= full_dbg.get_k()) {
+            index_in_full_graph.assign(graph->max_index() + 1, 0);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &path = contigs[i].second;
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+            for (size_t i = 0; i < contigs.size(); ++i) {
+                const std::string &contig = contigs[i].first;
+                const auto &path = contigs[i].second;
 
-            size_t j = 0;
-            full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
-                index_in_full_graph[path[j++]] = node_in_full;
-            });
-            assert(j == path.size());
+                size_t j = 0;
+                full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
+                    index_in_full_graph[path[j++]] = node_in_full;
+                });
+                assert(j == path.size());
+            }
+        } else {
+            graph = convert_to_succinct(full_dbg, contigs, false, num_threads);
+            contigs = decltype(contigs)();
+            index_in_full_graph.assign(graph->max_index() + 1, 0);
+
+            graph->call_sequences([&](const std::string &contig, const auto &path) {
+                size_t j = 0;
+                full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
+                    index_in_full_graph[path[j++]] = node_in_full;
+                });
+                assert(j == path.size());
+            }, get_num_threads());
         }
 
         logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
@@ -395,7 +444,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     assert(!index_in_full_graph.at(0));
 
-    if (discovery_fraction > 0) {
+    if (discovery_fraction > 0 && sub_k >= full_dbg.get_k()) {
         sdsl::bit_vector mask(graph->max_index() + 1, false);
 
         call_sequences([&](const std::string &sequence) {
@@ -600,6 +649,10 @@ void QueryExecutor
     seq_io::FastaParser::iterator it;
 
     size_t seq_count = 0;
+    size_t sub_k = aligner_config_
+        ? aligner_config_->min_seed_length
+        : std::numeric_limits<size_t>::max();
+
     while (begin != end) {
         Timer batch_timer;
 
@@ -663,7 +716,8 @@ void QueryExecutor
             generate_batch,
             config_.count_labels ? 0 : config_.discovery_fraction,
             get_num_threads(),
-            anno_graph_.get_graph().is_canonical_mode() || config_.canonical
+            anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
+            sub_k
         );
 
         logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
