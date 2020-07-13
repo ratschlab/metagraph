@@ -51,8 +51,6 @@ class Config {
     bool cluster_linkage = false;
     bool separately = false;
     bool files_sequentially = false;
-    bool call_bubbles = false;
-    bool call_breakpoints = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_both_strands = false;
@@ -78,7 +76,6 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
-    // unsigned int row_cache_size = 0;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -130,7 +127,6 @@ class Config {
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
-    std::string dbpath;
     std::string refpath;
     std::string suffix;
     std::string fasta_header_delimiter;
@@ -138,7 +134,6 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string annotation_label = "";
     std::string header = "";
-    std::string accession2taxid;
     std::string host_address;
 
     std::filesystem::path tmp_dir;

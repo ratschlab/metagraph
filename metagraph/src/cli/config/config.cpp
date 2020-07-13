@@ -255,8 +255,6 @@ Config::Config(int argc, char *argv[]) {
             graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
             rename_instructions_file = std::string(get_value(i++));
-        //} else if (!strcmp(argv[i], "--db-path")) {
-        //    dbpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
             infbase_annotators.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
