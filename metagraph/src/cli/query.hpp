@@ -34,7 +34,9 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       double discovery_fraction,
                       size_t num_threads,
                       bool canonical = false,
-                      size_t sub_k = std::numeric_limits<size_t>::max());
+                      size_t sub_k = std::numeric_limits<size_t>::max(),
+                      size_t max_fork_count = 0,
+                      size_t max_traversal_distance = 0);
 
 
 class QueryExecutor {

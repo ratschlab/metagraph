@@ -184,6 +184,8 @@ Config::Config(int argc, char *argv[]) {
             align_both_strands = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
+        } else if (!strcmp(argv[i], "--max-traversal-distance")) {
+            max_traversal_distance = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-queue-size")) {
@@ -216,6 +218,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_num_seeds_per_locus = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-nodes-per-seq-char")) {
             alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-fork-count")) {
+            max_fork_count = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -1029,6 +1033,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
             fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [inf]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [10.0]\n");
+            fprintf(stderr, "\t   --max-fork-count [INT]\t\tmaximum number of forks to take when expanding query graph [0]\n");
+            fprintf(stderr, "\t   --max-traversal-distance [INT]\tmaximum number of steps to traverse a linear path when expanding query graph [2 * graph k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
