@@ -182,7 +182,8 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
 
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
-    for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
+    #pragma omp parallel for num_threads(num_threads) schedule(static)
+    for (T *kmer = kmers->data(); kmer < kmers->data() + size; ++kmer) {
         const T &rc = rev_comp(k + 1, *kmer, complement_code);
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
@@ -321,8 +322,8 @@ using Decoder = common::EliasFanoDecoder<T>;
 
 /**
  * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
- * T_REAL: type KmerExtractorT::KMerBOSS representing k-mers over the alphabet
- * without the sentinel character (e.g., ACGT).
+ * @tparam T_REAL k-mers over the alphabet without the sentinel character (e.g. ACGT).
+ * @return the name of the files containing the split k-mers
  */
 template <typename T_REAL>
 std::vector<std::string> split(size_t k,
