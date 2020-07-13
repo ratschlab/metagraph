@@ -34,16 +34,6 @@ using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
 constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
 
-
-template <class Container, typename KMER>
-inline void push_back(Container &kmers, const KMER &kmer) {
-    if constexpr(utils::is_pair_v<typename Container::value_type>) {
-        kmers.emplace_back(kmer, 0);
-    } else {
-        kmers.push_back(kmer);
-    }
-}
-
 /**
  * Generates non-redundant dummy sink kmers (a1a2...ak->$) for the given #kmers_p.
  *
@@ -54,18 +44,22 @@ inline void push_back(Container &kmers, const KMER &kmer) {
  * iterator for each edge label that points to the first k-mer with prefix greater or
  * equal to the current dummy k-mer. The current dummy k-mer is marked as redundant if its
  * corresponding iterator points to a kmer with identical prefix.
- * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
- * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
+ * @tparam T_REAL the type of kmers being processed, typically either a KMer64/128/256 or
+ * an std::pair<KMer64/128/256, int8/16/32> if counting kmers.
+ * @tparam KMER "tight" KMer64/128/256 over the restricted alphabet (no sentinel)
  * @param k node length (the actual k-mer has length k+1)
  * @param kmers_p list of sorted, non-redundant kmers of length k+1
  */
-template <typename T>
-void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
-    using KMER = get_first_type_t<T>;
+template <typename KMER, typename T_REAL>
+void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *dummy_kmers) {
+    using KMER_REAL = get_first_type_t<T_REAL>;
+    using KMER_INT = typename KMER::WordType;
 
-    const size_t alphabet_size = KmerExtractorBOSS::alphabet.size();
+    KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+    // reset kmer[0] (the last character in k-mer, $ in dummy sink) to zero
+    kmer_delta &= ~KMER_INT(KMER::kFirstCharMask);
 
-    Vector<T> &kmers = *kmers_p;
+    const size_t alphabet_size = KmerExtractor2Bit().alphabet.size();
 
     // points to the current k-mer with the given first character
     std::vector<size_t> max_it(alphabet_size);
@@ -74,35 +68,30 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
         std::vector<TAlphabet> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
-                                 KMER(zeros, k + 1), // the $$...i->$ k-mer
-                                 [](const T &a, const KMER &b) -> bool {
+                                 KMER_REAL(zeros, k + 1), // the AA...c->A k-mer
+                                 [](const T_REAL &a, const KMER_REAL &b) -> bool {
                                      return get_first(a) < b;
                                  }) - kmers.data();
         max_it[c - 1] = it[c];
     }
     max_it[alphabet_size - 1] = kmers.size();
 
-    std::vector<KMER> last_dummy(alphabet_size, KMER(0));
+    std::vector<KMER_REAL> last_shifted(alphabet_size, KMER_REAL(1));
     size_t size = kmers.size();
-    for (size_t i = 1; i < size; ++i) { // starting at 1 to skip the $$...$$ k-mer
-        const KMER &kmer = get_first(kmers[i]);
-        // none of the original k-mers is a dummy k-mer
-        assert(kmer[1] != 0 && kmer[0] != 0);
-
-        KMER dummy_sink = kmer;
-        dummy_sink.to_next(k + 1, BOSS::kSentinelCode);
-
-        TAlphabet last_char = kmer[0];
+    for (size_t i = 0; i < size; ++i) {
+        TAlphabet last_char = get_first(kmers[i])[0];
+        KMER_REAL shifted = get_first(kmers[i]);
+        shifted.to_next(k + 1, 0);
 
         while (it[last_char] < max_it[last_char]
-                && KMER::less(get_first(kmers[it[last_char]]), dummy_sink)) {
+                && KMER_REAL::less(get_first(kmers[it[last_char]]), shifted)) {
             it[last_char]++;
         }
-        if (last_dummy[last_char] != dummy_sink
+        if (last_shifted[last_char] != shifted
             && (it[last_char] == max_it[last_char]
-                || !KMER::compare_suffix(get_first(kmers[it[last_char]]), dummy_sink))) {
-            push_back(kmers, dummy_sink);
-            last_dummy[last_char] = dummy_sink;
+                || !KMER_REAL::compare_suffix(get_first(kmers[it[last_char]]), shifted))) {
+            dummy_kmers->emplace_back(kmer::transform<KMER>(shifted, k + 1) + kmer_delta);
+            last_shifted[last_char] = shifted;
         }
     }
 }
@@ -110,12 +99,12 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
 /**
  * Adds non-redundant dummy source nodes with prefix length 1 for the given kmers.
  *
- * For each kmer in #kmers_p, the method creates the corresponding dummy sources with
+ * For each kmer in #kmers, the method creates the corresponding dummy sources with
  * sentinels of length 1 (aka dummy-1 sources). The method then checks if the dummy-1
  * source node is redundant, i.e. if there is another k-mer that is identical
  * except for the first character. For example, $ACGT is redundant with TACGT. To do this
  * efficiently, the method uses an iterator called dummy_it that points to the first kmer
- * with the suffix equal to or larger than the current kmer. Since #kmers_p are ordered,
+ * with the suffix equal to or larger than the current kmer. Since #kmers are ordered,
  * the generated dummy-1 kmers will also be ordered as long as the last character
  * in the original k-mers stays the same. This means that dummy_it only needs to move
  * forward and must be reset only when the last character in the original kmer changes.
@@ -126,37 +115,45 @@ void add_dummy_sink_kmers(size_t k, Vector<T> *kmers_p) {
  * find or pass k-mers with the suffix AC. Then we check all kmers with the AC suffix, and
  * if we find one with the same edge label, such as TAC->G, then $AC->G is redundant and
  * will be skipped.
+ *
+ * Dummy-1 kmers are transformed to the alphabet that includes the sentinel ($) before
+ * being added to #dummy_kmers.
  */
-template <typename T>
-void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
-    using KMER = get_first_type_t<T>;
-    Vector<T> &kmers = *kmers_p;
+template <typename T_REAL, typename KMER>
+void add_dummy_source_kmers(size_t k,
+                            const Vector<T_REAL> &kmers,
+                            Vector<KMER> *dummy_kmers) {
+    using KMER_REAL = get_first_type_t<T_REAL>;
+    using KMER_INT = typename KMER::WordType;
+
+    KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+    // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
+    kmer_delta &= ~KMER_INT(KMER::kFirstCharMask << KMER::kBitsPerChar);
 
     // points to the first k-mer that may be redundant with the current dummy source k-mer
     size_t real_it = 0;
 
-    for (size_t i = 1; i < end; ++i) { // starting at 1 to skip the $$...$$ k-mer
-        const KMER &kmer = get_first(kmers[i]);
-        // none of the original k-mers is a dummy k-mer
-        assert(kmer[1] != 0 && kmer[0] != 0);
+    for (size_t i = 0; i < kmers.size(); ++i) {
+        const KMER_REAL &kmer = get_first(kmers[i]);
 
-        if (kmer[k] != get_first(kmers[i - 1])[k]) {
+        if (i > 0 && kmer[k] != get_first(kmers[i - 1])[k]) {
             // the last (most significant) character changed -> reset the iterator
             real_it = 0;
         }
 
-        if (KMER::compare_suffix(kmer, get_first(kmers[i - 1])))
+        if (i > 0 && KMER_REAL::compare_suffix(kmer, get_first(kmers[i - 1])))
             continue; // i would generate the same dummy-1 k-mer as i-1, skip
 
-        KMER prev_kmer = kmer;
-        prev_kmer.to_prev(k + 1, BOSS::kSentinelCode);
+        KMER_REAL prev_kmer = kmer;
+        prev_kmer.to_prev(k + 1, 0);
 
-        while (real_it < end && KMER::less(get_first(kmers[real_it]), prev_kmer, 1)) {
+        while (real_it < kmers.size()
+                && KMER_REAL::less(get_first(kmers[real_it]), prev_kmer, 1)) {
             real_it++;
         }
         bool is_redundant = false;
-        while (real_it < end
-                && KMER::compare_suffix(get_first(kmers[real_it]), prev_kmer, 1)) {
+        while (real_it < kmers.size()
+                && KMER_REAL::compare_suffix(get_first(kmers[real_it]), prev_kmer, 1)) {
             if (get_first(kmers[real_it])[0] == prev_kmer[0]) {  // edge labels match
                 is_redundant = true;
                 break;
@@ -164,7 +161,7 @@ void add_dummy_source_kmers(size_t k, Vector<T> *kmers_p, size_t end) {
             real_it++;
         }
         if (!is_redundant) {
-            push_back(kmers, prev_kmer);
+            dummy_kmers->emplace_back(transform<KMER>(prev_kmer, k + 1) + kmer_delta);
         }
     }
 }
@@ -180,19 +177,13 @@ inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_cod
 
 template <typename T>
 void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
-    logger->trace("Adding reverse-complement k-mers...");
     size_t size = kmers->size();
-    if (size < 2) {
-        return;
-    }
-    // extra 20% for dummy kmers; better to waste some extra space now than to have a
-    // twice larger re-allocation after the reverse complements were added
-    kmers->reserve(2.4 * size);
+    kmers->reserve(2 * size);
 
-    T *kmer = kmers->data() + 1; // skip $$...$
-    const T *end = kmers->data() + size;
-    for( ; kmer != end; ++kmer) {
-        const T &rc = rev_comp(k + 1, *kmer, KmerExtractorBOSS::kComplementCode);
+    logger->trace("Adding reverse-complement k-mers...");
+    const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
+    for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
+        const T &rc = rev_comp(k + 1, *kmer, complement_code);
         if (get_first(rc) != get_first(*kmer)) {
             kmers->push_back(std::move(rc));
         } else {
@@ -221,53 +212,106 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
  * @param k the node length in the BOOS graph (so k-mer length is k+1)
  * @param num_threads number of threads available for sorting
  * @param both_strands for each k-mer, also add its reverse complement
- * @tparam T the type of kmers being processed, typically either a KMer64/128/256 or an
+ * @param kmers real (not dummy) k-mers to generate dummy k-mers for
+ * @param kmers_out sorted real+dummy k-mers
+ * @tparam T_REAL the type of kmers being processed, typically either a KMer64/128/256 or an
  * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
+ * @tparam T a k-mer over the same alphabet as T_REAL plus the $ sentinel character (may
+ * require one extra bit of storage per character)
  */
-template <typename T>
-void recover_dummy_nodes(size_t k, size_t num_threads, bool both_strands, Vector<T> *kmers_p) {
+template <typename KmerCollector, typename T_REAL, typename T>
+void recover_dummy_nodes(const KmerCollector &kmer_collector,
+                         Vector<T_REAL> &kmers,
+                         ChunkedWaitQueue<T> *kmers_out,
+                         ThreadPool &async_worker) {
     using KMER = get_first_type_t<T>;
-    Vector<T> &kmers = *kmers_p;
+    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
+    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
-    if (both_strands) {
+    size_t k = kmer_collector.get_k() - 1;
+    size_t num_threads = kmer_collector.num_threads();
+
+    if (kmer_collector.is_both_strands_mode()) {
         add_reverse_complements(k, num_threads, &kmers);
     }
 
-    size_t original_end = kmers.size();
-    logger->trace("Total number of real k-mers: {}", original_end);
-    add_dummy_sink_kmers(k, &kmers);
-    logger->trace("Added {} dummy sink k-mers", kmers.size() - original_end);
+    logger->trace("Total number of real k-mers: {}", kmers.size());
 
-    size_t dummy_source_begin = kmers.size();
-    add_dummy_source_kmers(k, &kmers, original_end);
+    Vector<KMER> dummy_kmers;
+    dummy_kmers.reserve(0.1 * kmers.size()); // assume at most 10% dummy sink k-mers
+    add_dummy_sink_kmers(k, kmers, &dummy_kmers);
+    // the total number of dummy source k-mers can be relatively accurately predicted
+    // using the dummy sink kmers
+    dummy_kmers.reserve(std::max(static_cast<int>(k) - 8, 2) * dummy_kmers.size());
+    logger->trace("Added {} dummy sink k-mers", dummy_kmers.size());
 
-    ips4o::parallel::sort(kmers.begin() + dummy_source_begin, kmers.end(),
+    size_t dummy_source_begin = dummy_kmers.size();
+    add_dummy_source_kmers(k, kmers, &dummy_kmers);
+
+    ips4o::parallel::sort(dummy_kmers.begin() + dummy_source_begin, dummy_kmers.end(),
                           utils::LessFirst(), num_threads);
 
     logger->trace("Number of dummy k-mers with dummy prefix of length 1: {}",
-                  kmers.size() - dummy_source_begin);
+                  dummy_kmers.size() - dummy_source_begin);
 
     for (size_t c = 2; c < k + 1; ++c) {
-        size_t dummy_end = kmers.size();
+        size_t dummy_end = dummy_kmers.size();
 
         for (size_t i = dummy_source_begin; i < dummy_end; ++i) {
-            KMER kmer = get_first(kmers[i]);
-            if (KMER::compare_suffix(kmer, get_first(kmers[i - 1])))
+            KMER kmer = dummy_kmers[i];
+            if (i> 0 && KMER::compare_suffix(kmer, dummy_kmers[i - 1]))
                 continue; // i would generate the same dummy source k-mer as i-1, skip
 
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
-            push_back(kmers, kmer);
+            dummy_kmers.push_back(kmer);
         }
         dummy_source_begin = dummy_end;
-        ips4o::parallel::sort(kmers.begin() + dummy_source_begin, kmers.end(),
+        ips4o::parallel::sort(dummy_kmers.begin() + dummy_source_begin, dummy_kmers.end(),
                               utils::LessFirst(), num_threads);
 
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}", c,
-                      kmers.size() - dummy_source_begin);
+                      dummy_kmers.size() - dummy_source_begin);
     }
 
-    ips4o::parallel::sort(kmers.begin(), kmers.end(),
+    ips4o::parallel::sort(dummy_kmers.begin(), dummy_kmers.end(),
                           utils::LessFirst(), num_threads);
+
+    // add the main dummy source k-mer
+    if constexpr (utils::is_pair_v<T>) {
+        kmers_out->push({ KMER(0), 0 });
+    } else {
+        kmers_out->push(KMER(0));
+    }
+
+    async_worker.enqueue([k, &kmers, dummy_kmers = std::move(dummy_kmers), kmers_out]() {
+        // merge #kmers and #dummy_kmers into #kmers_out
+        size_t di = 0;
+        const KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+        for(const auto& kmer : kmers) {
+            KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
+            if constexpr (utils::is_pair_v<T>) {
+                while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
+                    kmers_out->push({ dummy_kmers[di], 0 });
+                    di++;
+                }
+                kmers_out->push({lifted, kmer.second});
+            } else {
+                while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
+                    kmers_out->push(dummy_kmers[di]);
+                    di++;
+                }
+                kmers_out->push(lifted);
+            }
+        }
+        for (size_t i = di; i < dummy_kmers.size(); ++i) {
+            if constexpr (utils::is_pair_v<T>) {
+                kmers_out->push({ dummy_kmers[i], 0 });
+            } else {
+                kmers_out->push(dummy_kmers[i]);
+            }
+        }
+        kmers_out->shutdown();
+    });
 }
 
 template <typename T>
@@ -545,17 +589,15 @@ void add_reverse_complements(size_t k,
  * the dummy-k kmers, for k=2..k
  */
 template <class KmerCollector, typename T_REAL, typename T>
-void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
-                              ChunkedWaitQueue<T_REAL> &kmers,
-                              ChunkedWaitQueue<T> *kmers_out,
-                              ThreadPool &async_worker) {
+void recover_dummy_nodes(const KmerCollector &kmer_collector,
+                         ChunkedWaitQueue<T_REAL> &kmers,
+                         ChunkedWaitQueue<T> *kmers_out,
+                         ThreadPool &async_worker) {
     using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
-
-    const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
@@ -583,6 +625,7 @@ void recover_dummy_nodes_disk(const KmerCollector &kmer_collector,
             dummy_chunks.push_back(f);
         }
 
+        const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
         std::vector<std::string> dummy_next_names(alphabet_size);
         std::vector<Encoder<KMER_INT>> dummy_next_chunks;
         for (TAlphabet i = 0; i < alphabet_size; ++i) {
@@ -706,20 +749,19 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated,
-                         const std::filesystem::path &swap_dir,
+                         const std::filesystem::path &tmp_dir,
                          size_t max_disk_space)
         : kmer_collector_(k + 1,
                           both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
-                          swap_dir,
+                          tmp_dir,
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
-        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)
-            && (!utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>
-                || filter_suffix.size())) {
+        if (filter_suffix.size()
+                && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
@@ -738,75 +780,45 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     BOSS::Chunk* build_chunk() {
         BOSS::Chunk *result;
+        typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
+
+        using T_INT = typename KmerCollector::Data::value_type;
+        using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
+        auto &kmers = reinterpret_container<T>(kmer_ints);
 
         if constexpr(std::is_same_v<typename KmerCollector::Extractor,
                                     KmerExtractorBOSS>) {
-            typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
-
-            using T_INT = typename KmerCollector::Data::value_type;
-            using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
-            auto &kmers = reinterpret_container<T>(kmer_ints);
-
-            if (!kmer_collector_.suffix_length()) {
-                logger->trace("Reconstructing all required dummy source k-mers...");
-                Timer timer;
-                if constexpr(std::is_same_v<typename KmerCollector::Data,
-                                            ChunkedWaitQueue<T_INT>>) {
-                    recover_dummy_nodes_disk(kmer_collector_, kmers, &kmers, async_worker_);
-                } else {
-                    // kmer_collector stores (BOSS::k_ + 1)-mers
-                    static_assert(std::is_same_v<typename KmerCollector::Data, Vector<T_INT>>);
-                    recover_dummy_nodes(kmer_collector_.get_k() - 1,
-                                        kmer_collector_.num_threads(),
-                                        kmer_collector_.is_both_strands_mode(),
-                                        &kmers);
-                }
-                logger->trace("Dummy source k-mers were reconstructed in {} sec",
-                              timer.elapsed());
-            }
-
+            assert(kmer_collector_.suffix_length());
             // kmer_collector stores (BOSS::k_ + 1)-mers
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
-                                     bits_per_count_,
-                                     kmer_collector_.tmp_dir().parent_path());
+                                     bits_per_count_);
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
             assert(!kmer_collector_.suffix_length());
 
-            typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
-
-            using T_INT = typename KmerCollector::Data::value_type;
-            using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
-            auto &kmers = reinterpret_container<T>(kmer_ints);
-
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
-            if constexpr(std::is_same_v<typename KmerCollector::Data,
-                                        ChunkedWaitQueue<T_INT>>) {
+
 #define INIT_CHUNK(KMER) \
     ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
-    recover_dummy_nodes_disk(kmer_collector_, kmers, &queue, async_worker_); \
+    recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_); \
     logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
     result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
                              kmer_collector_.get_k() - 1, \
                              kmer_collector_.is_both_strands_mode(), \
                              queue, \
-                             bits_per_count_, \
-                             kmer_collector_.tmp_dir().parent_path())
+                             bits_per_count_)
 
-                if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer64);
-                } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer128);
-                } else {
-                    INIT_CHUNK(KmerExtractorBOSS::Kmer256);
-                }
+            if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
+                INIT_CHUNK(KmerExtractorBOSS::Kmer64);
+            } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
+                INIT_CHUNK(KmerExtractorBOSS::Kmer128);
             } else {
-                throw std::runtime_error("Not implemented");
+                INIT_CHUNK(KmerExtractorBOSS::Kmer256);
             }
         }
 
@@ -837,41 +849,33 @@ initialize_boss_chunk_constructor(size_t k,
         exit(1);
     }
 
-    // collect real k-mers in tight layout only with sorted set disk and if suffix is empty
-    if (!filter_suffix.size()
-            && utils::is_instance_v<typename KmerContainer<KmerExtractorBOSS::Kmer64,
-                                                           KmerExtractorBOSS>::Data,
-                                    ChunkedWaitQueue>) {
+#define ARGS k, canonical_mode, bits_per_count, filter_suffix, args...
+
+    // collect real k-mers in tight layout only if suffix is empty
+    if (filter_suffix.empty()) {
         if ((k + 1) * KmerExtractor2Bit::bits_per_char <= 64) {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractor2Bit::KmerBOSS64,
-                                                                       KmerExtractor2Bit>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
+            using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS64, KmerExtractor2Bit>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else if ((k + 1) * KmerExtractor2Bit::bits_per_char <= 128) {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractor2Bit::KmerBOSS128,
-                                                                       KmerExtractor2Bit>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
+            using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS128, KmerExtractor2Bit>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractor2Bit::KmerBOSS256,
-                                                                       KmerExtractor2Bit>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
+            using Container = KmerContainer<KmerExtractor2Bit::KmerBOSS256, KmerExtractor2Bit>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         }
     } else {
         if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 64) {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer64,
-                                                                       KmerExtractorBOSS>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
+            using Container = KmerContainer<KmerExtractorBOSS::Kmer64, KmerExtractorBOSS>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
 
         } else if ((k + 1) * KmerExtractorBOSS::bits_per_char <= 128) {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer128,
-                                                                       KmerExtractorBOSS>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
-
+            using Container = KmerContainer<KmerExtractorBOSS::Kmer128, KmerExtractorBOSS>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         } else {
-            return std::make_unique<BOSSChunkConstructor<KmerContainer<KmerExtractorBOSS::Kmer256,
-                                                                       KmerExtractorBOSS>>>(
-                            k, canonical_mode, bits_per_count, filter_suffix, args...);
+            using Container = KmerContainer<KmerExtractorBOSS::Kmer256, KmerExtractorBOSS>;
+            return std::make_unique<BOSSChunkConstructor<Container>>(ARGS);
         }
     }
 }
