@@ -33,7 +33,8 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
                       size_t num_threads,
-                      bool canonical = false);
+                      bool canonical = false,
+                      size_t sub_k = std::numeric_limits<size_t>::max());
 
 
 class QueryExecutor {
