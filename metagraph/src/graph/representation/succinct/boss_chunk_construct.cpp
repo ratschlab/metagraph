@@ -182,21 +182,44 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
 
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
-    #pragma omp parallel for num_threads(num_threads) schedule(static)
-    for (T *kmer = kmers->data(); kmer < kmers->data() + size; ++kmer) {
-        const T &rc = rev_comp(k + 1, *kmer, complement_code);
-        if (get_first(rc) != get_first(*kmer)) {
-            kmers->push_back(std::move(rc));
-        } else {
-            if constexpr (utils::is_pair_v<T>) {
-                using C = typename T::second_type;
-                if (kmer->second >> (sizeof(C) * 8 - 1)) {
-                    kmer->second = std::numeric_limits<C>::max();
-                } else {
-                    kmer->second *= 2;
+    std::mutex mutex;
+    std::vector<T> buffer;
+    constexpr uint32_t BUF_SIZE = 1000;
+    #pragma omp parallel num_threads(num_threads) private(buffer)
+    {
+        #pragma omp for schedule(static)
+        for (T *kmer = kmers->data(); kmer < kmers->data() + size; ++kmer) {
+            buffer.reserve(BUF_SIZE);
+            const T &rc = rev_comp(k + 1, *kmer, complement_code);
+            if (get_first(rc) != get_first(*kmer)) {
+                if (buffer.size() == buffer.capacity()) {
+                    T *end;
+                    {
+                        std::unique_lock<std::mutex> exclusive_lock(mutex);
+                        end = kmers->end();
+                        kmers->resize(kmers->size() + BUF_SIZE);
+                    }
+                    std::copy(buffer.data(), buffer.data() + BUF_SIZE, end);
+                }
+                buffer.push_back(std::move(rc));
+            } else {
+                if constexpr (utils::is_pair_v<T>) {
+                    using C = typename T::second_type;
+                    if (kmer->second >> (sizeof(C) * 8 - 1)) {
+                        kmer->second = std::numeric_limits<C>::max();
+                    } else {
+                        kmer->second *= 2;
+                    }
                 }
             }
         }
+        T *end;
+        {
+            std::unique_lock<std::mutex> exclusive_lock(mutex);
+            end = kmers->end();
+            kmers->resize(kmers->size() + buffer.size());
+        }
+        std::copy(buffer.data(), buffer.data() + buffer.size(), end);
     }
     logger->trace("Sorting all real kmers...");
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
