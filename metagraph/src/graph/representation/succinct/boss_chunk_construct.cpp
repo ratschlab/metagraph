@@ -200,6 +200,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                         kmers->resize(kmers->size() + BUF_SIZE);
                     }
                     std::copy(buffer.data(), buffer.data() + BUF_SIZE, end);
+                    buffer.resize(0);
                 }
                 buffer.push_back(std::move(rc));
             } else {
