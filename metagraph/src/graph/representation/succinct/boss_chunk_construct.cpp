@@ -193,7 +193,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
             const T &rc = rev_comp(k + 1, *kmer, complement_code);
             if (get_first(rc) != get_first(*kmer)) {
                 if (buffer.size() == buffer.capacity()) {
-                    T *end;
+                    typename Vector<T>::iterator end;
                     {
                         std::unique_lock<std::mutex> exclusive_lock(mutex);
                         end = kmers->end();
@@ -213,7 +213,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 }
             }
         }
-        T *end;
+        typename Vector<T>::iterator end;
         {
             std::unique_lock<std::mutex> exclusive_lock(mutex);
             end = kmers->end();
