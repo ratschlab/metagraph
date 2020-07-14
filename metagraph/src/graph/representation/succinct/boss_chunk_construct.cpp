@@ -184,7 +184,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
     std::mutex mutex;
     std::vector<T> buffer;
-    constexpr uint32_t BUF_SIZE = 1000;
+    const uint32_t BUF_SIZE = std::min(kmers->size() / num_threads, 10000);
     #pragma omp parallel num_threads(num_threads) private(buffer)
     {
         #pragma omp for schedule(static)
