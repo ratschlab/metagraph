@@ -182,21 +182,20 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
 
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
-    std::mutex mutex;
-    std::vector<T> buffer;
-    const uint32_t BUF_SIZE = std::min(kmers->size() / num_threads, 10000);
-    #pragma omp parallel num_threads(num_threads) private(buffer)
+    const uint32_t BUF_SIZE = std::min(kmers->size() / num_threads, 10000UL);
+    #pragma omp parallel num_threads(num_threads)
     {
+        std::vector<T> buffer;
+        buffer.reserve(BUF_SIZE);
         #pragma omp for schedule(static)
         for (T *kmer = kmers->data(); kmer < kmers->data() + size; ++kmer) {
-            buffer.reserve(BUF_SIZE);
             const T &rc = rev_comp(k + 1, *kmer, complement_code);
             if (get_first(rc) != get_first(*kmer)) {
                 if (buffer.size() == buffer.capacity()) {
-                    typename Vector<T>::iterator end;
+                    T* end;
+                    #pragma omp critical
                     {
-                        std::unique_lock<std::mutex> exclusive_lock(mutex);
-                        end = kmers->end();
+                        end = kmers->data() + kmers->size();
                         kmers->resize(kmers->size() + BUF_SIZE);
                     }
                     std::copy(buffer.data(), buffer.data() + BUF_SIZE, end);
@@ -214,10 +213,10 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 }
             }
         }
-        typename Vector<T>::iterator end;
+        T* end;
+        #pragma omp critical
         {
-            std::unique_lock<std::mutex> exclusive_lock(mutex);
-            end = kmers->end();
+            end = kmers->data() + kmers->size();
             kmers->resize(kmers->size() + buffer.size());
         }
         std::copy(buffer.data(), buffer.data() + buffer.size(), end);
@@ -347,7 +346,7 @@ using Decoder = common::EliasFanoDecoder<T>;
 /**
  * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
  * @tparam T_REAL k-mers over the alphabet without the sentinel character (e.g. ACGT).
- * @return the name of the files containing the split k-mers
+ * @return names of the files with the partitioned k-mers
  */
 template <typename T_REAL>
 std::vector<std::string> split(size_t k,
