@@ -227,7 +227,7 @@ class Alignment {
                       std::move(nodes),
                       std::string(query),
                       score,
-                      Cigar(Cigar::Operator::MATCH, query.size()),
+                      Cigar(Cigar::MATCH, query.size()),
                       clipping,
                       orientation,
                       offset) {
@@ -287,7 +287,7 @@ class Alignment {
 
         cigar_.insert(
             cigar_.begin(),
-            typename Cigar::value_type { Cigar::Operator::CLIPPED, query_begin_ - begin }
+            typename Cigar::value_type { Cigar::CLIPPED, query_begin_ - begin }
         );
     }
 
@@ -297,7 +297,7 @@ class Alignment {
         if (end == query_end_ + end_clipping)
             return;
 
-        cigar_.append(Cigar::Operator::CLIPPED, end - query_end_ - end_clipping);
+        cigar_.append(Cigar::CLIPPED, end - query_end_ - end_clipping);
     }
 
     void trim_clipping() {
@@ -349,7 +349,7 @@ class Alignment {
 
     bool is_exact_match() const {
         return cigar_.size() == 1
-            && cigar_.front().first == Cigar::Operator::MATCH
+            && cigar_.front().first == Cigar::MATCH
             && query_begin_ + cigar_.front().second == query_end_;
     }
 
@@ -379,7 +379,7 @@ class Alignment {
             nodes_(std::move(nodes)),
             sequence_(std::move(sequence)),
             score_(score),
-            cigar_(Cigar::Operator::CLIPPED, clipping),
+            cigar_(Cigar::CLIPPED, clipping),
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 

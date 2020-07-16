@@ -31,7 +31,7 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         table_init.prev_nodes[start_pos] = SequenceGraph::npos;
         table_init.gap_prev_nodes[start_pos] = SequenceGraph::npos;
         table_init.gap_scores[start_pos] = std::max(
-            last_op == Cigar::Operator::INSERTION
+            last_op == Cigar::INSERTION
                 ? table_init.scores[start_pos]
                 : table_init.scores[start_pos] - last_char_score + config.gap_opening_penalty,
             config.min_cell_score
@@ -84,7 +84,7 @@ void DPTable<NodeType>
     starts.reserve(size());
     for (const_iterator it = dp_table_.begin(); it != dp_table_.end(); ++it) {
         if (it->second.best_score() > min_path_score
-                && it->second.best_op() == Cigar::Operator::MATCH)
+                && it->second.best_op() == Cigar::MATCH)
             starts.emplace_back(it);
     }
 
@@ -153,20 +153,17 @@ Alignment<NodeType>::Alignment(const std::string_view query,
         query_begin_,
         query_begin_ + min_length,
         sequence_.c_str(),
-        Cigar(Cigar::Operator::CLIPPED, clipping),
+        Cigar(Cigar::CLIPPED, clipping),
         [&](Cigar &cigar, bool equal) -> Cigar& {
-            cigar.append(equal
-                  ? Cigar::Operator::MATCH
-                  : Cigar::Operator::MISMATCH
-              );
+            cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
             return cigar;
         },
         std::equal_to<char>()
     );
 
     assert(!(query_size - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::Operator::DELETION, query_size - min_length);
-    cigar_.append(Cigar::Operator::INSERTION, sequence_.size() - min_length);
+    cigar_.append(Cigar::DELETION, query_size - min_length);
+    cigar_.append(Cigar::INSERTION, sequence_.size() - min_length);
 }
 
 template <typename NodeType>
@@ -189,26 +186,26 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     Cigar::Operator op = column->second.ops.at(i);
     NodeType prev_node = column->second.prev_nodes.at(i);
     NodeType prev_gap_node = column->second.gap_prev_nodes.at(i);
-    uint8_t gap_count = op == Cigar::Operator::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
+    uint8_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
 
     if (!i && prev_node == SequenceGraph::npos)
         return;
 
     // use config to recompute CIGAR score in DEBUG mode
     score_t score_track = score_;
-    Cigar::Operator last_op = Cigar::Operator::CLIPPED;
+    Cigar::Operator last_op = Cigar::CLIPPED;
 
     score_t gap_diff = config.gap_opening_penalty - config.gap_extension_penalty;
 
     std::vector<typename DPTable::const_iterator> out_columns;
     while (prev_node != SequenceGraph::npos) {
-        auto prev_column = dp_table.find(op == Cigar::Operator::INSERTION ? prev_gap_node : prev_node);
+        auto prev_column = dp_table.find(op == Cigar::INSERTION ? prev_gap_node : prev_node);
         if (prev_column == dp_table.end())
             break;
 
         switch (op) {
-            case Cigar::Operator::MATCH:
-            case Cigar::Operator::MISMATCH: {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
                 --i;
                 out_columns.emplace_back(column);
 
@@ -219,7 +216,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                 assert(prev_column->second.scores.at(i) >= score_track);
 
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::INSERTION: {
                 out_columns.emplace_back(column);
 
                 assert(prev_column->second.scores.at(i)
@@ -228,7 +225,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                 score_track -= config.gap_extension_penalty;
 
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::DELETION: {
                 --i;
 
                 assert(prev_column->second.scores.at(i)
@@ -237,7 +234,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
                 score_track -= config.gap_extension_penalty;
 
             } break;
-            case Cigar::Operator::CLIPPED: { assert(false); }
+            case Cigar::CLIPPED: { assert(false); }
         }
 
         cigar_.append(op);
@@ -249,7 +246,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
             --gap_count;
         } else {
             op = column->second.ops.at(i);
-            if (op == Cigar::Operator::INSERTION)
+            if (op == Cigar::INSERTION)
                 gap_count = column->second.gap_count.at(i) - 1;
         }
         prev_node = column->second.prev_nodes.at(i);
@@ -275,7 +272,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
     if (i > std::numeric_limits<Cigar::LengthType>::max())
         throw std::runtime_error("Error: clipping length can't be stored in CIGAR");
 
-    cigar_.append(Cigar::Operator::CLIPPED, i);
+    cigar_.append(Cigar::CLIPPED, i);
     assert(cigar_.size());
 
     query_begin_ = query_view.data() + i;
@@ -301,7 +298,7 @@ template <typename NodeType>
 void Alignment<NodeType>::append(Alignment&& other) {
     assert(query_end_ == other.query_begin_);
     assert(orientation_ == other.orientation_);
-    assert(cigar_.empty() || cigar_.back().first != Cigar::Operator::CLIPPED);
+    assert(cigar_.empty() || cigar_.back().first != Cigar::CLIPPED);
 
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
@@ -327,8 +324,8 @@ void Alignment<NodeType>::trim_offset() {
     size_t counter = 0;
     while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
         if (counter == it->second
-                || it->first == Cigar::Operator::CLIPPED
-                || it->first == Cigar::Operator::DELETION) {
+                || it->first == Cigar::CLIPPED
+                || it->first == Cigar::DELETION) {
             ++it;
             counter = 0;
             continue;
@@ -440,7 +437,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     Json::Value path;
 
     auto cigar_it = cigar_.begin();
-    if (cigar_.size() && cigar_it->first == Cigar::Operator::CLIPPED) {
+    if (cigar_.size() && cigar_it->first == Cigar::CLIPPED) {
         cigar_it++;
     }
 
@@ -473,14 +470,14 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
         Json::Value edit;
         switch (cigar_it->first) {
-            case Cigar::Operator::MISMATCH: {
+            case Cigar::MISMATCH: {
                 assert(query_start + next_size <= query_end_);
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::DELETION: {
                 assert(query_start + next_size <= query_end_);
                 // this assumes that DELETIONS can't happen right after insertions
                 //edit["from_length"] = 0;
@@ -488,16 +485,16 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::INSERTION: {
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 //edit["to_length"] = 0;
             } break;
-            case Cigar::Operator::MATCH: {
+            case Cigar::MATCH: {
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 query_start += next_size;
             } break;
-            case Cigar::Operator::CLIPPED: {
+            case Cigar::CLIPPED: {
                 ++cigar_it;
                 cigar_offset = 0;
                 assert(cigar_it == cigar_.end());
@@ -531,7 +528,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         //position["is_reverse"] = false;
         mapping["position"] = position;
 
-        if (cigar_it->first == Cigar::Operator::DELETION) {
+        if (cigar_it->first == Cigar::DELETION) {
             Json::Value edit;
             size_t length = cigar_it->second - cigar_offset;
             assert(query_start + length < query_end_);
@@ -548,24 +545,24 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
         Json::Value edit;
         switch (cigar_it->first) {
-            case Cigar::Operator::MISMATCH: {
+            case Cigar::MISMATCH: {
                 assert(query_start < query_end_);
                 edit["from_length"] = 1;
                 edit["to_length"] = 1;
                 edit["sequence"] = std::string(query_start, 1);
                 query_start++;
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::INSERTION: {
                 edit["from_length"] = 1;
                 //edit["to_length"] = 0;
             } break;
-            case Cigar::Operator::MATCH: {
+            case Cigar::MATCH: {
                 edit["from_length"] = 1;
                 edit["to_length"] = 1;
                 query_start++;
             } break;
-            case Cigar::Operator::DELETION:
-            case Cigar::Operator::CLIPPED: assert(false); break;
+            case Cigar::DELETION:
+            case Cigar::CLIPPED: assert(false); break;
         }
 
         if (++cigar_offset == cigar_it->second) {
@@ -580,8 +577,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
     assert(query_start == query_end_);
     assert(cigar_it == cigar_.end()
-            || (cigar_it + 1 == cigar_.end()
-                    && cigar_it->first == Cigar::Operator::CLIPPED));
+            || (cigar_it + 1 == cigar_.end() && cigar_it->first == Cigar::CLIPPED));
 
     path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
@@ -698,7 +694,7 @@ std::shared_ptr<const std::string> Alignment<NodeType>
 
     query_end_ = query_begin_;
 
-    cigar_.append(Cigar::Operator::CLIPPED, query_begin_ - query_start);
+    cigar_.append(Cigar::CLIPPED, query_begin_ - query_start);
     for (; i < mapping.size(); ++i) {
         nodes_.emplace_back(mapping[i]["position"]["node_id"].asUInt64());
         if (nodes_.size() == 1) {
@@ -720,32 +716,26 @@ std::shared_ptr<const std::string> Alignment<NodeType>
 
             if (edits[j]["from_length"] == edits[j]["to_length"]) {
                 if (edits[j]["sequence"].asString().size()) {
-                    cigar_.append(Cigar::Operator::MISMATCH,
-                                  edits[j]["from_length"].asUInt64());
+                    cigar_.append(Cigar::MISMATCH, edits[j]["from_length"].asUInt64());
                 } else {
-                    cigar_.append(Cigar::Operator::MATCH,
-                                  edits[j]["from_length"].asUInt64());
+                    cigar_.append(Cigar::MATCH, edits[j]["from_length"].asUInt64());
                 }
 
                 path_steps += edits[j]["from_length"].asUInt64();
                 query_end_ += edits[j]["to_length"].asUInt64();
             } else if (edits[j]["from_length"].asUInt64()) {
-                cigar_.append(Cigar::Operator::INSERTION,
-                              edits[j]["from_length"].asUInt64());
-
+                cigar_.append(Cigar::INSERTION, edits[j]["from_length"].asUInt64());
                 path_steps += edits[j]["from_length"].asUInt64();
             } else {
                 assert(edits[j]["to_length"].asUInt64());
-                cigar_.append(Cigar::Operator::DELETION,
-                              edits[j]["to_length"].asUInt64());
-
+                cigar_.append(Cigar::DELETION, edits[j]["to_length"].asUInt64());
                 query_end_ += edits[j]["to_length"].asUInt64();
             }
         }
     }
 
     if (query_end_ < query_sequence->c_str() + query_sequence->length()) {
-        cigar_.append(Cigar::Operator::CLIPPED,
+        cigar_.append(Cigar::CLIPPED,
                       query_sequence->c_str() + query_sequence->length() - query_end_);
     }
 

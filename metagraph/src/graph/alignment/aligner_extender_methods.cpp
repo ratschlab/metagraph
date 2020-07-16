@@ -133,8 +133,8 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
 template <typename NodeType>
 bool DefaultColumnExtender<NodeType>
 ::add_seed(size_t clipping) {
-    assert(path_->get_cigar().back().first == Cigar::Operator::MATCH
-        || path_->get_cigar().back().first == Cigar::Operator::MISMATCH);
+    assert(path_->get_cigar().back().first == Cigar::MATCH
+        || path_->get_cigar().back().first == Cigar::MISMATCH);
 
     return dp_table.add_seed(*path_, config_, size, 0, clipping);
 }
@@ -224,7 +224,7 @@ inline void update_del_scores(const DBGAlignerConfig &config,
                               score_t xdrop_cutoff) {
     for (size_t i = 1; i < length; ++i) {
         score_t del_score = std::max(config.min_cell_score,
-            update_scores[i - 1] + (update_ops[i - 1] == Cigar::Operator::DELETION
+            update_scores[i - 1] + (update_ops[i - 1] == Cigar::DELETION
                 ? config.gap_extension_penalty
                 : config.gap_opening_penalty
         ));
@@ -232,7 +232,7 @@ inline void update_del_scores(const DBGAlignerConfig &config,
         if (del_score >= xdrop_cutoff && del_score > update_scores[i]) {
             while (i < length && del_score > update_scores[i]) {
                 update_scores[i] = del_score;
-                update_ops[i] = Cigar::Operator::DELETION;
+                update_ops[i] = Cigar::DELETION;
                 update_prevs[i] = node;
 
                 if (updated_mask)
@@ -268,7 +268,7 @@ inline void compute_HE_avx2(size_t length,
     assert(update_scores != incoming_scores);
     assert(update_gap_scores != incoming_gap_scores);
 
-    __m256i insert_p = _mm256_set1_epi32(Cigar::Operator::INSERTION);
+    __m256i insert_p = _mm256_set1_epi32(Cigar::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
         __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
 
@@ -360,7 +360,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
 
     if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
         update_scores[0] = update_score;
-        update_ops[0] = Cigar::Operator::INSERTION;
+        update_ops[0] = Cigar::INSERTION;
         update_prevs[0] = prev_node;
         updated_mask[0] = 0xFFFFFFFF;
     }
@@ -425,7 +425,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
 
         if (update_score >= xdrop_cutoff && update_score > H) {
             H = update_score;
-            H_op = Cigar::Operator::INSERTION;
+            H_op = Cigar::INSERTION;
             H_prev = prev_node;
         }
 
@@ -562,7 +562,7 @@ void DefaultColumnExtender<NodeType>
     // check to make sure that start_node stores the best starting point
     assert(start_score == dp_table.best_score().second);
 
-    if (dp_table.find(start_node)->second.best_op() != Cigar::Operator::MATCH)
+    if (dp_table.find(start_node)->second.best_op() != Cigar::MATCH)
         logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
