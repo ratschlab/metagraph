@@ -9,6 +9,7 @@ import requests
 
 DEFAULT_TOP_LABELS = 10000
 DEFAULT_DISCOVERY_THRESHOLD = 1.0
+DEFAULT_NUM_NODES_PER_SEQ_CHAR = 2.0
 
 JsonDict = Dict[str, Any]
 JsonStrList = List[str]
@@ -30,7 +31,8 @@ class GraphClientJson:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
-               align: bool = False) -> Tuple[JsonDict, str]:
+               align: bool = False,
+               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         if discovery_threshold < 0.0 or discovery_threshold > 1.0:
             raise ValueError(
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
@@ -42,8 +44,11 @@ class GraphClientJson:
 
         return self._json_seq_query(sequence, param_dict, "search")
 
-    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Tuple[JsonDict, str]:
-        params = {'max_alternative_alignments' : max_alternative_alignments}
+    def align(self, sequence: Union[str, Iterable[str]],
+              max_alternative_alignments: int = 1,
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+        params = {'max_alternative_alignments': max_alternative_alignments,
+                  'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char}
         return self._json_seq_query(sequence, params, "align")
 
     # noinspection PyTypeChecker
@@ -97,9 +102,11 @@ class GraphClient:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
-               align: bool = False) -> pd.DataFrame:
+               align: bool = False,
+               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
         (json_obj, err) = self._json_client.search(sequence, top_labels,
-                                                   discovery_threshold, align)
+                                                   discovery_threshold, align,
+                                                   max_num_nodes_per_seq_char)
 
         if err:
             raise RuntimeError(
@@ -137,8 +144,11 @@ class GraphClient:
 
         return build_df_from_json(json_obj)
 
-    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence, max_alternative_alignments)
+    def align(self, sequence: Union[str, Iterable[str]],
+              max_alternative_alignments: int = 1,
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
+        json_obj, err = self._json_client.align(sequence, max_alternative_alignments,
+                                                max_num_nodes_per_seq_char)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
@@ -181,22 +191,29 @@ class MultiGraphClient:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
-               align: bool = False) -> \
+               align: bool = False,
+               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> \
             Dict[str, pd.DataFrame]:
 
         result = {}
         for label, graph_client in self.graphs.items():
             result[label] = graph_client.search(sequence, top_labels,
-                                                discovery_threshold, align)
+                                                discovery_threshold,
+                                                align,
+                                                max_num_nodes_per_seq_char)
 
         return result
 
-    def align(self, sequence: Union[str, Iterable[str]], max_alternative_alignments: int = 1) -> Dict[
+    def align(self, sequence: Union[str, Iterable[str]],
+              max_alternative_alignments: int = 1,
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for label, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence, max_alternative_alignments)
+            result[label] = graph_client.align(sequence,
+                                               max_alternative_alignments,
+                                               max_num_nodes_per_seq_char)
 
         return result
 

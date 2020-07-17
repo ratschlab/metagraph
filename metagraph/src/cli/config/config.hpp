@@ -118,6 +118,7 @@ class Config {
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
+    double alignment_max_nodes_per_seq_char = 2.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;

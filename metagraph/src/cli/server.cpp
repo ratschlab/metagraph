@@ -128,6 +128,10 @@ std::string process_search_request(const std::string &received_message,
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
+    config.alignment_max_nodes_per_seq_char = json.get(
+        "max_num_nodes_per_seq_char",
+        config.alignment_max_nodes_per_seq_char).asDouble();
+
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
         throw std::domain_error(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
@@ -177,9 +181,14 @@ std::string process_align_request(const std::string &received_message,
 
     Config config(config_orig);
 
-    if (json.isMember("max_alternative_alignments")) {
-        config.alignment_num_alternative_paths = json["max_alternative_alignments"].asInt();
-    }
+    config.alignment_num_alternative_paths = json.get(
+        "max_alternative_alignments",
+        config.alignment_num_alternative_paths).asDouble();
+
+    config.alignment_max_nodes_per_seq_char = json.get(
+        "max_num_nodes_per_seq_char",
+        config.alignment_max_nodes_per_seq_char).asDouble();
+
     std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
 
     seq_io::read_fasta_from_string(fasta.asString(),

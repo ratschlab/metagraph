@@ -214,6 +214,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-num-seeds-per-locus")) {
             alignment_max_num_seeds_per_locus = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-max-nodes-per-seq-char")) {
+            alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -810,6 +812,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
             fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [16]\n");
+            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [2.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -1019,6 +1022,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-edit-distance \t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-queue-size [INT]\t\tmaximum size of the priority queue for alignment [20]\n");
             fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\tmaximum width of a window to consider in alignment step [16]\n");
+            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [2.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
