@@ -1,7 +1,6 @@
 #include "query.hpp"
 
 #include <ips4o.hpp>
-#include <fmt/format.h>
 #include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
