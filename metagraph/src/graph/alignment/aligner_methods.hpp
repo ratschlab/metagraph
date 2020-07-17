@@ -56,6 +56,7 @@ class SuffixSeeder : public Seeder<NodeType> {
 
     std::vector<NodeType>& get_query_nodes() { return base_seeder_->get_query_nodes(); }
     std::vector<uint8_t>& get_offsets() { return base_seeder_->get_offsets(); }
+    size_t get_num_matching_kmers() const { return base_seeder_->get_num_matching_kmers(); }
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -84,6 +85,7 @@ class ExactMapSeeder : public Seeder<NodeType> {
   protected:
     std::vector<NodeType>& get_query_nodes() { return query_nodes_; }
     std::vector<uint8_t>& get_offsets() { return offsets_; }
+    size_t get_num_matching_kmers() const { return num_matching_kmers_; }
 
   private:
     const DeBruijnGraph &graph_;
@@ -93,6 +95,7 @@ class ExactMapSeeder : public Seeder<NodeType> {
     std::vector<score_t> partial_sum_;
     std::vector<NodeType> query_nodes_;
     std::vector<uint8_t> offsets_;
+    size_t num_matching_kmers_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>

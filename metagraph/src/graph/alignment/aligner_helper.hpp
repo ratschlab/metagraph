@@ -165,6 +165,7 @@ class DBGAlignerConfig {
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
+    double exact_kmer_match_fraction = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
 
     int8_t gap_opening_penalty;

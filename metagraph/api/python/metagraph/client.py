@@ -46,10 +46,12 @@ class GraphClientJson:
         return self._json_seq_query(sequence, param_dict, "search")
 
     def align(self, sequence: Union[str, Iterable[str]],
+              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         params = {'max_alternative_alignments': max_alternative_alignments,
-                  'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char}
+                  'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
+                  'discovery_fraction': discovery_threshold}
         return self._json_seq_query(sequence, params, "align")
 
     # noinspection PyTypeChecker
@@ -146,10 +148,11 @@ class GraphClient:
         return build_df_from_json(json_obj)
 
     def align(self, sequence: Union[str, Iterable[str]],
+              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence, max_alternative_alignments,
-                                                max_num_nodes_per_seq_char)
+        json_obj, err = self._json_client.align(sequence, discovery_threshold,
+                                                max_alternative_alignments, max_num_nodes_per_seq_char)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
@@ -206,13 +209,14 @@ class MultiGraphClient:
         return result
 
     def align(self, sequence: Union[str, Iterable[str]],
+              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for label, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence,
+            result[label] = graph_client.align(sequence, discovery_threshold,
                                                max_alternative_alignments,
                                                max_num_nodes_per_seq_char)
 

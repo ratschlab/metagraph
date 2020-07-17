@@ -8,11 +8,14 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
     query_ = query;
     orientation_ = orientation;
     query_nodes_.clear();
+    num_matching_kmers_ = 0;
 
     if (query_.size() < graph_.get_k())
         return;
 
     query_nodes_ = map_sequence_to_nodes(graph_, query_);
+    num_matching_kmers_ = query_nodes_.size()
+        - std::count(query_nodes_.begin(), query_nodes_.end(), NodeType());
 
     offsets_.assign(query_nodes_.size(), 0);
 
@@ -37,6 +40,13 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     const auto &offsets = this->get_offsets();
     auto query = this->get_query();
     bool orientation = this->get_orientation();
+
+    // if node suffixes of length < k were matched, then query_nodes.size() may
+    // be greater than query.size() - k + 1
+    if (this->get_num_matching_kmers()
+            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+        return;
+    }
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] == DeBruijnGraph::npos)
@@ -86,11 +96,18 @@ void SuffixSeeder<NodeType>
     alt_query_nodes.clear();
 
     base_seeder_->initialize(query, orientation);
+    size_t k = graph.get_k();
+
+    // if node suffixes of length < k were matched, then query_nodes.size() may
+    // be greater than query.size() - k + 1
+    if (get_num_matching_kmers()
+            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+        return;
+    }
+
     if (query_nodes.empty())
         query_nodes.assign(1, DeBruijnGraph::npos);
 
-
-    size_t k = graph.get_k();
     size_t max_seed_length = std::min(query.size(), std::min(config.max_seed_length, k));
 
     if (config.max_num_seeds_per_locus > 1)
@@ -252,6 +269,11 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
     const auto &config = this->get_config();
     bool orientation = this->get_orientation();
     const auto &partial_sum = this->get_partial_sums();
+
+    if (this->get_num_matching_kmers()
+            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+        return;
+    }
 
     // find start of MEM
     auto it = query_node_flags_.begin();
