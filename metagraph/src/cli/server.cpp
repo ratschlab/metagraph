@@ -192,6 +192,9 @@ std::string process_align_request(const std::string &received_message,
         "max_alternative_alignments",
         (uint64_t)config.alignment_num_alternative_paths).asDouble();
 
+    config.discovery_fraction = json.get("discovery_fraction",
+                                         config.discovery_fraction).asDouble();
+
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
