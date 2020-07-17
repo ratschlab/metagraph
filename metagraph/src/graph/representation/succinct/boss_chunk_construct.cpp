@@ -192,13 +192,10 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
             const T &rc = rev_comp(k + 1, *kmer, complement_code);
             if (get_first(rc) != get_first(*kmer)) {
                 if (buffer.size() == buffer.capacity()) {
-                    T* end;
                     #pragma omp critical
                     {
-                        end = kmers->data() + kmers->size();
-                        kmers->resize(kmers->size() + BUF_SIZE);
+                        kmers->insert(kmers->end(), buffer.begin(), buffer.end());
                     }
-                    std::copy(buffer.data(), buffer.data() + BUF_SIZE, end);
                     buffer.resize(0);
                 }
                 buffer.push_back(std::move(rc));
@@ -213,13 +210,10 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 }
             }
         }
-        T* end;
         #pragma omp critical
         {
-            end = kmers->data() + kmers->size();
-            kmers->resize(kmers->size() + buffer.size());
+            kmers->insert(kmers->end(), buffer.begin(), buffer.end());
         }
-        std::copy(buffer.data(), buffer.data() + buffer.size(), end);
     }
     logger->trace("Sorting all real kmers...");
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
