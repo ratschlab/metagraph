@@ -31,6 +31,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
     aligner_config.xdrop = config.alignment_xdrop;
+    aligner_config.exact_kmer_match_fraction = config.discovery_fraction;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
     aligner_config.forward_and_reverse_complement = config.align_both_strands;
@@ -58,6 +59,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
+    logger->trace("\t Exact k-mer match fraction: {}", aligner_config.exact_kmer_match_fraction);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {

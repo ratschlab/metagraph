@@ -130,7 +130,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str})
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -148,7 +148,7 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_align_empty_fasta_desc(self):
         fasta_str = ">\nTCGATCGA"
-        payload = json.dumps({"FASTA": fasta_str})
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
         ret = self.raw_post_request('align', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
