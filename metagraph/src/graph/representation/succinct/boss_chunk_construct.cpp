@@ -194,6 +194,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 if (buffer.size() == buffer.capacity()) {
                     #pragma omp critical
                     {
+                        // this is guaranteed to not reallocate
                         kmers->insert(kmers->end(), buffer.begin(), buffer.end());
                     }
                     buffer.resize(0);
