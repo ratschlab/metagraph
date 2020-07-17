@@ -110,7 +110,7 @@ class Config {
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
-    double discovery_fraction = 1.0;
+    double discovery_fraction = 0.7;
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;

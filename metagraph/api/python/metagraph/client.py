@@ -8,7 +8,7 @@ import requests
 """Metagraph client."""
 
 DEFAULT_TOP_LABELS = 10000
-DEFAULT_DISCOVERY_THRESHOLD = 1.0
+DEFAULT_DISCOVERY_THRESHOLD = 0.7
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
 
 JsonDict = Dict[str, Any]
