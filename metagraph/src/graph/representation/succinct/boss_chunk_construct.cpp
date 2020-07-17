@@ -182,19 +182,38 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
 
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
-    for (T *kmer = kmers->data(); kmer != kmers->data() + size; ++kmer) {
-        const T &rc = rev_comp(k + 1, *kmer, complement_code);
-        if (get_first(rc) != get_first(*kmer)) {
-            kmers->push_back(std::move(rc));
-        } else {
-            if constexpr (utils::is_pair_v<T>) {
-                using C = typename T::second_type;
-                if (kmer->second >> (sizeof(C) * 8 - 1)) {
-                    kmer->second = std::numeric_limits<C>::max();
-                } else {
-                    kmer->second *= 2;
+    const uint32_t BUF_SIZE = std::min(kmers->size() / num_threads, 10000UL);
+    #pragma omp parallel num_threads(num_threads)
+    {
+        std::vector<T> buffer;
+        buffer.reserve(BUF_SIZE);
+        #pragma omp for schedule(static)
+        for (T *kmer = kmers->data(); kmer < kmers->data() + size; ++kmer) {
+            const T &rc = rev_comp(k + 1, *kmer, complement_code);
+            if (get_first(rc) != get_first(*kmer)) {
+                if (buffer.size() == buffer.capacity()) {
+                    #pragma omp critical
+                    {
+                        // this is guaranteed to not reallocate
+                        kmers->insert(kmers->end(), buffer.begin(), buffer.end());
+                    }
+                    buffer.resize(0);
+                }
+                buffer.push_back(std::move(rc));
+            } else {
+                if constexpr (utils::is_pair_v<T>) {
+                    using C = typename T::second_type;
+                    if (kmer->second >> (sizeof(C) * 8 - 1)) {
+                        kmer->second = std::numeric_limits<C>::max();
+                    } else {
+                        kmer->second *= 2;
+                    }
                 }
             }
+        }
+        #pragma omp critical
+        {
+            kmers->insert(kmers->end(), buffer.begin(), buffer.end());
         }
     }
     logger->trace("Sorting all real kmers...");
@@ -321,8 +340,8 @@ using Decoder = common::EliasFanoDecoder<T>;
 
 /**
  * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
- * T_REAL: type KmerExtractorT::KMerBOSS representing k-mers over the alphabet
- * without the sentinel character (e.g., ACGT).
+ * @tparam T_REAL k-mers over the alphabet without the sentinel character (e.g. ACGT).
+ * @return names of the files with the partitioned k-mers
  */
 template <typename T_REAL>
 std::vector<std::string> split(size_t k,
