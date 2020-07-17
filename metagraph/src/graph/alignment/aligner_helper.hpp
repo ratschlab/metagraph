@@ -165,6 +165,8 @@ class DBGAlignerConfig {
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
+    double max_nodes_per_seq_char = std::numeric_limits<double>::max();
+
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
 
@@ -548,6 +550,9 @@ class DPTable {
     std::pair<iterator, bool> emplace(Args&&... args) {
         return dp_table_.emplace(std::forward<Args>(args)...);
     }
+
+    void erase(NodeType key) { dp_table_.erase(key); }
+    size_t count(NodeType key) { return dp_table_.count(key); }
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,

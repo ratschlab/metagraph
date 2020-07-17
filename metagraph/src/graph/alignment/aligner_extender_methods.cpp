@@ -15,6 +15,10 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::initialize_query(const std::string_view query) {
     this->query = query;
+    max_num_nodes = config_.max_nodes_per_seq_char < std::numeric_limits<double>::max()
+                        ? std::ceil(config_.max_nodes_per_seq_char * query.size())
+                        : std::numeric_limits<size_t>::max();
+
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
                    partial_sums_.begin(),
@@ -450,8 +454,9 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
                  score_t) {
     overlapping_range_ = false;
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
+
     graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
-        if (c != '$') {
+        if (c != '$' && (dp_table.size() < max_num_nodes || dp_table.count(next_node))) {
             if (next_node == node) {
                 out_columns.emplace_front(next_node, c);
             } else {
