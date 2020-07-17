@@ -279,6 +279,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     size_t end;
     score_t xdrop_cutoff;
     bool overlapping_range_;
+    size_t max_num_nodes;
 };
 
 
