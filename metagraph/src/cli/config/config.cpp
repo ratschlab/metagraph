@@ -442,12 +442,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    // only the best alignment is used in query
-    // |alignment_num_alternative_paths| must be set to 1
-    if (identity == QUERY && align_sequences
-                          && alignment_num_alternative_paths != 1)
-        print_usage_and_exit = true;
-
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 

@@ -4,6 +4,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "common/logger.hpp"
+#include "common/vector_map.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 using mtg::common::logger;
@@ -904,67 +905,100 @@ void QueryAlignment<NodeType>
 }
 
 template <typename NodeType>
-std::vector<std::tuple<std::string, Cigar, score_t>> QueryAlignment<NodeType>
-::get_top_label_cigars(size_t num_top_labels, double presence_ratio) {
-    tsl::hopscotch_map<std::string, std::pair<size_t, std::vector<value_type>>> matches;
+std::vector<std::pair<std::string, size_t>> QueryAlignment<NodeType>
+::get_top_labels(size_t num_top_labels, double presence_ratio) {
     size_t min_count = presence_ratio * query_.size();
+    VectorMap<std::string, size_t> label_count_map;
 
     for (const auto &path : *this) {
         size_t num_matches = path.get_num_matches();
         for (const auto &label : path.get_labels()) {
-            auto emplace = matches.emplace(label,
-                                           std::make_pair(num_matches, std::vector<value_type>()));
-            if (!emplace.second)
-                emplace.first.value().first += num_matches;
-
-            emplace.first.value().second.push_back(path);
+            label_count_map[label] += num_matches;
         }
     }
 
-    std::vector<std::tuple<std::string, Cigar, score_t>> top_labels;
-    for (auto it = matches.begin(); it != matches.end(); ++it) {
-        if (it->second.first >= min_count) {
-            score_t score_sum = 0;
-            // Cigar combined_cigar;
-            // size_t end = 0;
-            for (auto &path : it.value().second) {
-                // std::cout << "test\t" << path << std::endl;
-                score_sum += path.get_score();
-                // if (path.get_clipping() > end) {
-                //     size_t diff = path.get_clipping() - end;
-                //     combined_cigar.append(Cigar::Operator::CLIPPED, diff);
-                //     end += diff;
-                // }
-                // auto next_cigar = path.get_cigar();
-                // next_cigar.pop_front();
-                // combined_cigar.append(std::move(next_cigar));
-            }
-            top_labels.emplace_back(it->first, Cigar(), score_sum);
-        }
-    }
-    // VectorOrderedMap<std::tuple<std::string, Cigar, score_t>> top_labels;
-    // top_labels.reserve(size());
+    auto label_counts = const_cast<std::vector<std::pair<std::string, size_t>>&&>(
+        label_count_map.values_container()
+    );
 
-    // for (const auto &path : *this) {
-    //     for (const auto &label)
-    //     size_t num_matches = path.get_num_matches();
-    //     if (num_matches >= presence_ratio * query_.size()) {
-    //         for (const auto &label : path.get_labels()) {
-    //             top_labels.emplace_back(label, path.get_cigar(), path.get_score());
-    //         }
-    //     }
-    // }
-
-    if (top_labels.size() > num_top_labels) {
-        std::sort(top_labels.begin(), top_labels.end(),
+    if (label_counts.size() > num_top_labels) {
+        std::sort(label_counts.begin(), label_counts.end(),
                   [&](const auto &a, const auto &b) {
-            return std::get<2>(a) > std::get<2>(b);
+            return a.second > b.second || (a.second == b.second && a.first < b.first);
         });
 
-        top_labels.resize(num_top_labels);
+        label_counts.resize(num_top_labels);
     }
 
-    return top_labels;
+    label_counts.erase(
+        std::find_if(label_counts.begin(), label_counts.end(),
+                     [&](const auto &pair) { return pair.second < min_count; }),
+        label_counts.end()
+    );
+
+    return label_counts;
+}
+
+template <typename NodeType>
+std::vector<std::pair<std::string, std::tuple<size_t, score_t, std::vector<Cigar>>>>
+QueryAlignment<NodeType>
+::get_top_label_cigars(size_t num_top_labels, double presence_ratio) {
+    size_t min_count = presence_ratio * query_.size();
+
+    typedef std::tuple<size_t, score_t, std::vector<Cigar>> ValueType;
+    VectorMap<std::string, ValueType> labeled_cigar_map;
+    for (const auto &path : *this) {
+        for (const auto &label : path.get_labels()) {
+            std::get<0>(labeled_cigar_map[label]) += path.get_num_matches();
+            std::get<1>(labeled_cigar_map[label]) += path.get_score();
+            std::get<2>(labeled_cigar_map[label]).push_back(path.get_cigar());
+        }
+    }
+
+    auto labeled_cigars = const_cast<std::vector<std::pair<std::string, ValueType>>&&>(
+        labeled_cigar_map.values_container()
+    );
+
+    if (labeled_cigars.size() > num_top_labels) {
+        std::sort(labeled_cigars.begin(), labeled_cigars.end(),
+                  [&](const auto &a, const auto &b) {
+                      return std::get<0>(a.second) > std::get<0>(b.second)
+                          || (std::get<0>(a.second) == std::get<0>(b.second)
+                                && a.first < b.first);
+                  });
+        labeled_cigars.resize(num_top_labels);
+    }
+
+    labeled_cigars.erase(
+        std::find_if(labeled_cigars.begin(), labeled_cigars.end(),
+                     [&](const auto &pair) { return std::get<0>(pair.second) < min_count; }),
+        labeled_cigars.end()
+    );
+
+    return labeled_cigars;
+}
+
+template <typename NodeType>
+std::vector<std::string> QueryAlignment<NodeType>::get_labels(double presence_ratio) {
+    size_t min_count = presence_ratio * query_.size();
+    tsl::hopscotch_map<std::string, size_t> label_counts;
+
+    for (const auto &path : *this) {
+        size_t num_matches = path.get_num_matches();
+        for (const auto &label : path.get_labels()) {
+            label_counts[label] += num_matches;
+        }
+    }
+
+    std::vector<std::string> labels;
+    labels.reserve(label_counts.size());
+
+    for (auto &[label, count] : label_counts) {
+        if (count >= min_count)
+            labels.emplace_back(std::move(label));
+    }
+
+    return labels;
 }
 
 

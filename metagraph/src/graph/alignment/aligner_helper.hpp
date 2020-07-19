@@ -469,50 +469,15 @@ class QueryAlignment {
 
     bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
 
+    bool alignments_overlapping() const;
 
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(size_t num_top_labels, double presence_ratio = 0.0) {
-        std::vector<std::pair<std::string, size_t>> top_labels;
-        top_labels.reserve(size());
+    get_top_labels(size_t num_top_labels, double presence_ratio = 0.0);
 
-        for (const auto &path : *this) {
-            size_t num_matches = path.get_num_matches();
-            if (num_matches >= presence_ratio * query_.size()) {
-                for (const auto &label : path.get_labels()) {
-                    top_labels.emplace_back(label, num_matches);
-                }
-            }
-        }
-
-        if (top_labels.size() > num_top_labels) {
-            std::sort(top_labels.begin(), top_labels.end(),
-                      [&](const auto &a, const auto &b) {
-                return a.second > b.second;
-            });
-
-            top_labels.resize(num_top_labels);
-        }
-
-        return top_labels;
-    }
-
-    std::vector<std::tuple<std::string, Cigar, score_t>>
+    std::vector<std::pair<std::string, std::tuple<size_t, score_t, std::vector<Cigar>>>>
     get_top_label_cigars(size_t num_top_labels, double presence_ratio = 0.0);
 
-    std::vector<std::string> get_labels(double presence_ratio = 0.0) {
-        std::vector<std::string> labels;
-        labels.reserve(size());
-
-        for (const auto &path : *this) {
-            if (path.get_num_matches() >= presence_ratio * query_.size()) {
-                for (const auto &label : path.get_labels()) {
-                    labels.push_back(label);
-                }
-            }
-        }
-
-        return labels;
-    }
+    std::vector<std::string> get_labels(double presence_ratio = 0.0);
 
   private:
     // When a QueryAlignment is copied or moved, the pointers in the alignment

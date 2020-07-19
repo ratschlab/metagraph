@@ -61,11 +61,18 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 
             output += seq_name;
 
-            for (const auto &[label, cigar, score] : top_labels) {
-                output += fmt::format("\t<{}>:{}:{}:{}", label,
-                                      cigar.get_num_matches(),
-                                      cigar.to_string(),
-                                      score);
+            for (const auto &[label, tuple] : top_labels) {
+                size_t num_matches = std::get<0>(tuple);
+                score_t score = std::get<1>(tuple);
+                const auto &cigars = std::get<2>(tuple);
+
+                std::string cigars_cat;
+                for (const Cigar &cigar : cigars) {
+                    cigars_cat += cigar.to_string() + ",";
+                }
+                cigars_cat.pop_back();
+                output += fmt::format("\t<{}>:{}:{}:{}", label, num_matches,
+                                      cigars_cat, score);
             }
         } else {
             auto top_labels
