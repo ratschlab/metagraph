@@ -152,9 +152,9 @@ template class StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string>;
 
 template class StaticBinRelAnnotator<binmat::BinRelWT, std::string>;
 
-template class StaticBinRelAnnotator<UniqueRowBinmat, std::string>;
+template class StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string>;
 
-template class StaticBinRelAnnotator<Rainbow<BRWT>, std::string>;
+template class StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string>;
 
 } // namespace anno
 } // namespace mtg

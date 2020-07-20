@@ -111,23 +111,23 @@ UniquePtrs<bit_vector> convert_to(UniquePtrs<bit_vector>&& input) {
 std::unique_ptr<anno::binmat::BinaryMatrix>
 generate_brwt_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                         size_t arity, bool greedy, size_t relax_arity_limit) {
-    std::unique_ptr<BRWT> binary_matrix;
+    std::unique_ptr<anno::binmat::BRWT> binary_matrix;
 
     if (greedy) {
-        binary_matrix = std::make_unique<BRWT>(
+        binary_matrix = std::make_unique<anno::binmat::BRWT>(
             anno::binmat::BRWTBottomUpBuilder::build(std::move(columns),
                 [](const auto &columns) {
                     std::vector<sdsl::bit_vector> subvectors
-                        = random_submatrix(columns, 1'000'000);
-                    return greedy_matching(subvectors);
+                        = anno::binmat::random_submatrix(columns, 1'000'000);
+                    return anno::binmat::greedy_matching(subvectors);
                 }
             )
         );
     } else {
-        binary_matrix = std::make_unique<BRWT>(
+        binary_matrix = std::make_unique<anno::binmat::BRWT>(
             anno::binmat::BRWTBottomUpBuilder::build(
                 std::move(columns),
-                BRWTBottomUpBuilder::get_basic_partitioner(arity)
+                anno::binmat::BRWTBottomUpBuilder::get_basic_partitioner(arity)
             )
         );
     }
@@ -150,7 +150,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             for (size_t i = 0; i < columns.size(); ++i) {
                 columns[i]->call_ones([&mat,i](auto p) { mat.set(p, i); });
             }
-            binary_matrix.reset(new VectorRowBinMat(std::move(mat)));
+            binary_matrix.reset(new anno::binmat::VectorRowBinMat(std::move(mat)));
             break;
         }
         case MatrixType::COLUMN: {
@@ -170,8 +170,8 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 anno::binmat::BRWTBottomUpBuilder::build(std::move(columns),
                     [](const auto &columns) {
                         std::vector<sdsl::bit_vector> subvectors
-                            = random_submatrix(columns, 1'000'000);
-                        return greedy_matching(subvectors);
+                            = anno::binmat::random_submatrix(columns, 1'000'000);
+                        return anno::binmat::greedy_matching(subvectors);
                     }
                 )
             ));

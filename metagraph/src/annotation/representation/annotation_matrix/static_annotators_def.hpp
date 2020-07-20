@@ -23,9 +23,9 @@ typedef StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string> BinRelWT_sdslA
 
 typedef StaticBinRelAnnotator<binmat::BinRelWT, std::string> BinRelWTAnnotator;
 
-typedef StaticBinRelAnnotator<UniqueRowBinmat, std::string> UniqueRowAnnotator;
+typedef StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string> UniqueRowAnnotator;
 
-typedef StaticBinRelAnnotator<Rainbow<BRWT>, std::string> RbBRWTAnnotator;
+typedef StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string> RbBRWTAnnotator;
 
 
 template <>

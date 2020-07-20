@@ -19,7 +19,7 @@ namespace cli {
 
 using mtg::common::logger;
 using mtg::common::get_verbose;
-using namespace annotate;
+using namespace mtg::anno;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
@@ -191,8 +191,8 @@ int transform_annotation(Config *config) {
                         if (row_indexes.empty()) {
                             num_rows = column->size();
                             row_indexes
-                                = sample_row_indexes(num_rows,
-                                                     config->num_rows_subsampled);
+                                = binmat::sample_row_indexes(num_rows,
+                                                             config->num_rows_subsampled);
                         } else if (column->size() != num_rows) {
                             logger->error("Size of column {} is {} != {}",
                                           label, column->size(), num_rows);
@@ -233,9 +233,9 @@ int transform_annotation(Config *config) {
             subcolumns.push_back(std::move(*col_ptr));
         }
 
-        LinkageMatrix linkage_matrix
-                = agglomerative_greedy_linkage(std::move(subcolumns),
-                                               get_num_threads());
+        binmat::LinkageMatrix linkage_matrix
+            = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
+                                                   get_num_threads());
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
@@ -475,7 +475,7 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    auto annotator = std::make_unique<anno::MultiBRWTAnnotator>();
+    auto annotator = std::make_unique<MultiBRWTAnnotator>();
 
     logger->trace("Loading annotator...");
 
@@ -487,9 +487,9 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    anno::relax_BRWT<anno::MultiBRWTAnnotator>(annotator.get(),
-                                               config->relax_arity_brwt,
-                                               get_num_threads());
+    relax_BRWT<MultiBRWTAnnotator>(annotator.get(),
+                                   config->relax_arity_brwt,
+                                   get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

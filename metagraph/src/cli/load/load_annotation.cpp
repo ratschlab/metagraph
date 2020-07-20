@@ -37,7 +37,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, anno::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
-    } else if (utils::ends_with(filename, annotate::RbBRWTAnnotator::kExtension)) {
+    } else if (utils::ends_with(filename, anno::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
 
     } else {
@@ -85,7 +85,7 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::RbBRWT: {
-            annotation.reset(new annotate::RbBRWTAnnotator());
+            annotation.reset(new anno::RbBRWTAnnotator());
             break;
         }
     }

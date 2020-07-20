@@ -28,6 +28,7 @@ const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
+using namespace mtg::anno::binmat;
 using mtg::common::logger;
 
 

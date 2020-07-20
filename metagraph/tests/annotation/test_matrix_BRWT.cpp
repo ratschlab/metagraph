@@ -12,6 +12,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::test;
+using namespace mtg::anno::binmat;
 
 template <typename BinMat>
 class BinaryMatrixBRWTTest : public ::testing::Test { };

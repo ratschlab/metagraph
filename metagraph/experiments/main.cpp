@@ -636,10 +636,12 @@ int main(int argc, char *argv[]) {
                 std::cout << "Density:\t" << static_cast<double>(matrix->num_relations())
                                                 / matrix->num_rows() / matrix->num_columns() << std::endl;
 
-                if (dynamic_cast<Rainbowfish*>(matrix.get()))
-                    std::cout << "Num distinct rows:\t" << dynamic_cast<Rainbowfish*>(matrix.get())->num_distinct_rows() << std::endl;
+                if (dynamic_cast<anno::binmat::Rainbowfish*>(matrix.get()))
+                    std::cout << "Num distinct rows:\t"
+                              << dynamic_cast<anno::binmat::Rainbowfish*>(matrix.get())->num_distinct_rows()
+                              << std::endl;
 
-                auto *brwt = dynamic_cast<BRWT*>(matrix.get());
+                auto *brwt = dynamic_cast<anno::binmat::BRWT*>(matrix.get());
                 if (!brwt)
                     continue;
 
@@ -686,7 +688,7 @@ int main(int argc, char *argv[]) {
                             columns.erase(it--);
                     }
 
-                    ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
+                    anno::binmat::ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
                     std::cout << "Reduced matrix from ("
                               << annotator.num_objects() << ", " << annotator.num_labels()
                               << ") to ("
@@ -716,7 +718,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::ROW_FLAT) {
-                    anno::StaticBinRelAnnotator<RowConcatenated<>> annotator;
+                    anno::StaticBinRelAnnotator<anno::binmat::RowConcatenated<>> annotator;
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
@@ -730,7 +732,7 @@ int main(int argc, char *argv[]) {
                     sdsl::rrr_vector<> rrr(rows.copy_to<sdsl::bit_vector>());
                     std::cout << "Dummy:\t" << rrr.serialize(rrrout) << std::endl;
                 } else if (compressor == MatrixType::RAINBOWFISH) {
-                    anno::StaticBinRelAnnotator<Rainbowfish> annotator;
+                    anno::StaticBinRelAnnotator<anno::binmat::Rainbowfish> annotator;
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
@@ -770,7 +772,7 @@ int main(int argc, char *argv[]) {
 
                         std::ofstream outrrr(file + ".distinct_rows.rrr", std::ios::binary);
                         for (const auto &a : distinct_rows) {
-                            dynamic_cast<const RowConcatenated<> &>(*a).data()
+                            dynamic_cast<const anno::binmat::RowConcatenated<> &>(*a).data()
                                 .copy_to<bit_vector_rrr<>>().serialize(outrrr);
                         }
                     }
