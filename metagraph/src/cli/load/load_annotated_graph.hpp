@@ -24,7 +24,8 @@ mask_graph(const graph::AnnotatedDBG &anno_graph, Config *config);
 void
 call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                    const std::function<void(const MaskedDeBruijnGraph&,
-                                            const std::string& /* header */)> &callback);
+                                            const std::string& /* header */)> &callback,
+                   size_t num_threads = 1);
 
 } // namespace cli
 } // namespace mtg

@@ -15,6 +15,8 @@ namespace cli {
 
 using mtg::common::logger;
 
+const size_t NUM_THREADS_PER_TRAVERSAL = 4;
+
 template <class Generator>
 void write_sequences(const Config &config,
                      const std::string &header,
@@ -61,16 +63,17 @@ int assemble(Config *config) {
                     write_sequences(*config, header, [&](const auto &callback) {
                         if (config->unitigs || config->min_tip_size > 1) {
                             graph.call_unitigs(callback,
-                                               get_num_threads(),
+                                               NUM_THREADS_PER_TRAVERSAL,
                                                config->min_tip_size,
                                                config->kmers_in_single_form);
                         } else {
                             graph.call_sequences(callback,
-                                                 get_num_threads(),
+                                                 NUM_THREADS_PER_TRAVERSAL,
                                                  config->kmers_in_single_form);
                         }
                     }, true);
-                }
+                },
+                get_num_threads() / NUM_THREADS_PER_TRAVERSAL
             );
             return 0;
         }

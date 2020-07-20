@@ -3,6 +3,7 @@
 #include "graph/annotated_graph_algorithm.hpp"
 #include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/threads/threading.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
@@ -134,7 +135,8 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
 void
 call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                    const std::function<void(const MaskedDeBruijnGraph&,
-                                            const std::string& /* header */)> &callback) {
+                                            const std::string& /* header */)> &callback,
+                   size_t num_threads) {
     if (config->label_mask_file.empty()) {
         callback(*mask_graph_from_labels(anno_graph,
                                          config->label_mask_in,
@@ -149,24 +151,29 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
         exit(1);
     }
 
+    ThreadPool thread_pool(num_threads);
+
     std::string line;
     while (std::getline(fin, line)) {
-        auto line_split = utils::split_string(line, "\t");
-        if (line_split.size() <= 1)
-            continue;
+        thread_pool.enqueue([&](std::string line) {
+            auto line_split = utils::split_string(line, "\t");
+            if (line_split.size() <= 1)
+                return;
 
-        if (line_split.size() > 3)
-            throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
+            if (line_split.size() > 3)
+                throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
 
-        auto foreground_labels = utils::split_string(line_split[1], ",");
-        auto background_labels = utils::split_string(
-            line_split.size() == 3 ? line_split[2] : "",
-            ","
-        );
-        callback(*mask_graph_from_labels(anno_graph,
-                                         foreground_labels,
-                                         background_labels,
-                                         config), line_split[0]);
+            auto foreground_labels = utils::split_string(line_split[1], ",");
+            auto background_labels = utils::split_string(
+                line_split.size() == 3 ? line_split[2] : "",
+                ","
+            );
+
+            callback(*mask_graph_from_labels(anno_graph,
+                                             foreground_labels,
+                                             background_labels,
+                                             config), line_split[0]);
+        }, line);
     }
 }
 

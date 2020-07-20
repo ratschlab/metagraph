@@ -84,14 +84,14 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
                 set_bit(union_mask.data(), node, parallel, memorder);
             });
         }
-        #pragma omp taskloop default(shared)
-        for (size_t i = 0; i < labels_out.size(); ++i) {
-            const std::string &label = labels_out[i];
-            logger->trace("Adding label: {}", label);
-            anno_graph.call_annotated_nodes(label, [&](node_index node) {
-                set_bit(union_mask.data(), node, parallel, memorder);
-            });
-        }
+        //#pragma omp taskloop default(shared)
+        //for (size_t i = 0; i < labels_out.size(); ++i) {
+        //    const std::string &label = labels_out[i];
+        //    logger->trace("Adding label: {}", label);
+        //    anno_graph.call_annotated_nodes(label, [&](node_index node) {
+        //        set_bit(union_mask.data(), node, parallel, memorder);
+        //    });
+        //}
     }
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
