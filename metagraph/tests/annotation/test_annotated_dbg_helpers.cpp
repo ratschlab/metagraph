@@ -9,7 +9,7 @@
 namespace mtg {
 namespace test {
 
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 
 template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG>
@@ -69,7 +69,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
     size_t outsize = outgroup.size();
     return MaskedDeBruijnGraph(
         std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-        annotated_graph_algorithm::mask_nodes_by_node_label(
+        graph::mask_nodes_by_node_label(
             anno_graph,
             ingroup,
             outgroup,

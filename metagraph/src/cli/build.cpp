@@ -20,9 +20,7 @@
 namespace mtg {
 namespace cli {
 
-using mtg::succinct::IBOSSChunkConstructor;
-using mtg::bitmap_graph::DBGBitmap;
-using mtg::bitmap_graph::DBGBitmapConstructor;
+using namespace mtg::graph;
 using mtg::common::logger;
 using mtg::common::get_verbose;
 

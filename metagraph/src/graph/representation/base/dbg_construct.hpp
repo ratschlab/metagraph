@@ -4,6 +4,10 @@
 #include <functional>
 #include <string>
 
+
+namespace mtg {
+namespace graph {
+
 typedef std::function<void(const std::string&)> CallString;
 typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
@@ -32,5 +36,8 @@ class IGraphConstructor {
 
     virtual void build_graph(Graph *graph) = 0;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_CONSTRUCT_HPP__

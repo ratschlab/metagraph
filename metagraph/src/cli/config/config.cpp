@@ -563,15 +563,15 @@ Config::Config(int argc, char *argv[]) {
     }
 }
 
-std::string Config::state_to_string(BOSS::State state) {
+std::string Config::state_to_string(graph::BOSS::State state) {
     switch (state) {
-        case BOSS::State::STAT:
+        case graph::BOSS::State::STAT:
             return "stat-obsolete";
-        case BOSS::State::DYN:
+        case graph::BOSS::State::DYN:
             return "dynamic";
-        case BOSS::State::SMALL:
+        case graph::BOSS::State::SMALL:
             return "small";
-        case BOSS::State::FAST:
+        case graph::BOSS::State::FAST:
             return "fast";
         default:
             assert(false);
@@ -579,15 +579,15 @@ std::string Config::state_to_string(BOSS::State state) {
     }
 }
 
-BOSS::State Config::string_to_state(const std::string &string) {
+graph::BOSS::State Config::string_to_state(const std::string &string) {
     if (string == "stat-obsolete") {
-        return BOSS::State::STAT;
+        return graph::BOSS::State::STAT;
     } else if (string == "dynamic") {
-        return BOSS::State::DYN;
+        return graph::BOSS::State::DYN;
     } else if (string == "small") {
-        return BOSS::State::SMALL;
+        return graph::BOSS::State::SMALL;
     } else if (string == "fast") {
-        return BOSS::State::FAST;
+        return graph::BOSS::State::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }

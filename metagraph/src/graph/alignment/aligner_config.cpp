@@ -2,8 +2,10 @@
 
 #include "kmer/alphabets.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace graph {
+namespace align {
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
@@ -200,3 +202,7 @@ DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
 
 const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
     = blosum62_scoring_matrix();
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

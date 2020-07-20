@@ -24,7 +24,7 @@ using mtg::common::get_verbose;
 typedef annot::MultiLabelEncoded<std::string> Annotator;
 
 
-void print_boss_stats(const BOSS &boss_graph,
+void print_boss_stats(const graph::BOSS &boss_graph,
                       bool count_dummy,
                       size_t num_threads,
                       bool verbose) {
@@ -67,16 +67,16 @@ void print_boss_stats(const BOSS &boss_graph,
     std::cout << "========================================================" << std::endl;
 }
 
-void print_stats(const DeBruijnGraph &graph) {
+void print_stats(const graph::DeBruijnGraph &graph) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (auto weights = graph.get_extension<NodeWeights>()) {
+    if (auto weights = graph.get_extension<graph::NodeWeights>()) {
         double sum_weights = 0;
         uint64_t num_non_zero_weights = 0;
-        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
+        if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
             // In DBGSuccinct some of the nodes may be masked out
             // TODO: Fix this by using non-contiguous indexing in graph
             //       so that mask of dummy edges does not change indexes.
@@ -102,7 +102,7 @@ void print_stats(const DeBruijnGraph &graph) {
         std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
 
         if (get_verbose()) {
-            if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
+            if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
                 // In DBGSuccinct some of the nodes may be masked out
                 // TODO: Fix this by using non-contiguous indexing in graph
                 //       so that mask of dummy edges does not change indexes.
@@ -167,16 +167,16 @@ int print_stats(Config *config) {
     const auto &files = config->fnames;
 
     for (const auto &file : files) {
-        std::shared_ptr<DeBruijnGraph> graph;
+        std::shared_ptr<graph::DeBruijnGraph> graph;
 
         graph = load_critical_dbg(file);
-        graph->load_extension<NodeWeights>(file);
+        graph->load_extension<graph::NodeWeights>(file);
 
         logger->info("Statistics for graph '{}'", file);
 
         print_stats(*graph);
 
-        if (auto dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+        if (auto dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
             const auto &boss_graph = dbg_succ->get_boss();
 
             print_boss_stats(boss_graph,

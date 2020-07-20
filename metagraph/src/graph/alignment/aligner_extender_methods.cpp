@@ -8,6 +8,11 @@
 #include "common/utils/simd_utils.hpp"
 #include "common/vectors/aligned_vector.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace align {
+
 using mtg::common::logger;
 
 
@@ -616,3 +621,7 @@ void DefaultColumnExtender<NodeType>
 
 
 template class DefaultColumnExtender<>;
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

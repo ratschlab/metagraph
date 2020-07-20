@@ -7,6 +7,8 @@
 
 namespace {
 
+using namespace mtg::graph;
+
 const std::string filename = "./benchmark_graph.dbg";
 
 constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;

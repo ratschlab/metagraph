@@ -8,6 +8,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::graph;
 
 TEST(DBGSuccinct, get_degree_with_source_dummy) {
     for (size_t k = 2; k < 10; ++k) {

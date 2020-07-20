@@ -29,6 +29,7 @@ const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using namespace mtg::annot::binmat;
+using namespace mtg::graph;
 using mtg::common::logger;
 
 
@@ -474,7 +475,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
 std::string get_alignment_header_and_swap_query(const std::string &name,
                                                 std::string *query_seq,
-                                                QueryAlignment<> *matches) {
+                                                align::QueryAlignment<> *matches) {
     std::string header;
 
     if (matches->size()) {
@@ -510,7 +511,7 @@ int query_graph(Config *config) {
 
     Timer timer;
 
-    std::unique_ptr<IDBGAligner> aligner;
+    std::unique_ptr<align::IDBGAligner> aligner;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");

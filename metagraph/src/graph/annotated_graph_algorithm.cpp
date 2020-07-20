@@ -10,7 +10,8 @@
 #include "graph/representation/masked_graph.hpp"
 
 
-namespace annotated_graph_algorithm {
+namespace mtg {
+namespace graph {
 
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
@@ -233,5 +234,5 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     }, anno_graph.get_graph().max_index() + 1);
 }
 
-
-} // namespace annotated_graph_algorithm
+} // namespace graph
+} // namespace mtg

@@ -24,7 +24,7 @@
 namespace mtg {
 namespace test {
 
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,

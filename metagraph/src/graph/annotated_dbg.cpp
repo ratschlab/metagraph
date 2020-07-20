@@ -17,6 +17,9 @@
 typedef std::pair<std::string, size_t> StringCountPair;
 
 
+namespace mtg {
+namespace graph {
+
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
                          std::unique_ptr<Annotator>&& annotation,
@@ -545,3 +548,6 @@ int32_t AnnotatedDBG
 
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
+
+} // namespace graph
+} // namespace mtg

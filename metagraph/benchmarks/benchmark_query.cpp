@@ -18,6 +18,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::graph;
 using mtg::seq_io::kseq_t;
 
 

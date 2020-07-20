@@ -21,7 +21,7 @@ using mtg::common::logger;
 
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
-                   AnnotatedDBG *anno_graph,
+                   graph::AnnotatedDBG *anno_graph,
                    bool forward_and_reverse,
                    size_t min_count,
                    size_t max_count,
@@ -157,7 +157,7 @@ void annotate_data(const std::vector<std::string> &files,
 
 
 void annotate_coordinates(const std::vector<std::string> &files,
-                          AnnotatedDBG *anno_graph,
+                          graph::AnnotatedDBG *anno_graph,
                           bool forward_and_reverse,
                           size_t genome_bin_size) {
     size_t total_seqs = 0;
@@ -327,9 +327,9 @@ int annotate_graph_with_genome_coordinates(Config *config) {
     }
 
     // load graph
-    AnnotatedDBG anno_graph(graph_temp,
-                            std::move(annotation_temp),
-                            config->fast);
+    graph::AnnotatedDBG anno_graph(graph_temp,
+                                   std::move(annotation_temp),
+                                   config->fast);
 
     if (!anno_graph.check_compatibility()) {
         logger->error("Graph and annotation are incompatible");

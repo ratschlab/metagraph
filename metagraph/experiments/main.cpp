@@ -32,12 +32,15 @@
 #include "method_constructors.hpp"
 
 
+namespace mtg {
+
+namespace graph {
 int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *alpha_est_ptr, double *beta_est_ptr,
                                  double *false_pos_ptr, double *false_neg_ptr);
+} // namespace graph
 
 
-namespace mtg {
 namespace experiments {
 
 using namespace std::chrono_literals;
@@ -299,6 +302,8 @@ void dump_column_slice(const bit_vector &column,
 
 
 using namespace mtg;
+using namespace mtg::graph;
+using namespace mtg::graph::align;
 using namespace experiments;
 
 

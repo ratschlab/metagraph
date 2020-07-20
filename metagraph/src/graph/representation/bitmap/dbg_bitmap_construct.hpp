@@ -4,9 +4,9 @@
 #include "dbg_bitmap.hpp"
 #include "graph/representation/base/dbg_construct.hpp"
 
-namespace mtg {
-namespace bitmap_graph {
 
+namespace mtg {
+namespace graph {
 
 class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> {
   public:
@@ -82,7 +82,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     uint8_t bits_per_count_;
 };
 
-} // namespace bitmap_graph
+} // namespace graph
 } // namespace mtg
 
 #endif // __DBG_BITMAP_CONSTRUCT_HPP__

@@ -14,6 +14,7 @@ namespace {
 KSEQ_INIT(gzFile, gzread);
 
 using namespace mtg;
+using namespace mtg::graph;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";

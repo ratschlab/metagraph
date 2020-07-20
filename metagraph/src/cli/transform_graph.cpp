@@ -37,7 +37,7 @@ int transform_graph(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+    auto dbg_succ = std::dynamic_pointer_cast<graph::DBGSuccinct>(graph);
 
     if (!dbg_succ.get())
         throw std::runtime_error("Only implemented for DBGSuccinct");

@@ -10,9 +10,9 @@
 #include "graph/representation/base/dbg_construct.hpp"
 #include "boss_chunk.hpp"
 
-namespace mtg {
-namespace succinct {
 
+namespace mtg {
+namespace graph {
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
@@ -38,7 +38,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
     virtual uint64_t get_k() const = 0;
 };
 
-} // namespace succinct
+} // namespace graph
 } // namespace mtg
 
 #endif // __BOSS_CHUNK_CONSTRUCT_HPP__

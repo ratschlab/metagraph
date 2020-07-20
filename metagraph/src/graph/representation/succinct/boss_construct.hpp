@@ -5,12 +5,15 @@
 #include "boss_chunk_construct.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
     // see input arguments in IBOSSChunkConstructor::initialize
     template <typename... Args>
     BOSSConstructor(const Args&... args)
-      : constructor_(mtg::succinct::IBOSSChunkConstructor::initialize(args...)) {}
+      : constructor_(mtg::graph::IBOSSChunkConstructor::initialize(args...)) {}
 
     void add_sequence(std::string_view sequence, uint64_t count = 1) {
         constructor_->add_sequence(sequence, count);
@@ -56,7 +59,10 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     }
 
   private:
-    std::unique_ptr<mtg::succinct::IBOSSChunkConstructor> constructor_;
+    std::unique_ptr<mtg::graph::IBOSSChunkConstructor> constructor_;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __BOSS_CONSTRUCT_HPP__

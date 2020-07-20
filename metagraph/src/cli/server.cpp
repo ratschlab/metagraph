@@ -114,9 +114,9 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
 
 
 std::string process_search_request(const std::string &received_message,
-                                   const AnnotatedDBG &anno_graph,
+                                   const graph::AnnotatedDBG &anno_graph,
                                    const Config &config_orig,
-                                   const IDBGAligner &aligner) {
+                                   const graph::align::IDBGAligner &aligner) {
     Json::Value json = parse_json_string(received_message);
 
     const auto &fasta = json["FASTA"];
@@ -167,7 +167,7 @@ std::string process_search_request(const std::string &received_message,
 }
 
 std::string process_align_request(const std::string &received_message,
-                                  const DeBruijnGraph &graph,
+                                  const graph::DeBruijnGraph &graph,
                                   const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
@@ -180,11 +180,12 @@ std::string process_align_request(const std::string &received_message,
     if (json.isMember("max_alternative_alignments")) {
         config.alignment_num_alternative_paths = json["max_alternative_alignments"].asInt();
     }
-    std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
+    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
 
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const QueryAlignment<IDBGAligner::node_index> paths = aligner->align(read_stream->seq.s);
+        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
+                            = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
@@ -193,7 +194,7 @@ std::string process_align_request(const std::string &received_message,
         if (!paths.empty()) {
             Json::Value alignments = Json::Value(Json::arrayValue);
 
-            for (const Alignment<IDBGAligner::node_index> &path : paths) {
+            for (const graph::align::Alignment<graph::align::IDBGAligner::node_index> &path : paths) {
                 Json::Value a;
                 a[SCORE_JSON_FIELD] = path.get_score();
                 a[SEQUENCE_JSON_FIELD] = path.get_sequence();
@@ -214,7 +215,7 @@ std::string process_align_request(const std::string &received_message,
     return Json::writeString(builder, root);
 }
 
-std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
+std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
     auto labels = anno_graph.get_annotation().get_all_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
@@ -228,8 +229,10 @@ std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
     return Json::writeString(builder, root);
 }
 
-std::string process_stats_request(const DeBruijnGraph &graph, const AnnotatedDBG &anno_graph,
-                                  const std::string &graph_filename, const std::string &annotation_filename) {
+std::string process_stats_request(const graph::DeBruijnGraph &graph,
+                                  const graph::AnnotatedDBG &anno_graph,
+                                  const std::string &graph_filename,
+                                  const std::string &annotation_filename) {
     Json::Value root;
 
     Json::Value graph_stats;
@@ -289,7 +292,7 @@ int run_server(Config *config) {
 
     logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
 
-    std::unique_ptr<IDBGAligner> default_aligner = build_aligner(*graph, *config);
+    std::unique_ptr<graph::align::IDBGAligner> default_aligner = build_aligner(*graph, *config);
 
     // defaults for the server
     config->num_top_labels = 10000;

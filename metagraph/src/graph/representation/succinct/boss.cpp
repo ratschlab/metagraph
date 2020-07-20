@@ -22,7 +22,10 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "boss_construct.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace graph {
+
 using utils::remove_suffix;
 
 #define CHECK_INDEX(idx) \
@@ -1902,10 +1905,10 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&,start]() {
-            ::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
-                         split_to_unitigs, kmers_in_single_form,
-                         trim_sentinels, thread_pool, &visited, &fetched,
-                         async, fetched_mutex, progress_bar, subgraph_mask);
+            ::mtg::graph::call_paths(*this, { Edge(start, get_node_seq(start)) }, callback,
+                                     split_to_unitigs, kmers_in_single_form,
+                                     trim_sentinels, thread_pool, &visited, &fetched,
+                                     async, fetched_mutex, progress_bar, subgraph_mask);
         });
     };
 
@@ -2216,10 +2219,10 @@ void call_paths(const BOSS &boss,
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
                     [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<Edge> &edges) {
-                        ::call_paths(boss, std::move(edges), callback,
-                                     split_to_unitigs, kmers_in_single_form,
-                                     trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
-                                     async, fetched_mutex, progress_bar, subgraph_mask);
+                        ::mtg::graph::call_paths(boss, std::move(edges), callback,
+                                                 split_to_unitigs, kmers_in_single_form,
+                                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
+                                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
                     std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                       edges.end())
@@ -2697,3 +2700,6 @@ std::ostream& operator<<(std::ostream &os, const BOSS &graph) {
     graph.print(os);
     return os;
 }
+
+} // namespace graph
+} // namespace mtg

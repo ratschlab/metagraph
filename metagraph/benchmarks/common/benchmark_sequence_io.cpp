@@ -13,6 +13,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::graph;
 
 const std::string file_prefix = "/tmp/bm_mg_outfile.fasta.gz";
 

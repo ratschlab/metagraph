@@ -3,6 +3,10 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 template <typename NodeType>
 void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     query_ = query;
@@ -235,3 +239,7 @@ template class ExactSeeder<>;
 template class SuffixSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

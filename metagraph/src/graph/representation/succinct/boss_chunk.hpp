@@ -7,6 +7,10 @@
 
 #include "boss.hpp"
 
+
+namespace mtg {
+namespace graph {
+
 /**
  * Structure storing data for the BOSS table (or part of it), without support for
  * 'rank' and 'select' operations.
@@ -98,5 +102,7 @@ class BOSS::Chunk {
     sdsl::int_vector_buffer<> weights_;
 };
 
+} // namespace graph
+} // namespace mtg
 
 #endif // __BOSS_CHUNK_HPP__

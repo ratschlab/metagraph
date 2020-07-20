@@ -10,8 +10,9 @@
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace graph {
 
 class AnnotatedSequenceGraph {
   public:
@@ -108,5 +109,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
   private:
     DeBruijnGraph &dbg_;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __ANNOTATED_DBG_HPP__

@@ -7,6 +7,9 @@
 #include "boss.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class DBGSuccinct : public DeBruijnGraph {
   public:
     friend class MaskedDeBruijnGraph;
@@ -152,5 +155,7 @@ class DBGSuccinct : public DeBruijnGraph {
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 };
 
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_SUCCINCT_HPP__

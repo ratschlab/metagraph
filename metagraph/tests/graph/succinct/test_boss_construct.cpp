@@ -23,7 +23,7 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::succinct;
+using namespace mtg::graph;
 using mtg::kmer::KmerExtractorBOSS;
 
 const std::string test_data_dir = TEST_DATA_DIR;

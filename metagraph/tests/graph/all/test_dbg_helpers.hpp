@@ -16,7 +16,7 @@
 namespace mtg {
 namespace test {
 
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {

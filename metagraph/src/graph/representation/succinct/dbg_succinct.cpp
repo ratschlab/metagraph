@@ -15,7 +15,10 @@
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace graph {
+
 using utils::remove_suffix;
 using mtg::common::logger;
 
@@ -1028,3 +1031,6 @@ void DBGSuccinct::print(std::ostream &out) const {
         out << std::endl;
     }
 }
+
+} // namespace graph
+} // namespace mtg

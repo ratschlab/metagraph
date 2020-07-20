@@ -5,6 +5,10 @@
 #include "common/utils/simd_utils.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 template <typename NodeType>
 bool DPTable<NodeType>::add_seed(NodeType start_node,
                                  char start_char,
@@ -775,3 +779,7 @@ void QueryAlignment<NodeType>
 template class Alignment<>;
 template class QueryAlignment<>;
 template class DPTable<>;
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

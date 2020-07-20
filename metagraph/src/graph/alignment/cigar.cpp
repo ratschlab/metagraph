@@ -2,8 +2,10 @@
 
 #include "kmer/alphabets.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace graph {
+namespace align {
 
 Cigar::Cigar(const std::string &cigar_str) {
     std::string op_count;
@@ -239,3 +241,7 @@ bool Cigar::is_valid(const std::string_view reference,
 
     return true;
 }
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

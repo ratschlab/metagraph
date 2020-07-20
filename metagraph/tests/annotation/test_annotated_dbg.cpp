@@ -16,6 +16,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::test;
+using namespace mtg::graph;
 
 void check_labels(const AnnotatedDBG &anno_graph,
                   const std::string &sequence,

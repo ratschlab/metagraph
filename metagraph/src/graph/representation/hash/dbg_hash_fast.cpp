@@ -13,6 +13,10 @@
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
 
+
+namespace mtg {
+namespace graph {
+
 using mtg::common::logger;
 using mtg::kmer::KmerExtractor2Bit;
 
@@ -608,3 +612,6 @@ bool DBGHashFast::load(const std::string &filename) {
                      std::ios::binary);
     return load(in);
 }
+
+} // namespace graph
+} // namespace mtg

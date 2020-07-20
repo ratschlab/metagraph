@@ -13,6 +13,10 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 class IDBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
@@ -287,5 +291,8 @@ class DBGAligner : public IDBGAligner {
     DBGAlignerConfig config_;
 };
 
+} // namespace align
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_ALIGNER_HPP__

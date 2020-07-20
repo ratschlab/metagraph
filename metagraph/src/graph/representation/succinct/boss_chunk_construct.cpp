@@ -19,7 +19,7 @@
 
 
 namespace mtg {
-namespace succinct {
+namespace graph {
 
 using mtg::common::logger;
 using mtg::common::ChunkedWaitQueue;
@@ -961,5 +961,5 @@ IBOSSChunkConstructor::initialize(size_t k,
     }
 }
 
-} // namespace succinct
+} // namespace graph
 } // namespace mtg

@@ -7,7 +7,10 @@
 #include "common/utils/template_utils.hpp"
 #include "common/utils/file_utils.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace graph {
+
 using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
 
@@ -417,3 +420,6 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
 uint8_t BOSS::Chunk::get_W_width() const {
     return alph_size_ ? sdsl::bits::hi(alph_size_ * 2 - 1) + 1 : 1;
 }
+
+} // namespace graph
+} // namespace mtg

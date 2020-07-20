@@ -34,7 +34,7 @@ int augment_graph(Config *config) {
     // load graph
     auto graph = load_critical_dbg(config->infbase);
 
-    auto node_weights = graph->load_extension<NodeWeights>(config->infbase);
+    auto node_weights = graph->load_extension<graph::NodeWeights>(config->infbase);
     // TODO: fix extension of DBGSuccinct with k-mer counts
     //       DBGSuccinct with mask of dummy edges initialized uses
     //       contiguous indexes that are not compatible with node weights,
@@ -51,13 +51,13 @@ int augment_graph(Config *config) {
                   graph->get_k(), timer.elapsed());
     timer.reset();
 
-    if (dynamic_cast<DBGSuccinct*>(graph.get())) {
-        auto &succinct_graph = dynamic_cast<DBGSuccinct&>(*graph);
+    if (dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
+        auto &succinct_graph = dynamic_cast<graph::DBGSuccinct&>(*graph);
 
-        if (succinct_graph.get_state() != BOSS::State::DYN) {
+        if (succinct_graph.get_state() != graph::BOSS::State::DYN) {
             logger->trace("Switching state of succinct graph to dynamic...");
 
-            succinct_graph.switch_state(BOSS::State::DYN);
+            succinct_graph.switch_state(graph::BOSS::State::DYN);
 
             logger->trace("State switching done in {} sec", timer.elapsed());
         }
@@ -166,7 +166,7 @@ int augment_graph(Config *config) {
     // transform indexes of the inserved k-mers to the annotation format
     std::vector<uint64_t> inserted_rows;
     inserted_nodes->call_ones([&](auto i) {
-        inserted_rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
+        inserted_rows.push_back(graph::AnnotatedDBG::graph_to_anno_index(i));
     });
     annotation->insert_rows(inserted_rows);
 

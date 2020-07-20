@@ -167,10 +167,10 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    BOSS::State state = BOSS::State::SMALL;
+    graph::BOSS::State state = graph::BOSS::State::SMALL;
 
-    static std::string state_to_string(BOSS::State state);
-    static BOSS::State string_to_state(const std::string &string);
+    static std::string state_to_string(graph::BOSS::State state);
+    static graph::BOSS::State string_to_state(const std::string &string);
 
     enum AnnotationType {
         ColumnCompressed = 1,

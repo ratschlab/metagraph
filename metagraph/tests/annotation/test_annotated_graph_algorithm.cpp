@@ -10,6 +10,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::graph;
 using namespace mtg::test;
 
 template <typename GraphAnnotationPair>
@@ -128,7 +129,7 @@ test_mask_unitigs(double inlabel_fraction,
 
         MaskedDeBruijnGraph masked_dbg(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
-            annotated_graph_algorithm::mask_nodes_by_unitig_labels(
+            mask_nodes_by_unitig_labels(
                 *anno_graph,
                 ingroup,
                 outgroup,
