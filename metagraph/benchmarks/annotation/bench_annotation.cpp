@@ -15,7 +15,7 @@ namespace {
 using namespace mtg;
 
 
-std::unique_ptr<mtg::anno::MultiLabelEncoded<std::string>> load_annotation() {
+std::unique_ptr<mtg::annot::MultiLabelEncoded<std::string>> load_annotation() {
     if (!std::getenv("ANNO")) {
         std::cerr << "Set environment variable ANNO" << std::endl;
         exit(1);
@@ -47,7 +47,7 @@ std::vector<uint64_t> random_numbers(size_t size, uint64_t min, uint64_t max) {
 
 static void BM_anno_get_row(benchmark::State &state) {
     auto anno = load_annotation();
-    const anno::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
+    const annot::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
 
     auto rows = random_numbers(100'000, 0, annotation_matrix.num_rows() - 1);
 
@@ -60,7 +60,7 @@ BENCHMARK(BM_anno_get_row) -> Unit(benchmark::kMicrosecond);
 
 static void BM_anno_get_rows(benchmark::State &state) {
     auto anno = load_annotation();
-    const anno::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
+    const annot::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
 
     auto rows = random_numbers(100'000, 0, annotation_matrix.num_rows() - 1);
     std::sort(rows.begin(), rows.end());
@@ -73,12 +73,12 @@ BENCHMARK(BM_anno_get_rows) -> Unit(benchmark::kMillisecond);
 
 static void BM_anno_get_rows_unique(benchmark::State &state) {
     auto anno = load_annotation();
-    if (!dynamic_cast<const anno::binmat::RainbowMatrix*>(&anno->get_matrix())) {
+    if (!dynamic_cast<const annot::binmat::RainbowMatrix*>(&anno->get_matrix())) {
         state.SkipWithError("This is not a Rainbow type of matrix. Skipped.");
         return;
     }
-    const anno::binmat::RainbowMatrix &rb_matrix
-        = dynamic_cast<const anno::binmat::RainbowMatrix&>(anno->get_matrix());
+    const annot::binmat::RainbowMatrix &rb_matrix
+        = dynamic_cast<const annot::binmat::RainbowMatrix&>(anno->get_matrix());
 
     auto rows = random_numbers(100'000, 0, rb_matrix.num_rows() - 1);
     std::sort(rows.begin(), rows.end());

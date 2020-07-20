@@ -24,9 +24,9 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
-using namespace mtg::anno::binmat;
+using namespace mtg::annot::binmat;
 
 using mtg::common::logger;
 

@@ -10,7 +10,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 using mtg::common::logger;

@@ -20,7 +20,7 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compr
 
 TEST(RowCompressed, load_label_encoder) {
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
@@ -28,7 +28,7 @@ TEST(RowCompressed, load_label_encoder) {
         annotation.serialize(test_dump_basename_vec_good);
     }
     {
-        auto label_encoder = anno::RowCompressed<>::load_label_encoder(test_dump_basename_vec_good);
+        auto label_encoder = annot::RowCompressed<>::load_label_encoder(test_dump_basename_vec_good);
         ASSERT_TRUE(label_encoder.get());
         EXPECT_EQ(4u, label_encoder->size());
     }
@@ -36,7 +36,7 @@ TEST(RowCompressed, load_label_encoder) {
 
 TEST(RowCompressed, load_shape) {
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
@@ -45,7 +45,7 @@ TEST(RowCompressed, load_shape) {
     }
     {
         uint64_t num_rows, num_relations;
-        anno::RowCompressed<>::load_shape(test_dump_basename_vec_good,
+        annot::RowCompressed<>::load_shape(test_dump_basename_vec_good,
                                               &num_rows, &num_relations);
         ASSERT_EQ(5u, num_rows);
         ASSERT_EQ(6u, num_relations);
@@ -54,7 +54,7 @@ TEST(RowCompressed, load_shape) {
 
 TEST(RowCompressed, load_label_encoder_and_load_shape) {
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
@@ -63,10 +63,10 @@ TEST(RowCompressed, load_label_encoder_and_load_shape) {
     }
     {
         uint64_t num_rows, num_relations;
-        auto label_encoder = anno::RowCompressed<>::load_label_encoder(
+        auto label_encoder = annot::RowCompressed<>::load_label_encoder(
             test_dump_basename_vec_good
         );
-        anno::RowCompressed<>::load_shape(test_dump_basename_vec_good,
+        annot::RowCompressed<>::load_shape(test_dump_basename_vec_good,
                                               &num_rows, &num_relations);
         ASSERT_EQ(5u, num_rows);
         ASSERT_EQ(6u, num_relations);
@@ -77,7 +77,7 @@ TEST(RowCompressed, load_label_encoder_and_load_shape) {
 
 TEST(RowCompressed, load_shape_and_load_label_encoder) {
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
@@ -86,9 +86,9 @@ TEST(RowCompressed, load_shape_and_load_label_encoder) {
     }
     {
         uint64_t num_rows, num_relations;
-        anno::RowCompressed<>::load_shape(test_dump_basename_vec_good,
+        annot::RowCompressed<>::load_shape(test_dump_basename_vec_good,
                                               &num_rows, &num_relations);
-        auto label_encoder = anno::RowCompressed<>::load_label_encoder(
+        auto label_encoder = annot::RowCompressed<>::load_label_encoder(
             test_dump_basename_vec_good
         );
         ASSERT_EQ(5u, num_rows);
@@ -100,7 +100,7 @@ TEST(RowCompressed, load_shape_and_load_label_encoder) {
 
 TEST(RowCompressed, SerializationExtension) {
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
@@ -109,7 +109,7 @@ TEST(RowCompressed, SerializationExtension) {
                                         + annotation.file_extension());
     }
     {
-        anno::RowCompressed<> annotation(5, false);
+        annot::RowCompressed<> annotation(5, false);
         ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad
                                         + annotation.file_extension()));
         ASSERT_TRUE(annotation.load(test_dump_basename_vec_good
@@ -127,7 +127,7 @@ TEST(RowCompressed, SerializationExtension) {
 }
 
 TEST(RowCompressed, RenameColumnsMerge) {
-    anno::RowCompressed<> annotation(5);
+    annot::RowCompressed<> annotation(5);
     annotation.set(0, { "Label0", "Label2", "Label8" });
     annotation.set(2, { "Label1", "Label2" });
     annotation.set(4, { "Label8" });
@@ -146,7 +146,7 @@ TEST(RowCompressed, RenameColumnsMerge) {
 }
 
 TEST(RowCompressed, RenameColumnsMergeAll) {
-    anno::RowCompressed<> annotation(5);
+    annot::RowCompressed<> annotation(5);
     annotation.set(0, { "Label0", "Label2", "Label8" });
     annotation.set(2, { "Label1", "Label2" });
     annotation.set(4, { "Label8" });

@@ -9,7 +9,7 @@ class bit_vector;
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 class BinRelWT : public BinaryMatrix {

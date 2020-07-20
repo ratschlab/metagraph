@@ -28,7 +28,7 @@ const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
-using namespace mtg::anno::binmat;
+using namespace mtg::annot::binmat;
 using mtg::common::logger;
 
 
@@ -110,7 +110,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
  *
  * @return     Annotation submatrix in the UniqueRowAnnotator representation
  */
-std::unique_ptr<anno::UniqueRowAnnotator>
+std::unique_ptr<annot::UniqueRowAnnotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  const std::vector<uint64_t> &index_in_full,
                  size_t num_threads) {
@@ -149,7 +149,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
 
         // copy annotations from the full graph to the query graph
-        return std::make_unique<anno::UniqueRowAnnotator>(
+        return std::make_unique<annot::UniqueRowAnnotator>(
             std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                               std::vector<uint32_t>(row_indexes.begin(),
                                                                     row_indexes.end()),
@@ -215,7 +215,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     );
 
     // copy annotations from the full graph to the query graph
-    return std::make_unique<anno::UniqueRowAnnotator>(
+    return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
                                           std::move(row_rank),
                                           full_annotation.num_labels()),

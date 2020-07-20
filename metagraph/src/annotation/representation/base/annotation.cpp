@@ -7,7 +7,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 using libmaus2::util::StringSerialisation;
 using mtg::common::logger;

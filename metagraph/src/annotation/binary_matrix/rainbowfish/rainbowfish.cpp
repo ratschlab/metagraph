@@ -15,7 +15,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,

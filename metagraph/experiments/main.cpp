@@ -48,7 +48,7 @@ using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
 
-using mtg::anno::binmat::BinaryMatrix;
+using mtg::annot::binmat::BinaryMatrix;
 using mtg::cli::Config;
 
 
@@ -636,12 +636,12 @@ int main(int argc, char *argv[]) {
                 std::cout << "Density:\t" << static_cast<double>(matrix->num_relations())
                                                 / matrix->num_rows() / matrix->num_columns() << std::endl;
 
-                if (dynamic_cast<anno::binmat::Rainbowfish*>(matrix.get()))
+                if (dynamic_cast<annot::binmat::Rainbowfish*>(matrix.get()))
                     std::cout << "Num distinct rows:\t"
-                              << dynamic_cast<anno::binmat::Rainbowfish*>(matrix.get())->num_distinct_rows()
+                              << dynamic_cast<annot::binmat::Rainbowfish*>(matrix.get())->num_distinct_rows()
                               << std::endl;
 
-                auto *brwt = dynamic_cast<anno::binmat::BRWT*>(matrix.get());
+                auto *brwt = dynamic_cast<annot::binmat::BRWT*>(matrix.get());
                 if (!brwt)
                     continue;
 
@@ -671,7 +671,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::COLUMN) {
-                    anno::ColumnCompressed<> annotator;
+                    annot::ColumnCompressed<> annotator;
                     annotator.merge_load({ file });
                     const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());
@@ -688,7 +688,7 @@ int main(int argc, char *argv[]) {
                             columns.erase(it--);
                     }
 
-                    anno::binmat::ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
+                    annot::binmat::ColumnMajor matrix_subsample(convert_to<bit_vector_sd>(std::move(columns)));
                     std::cout << "Reduced matrix from ("
                               << annotator.num_objects() << ", " << annotator.num_labels()
                               << ") to ("
@@ -718,7 +718,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::ROW_FLAT) {
-                    anno::StaticBinRelAnnotator<anno::binmat::RowConcatenated<>> annotator;
+                    annot::StaticBinRelAnnotator<annot::binmat::RowConcatenated<>> annotator;
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
@@ -732,7 +732,7 @@ int main(int argc, char *argv[]) {
                     sdsl::rrr_vector<> rrr(rows.copy_to<sdsl::bit_vector>());
                     std::cout << "Dummy:\t" << rrr.serialize(rrrout) << std::endl;
                 } else if (compressor == MatrixType::RAINBOWFISH) {
-                    anno::StaticBinRelAnnotator<anno::binmat::Rainbowfish> annotator;
+                    annot::StaticBinRelAnnotator<annot::binmat::Rainbowfish> annotator;
                     std::cout << "loading\n";
                     annotator.merge_load({ file });
                     std::cout << "done\n";
@@ -772,7 +772,7 @@ int main(int argc, char *argv[]) {
 
                         std::ofstream outrrr(file + ".distinct_rows.rrr", std::ios::binary);
                         for (const auto &a : distinct_rows) {
-                            dynamic_cast<const anno::binmat::RowConcatenated<> &>(*a).data()
+                            dynamic_cast<const annot::binmat::RowConcatenated<> &>(*a).data()
                                 .copy_to<bit_vector_rrr<>>().serialize(outrrr);
                         }
                     }
@@ -870,7 +870,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Begin and end out of bounds");
 
             auto files = files_arg.getValue();
-            anno::ColumnCompressed<> annotator;
+            annot::ColumnCompressed<> annotator;
             for (const auto &file : files) {
                 std::string outbase = out_prefix.empty()
                     ? file
@@ -1142,7 +1142,7 @@ int main(int argc, char *argv[]) {
             }
 
             // copy annotations from the full graph to the query graph
-            auto row_annotation = std::make_unique<anno::RowCompressed<>>(
+            auto row_annotation = std::make_unique<annot::RowCompressed<>>(
                 std::move(annotation_rows),
                 annotation->get_label_encoder().get_labels()
             );

@@ -13,9 +13,9 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
-using mtg::anno::binmat::ColumnMajor;
+using mtg::annot::binmat::ColumnMajor;
 
 
 /**

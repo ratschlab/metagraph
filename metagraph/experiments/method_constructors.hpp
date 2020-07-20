@@ -59,25 +59,25 @@ MatrixType string_to_matrix_type(const std::string &string) {
     }
 }
 
-std::unique_ptr<anno::binmat::BinaryMatrix>
+std::unique_ptr<annot::binmat::BinaryMatrix>
 matrix_type_to_data(const std::string &file, MatrixType type) {
-    std::unique_ptr<anno::binmat::BinaryMatrix> matrix_ptr;
+    std::unique_ptr<annot::binmat::BinaryMatrix> matrix_ptr;
     if (type == MatrixType::COLUMN) {
-        matrix_ptr.reset(new anno::binmat::ColumnMajor());
+        matrix_ptr.reset(new annot::binmat::ColumnMajor());
     } else if (type == MatrixType::ROW) {
-        matrix_ptr.reset(new anno::binmat::VectorRowBinMat());
+        matrix_ptr.reset(new annot::binmat::VectorRowBinMat());
     } else if (type == MatrixType::BRWT) {
-        matrix_ptr.reset(new anno::binmat::BRWT());
+        matrix_ptr.reset(new annot::binmat::BRWT());
     } else if (type == MatrixType::BRWT_EXTRA) {
-        matrix_ptr.reset(new anno::binmat::BRWT());
+        matrix_ptr.reset(new annot::binmat::BRWT());
     } else if (type == MatrixType::BIN_REL_WT_SDSL) {
-        matrix_ptr.reset(new anno::binmat::BinRelWT_sdsl());
+        matrix_ptr.reset(new annot::binmat::BinRelWT_sdsl());
     } else if (type == MatrixType::BIN_REL_WT) {
-        matrix_ptr.reset(new anno::binmat::BinRelWT());
+        matrix_ptr.reset(new annot::binmat::BinRelWT());
     } else if (type == MatrixType::ROW_FLAT) {
-        matrix_ptr.reset(new anno::binmat::RowConcatenated<>());
+        matrix_ptr.reset(new annot::binmat::RowConcatenated<>());
     } else if (type == MatrixType::RAINBOWFISH) {
-        matrix_ptr.reset(new anno::binmat::Rainbowfish());
+        matrix_ptr.reset(new annot::binmat::Rainbowfish());
     } else {
         std::cerr << "Error: invalid matrix type" << std::endl;
         exit(1);
@@ -108,70 +108,70 @@ UniquePtrs<bit_vector> convert_to(UniquePtrs<bit_vector>&& input) {
     return result;
 }
 
-std::unique_ptr<anno::binmat::BinaryMatrix>
+std::unique_ptr<annot::binmat::BinaryMatrix>
 generate_brwt_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                         size_t arity, bool greedy, size_t relax_arity_limit) {
-    std::unique_ptr<anno::binmat::BRWT> binary_matrix;
+    std::unique_ptr<annot::binmat::BRWT> binary_matrix;
 
     if (greedy) {
-        binary_matrix = std::make_unique<anno::binmat::BRWT>(
-            anno::binmat::BRWTBottomUpBuilder::build(std::move(columns),
+        binary_matrix = std::make_unique<annot::binmat::BRWT>(
+            annot::binmat::BRWTBottomUpBuilder::build(std::move(columns),
                 [](const auto &columns) {
                     std::vector<sdsl::bit_vector> subvectors
-                        = anno::binmat::random_submatrix(columns, 1'000'000);
-                    return anno::binmat::greedy_matching(subvectors);
+                        = annot::binmat::random_submatrix(columns, 1'000'000);
+                    return annot::binmat::greedy_matching(subvectors);
                 }
             )
         );
     } else {
-        binary_matrix = std::make_unique<anno::binmat::BRWT>(
-            anno::binmat::BRWTBottomUpBuilder::build(
+        binary_matrix = std::make_unique<annot::binmat::BRWT>(
+            annot::binmat::BRWTBottomUpBuilder::build(
                 std::move(columns),
-                anno::binmat::BRWTBottomUpBuilder::get_basic_partitioner(arity)
+                annot::binmat::BRWTBottomUpBuilder::get_basic_partitioner(arity)
             )
         );
     }
 
     if (relax_arity_limit > 1)
-        anno::binmat::BRWTOptimizer::relax(binary_matrix.get(), relax_arity_limit);
+        annot::binmat::BRWTOptimizer::relax(binary_matrix.get(), relax_arity_limit);
 
     return binary_matrix;
 }
 
 template <class... Args>
-std::unique_ptr<anno::binmat::BinaryMatrix>
+std::unique_ptr<annot::binmat::BinaryMatrix>
 generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                    MatrixType type, Args&&... args) {
-    std::unique_ptr<anno::binmat::BinaryMatrix> binary_matrix;
+    std::unique_ptr<annot::binmat::BinaryMatrix> binary_matrix;
 
     switch (type) {
         case MatrixType::ROW: {
-            anno::binmat::VectorRowBinMat mat(columns[0]->size());
+            annot::binmat::VectorRowBinMat mat(columns[0]->size());
             for (size_t i = 0; i < columns.size(); ++i) {
                 columns[i]->call_ones([&mat,i](auto p) { mat.set(p, i); });
             }
-            binary_matrix.reset(new anno::binmat::VectorRowBinMat(std::move(mat)));
+            binary_matrix.reset(new annot::binmat::VectorRowBinMat(std::move(mat)));
             break;
         }
         case MatrixType::COLUMN: {
-            binary_matrix.reset(new anno::binmat::ColumnMajor(
+            binary_matrix.reset(new annot::binmat::ColumnMajor(
                 convert_to<bit_vector_sd>(std::move(columns))
             ));
             break;
         }
         case MatrixType::BRWT: {
-            binary_matrix.reset(new anno::binmat::BRWT(
-                anno::binmat::BRWTBottomUpBuilder::build(std::move(columns))
+            binary_matrix.reset(new annot::binmat::BRWT(
+                annot::binmat::BRWTBottomUpBuilder::build(std::move(columns))
             ));
             break;
         }
         case MatrixType::BRWT_EXTRA: {
-            binary_matrix.reset(new anno::binmat::BRWT(
-                anno::binmat::BRWTBottomUpBuilder::build(std::move(columns),
+            binary_matrix.reset(new annot::binmat::BRWT(
+                annot::binmat::BRWTBottomUpBuilder::build(std::move(columns),
                     [](const auto &columns) {
                         std::vector<sdsl::bit_vector> subvectors
-                            = anno::binmat::random_submatrix(columns, 1'000'000);
-                        return anno::binmat::greedy_matching(subvectors);
+                            = annot::binmat::random_submatrix(columns, 1'000'000);
+                        return annot::binmat::greedy_matching(subvectors);
                     }
                 )
             ));
@@ -185,7 +185,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits += vector_ptr->num_set_bits();
             }
 
-            binary_matrix.reset(new anno::binmat::BinRelWT_sdsl(
+            binary_matrix.reset(new annot::binmat::BinRelWT_sdsl(
                 [&](const auto &callback) {
                     utils::RowsFromColumnsTransformer(columns).call_rows(callback);
                 },
@@ -195,7 +195,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             break;
         }
         case MatrixType::BIN_REL_WT: {
-            binary_matrix.reset(new anno::binmat::BinRelWT(std::move(columns)));
+            binary_matrix.reset(new annot::binmat::BinRelWT(std::move(columns)));
             break;
         }
         case MatrixType::ROW_FLAT: {
@@ -207,7 +207,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits += vector_ptr->num_set_bits();
             }
 
-            binary_matrix.reset(new anno::binmat::RowConcatenated<>(
+            binary_matrix.reset(new annot::binmat::RowConcatenated<>(
                 [&](const auto &callback) {
                     utils::RowsFromColumnsTransformer(columns).call_rows(callback);
                 },
@@ -222,7 +222,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
         case MatrixType::RAINBOWFISH: {
             const auto num_columns = columns.size();
 
-            binary_matrix.reset(new anno::binmat::Rainbowfish(
+            binary_matrix.reset(new annot::binmat::Rainbowfish(
                 [&](const auto &callback) {
                     utils::RowsFromColumnsTransformer(columns).call_rows(callback);
                 },

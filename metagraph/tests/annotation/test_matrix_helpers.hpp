@@ -13,19 +13,19 @@
 
 namespace mtg {
 
-namespace anno {
+namespace annot {
 namespace binmat {
 
-class BRWTOptimized : public anno::binmat::BRWT {
+class BRWTOptimized : public annot::binmat::BRWT {
   public:
     template <typename... Args>
     BRWTOptimized(Args&&... args) : BRWT(std::forward<Args>(args)...) {
-        anno::binmat::BRWTOptimizer::relax(this);
+        annot::binmat::BRWTOptimizer::relax(this);
     }
 };
 
 template <int BufferSize>
-class RainbowfishBuffer : public anno::binmat::Rainbowfish {
+class RainbowfishBuffer : public annot::binmat::Rainbowfish {
   public:
     template <typename... Args>
     RainbowfishBuffer(Args&... args)

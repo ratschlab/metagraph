@@ -5,7 +5,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)

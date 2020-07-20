@@ -8,7 +8,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 template <class BinaryMatrixType, typename Label = std::string>
 class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {

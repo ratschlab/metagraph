@@ -12,7 +12,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 const size_t kRowBatchSize = 1'000'000;

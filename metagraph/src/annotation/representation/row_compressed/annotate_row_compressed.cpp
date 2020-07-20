@@ -12,13 +12,13 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 using utils::remove_suffix;
-using mtg::anno::binmat::BinaryMatrix;
-using mtg::anno::binmat::StreamRows;
-using mtg::anno::binmat::EigenSpMat;
-using mtg::anno::binmat::VectorRowBinMat;
+using mtg::annot::binmat::BinaryMatrix;
+using mtg::annot::binmat::StreamRows;
+using mtg::annot::binmat::EigenSpMat;
+using mtg::annot::binmat::VectorRowBinMat;
 
 
 template <typename Label>

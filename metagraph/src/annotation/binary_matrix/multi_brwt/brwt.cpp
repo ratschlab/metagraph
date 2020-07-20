@@ -8,7 +8,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 bool BRWT::get(Row row, Column column) const {

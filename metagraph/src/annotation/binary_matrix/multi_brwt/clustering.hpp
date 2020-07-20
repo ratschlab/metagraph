@@ -9,7 +9,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 typedef Eigen::Matrix<uint64_t, Eigen::Dynamic, 4> LinkageMatrix;

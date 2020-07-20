@@ -15,7 +15,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 using utils::remove_suffix;
 using mtg::common::logger;

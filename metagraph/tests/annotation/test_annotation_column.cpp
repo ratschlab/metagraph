@@ -20,7 +20,7 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_column_co
 
 TEST(ColumnCompressed, add_label_random_with_caching) {
     size_t graph_half_size = 1000;
-    anno::ColumnCompressed<> annotation(graph_half_size * 2, 2);
+    annot::ColumnCompressed<> annotation(graph_half_size * 2, 2);
 
     std::vector<std::string> labels { "Label1", "Label2" };
 
@@ -33,7 +33,7 @@ TEST(ColumnCompressed, add_label_random_with_caching) {
 }
 
 TEST(ColumnCompressed, RenameColumnsMerge) {
-    anno::ColumnCompressed<> annotation(5);
+    annot::ColumnCompressed<> annotation(5);
     annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
     annotation.add_labels({ 2 }, { "Label1", "Label2" });
     annotation.add_labels({ 4 }, { "Label8" });
@@ -49,7 +49,7 @@ TEST(ColumnCompressed, RenameColumnsMerge) {
 }
 
 TEST(ColumnCompressed, RenameColumnsMergeAll) {
-    anno::ColumnCompressed<> annotation(5);
+    annot::ColumnCompressed<> annotation(5);
     annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
     annotation.add_labels({ 2 }, { "Label1", "Label2" });
     annotation.add_labels({ 4 }, { "Label8" });
@@ -67,7 +67,7 @@ TEST(ColumnCompressed, RenameColumnsMergeAll) {
 }
 
 TEST(ColumnCompressed, GetColumn) {
-    anno::ColumnCompressed<> annotation(5);
+    annot::ColumnCompressed<> annotation(5);
     annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
     annotation.add_labels({ 2 }, { "Label1", "Label2" });
     annotation.add_labels({ 4 }, { "Label8" });

@@ -9,7 +9,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 template <typename BitVector>

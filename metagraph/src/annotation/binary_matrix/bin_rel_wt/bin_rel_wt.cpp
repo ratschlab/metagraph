@@ -8,7 +8,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 typedef brwt::binary_relation::object_id object_id;

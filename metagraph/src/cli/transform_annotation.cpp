@@ -19,7 +19,7 @@ namespace cli {
 
 using mtg::common::logger;
 using mtg::common::get_verbose;
-using namespace mtg::anno;
+using namespace mtg::annot;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
@@ -259,22 +259,22 @@ int transform_annotation(Config *config) {
 
         switch (config->anno_type) {
             case Config::RowFlat: {
-                auto annotator = anno::convert<RowFlatAnnotator>(files.at(0));
+                auto annotator = annot::convert<RowFlatAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::RBFish: {
-                auto annotator = anno::convert<RainbowfishAnnotator>(files.at(0));
+                auto annotator = annot::convert<RainbowfishAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                auto annotator = anno::convert<BinRelWT_sdslAnnotator>(files.at(0));
+                auto annotator = annot::convert<BinRelWT_sdslAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT: {
-                auto annotator = anno::convert<BinRelWTAnnotator>(files.at(0));
+                auto annotator = annot::convert<BinRelWTAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }

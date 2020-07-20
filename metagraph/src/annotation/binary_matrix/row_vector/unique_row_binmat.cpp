@@ -9,7 +9,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 UniqueRowBinmat::UniqueRowBinmat(uint64_t num_rows)

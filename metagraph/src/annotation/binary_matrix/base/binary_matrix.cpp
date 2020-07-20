@@ -4,7 +4,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 std::vector<BinaryMatrix::SetBitPositions>

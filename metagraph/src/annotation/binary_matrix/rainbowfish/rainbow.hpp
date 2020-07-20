@@ -8,7 +8,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 template <class MatrixType>

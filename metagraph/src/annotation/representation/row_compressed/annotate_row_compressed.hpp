@@ -7,10 +7,10 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
-using mtg::anno::binmat::BinaryMatrix;
-using mtg::anno::binmat::BinaryMatrixRowDynamic;
+using mtg::annot::binmat::BinaryMatrix;
+using mtg::annot::binmat::BinaryMatrixRowDynamic;
 
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>

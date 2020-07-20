@@ -7,7 +7,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 class UniqueRowBinmat : public BinaryMatrix {

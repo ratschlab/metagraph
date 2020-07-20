@@ -15,7 +15,7 @@ using namespace mtg;
 
 class AnnotatedSequenceGraph {
   public:
-    typedef anno::MultiLabelEncoded<std::string> Annotator;
+    typedef annot::MultiLabelEncoded<std::string> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -64,7 +64,7 @@ class AnnotatedSequenceGraph {
 
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
-    typedef anno::MultiLabelEncoded<std::string> Annotator;
+    typedef annot::MultiLabelEncoded<std::string> Annotator;
     using node_index = DeBruijnGraph::node_index;
     using row_index = Annotator::Index;
 

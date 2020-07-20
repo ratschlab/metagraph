@@ -9,7 +9,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 BinRelWT_sdsl

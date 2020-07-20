@@ -6,7 +6,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 using utils::remove_suffix;
 

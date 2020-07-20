@@ -11,7 +11,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnnotator;
 

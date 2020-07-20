@@ -12,7 +12,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 class BRWTBottomUpBuilder {

@@ -82,7 +82,7 @@ enum QueryMode : bool { NORMAL, FAST };
 template <QueryMode fast>
 static void BM_GetTopLabels(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto anno_graph = build_anno_graph<anno::RowCompressed<>>(graph_file);
+    auto anno_graph = build_anno_graph<annot::RowCompressed<>>(graph_file);
 
     for (auto _ : state) {
         std::unique_ptr<AnnotatedDBG> query_graph;
@@ -109,7 +109,7 @@ BENCHMARK_TEMPLATE(BM_GetTopLabels, QueryMode::FAST)
 template <QueryMode fast>
 static void BM_GetTopLabelSignatures(benchmark::State& state) {
     std::string graph_file = "../tests/data/transcripts_1000.fa";
-    auto anno_graph = build_anno_graph<anno::RowCompressed<>>(graph_file);
+    auto anno_graph = build_anno_graph<annot::RowCompressed<>>(graph_file);
 
     for (auto _ : state) {
         std::unique_ptr<AnnotatedDBG> query_graph;
@@ -135,24 +135,24 @@ BENCHMARK_TEMPLATE(BM_GetTopLabelSignatures, QueryMode::FAST)
 
 template <size_t file_index>
 static void BM_BRWTCompressTranscripts(benchmark::State& state) {
-    auto anno_graph = build_anno_graph<anno::ColumnCompressed<>>(queries[file_index]);
+    auto anno_graph = build_anno_graph<annot::ColumnCompressed<>>(queries[file_index]);
 
-    std::unique_ptr<anno::MultiBRWTAnnotator> annotator;
+    std::unique_ptr<annot::MultiBRWTAnnotator> annotator;
 
     size_t i = 0;
     for (auto _ : state) {
         if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
-        const auto *column = dynamic_cast<const anno::ColumnCompressed<>*>(
+        const auto *column = dynamic_cast<const annot::ColumnCompressed<>*>(
             &anno_graph->get_annotation()
         );
 
         if (!column)
             throw std::runtime_error("This shouldn't happen");
 
-        annotator = anno::convert_to_greedy_BRWT<anno::MultiBRWTAnnotator>(
-            const_cast<anno::ColumnCompressed<>&&>(*column),
+        annotator = annot::convert_to_greedy_BRWT<annot::MultiBRWTAnnotator>(
+            const_cast<annot::ColumnCompressed<>&&>(*column),
             state.range(0),
             state.range(0)
         );

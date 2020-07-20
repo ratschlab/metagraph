@@ -21,7 +21,7 @@ namespace cli {
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef anno::MultiLabelEncoded<std::string> Annotator;
+typedef annot::MultiLabelEncoded<std::string> Annotator;
 
 
 void print_boss_stats(const BOSS &boss_graph,
@@ -141,12 +141,12 @@ void print_stats(const Annotator &annotation) {
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
-    if (const auto *rbmat = dynamic_cast<const anno::binmat::RainbowMatrix *>(&annotation.get_matrix())) {
+    if (const auto *rbmat = dynamic_cast<const annot::binmat::RainbowMatrix *>(&annotation.get_matrix())) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
     }
 
-    if (const auto *brwt = dynamic_cast<const anno::binmat::BRWT *>(&annotation.get_matrix())) {
+    if (const auto *brwt = dynamic_cast<const annot::binmat::BRWT *>(&annotation.get_matrix())) {
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt->num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt->avg_arity() << std::endl;
@@ -199,7 +199,7 @@ int print_stats(Config *config) {
         auto annotation = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
-            anno::LabelEncoder<std::string> label_encoder;
+            annot::LabelEncoder<std::string> label_encoder;
 
             logger->info("Scanning annotation '{}'", file);
 
@@ -207,7 +207,7 @@ int print_stats(Config *config) {
                 std::ifstream instream(file, std::ios::binary);
 
                 // TODO: make this more reliable
-                if (dynamic_cast<const anno::ColumnCompressed<> *>(annotation.get())) {
+                if (dynamic_cast<const annot::ColumnCompressed<> *>(annotation.get())) {
                     // Column compressed dumps the number of rows first
                     // skipping it...
                     load_number(instream);

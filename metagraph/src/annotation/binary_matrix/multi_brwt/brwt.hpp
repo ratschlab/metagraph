@@ -11,7 +11,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 // The Multi-BRWT compressed binary matrix representation

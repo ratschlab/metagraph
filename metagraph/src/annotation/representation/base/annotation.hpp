@@ -15,7 +15,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 
 template <typename IndexType, typename LabelType>

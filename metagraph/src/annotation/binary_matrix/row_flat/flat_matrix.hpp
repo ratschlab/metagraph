@@ -9,7 +9,7 @@ class bit_vector_sd;
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 template <typename BitVector = bit_vector_sd>

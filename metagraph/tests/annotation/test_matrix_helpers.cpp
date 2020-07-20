@@ -17,9 +17,9 @@
 
 namespace mtg {
 
-using namespace mtg::anno::binmat;
+using namespace mtg::annot::binmat;
 
-namespace anno {
+namespace annot {
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 std::unique_ptr<Rainbow<BRWT>>
 convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns);
@@ -122,7 +122,7 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(const BitVectorPtrArray &
 }
 template <>
 Rainbow<BRWT> build_matrix_from_columns<Rainbow<BRWT>>(const BitVectorPtrArray &columns, uint64_t) {
-    return std::move(*anno::convert_to_RainbowBRWT([&](const auto &callback) {
+    return std::move(*annot::convert_to_RainbowBRWT([&](const auto &callback) {
         for (size_t j = 0; j < columns.size(); ++j) {
             callback(columns[j]->copy());
         }

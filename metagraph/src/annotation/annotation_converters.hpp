@@ -7,7 +7,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 
 template <typename Label>
 class RowCompressed;

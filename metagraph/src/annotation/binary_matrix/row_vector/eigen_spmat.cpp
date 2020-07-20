@@ -4,7 +4,7 @@
 
 
 namespace mtg {
-namespace anno {
+namespace annot {
 namespace binmat {
 
 EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {

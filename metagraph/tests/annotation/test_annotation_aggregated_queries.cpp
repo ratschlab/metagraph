@@ -12,7 +12,7 @@ using namespace mtg;
 using namespace mtg::test;
 
 
-std::vector<std::string> get_labels(const anno::MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels(const annot::MultiLabelEncoded<std::string> &annotator,
                                     const std::vector<uint64_t> &indices,
                                     double min_label_frequency = 0.0) {
     const auto& label_encoder = annotator.get_label_encoder();
@@ -101,7 +101,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
-std::vector<std::string> get_labels_by_label(const anno::MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels_by_label(const annot::MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
     VectorMap<uint64_t, size_t> index_counts;
@@ -191,7 +191,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels_by_label) {
 
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels(const anno::MultiLabelEncoded<std::string> &annotator,
+get_top_labels(const annot::MultiLabelEncoded<std::string> &annotator,
                const std::vector<uint64_t> &indices,
                size_t num_top_labels = static_cast<size_t>(-1),
                double min_label_frequency = 0.0) {
@@ -275,7 +275,7 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
 }
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels_by_label(const anno::MultiLabelEncoded<std::string> &annotator,
+get_top_labels_by_label(const annot::MultiLabelEncoded<std::string> &annotator,
                         const std::vector<uint64_t> &indices,
                         size_t num_top_labels = static_cast<size_t>(-1),
                         double min_label_frequency = 0.0) {
