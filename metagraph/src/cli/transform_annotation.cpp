@@ -1,7 +1,5 @@
 #include "transform_annotation.hpp"
 
-#include <fmt/format.h>
-
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"

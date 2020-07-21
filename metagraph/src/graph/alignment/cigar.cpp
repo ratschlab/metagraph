@@ -12,23 +12,23 @@ Cigar::Cigar(const std::string &cigar_str) {
     for (auto c : cigar_str) {
         switch (c) {
             case '=':
-                cigar_.emplace_back(Cigar::Operator::MATCH, std::stol(op_count));
+                cigar_.emplace_back(Cigar::MATCH, std::stol(op_count));
                 op_count.clear();
                 break;
             case 'X':
-                cigar_.emplace_back(Cigar::Operator::MISMATCH, std::stol(op_count));
+                cigar_.emplace_back(Cigar::MISMATCH, std::stol(op_count));
                 op_count.clear();
                 break;
             case 'I':
-                cigar_.emplace_back(Cigar::Operator::INSERTION, std::stol(op_count));
+                cigar_.emplace_back(Cigar::INSERTION, std::stol(op_count));
                 op_count.clear();
                 break;
             case 'D':
-                cigar_.emplace_back(Cigar::Operator::DELETION, std::stol(op_count));
+                cigar_.emplace_back(Cigar::DELETION, std::stol(op_count));
                 op_count.clear();
                 break;
             case 'S':
-                cigar_.emplace_back(Cigar::Operator::CLIPPED, std::stol(op_count));
+                cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
                 op_count.clear();
                 break;
             default:
@@ -62,7 +62,7 @@ Cigar::OperatorTable Cigar::initialize_opt_table() {
     #endif
 
     for (auto& row : char_to_op) {
-        row.fill(Cigar::Operator::MISMATCH);
+        row.fill(Cigar::MISMATCH);
     }
 
     for (uint8_t c : std::string(alphabet)) {
@@ -75,7 +75,7 @@ Cigar::OperatorTable Cigar::initialize_opt_table() {
         char_to_op[upper][upper]
             = char_to_op[upper][lower]
             = char_to_op[lower][upper]
-            = char_to_op[lower][lower] = Cigar::Operator::MATCH;
+            = char_to_op[lower][lower] = Cigar::MATCH;
     }
 
     return char_to_op;
@@ -85,11 +85,11 @@ Cigar::OperatorTable Cigar::char_to_op = Cigar::initialize_opt_table();
 
 char Cigar::opt_to_char(Cigar::Operator op) {
     switch (op) {
-        case Cigar::Operator::MATCH: return '=';
-        case Cigar::Operator::MISMATCH: return 'X';
-        case Cigar::Operator::INSERTION: return 'I';
-        case Cigar::Operator::DELETION: return 'D';
-        case Cigar::Operator::CLIPPED: return 'S';
+        case Cigar::MATCH: return '=';
+        case Cigar::MISMATCH: return 'X';
+        case Cigar::INSERTION: return 'I';
+        case Cigar::DELETION: return 'D';
+        case Cigar::CLIPPED: return 'S';
     }
 
     assert(false);
@@ -171,7 +171,7 @@ bool Cigar::is_valid(const std::string_view reference,
                 }
 
                 if (std::equal(ref_it, ref_it + op.second, alt_it)
-                        == (op.first != Cigar::Operator::MATCH)) {
+                        == (op.first != Cigar::MATCH)) {
                     std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl

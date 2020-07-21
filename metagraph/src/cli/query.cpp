@@ -1,7 +1,6 @@
 #include "query.hpp"
 
 #include <ips4o.hpp>
-#include <fmt/format.h>
 #include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
@@ -517,6 +516,12 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner = build_aligner(*graph, *config);
+
+        // the fwd_and_reverse argument in the aligner config returns the best of
+        // the forward and reverse complement alignments, rather than both.
+        // so, we want to prevent it from doing this
+        auto &aligner_config = const_cast<align::DBGAlignerConfig&>(aligner->get_config());
+        aligner_config.forward_and_reverse_complement = false;
     }
 
     QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);

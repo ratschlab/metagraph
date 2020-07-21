@@ -168,6 +168,9 @@ class DBGAlignerConfig {
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
+    double exact_kmer_match_fraction = 0.0;
+    double max_nodes_per_seq_char = std::numeric_limits<double>::max();
+
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
 
@@ -227,7 +230,7 @@ class Alignment {
                       std::move(nodes),
                       std::string(query),
                       score,
-                      Cigar(Cigar::Operator::MATCH, query.size()),
+                      Cigar(Cigar::MATCH, query.size()),
                       clipping,
                       orientation,
                       offset) {
@@ -287,7 +290,7 @@ class Alignment {
 
         cigar_.insert(
             cigar_.begin(),
-            typename Cigar::value_type { Cigar::Operator::CLIPPED, query_begin_ - begin }
+            typename Cigar::value_type { Cigar::CLIPPED, query_begin_ - begin }
         );
     }
 
@@ -297,7 +300,7 @@ class Alignment {
         if (end == query_end_ + end_clipping)
             return;
 
-        cigar_.append(Cigar::Operator::CLIPPED, end - query_end_ - end_clipping);
+        cigar_.append(Cigar::CLIPPED, end - query_end_ - end_clipping);
     }
 
     void trim_clipping() {
@@ -310,24 +313,10 @@ class Alignment {
             cigar_.pop_back();
     }
 
+    void trim_offset();
+
     void reverse_complement(const DeBruijnGraph &graph,
-                            const std::string_view query_rev_comp) {
-        assert(query_end_ + get_end_clipping()
-            == query_begin_ - get_clipping() + query_rev_comp.size());
-
-        assert(!offset_);
-
-        std::reverse(cigar_.begin(), cigar_.end());
-        ::reverse_complement(sequence_.begin(), sequence_.end());
-        nodes_ = map_sequence_to_nodes(graph, sequence_);
-
-        orientation_ = !orientation_;
-
-        query_begin_ = query_rev_comp.data() + get_clipping();
-        query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
-
-        assert(query_end_ >= query_begin_);
-    }
+                            const std::string_view query_rev_comp);
 
     const std::string& get_sequence() const { return sequence_; }
 
@@ -363,7 +352,7 @@ class Alignment {
 
     bool is_exact_match() const {
         return cigar_.size() == 1
-            && cigar_.front().first == Cigar::Operator::MATCH
+            && cigar_.front().first == Cigar::MATCH
             && query_begin_ + cigar_.front().second == query_end_;
     }
 
@@ -393,7 +382,7 @@ class Alignment {
             nodes_(std::move(nodes)),
             sequence_(std::move(sequence)),
             score_(score),
-            cigar_(Cigar::Operator::CLIPPED, clipping),
+            cigar_(Cigar::CLIPPED, clipping),
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
@@ -507,6 +496,8 @@ class DPTable {
                 gap_scores(size + 8, min_score),
                 ops(scores.size()),
                 prev_nodes(scores.size()),
+                gap_prev_nodes(scores.size()),
+                gap_count(scores.size()),
                 last_char(start_char),
                 best_pos(pos),
                 last_priority_pos(priority_pos) {}
@@ -516,6 +507,8 @@ class DPTable {
         std::vector<score_t> gap_scores;
         std::vector<Cigar::Operator> ops;
         std::vector<NodeType> prev_nodes;
+        std::vector<NodeType> gap_prev_nodes;
+        std::vector<int32_t> gap_count;
         char last_char;
         size_t best_pos;
         size_t last_priority_pos;
@@ -534,15 +527,10 @@ class DPTable {
 
     DPTable() {}
 
-    bool add_seed(NodeType start_node,
-                  char start_char,
-                  score_t last_char_score,
-                  score_t initial_score,
-                  score_t min_score,
+    bool add_seed(const Alignment<NodeType> &seed,
+                  const DBGAlignerConfig &config,
                   size_t size,
                   size_t start_pos,
-                  int8_t gap_opening_penalty,
-                  int8_t gap_extension_penalty,
                   size_t query_offset = 0);
 
     typedef tsl::hopscotch_map<NodeType, Column> Storage;
@@ -570,6 +558,9 @@ class DPTable {
     std::pair<iterator, bool> emplace(Args&&... args) {
         return dp_table_.emplace(std::forward<Args>(args)...);
     }
+
+    void erase(NodeType key) { dp_table_.erase(key); }
+    size_t count(NodeType key) { return dp_table_.count(key); }
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,
