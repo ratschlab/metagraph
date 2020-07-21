@@ -11,9 +11,9 @@
 #define private public
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_multiset.hpp"
-#include "common/sorted_multiset_disk.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_multiset_disk.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"

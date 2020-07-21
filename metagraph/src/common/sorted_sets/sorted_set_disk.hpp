@@ -1,7 +1,7 @@
 #ifndef __SORTED_SET_DISK_HPP__
 #define __SORTED_SET_DISK_HPP__
 
-#include "common/sorted_set_disk_base.hpp"
+#include "sorted_set_disk_base.hpp"
 
 
 namespace mtg {
