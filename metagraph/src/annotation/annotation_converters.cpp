@@ -11,7 +11,7 @@
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
 #include "common/algorithms.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
