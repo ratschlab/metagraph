@@ -8,7 +8,7 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"

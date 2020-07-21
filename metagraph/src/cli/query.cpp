@@ -5,7 +5,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"

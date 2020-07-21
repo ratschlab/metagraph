@@ -3,7 +3,7 @@
 #include <sdsl/int_vector.hpp>
 #include <tsl/ordered_set.h>
 
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
