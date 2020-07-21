@@ -140,5 +140,5 @@ uint64_t BinRelWT_sdsl::num_relations() const {
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

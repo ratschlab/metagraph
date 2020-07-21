@@ -177,7 +177,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     LabelEncoder<Label> label_encoder_;
 };
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __ANNOTATION_HPP__

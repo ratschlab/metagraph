@@ -166,5 +166,5 @@ template class VectorRowBinMat<SmallVector<uint32_t>>;
 template class VectorRowBinMat<Vector<uint64_t>>;
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

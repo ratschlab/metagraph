@@ -127,5 +127,5 @@ uint64_t ColumnMajor::num_relations() const {
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

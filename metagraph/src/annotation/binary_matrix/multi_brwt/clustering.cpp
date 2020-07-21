@@ -292,5 +292,5 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

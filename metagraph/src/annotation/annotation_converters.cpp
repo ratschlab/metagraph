@@ -970,5 +970,5 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg

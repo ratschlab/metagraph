@@ -43,7 +43,7 @@ class RowConcatenated : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __FLAT_MATRIX_HPP__

@@ -45,7 +45,7 @@ class UniqueRowBinmat : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __UNIQUE_ROW_BINMAT_HPP__

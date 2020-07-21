@@ -47,7 +47,7 @@ class ColumnMajor : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __COLUMN_MAJOR_HPP__

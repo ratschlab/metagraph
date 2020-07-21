@@ -59,7 +59,7 @@ class Rainbow : public RainbowMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __RAINBOW_HPP__

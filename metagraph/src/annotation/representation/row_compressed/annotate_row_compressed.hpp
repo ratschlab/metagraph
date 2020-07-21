@@ -77,7 +77,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     load_label_encoder(std::istream &instream);
 };
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __ANNOTATE_ROW_COMPRESSED_HPP__

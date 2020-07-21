@@ -39,7 +39,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __BIN_REL_WT_SDSL_HPP__

@@ -61,7 +61,7 @@ class BRWT : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __BRWT_HPP__

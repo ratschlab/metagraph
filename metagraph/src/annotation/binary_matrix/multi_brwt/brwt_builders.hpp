@@ -75,7 +75,7 @@ class BRWTOptimizer {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __BRWT_BUILDERS_HPP__

@@ -154,5 +154,5 @@ void Rainbow<MatrixType>::serialize(std::ostream &out) const {
 template class Rainbow<BRWT>;
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

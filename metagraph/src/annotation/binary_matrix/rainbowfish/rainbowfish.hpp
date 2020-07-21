@@ -64,7 +64,7 @@ class Rainbowfish : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __RAINBOWFISH_HPP__

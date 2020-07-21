@@ -109,7 +109,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using MultiLabelEncoded<Label>::label_encoder_;
 };
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __ANNOTATE_COLUMN_COMPRESSED_HPP__

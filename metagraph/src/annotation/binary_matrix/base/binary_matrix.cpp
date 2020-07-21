@@ -110,5 +110,5 @@ void append_row_major(const std::string &filename,
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

@@ -43,7 +43,7 @@ inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __STATIC_ANNOTATOR_DEFS_HPP__

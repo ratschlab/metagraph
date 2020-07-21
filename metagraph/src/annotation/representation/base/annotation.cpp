@@ -173,5 +173,5 @@ template class MultiLabelEncoded<std::string>;
 
 template class LabelEncoder<std::string>;
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg

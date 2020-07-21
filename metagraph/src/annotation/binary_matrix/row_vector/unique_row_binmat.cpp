@@ -166,5 +166,5 @@ double UniqueRowBinmat::density() const {
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

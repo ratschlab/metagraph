@@ -76,7 +76,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __ANNOTATION_CONVERTERS_HPP__

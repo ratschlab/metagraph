@@ -46,7 +46,7 @@ class BinRelWT : public BinaryMatrix {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __BIN_REL_WT_HPP__

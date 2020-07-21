@@ -51,7 +51,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     using MultiLabelEncoded<Label>::label_encoder_;
 };
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __ANNOTATION_MATRIX_HPP__

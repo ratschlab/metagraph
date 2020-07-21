@@ -307,5 +307,5 @@ void RowCompressed<Label>
 
 template class RowCompressed<std::string>;
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg

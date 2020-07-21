@@ -578,5 +578,5 @@ bool ColumnCompressed<Label>
 
 template class ColumnCompressed<std::string>;
 
-} // namespace anno
+} // namespace annot
 } // namespace mtg

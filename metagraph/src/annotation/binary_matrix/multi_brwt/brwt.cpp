@@ -370,5 +370,5 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

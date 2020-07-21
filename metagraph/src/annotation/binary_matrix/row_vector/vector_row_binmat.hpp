@@ -51,7 +51,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

@@ -97,7 +97,7 @@ void append_row_major(const std::string &filename,
                       uint64_t num_cols);
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __SPARSE_MATRIX_HPP__

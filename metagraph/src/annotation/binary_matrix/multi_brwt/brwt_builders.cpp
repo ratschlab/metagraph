@@ -598,5 +598,5 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
 }
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg

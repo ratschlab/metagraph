@@ -44,7 +44,7 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
 };
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __EIGEN_SPMAT_HPP__

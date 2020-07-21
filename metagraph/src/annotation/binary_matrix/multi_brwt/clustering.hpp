@@ -39,7 +39,7 @@ random_submatrix(const std::vector<const bit_vector *> &columns,
                  size_t num_threads = 1, int seed = 1);
 
 } // namespace binmat
-} // namespace anno
+} // namespace annot
 } // namespace mtg
 
 #endif // __CLUSTERING_HPP__
