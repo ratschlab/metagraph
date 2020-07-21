@@ -1,4 +1,4 @@
-#include "common/sorted_set_disk.hpp"
+#include "common/sorted_sets/sorted_set_disk.hpp"
 #include "common/threads/chunked_wait_queue.hpp"
 
 #include <gtest/gtest.h>

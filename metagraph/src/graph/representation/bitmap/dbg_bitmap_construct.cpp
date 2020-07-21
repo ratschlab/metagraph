@@ -3,8 +3,8 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "graph/graph_extensions/node_weights.hpp"

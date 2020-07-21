@@ -4,7 +4,7 @@
 #include <cassert>
 #include <functional>
 
-#include "common/sorted_set.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
 
 
 /**
