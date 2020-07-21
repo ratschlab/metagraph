@@ -3,6 +3,10 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 template <typename NodeType>
 void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     query_ = query;
@@ -225,7 +229,7 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
                         == DeBruijnGraph::npos);
 
                 std::string_view seed_seq(query.data() + i, seed_length);
-                score_t match_score = config.match_score(seed_seq);
+                DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
 
                 if (match_score <= config.min_cell_score)
                     return;
@@ -327,3 +331,7 @@ template class ExactSeeder<>;
 template class SuffixSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

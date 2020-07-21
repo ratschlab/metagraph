@@ -5,9 +5,13 @@
 
 #include "common/algorithms.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace boss {
+
 using TAlphabet = BOSS::TAlphabet;
 
-namespace merge {
 
 /**
  * Helper function to determine the bin boundaries, given
@@ -360,5 +364,6 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
     return chunk;
 }
 
-
-} // namespace merge
+} // namespace boss
+} // namespace graph
+} // namespace mtg

@@ -7,6 +7,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class DBGHashString : public DeBruijnGraph {
   public:
     explicit DBGHashString(size_t k) : k_(k) {}
@@ -95,5 +98,8 @@ class DBGHashString : public DeBruijnGraph {
 
     static const std::string alphabet_;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_HASH_STRING_HPP__

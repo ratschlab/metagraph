@@ -21,10 +21,10 @@ namespace cli {
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef annotate::MultiLabelEncoded<std::string> Annotator;
+typedef annot::MultiLabelEncoded<std::string> Annotator;
 
 
-void print_boss_stats(const BOSS &boss_graph,
+void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy,
                       size_t num_threads,
                       bool verbose) {
@@ -67,16 +67,16 @@ void print_boss_stats(const BOSS &boss_graph,
     std::cout << "========================================================" << std::endl;
 }
 
-void print_stats(const DeBruijnGraph &graph) {
+void print_stats(const graph::DeBruijnGraph &graph) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (auto weights = graph.get_extension<NodeWeights>()) {
+    if (auto weights = graph.get_extension<graph::NodeWeights>()) {
         double sum_weights = 0;
         uint64_t num_non_zero_weights = 0;
-        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
+        if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
             // In DBGSuccinct some of the nodes may be masked out
             // TODO: Fix this by using non-contiguous indexing in graph
             //       so that mask of dummy edges does not change indexes.
@@ -102,7 +102,7 @@ void print_stats(const DeBruijnGraph &graph) {
         std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
 
         if (get_verbose()) {
-            if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph)) {
+            if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
                 // In DBGSuccinct some of the nodes may be masked out
                 // TODO: Fix this by using non-contiguous indexing in graph
                 //       so that mask of dummy edges does not change indexes.
@@ -141,12 +141,12 @@ void print_stats(const Annotator &annotation) {
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
-    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
+    if (const auto *rbmat = dynamic_cast<const annot::binmat::RainbowMatrix *>(&annotation.get_matrix())) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
     }
 
-    if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
+    if (const auto *brwt = dynamic_cast<const annot::binmat::BRWT *>(&annotation.get_matrix())) {
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
         std::cout << "num nodes: " << brwt->num_nodes() << std::endl;
         std::cout << "avg arity: " << brwt->avg_arity() << std::endl;
@@ -167,16 +167,16 @@ int print_stats(Config *config) {
     const auto &files = config->fnames;
 
     for (const auto &file : files) {
-        std::shared_ptr<DeBruijnGraph> graph;
+        std::shared_ptr<graph::DeBruijnGraph> graph;
 
         graph = load_critical_dbg(file);
-        graph->load_extension<NodeWeights>(file);
+        graph->load_extension<graph::NodeWeights>(file);
 
         logger->info("Statistics for graph '{}'", file);
 
         print_stats(*graph);
 
-        if (auto dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get())) {
+        if (auto dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
             const auto &boss_graph = dbg_succ->get_boss();
 
             print_boss_stats(boss_graph,
@@ -199,7 +199,7 @@ int print_stats(Config *config) {
         auto annotation = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
-            annotate::LabelEncoder<std::string> label_encoder;
+            annot::LabelEncoder<std::string> label_encoder;
 
             logger->info("Scanning annotation '{}'", file);
 
@@ -207,7 +207,7 @@ int print_stats(Config *config) {
                 std::ifstream instream(file, std::ios::binary);
 
                 // TODO: make this more reliable
-                if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                if (dynamic_cast<const annot::ColumnCompressed<> *>(annotation.get())) {
                     // Column compressed dumps the number of rows first
                     // skipping it...
                     load_number(instream);

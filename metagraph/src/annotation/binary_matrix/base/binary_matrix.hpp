@@ -9,6 +9,10 @@
 #include "common/vector.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class BinaryMatrix {
   public:
     typedef uint64_t Row;
@@ -91,5 +95,9 @@ class StreamRows {
 void append_row_major(const std::string &filename,
                       const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                       uint64_t num_cols);
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __SPARSE_MATRIX_HPP__

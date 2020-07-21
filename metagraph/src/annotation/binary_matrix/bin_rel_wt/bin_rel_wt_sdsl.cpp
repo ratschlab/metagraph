@@ -8,6 +8,10 @@
 #include "common/vectors/vector_algorithm.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 BinRelWT_sdsl
 ::BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
                 uint64_t num_relations,
@@ -134,3 +138,7 @@ void BinRelWT_sdsl::serialize(std::ostream &out) const {
 uint64_t BinRelWT_sdsl::num_relations() const {
     return wt_.size();
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

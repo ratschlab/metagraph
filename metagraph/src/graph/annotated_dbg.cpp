@@ -17,6 +17,9 @@
 typedef std::pair<std::string, size_t> StringCountPair;
 
 
+namespace mtg {
+namespace graph {
+
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
                          std::unique_ptr<Annotator>&& annotation,
@@ -51,7 +54,7 @@ void AnnotatedSequenceGraph
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (force_fast_) {
-        auto row_major = dynamic_cast<annotate::RowCompressed<std::string>*>(annotator_.get());
+        auto row_major = dynamic_cast<annot::RowCompressed<std::string>*>(annotator_.get());
         if (row_major) {
             row_major->add_labels_fast(indices, labels);
             return;
@@ -545,3 +548,6 @@ int32_t AnnotatedDBG
 
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
+
+} // namespace graph
+} // namespace mtg

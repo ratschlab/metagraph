@@ -10,6 +10,7 @@
 namespace {
 
 using namespace mtg;
+
 using mtg::kmer::KmerExtractor2Bit;
 
 template <typename Kmer>

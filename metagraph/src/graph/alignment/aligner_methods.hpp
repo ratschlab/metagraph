@@ -11,6 +11,10 @@
 #include "common/vectors/bitmap.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class Seeder {
   public:
@@ -61,10 +65,11 @@ class SuffixSeeder : public Seeder<NodeType> {
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactMapSeeder : public Seeder<NodeType> {
-  friend SuffixSeeder<NodeType>;
+    friend SuffixSeeder<NodeType>;
 
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     ExactMapSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
@@ -102,6 +107,7 @@ template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactSeeder : public ExactMapSeeder<NodeType> {
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : ExactMapSeeder<NodeType>(graph, config) {}
@@ -115,6 +121,7 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
 
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     MEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : ExactMapSeeder<NodeType>(graph, config) {}
@@ -285,5 +292,8 @@ class DefaultColumnExtender : public Extender<NodeType> {
     size_t max_num_nodes;
 };
 
+} // namespace align
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_ALIGNER_METHODS_HPP__

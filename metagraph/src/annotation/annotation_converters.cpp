@@ -22,9 +22,12 @@
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
 
-namespace annotate {
 
-using namespace mtg;
+namespace mtg {
+namespace annot {
+
+using namespace mtg::annot::binmat;
+
 using mtg::common::logger;
 
 typedef LabelEncoder<std::string> LEncoder;
@@ -967,4 +970,5 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg

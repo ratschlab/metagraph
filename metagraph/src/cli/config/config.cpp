@@ -565,6 +565,10 @@ Config::Config(int argc, char *argv[]) {
     }
 }
 
+
+using mtg::graph::boss::BOSS;
+
+
 std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
         case BOSS::State::STAT:

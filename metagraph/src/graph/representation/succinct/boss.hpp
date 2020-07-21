@@ -8,6 +8,11 @@
 #include "kmer/kmer_extractor.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace boss {
+
 class BOSSConstructor;
 
 /**
@@ -699,5 +704,9 @@ BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
             ? pick_edge(edge, *(end - 1))
             : npos;
 }
+
+} // namespace boss
+} // namespace graph
+} // namespace mtg
 
 #endif // __BOSS_HPP__

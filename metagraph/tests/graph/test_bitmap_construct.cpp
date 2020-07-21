@@ -24,7 +24,7 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 using mtg::kmer::KmerExtractor2Bit;
 
 const std::string test_data_dir = "../tests/data";

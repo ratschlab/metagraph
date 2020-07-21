@@ -9,7 +9,11 @@
 #include "annotation/binary_matrix/row_flat/flat_matrix.hpp"
 
 
-class Rainbowfish : public RainbowMatrix {
+namespace mtg {
+namespace annot {
+namespace binmat {
+
+class Rainbowfish : public BinaryMatrix {
   public:
     Rainbowfish() {}
     Rainbowfish(const std::function<void(RowCallback)> &call_rows,
@@ -58,5 +62,9 @@ class Rainbowfish : public RainbowMatrix {
 
     uint64_t get_code(Row row) const;
 };
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __RAINBOWFISH_HPP__

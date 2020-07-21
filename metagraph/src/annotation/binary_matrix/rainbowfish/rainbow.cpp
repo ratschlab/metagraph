@@ -10,6 +10,11 @@
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 
+
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 const size_t kRowBatchSize = 1'000'000;
 
 
@@ -147,3 +152,7 @@ void Rainbow<MatrixType>::serialize(std::ostream &out) const {
 }
 
 template class Rainbow<BRWT>;
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

@@ -8,7 +8,11 @@
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 using mtg::common::logger;
 
 
@@ -592,3 +596,7 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
 
     return delta;
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

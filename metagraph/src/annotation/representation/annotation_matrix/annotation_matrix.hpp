@@ -7,7 +7,8 @@
 #include "annotation/representation/base/annotation.hpp"
 
 
-namespace annotate {
+namespace mtg {
+namespace annot {
 
 template <class BinaryMatrixType, typename Label = std::string>
 class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
@@ -50,6 +51,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     using MultiLabelEncoded<Label>::label_encoder_;
 };
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg
 
 #endif // __ANNOTATION_MATRIX_HPP__

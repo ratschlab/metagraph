@@ -16,12 +16,13 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::seq_io;
+
 using mtg::common::logger;
 
 
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
-                   AnnotatedDBG *anno_graph,
+                   graph::AnnotatedDBG *anno_graph,
                    bool forward_and_reverse,
                    size_t min_count,
                    size_t max_count,
@@ -157,7 +158,7 @@ void annotate_data(const std::vector<std::string> &files,
 
 
 void annotate_coordinates(const std::vector<std::string> &files,
-                          AnnotatedDBG *anno_graph,
+                          graph::AnnotatedDBG *anno_graph,
                           bool forward_and_reverse,
                           size_t genome_bin_size) {
     size_t total_seqs = 0;
@@ -317,7 +318,7 @@ int annotate_graph_with_genome_coordinates(Config *config) {
     auto graph_temp = load_critical_dbg(config->infbase);
 
     auto annotation_temp
-        = std::make_unique<annotate::RowCompressed<>>(graph_temp->max_index());
+        = std::make_unique<annot::RowCompressed<>>(graph_temp->max_index());
 
     if (config->infbase_annotators.size()
             && !annotation_temp->load(config->infbase_annotators.at(0))) {
@@ -327,9 +328,9 @@ int annotate_graph_with_genome_coordinates(Config *config) {
     }
 
     // load graph
-    AnnotatedDBG anno_graph(graph_temp,
-                            std::move(annotation_temp),
-                            config->fast);
+    graph::AnnotatedDBG anno_graph(graph_temp,
+                                   std::move(annotation_temp),
+                                   config->fast);
 
     if (!anno_graph.check_compatibility()) {
         logger->error("Graph and annotation are incompatible");

@@ -17,6 +17,10 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+namespace align {
+
 class Cigar {
   public:
     enum Operator : int32_t {
@@ -116,11 +120,10 @@ class Cigar {
     static OperatorTable initialize_opt_table();
 };
 
-typedef int32_t score_t;
 
 class DBGAlignerConfig {
   public:
-    typedef ::score_t score_t;
+    typedef int32_t score_t;
     typedef std::array<score_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
@@ -213,8 +216,7 @@ class Alignment {
 
   public:
     typedef NodeType node_index;
-    typedef ::score_t score_t;
-    typedef ::DPTable<NodeType> DPTable;
+    typedef DBGAlignerConfig::score_t score_t;
 
     // Used for constructing seeds
     Alignment(const std::string_view query = {},
@@ -243,10 +245,10 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
-    Alignment(const DPTable &dp_table,
+    Alignment(const DPTable<NodeType> &dp_table,
               const DBGAlignerConfig &config,
               const std::string_view query_view,
-              typename DPTable::const_iterator column,
+              typename DPTable<NodeType>::const_iterator column,
               size_t start_pos,
               size_t offset,
               NodeType *start_node,
@@ -478,7 +480,7 @@ class QueryAlignment {
 template <typename NodeType = SequenceGraph::node_index>
 class DPTable {
   public:
-    typedef ::score_t score_t;
+    typedef DBGAlignerConfig::score_t score_t;
 
     struct Column {
         Column() = default;
@@ -582,6 +584,8 @@ class DPTable {
     size_t query_offset_ = 0;
 };
 
-
+} // namespace align
+} // namespace graph
+} // namespace mtg
 
 #endif  // __ALIGNER_HELPER_HPP__

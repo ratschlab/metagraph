@@ -7,6 +7,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 template <class MatrixType>
 class Rainbow : public RainbowMatrix {
   public:
@@ -53,5 +57,9 @@ class Rainbow : public RainbowMatrix {
 
     uint64_t get_code(Row row) const;
 };
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __RAINBOW_HPP__

@@ -8,6 +8,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
@@ -121,5 +124,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     bool is_canonical_;
 };
 
+} // namespace graph
+} // namespace mtg
 
 #endif // __MASKED_GRAPH_HPP__

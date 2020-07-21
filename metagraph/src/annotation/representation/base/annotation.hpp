@@ -14,7 +14,9 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
-namespace annotate {
+namespace mtg {
+namespace annot {
+
 
 template <typename IndexType, typename LabelType>
 class AnnotationCategory {
@@ -158,7 +160,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const override;
 
-    virtual const BinaryMatrix& get_matrix() const = 0;
+    virtual const binmat::BinaryMatrix& get_matrix() const = 0;
 
     /*********************** Special queries **********************/
 
@@ -175,6 +177,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     LabelEncoder<Label> label_encoder_;
 };
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg
 
 #endif // __ANNOTATION_HPP__

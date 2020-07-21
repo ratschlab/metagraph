@@ -31,7 +31,7 @@ int assemble(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    std::unique_ptr<AnnotatedDBG> anno_graph;
+    std::unique_ptr<graph::AnnotatedDBG> anno_graph;
     if (config->infbase_annotators.size()) {
         anno_graph = initialize_annotated_dbg(graph, *config);
 

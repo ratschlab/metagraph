@@ -15,14 +15,17 @@
 #include "common/vectors/bitmap_mergers.hpp"
 
 
-namespace annotate {
+namespace mtg {
+
+using namespace mtg::annot::binmat;
+
+namespace annot {
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 std::unique_ptr<Rainbow<BRWT>>
 convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns);
-} // namespace annotate
+} // namespace annot
 
 
-namespace mtg {
 namespace test {
 
 typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
@@ -119,7 +122,7 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(const BitVectorPtrArray &
 }
 template <>
 Rainbow<BRWT> build_matrix_from_columns<Rainbow<BRWT>>(const BitVectorPtrArray &columns, uint64_t) {
-    return std::move(*annotate::convert_to_RainbowBRWT([&](const auto &callback) {
+    return std::move(*annot::convert_to_RainbowBRWT([&](const auto &callback) {
         for (size_t j = 0; j < columns.size(); ++j) {
             callback(columns[j]->copy());
         }

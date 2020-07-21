@@ -8,6 +8,11 @@
 #include "common/utils/simd_utils.hpp"
 #include "common/vectors/aligned_vector.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace align {
+
 using mtg::common::logger;
 
 
@@ -63,7 +68,7 @@ template <class Vector>
 std::pair<size_t, size_t> get_column_boundaries(const Vector &scores,
                                                 size_t size,
                                                 size_t best_pos,
-                                                score_t xdrop_cutoff,
+                                                DBGAlignerConfig::score_t xdrop_cutoff,
                                                 size_t bandwidth) {
     if (xdrop_cutoff > scores[best_pos])
         return std::make_pair(best_pos, best_pos);
@@ -685,3 +690,7 @@ void DefaultColumnExtender<NodeType>
 
 
 template class DefaultColumnExtender<>;
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

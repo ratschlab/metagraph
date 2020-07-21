@@ -7,10 +7,14 @@
 #include <iostream>
 #include <memory>
 
+
 namespace utils {
     std::string remove_suffix(const std::string &str, const std::string &suffix);
-}
+} // namespace utils
 
+
+namespace mtg {
+namespace graph {
 
 class SequenceGraph {
   public:
@@ -232,5 +236,8 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
 
 std::vector<SequenceGraph::node_index>
 map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence);
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __SEQUENCE_GRAPH_HPP__

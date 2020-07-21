@@ -13,13 +13,15 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/threads/threading.hpp"
 
+
+namespace mtg {
+namespace annot {
+
 using utils::remove_suffix;
 using mtg::common::logger;
 
 size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 
-
-namespace annotate {
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
@@ -538,7 +540,7 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
-const ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
+const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
     return annotation_matrix_view_;
 }
@@ -576,4 +578,5 @@ bool ColumnCompressed<Label>
 
 template class ColumnCompressed<std::string>;
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg

@@ -12,6 +12,7 @@
 namespace {
 
 using namespace mtg;
+
 using mtg::common::ChunkedWaitQueue;
 
 TEST(WaitQueue, PushPop) {

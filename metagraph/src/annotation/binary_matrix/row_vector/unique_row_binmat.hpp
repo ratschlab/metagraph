@@ -6,6 +6,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class UniqueRowBinmat : public BinaryMatrix {
   public:
     explicit UniqueRowBinmat(uint64_t num_rows = 0);
@@ -39,5 +43,9 @@ class UniqueRowBinmat : public BinaryMatrix {
     std::vector<SetBitPositions> unique_rows_;
     std::vector<uint32_t> row_rank_;
 };
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __UNIQUE_ROW_BINMAT_HPP__

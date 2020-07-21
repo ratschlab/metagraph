@@ -4,6 +4,10 @@
 
 #include "common/logger.hpp"
 
+
+namespace mtg {
+namespace graph {
+
 using mtg::common::logger;
 
 
@@ -324,3 +328,6 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
 
   return cutoff;
 }
+
+} // namespace graph
+} // namespace mtg

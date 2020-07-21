@@ -114,7 +114,7 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
 
 
 std::string process_search_request(const std::string &received_message,
-                                   const AnnotatedDBG &anno_graph,
+                                   const graph::AnnotatedDBG &anno_graph,
                                    const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
@@ -141,15 +141,15 @@ std::string process_search_request(const std::string &received_message,
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
 
-    std::unique_ptr<IDBGAligner> aligner;
+    std::unique_ptr<graph::align::IDBGAligner> aligner;
     if (json.get("align", false).asBool()) {
         aligner = build_aligner(anno_graph.get_graph(), config);
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
         // so, we want to prevent it from doing this
-        const_cast<DBGAlignerConfig&>(aligner->get_config()).forward_and_reverse_complement
-                = false;
+        auto &aligner_config = const_cast<graph::align::DBGAlignerConfig&>(aligner->get_config());
+        aligner_config.forward_and_reverse_complement = false;
     }
 
     std::ostringstream oss;
@@ -178,7 +178,7 @@ std::string process_search_request(const std::string &received_message,
 }
 
 std::string process_align_request(const std::string &received_message,
-                                  const DeBruijnGraph &graph,
+                                  const graph::DeBruijnGraph &graph,
                                   const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
@@ -190,20 +190,21 @@ std::string process_align_request(const std::string &received_message,
 
     config.alignment_num_alternative_paths = json.get(
         "max_alternative_alignments",
-        (uint64_t)config.alignment_num_alternative_paths).asDouble();
+        (uint64_t)config.alignment_num_alternative_paths).asInt();
 
-    config.discovery_fraction = json.get("discovery_fraction",
-                                         config.discovery_fraction).asDouble();
+    config.discovery_fraction
+            = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    std::unique_ptr<IDBGAligner> aligner = build_aligner(graph, config);
+    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
 
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const QueryAlignment<IDBGAligner::node_index> paths = aligner->align(read_stream->seq.s);
+        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
+                = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
@@ -212,7 +213,7 @@ std::string process_align_request(const std::string &received_message,
         if (!paths.empty()) {
             Json::Value alignments = Json::Value(Json::arrayValue);
 
-            for (const Alignment<IDBGAligner::node_index> &path : paths) {
+            for (const auto &path : paths) {
                 Json::Value a;
                 a[SCORE_JSON_FIELD] = path.get_score();
                 a[SEQUENCE_JSON_FIELD] = path.get_sequence();
@@ -233,7 +234,7 @@ std::string process_align_request(const std::string &received_message,
     return Json::writeString(builder, root);
 }
 
-std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
+std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
     auto labels = anno_graph.get_annotation().get_all_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
@@ -247,8 +248,10 @@ std::string process_column_label_request(const AnnotatedDBG &anno_graph) {
     return Json::writeString(builder, root);
 }
 
-std::string process_stats_request(const DeBruijnGraph &graph, const AnnotatedDBG &anno_graph,
-                                  const std::string &graph_filename, const std::string &annotation_filename) {
+std::string process_stats_request(const graph::DeBruijnGraph &graph,
+                                  const graph::AnnotatedDBG &anno_graph,
+                                  const std::string &graph_filename,
+                                  const std::string &annotation_filename) {
     Json::Value root;
 
     Json::Value graph_stats;

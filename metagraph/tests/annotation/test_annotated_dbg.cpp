@@ -16,6 +16,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::test;
+using namespace mtg::graph;
 
 void check_labels(const AnnotatedDBG &anno_graph,
                   const std::string &sequence,
@@ -73,7 +74,7 @@ std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
-                                std::make_unique<annotate::ColumnCompressed<>>(1));
+                                std::make_unique<annot::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
                   anno_graph.get_annotation().num_objects());
@@ -122,7 +123,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -191,7 +192,7 @@ TEST(AnnotatedDBG, Transform) {
         uint64_t num_nodes = graph->num_nodes();
         auto anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph->get_graph().num_nodes());
 
@@ -228,8 +229,8 @@ TEST(AnnotatedDBG, Transform) {
         anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
-                annotate::convert<annotate::RowFlatAnnotator>(
-                    std::move(dynamic_cast<annotate::ColumnCompressed<>&>(
+                annot::convert<annot::RowFlatAnnotator>(
+                    std::move(dynamic_cast<annot::ColumnCompressed<>&>(
                         *anno_graph->annotator_
                     )
                 )).release()
@@ -275,7 +276,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -386,7 +387,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -508,7 +509,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -627,7 +628,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
@@ -755,7 +756,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
 
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -872,7 +873,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<annotate::ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
