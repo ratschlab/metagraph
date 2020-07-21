@@ -565,15 +565,19 @@ Config::Config(int argc, char *argv[]) {
     }
 }
 
-std::string Config::state_to_string(graph::BOSS::State state) {
+
+using mtg::graph::boss::BOSS;
+
+
+std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
-        case graph::BOSS::State::STAT:
+        case BOSS::State::STAT:
             return "stat-obsolete";
-        case graph::BOSS::State::DYN:
+        case BOSS::State::DYN:
             return "dynamic";
-        case graph::BOSS::State::SMALL:
+        case BOSS::State::SMALL:
             return "small";
-        case graph::BOSS::State::FAST:
+        case BOSS::State::FAST:
             return "fast";
         default:
             assert(false);
@@ -581,15 +585,15 @@ std::string Config::state_to_string(graph::BOSS::State state) {
     }
 }
 
-graph::BOSS::State Config::string_to_state(const std::string &string) {
+BOSS::State Config::string_to_state(const std::string &string) {
     if (string == "stat-obsolete") {
-        return graph::BOSS::State::STAT;
+        return BOSS::State::STAT;
     } else if (string == "dynamic") {
-        return graph::BOSS::State::DYN;
+        return BOSS::State::DYN;
     } else if (string == "small") {
-        return graph::BOSS::State::SMALL;
+        return BOSS::State::SMALL;
     } else if (string == "fast") {
-        return graph::BOSS::State::FAST;
+        return BOSS::State::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }

@@ -13,6 +13,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
@@ -38,6 +39,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
     virtual uint64_t get_k() const = 0;
 };
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg
 

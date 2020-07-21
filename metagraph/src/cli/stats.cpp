@@ -24,7 +24,7 @@ using mtg::common::get_verbose;
 typedef annot::MultiLabelEncoded<std::string> Annotator;
 
 
-void print_boss_stats(const graph::BOSS &boss_graph,
+void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy,
                       size_t num_threads,
                       bool verbose) {

@@ -8,6 +8,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 using TAlphabet = BOSS::TAlphabet;
 
@@ -363,5 +364,6 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
     return chunk;
 }
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg

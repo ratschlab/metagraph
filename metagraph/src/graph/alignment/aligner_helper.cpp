@@ -6,12 +6,12 @@
 #include "common/logger.hpp"
 
 
-using mtg::common::logger;
-
-
 namespace mtg {
 namespace graph {
 namespace align {
+
+using mtg::common::logger;
+
 
 template <typename NodeType>
 bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
@@ -374,7 +374,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
         // if the alignment starts from a source k-mer, then this alignment can't
         // be reversed
-        if (dynamic_cast<const DBGSuccinct*>(&graph) && rev_seq[0] == BOSS::kSentinel) {
+        if (dynamic_cast<const DBGSuccinct*>(&graph) && rev_seq[0] == boss::BOSS::kSentinel) {
             *this = Alignment();
             return;
         }

@@ -10,6 +10,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 /**
  * Structure storing data for the BOSS table (or part of it), without support for
@@ -102,6 +103,7 @@ class BOSS::Chunk {
     sdsl::int_vector_buffer<> weights_;
 };
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg
 

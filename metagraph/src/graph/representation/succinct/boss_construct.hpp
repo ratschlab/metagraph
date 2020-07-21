@@ -7,13 +7,14 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
     // see input arguments in IBOSSChunkConstructor::initialize
     template <typename... Args>
     BOSSConstructor(const Args&... args)
-      : constructor_(mtg::graph::IBOSSChunkConstructor::initialize(args...)) {}
+      : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
 
     void add_sequence(std::string_view sequence, uint64_t count = 1) {
         constructor_->add_sequence(sequence, count);
@@ -59,9 +60,10 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     }
 
   private:
-    std::unique_ptr<mtg::graph::IBOSSChunkConstructor> constructor_;
+    std::unique_ptr<IBOSSChunkConstructor> constructor_;
 };
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg
 

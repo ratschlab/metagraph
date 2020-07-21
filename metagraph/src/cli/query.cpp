@@ -29,6 +29,7 @@ const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using namespace mtg::annot::binmat;
 using namespace mtg::graph;
+
 using mtg::common::logger;
 
 

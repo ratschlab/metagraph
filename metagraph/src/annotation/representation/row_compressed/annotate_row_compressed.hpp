@@ -9,9 +9,6 @@
 namespace mtg {
 namespace annot {
 
-using mtg::annot::binmat::BinaryMatrix;
-using mtg::annot::binmat::BinaryMatrixRowDynamic;
-
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
 template <typename Label = std::string>
@@ -48,7 +45,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     static void serialize(const std::string &filename,
                           const LabelEncoder<Label> &label_encoder,
-                          const std::function<void(BinaryMatrix::RowCallback)> &call_rows);
+                          const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows);
 
     static void load_shape(const std::string &filename,
                            uint64_t *num_objects,
@@ -57,12 +54,12 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(const std::string &filename);
 
-    static binmat::StreamRows<BinaryMatrix::SetBitPositions>
+    static binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
     get_row_streamer(const std::string &filename);
 
     /*****************************************************************/
 
-    const BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
+    const binmat::BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
 
     std::string file_extension() const { return kExtension; }
 
@@ -71,7 +68,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
   private:
     using MultiLabelEncoded<Label>::label_encoder_;
 
-    std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
+    std::unique_ptr<binmat::BinaryMatrixRowDynamic> matrix_;
 
     static std::unique_ptr<LabelEncoder<Label>>
     load_label_encoder(std::istream &instream);

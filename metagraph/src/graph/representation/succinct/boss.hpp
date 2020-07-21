@@ -11,6 +11,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 class BOSSConstructor;
 
@@ -704,6 +705,7 @@ BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
             : npos;
 }
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg
 

@@ -21,6 +21,7 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
@@ -88,7 +89,7 @@ int build_graph(Config *config) {
         graph.reset(new DBGBitmap(config->k, config->canonical));
 
     } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
-        auto boss_graph = std::make_unique<BOSS>(config->k - 1);
+        auto boss_graph = std::make_unique<boss::BOSS>(config->k - 1);
 
         logger->trace("Start reading data and extracting k-mers");
         //enumerate all suffixes
@@ -100,7 +101,7 @@ int build_graph(Config *config) {
             suffixes = kmer::KmerExtractorBOSS::generate_suffixes(config->suffix_len);
         }
 
-        std::unique_ptr<BOSS::Chunk> graph_data;
+        std::unique_ptr<boss::BOSS::Chunk> graph_data;
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -110,7 +111,7 @@ int build_graph(Config *config) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
 
-            auto constructor = IBOSSChunkConstructor::initialize(
+            auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,
                 config->count_width,
@@ -125,7 +126,7 @@ int build_graph(Config *config) {
 
             push_sequences(files, *config, timer, constructor.get());
 
-            BOSS::Chunk *next_chunk = constructor->build_chunk();
+            boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
 
@@ -376,7 +377,7 @@ int concatenate_graph_chunks(Config *config) {
 
     for (auto &filename : chunk_files) {
         filename = utils::remove_suffix(filename,
-                                        BOSS::Chunk::kFileExtension,
+                                        boss::BOSS::Chunk::kFileExtension,
                                         DBGBitmap::kChunkFileExtension);
     }
 
@@ -384,7 +385,7 @@ int concatenate_graph_chunks(Config *config) {
     std::unique_ptr<DeBruijnGraph> graph;
     switch (config->graph_type) {
         case Config::GraphType::SUCCINCT: {
-            auto p = BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
+            auto p = boss::BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
             auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
 
             logger->trace("Chunks concatenated in {} sec", timer.elapsed());

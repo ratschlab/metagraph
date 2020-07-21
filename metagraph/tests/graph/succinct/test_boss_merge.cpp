@@ -9,7 +9,7 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::graph;
+using namespace mtg::graph::boss;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 
@@ -175,10 +175,10 @@ TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
 
             std::vector<const BOSS*> graphs = { &first, &second };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
 
             std::unique_ptr<BOSS::Chunk> chunk {
-                graph::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+                merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
             };
             chunk->serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
@@ -205,10 +205,10 @@ TEST(BOSSMerge, ParallelMergeTwoPaths) {
 
             std::vector<const BOSS*> graphs = { &first, &second };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
 
             std::unique_ptr<BOSS::Chunk> chunk {
-                graph::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+                merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
             };
             chunk->serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
@@ -236,10 +236,10 @@ TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
 
             std::vector<const BOSS*> graphs = { &first, &second };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
 
             std::unique_ptr<BOSS::Chunk> chunk {
-                graph::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+                merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
             };
             chunk->serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
@@ -271,10 +271,10 @@ TEST(BOSSMerge, ParallelMergeThreeGraphs) {
 
             std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
 
             std::unique_ptr<BOSS::Chunk> chunk {
-                graph::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+                merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
             };
             chunk->serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
@@ -307,23 +307,23 @@ TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
 
             std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
 
             {
                 std::unique_ptr<BOSS::Chunk> chunk {
-                    graph::merge_blocks_to_chunk(graphs, 0, 3, 1, 1)
+                    merge_blocks_to_chunk(graphs, 0, 3, 1, 1)
                 };
                 chunk->serialize(test_data_dir + "/1");
             }
             {
                 std::unique_ptr<BOSS::Chunk> chunk {
-                    graph::merge_blocks_to_chunk(graphs, 1, 3, 1, 1)
+                    merge_blocks_to_chunk(graphs, 1, 3, 1, 1)
                 };
                 chunk->serialize(test_data_dir + "/2");
             }
             {
                 std::unique_ptr<BOSS::Chunk> chunk {
-                    graph::merge_blocks_to_chunk(graphs, 2, 3, 1, 1)
+                    merge_blocks_to_chunk(graphs, 2, 3, 1, 1)
                 };
                 chunk->serialize(test_data_dir + "/3");
             }
@@ -359,12 +359,12 @@ TEST(BOSSMerge, ParallelDumpedChunkedMergeThreeGraphs) {
 
             std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-            BOSS *merged = graph::merge(graphs);
+            BOSS *merged = merge(graphs);
             size_t num_chunks = 3;
 
             std::vector<std::string> files;
             for (size_t i = 0; i < num_chunks; ++i) {
-                auto chunk = graph::merge_blocks_to_chunk(graphs, i, num_chunks, 1, 1);
+                auto chunk = merge_blocks_to_chunk(graphs, i, num_chunks, 1, 1);
                 ASSERT_TRUE(chunk);
                 files.push_back(test_data_dir + "/chunks_to_merge"
                                   + "." + std::to_string(i)
@@ -414,10 +414,10 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
             graphs[i] = component;
         }
 
-        BOSS *merged = graph::merge(graphs);
+        BOSS *merged = merge(graphs);
 
         std::unique_ptr<BOSS::Chunk> chunk {
-            graph::merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread)
+            merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread)
         };
         chunk->serialize(test_data_dir + "/1");
         BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(

@@ -54,10 +54,10 @@ int augment_graph(Config *config) {
     if (dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
         auto &succinct_graph = dynamic_cast<graph::DBGSuccinct&>(*graph);
 
-        if (succinct_graph.get_state() != graph::BOSS::State::DYN) {
+        if (succinct_graph.get_state() != graph::boss::BOSS::State::DYN) {
             logger->trace("Switching state of succinct graph to dynamic...");
 
-            succinct_graph.switch_state(graph::BOSS::State::DYN);
+            succinct_graph.switch_state(graph::boss::BOSS::State::DYN);
 
             logger->trace("State switching done in {} sec", timer.elapsed());
         }

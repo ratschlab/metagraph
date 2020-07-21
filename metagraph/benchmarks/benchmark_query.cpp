@@ -19,6 +19,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::graph;
+
 using mtg::seq_io::kseq_t;
 
 
@@ -35,9 +36,9 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(const std::string &filename) {
 
     size_t k = 12;
 
-    BOSSConstructor constructor(k - 1);
+    boss::BOSSConstructor constructor(k - 1);
     constructor.add_sequences(std::vector<std::string>(sequences));
-    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor));
+    auto graph = std::make_shared<DBGSuccinct>(new boss::BOSS(&constructor));
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
 
     uint64_t max_index = graph->max_index();

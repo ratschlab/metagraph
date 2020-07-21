@@ -204,7 +204,7 @@ std::string process_align_request(const std::string &received_message,
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
         const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
-                            = aligner->align(read_stream->seq.s);
+                = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
@@ -213,7 +213,7 @@ std::string process_align_request(const std::string &received_message,
         if (!paths.empty()) {
             Json::Value alignments = Json::Value(Json::arrayValue);
 
-            for (const graph::align::Alignment<graph::align::IDBGAligner::node_index> &path : paths) {
+            for (const auto &path : paths) {
                 Json::Value a;
                 a[SCORE_JSON_FIELD] = path.get_score();
                 a[SEQUENCE_JSON_FIELD] = path.get_sequence();

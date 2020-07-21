@@ -16,6 +16,7 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::seq_io;
+
 using mtg::common::logger;
 
 

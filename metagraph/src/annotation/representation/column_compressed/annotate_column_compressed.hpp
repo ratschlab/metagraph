@@ -15,9 +15,6 @@
 namespace mtg {
 namespace annot {
 
-using mtg::annot::binmat::ColumnMajor;
-
-
 /**
  * Multithreading:
  *  The non-const methods must be called sequentially.
@@ -80,7 +77,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     const bitmap& get_column(const Label &label) const;
 
-    const ColumnMajor& get_matrix() const override;
+    const binmat::ColumnMajor& get_matrix() const override;
 
     std::string file_extension() const override { return kExtension; }
 
@@ -97,7 +94,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-    ColumnMajor annotation_matrix_view_ = ColumnMajor::construct_view(bitmatrix_);
+    binmat::ColumnMajor annotation_matrix_view_
+            = binmat::ColumnMajor::construct_view(bitmatrix_);
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;

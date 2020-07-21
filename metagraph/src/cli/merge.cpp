@@ -23,12 +23,12 @@ int merge_graph(Config *config) {
 
     const auto &files = config->fnames;
 
-    graph::BOSS *graph = NULL;
+    graph::boss::BOSS *graph = NULL;
 
     Timer timer;
 
     std::vector<std::shared_ptr<graph::DBGSuccinct>> dbg_graphs;
-    std::vector<const graph::BOSS*> graphs;
+    std::vector<const graph::boss::BOSS*> graphs;
 
     config->canonical = true;
 
@@ -53,10 +53,10 @@ int merge_graph(Config *config) {
 
         graph = dbg_graphs.at(0)->release_boss();
 
-        if (graph->get_state() != graph::BOSS::State::DYN) {
+        if (graph->get_state() != graph::boss::BOSS::State::DYN) {
             logger->trace("Switching state of succinct graph to dynamic...");
 
-            graph->switch_state(graph::BOSS::State::DYN);
+            graph->switch_state(graph::boss::BOSS::State::DYN);
 
             logger->trace("Switching done in {} sec", timer.elapsed());
         }
@@ -72,7 +72,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging blocks");
         timer.reset();
 
-        auto *chunk = graph::merge_blocks_to_chunk(
+        auto *chunk = graph::boss::merge_blocks_to_chunk(
             graphs,
             config->part_idx,
             config->parts_total,
@@ -91,7 +91,7 @@ int merge_graph(Config *config) {
                               + "." + std::to_string(config->part_idx)
                               + "_" + std::to_string(config->parts_total));
         } else {
-            graph = new graph::BOSS(graphs[0]->get_k());
+            graph = new graph::boss::BOSS(graphs[0]->get_k());
             chunk->initialize_boss(graph);
         }
         delete chunk;
@@ -99,7 +99,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging graphs");
         timer.reset();
 
-        graph = graph::merge(graphs, get_verbose());
+        graph = graph::boss::merge(graphs, get_verbose());
     }
     dbg_graphs.clear();
 

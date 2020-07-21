@@ -20,6 +20,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
 using mtg::common::logger;
 using mtg::common::ChunkedWaitQueue;
@@ -984,5 +985,6 @@ IBOSSChunkConstructor::initialize(size_t k,
     }
 }
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg

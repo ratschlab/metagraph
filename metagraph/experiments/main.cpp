@@ -306,6 +306,8 @@ using namespace mtg::graph;
 using namespace mtg::graph::align;
 using namespace experiments;
 
+using mtg::graph::boss::BOSS;
+
 
 int main(int argc, char *argv[]) {
     try {
@@ -641,10 +643,11 @@ int main(int argc, char *argv[]) {
                 std::cout << "Density:\t" << static_cast<double>(matrix->num_relations())
                                                 / matrix->num_rows() / matrix->num_columns() << std::endl;
 
-                if (dynamic_cast<annot::binmat::Rainbowfish*>(matrix.get()))
+                if (dynamic_cast<annot::binmat::Rainbowfish*>(matrix.get())) {
                     std::cout << "Num distinct rows:\t"
                               << dynamic_cast<annot::binmat::Rainbowfish*>(matrix.get())->num_distinct_rows()
                               << std::endl;
+                }
 
                 auto *brwt = dynamic_cast<annot::binmat::BRWT*>(matrix.get());
                 if (!brwt)

@@ -15,9 +15,10 @@
 namespace mtg {
 namespace cli {
 
+using namespace mtg::annot;
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
-using namespace mtg::annot;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
@@ -232,8 +233,8 @@ int transform_annotation(Config *config) {
         }
 
         binmat::LinkageMatrix linkage_matrix
-            = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
-                                                   get_num_threads());
+                = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
+                                                       get_num_threads());
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;

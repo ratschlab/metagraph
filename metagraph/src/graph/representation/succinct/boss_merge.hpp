@@ -11,6 +11,7 @@
 
 namespace mtg {
 namespace graph {
+namespace boss {
 
     /**
      * Given a list of boss tables, this function
@@ -26,6 +27,7 @@ namespace graph {
                                        size_t num_bins_per_thread,
                                        bool verbose = false);
 
+} // namespace boss
 } // namespace graph
 } // namespace mtg
 

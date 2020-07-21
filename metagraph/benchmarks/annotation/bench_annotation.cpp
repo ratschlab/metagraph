@@ -15,7 +15,7 @@ namespace {
 using namespace mtg;
 
 
-std::unique_ptr<mtg::annot::MultiLabelEncoded<std::string>> load_annotation() {
+std::unique_ptr<annot::MultiLabelEncoded<std::string>> load_annotation() {
     if (!std::getenv("ANNO")) {
         std::cerr << "Set environment variable ANNO" << std::endl;
         exit(1);

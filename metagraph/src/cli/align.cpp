@@ -16,6 +16,7 @@ namespace cli {
 
 using namespace mtg::graph;
 using namespace mtg::graph::align;
+
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 

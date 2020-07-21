@@ -35,7 +35,7 @@ class RainbowfishBuffer : public annot::binmat::Rainbowfish {
 };
 
 } // namespace binmat
-} //namespace anno
+} // namespace annot
 
 namespace test {
 

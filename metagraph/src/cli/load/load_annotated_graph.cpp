@@ -10,6 +10,7 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
+
 using mtg::common::logger;
 
 

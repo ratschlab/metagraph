@@ -19,6 +19,8 @@
 namespace mtg {
 namespace graph {
 
+using namespace mtg::graph::boss;
+
 using utils::remove_suffix;
 using mtg::common::logger;
 
