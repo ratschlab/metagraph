@@ -7,7 +7,7 @@
 
 #include "aligner_helper.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/aligned_vector.hpp"
+#include "common/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
 
 
