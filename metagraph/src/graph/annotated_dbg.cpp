@@ -10,7 +10,7 @@
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
-#include "common/vectors/aligned_vector.hpp"
+#include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 
