@@ -172,10 +172,10 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 }
 
 template <typename NodeType>
-Alignment<NodeType>::Alignment(const DPTable &dp_table,
+Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                                const DBGAlignerConfig &config,
                                const std::string_view query_view,
-                               typename DPTable::const_iterator column,
+                               typename DPTable<NodeType>::const_iterator column,
                                size_t start_pos,
                                size_t offset,
                                NodeType *start_node,
@@ -202,7 +202,7 @@ Alignment<NodeType>::Alignment(const DPTable &dp_table,
 
     score_t gap_diff = config.gap_opening_penalty - config.gap_extension_penalty;
 
-    std::vector<typename DPTable::const_iterator> out_columns;
+    std::vector<typename DPTable<NodeType>::const_iterator> out_columns;
     while (prev_node != SequenceGraph::npos) {
         auto prev_column = dp_table.find(op == Cigar::INSERTION ? prev_gap_node : prev_node);
         if (prev_column == dp_table.end())

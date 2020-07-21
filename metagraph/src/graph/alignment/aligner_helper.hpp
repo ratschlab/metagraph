@@ -217,7 +217,6 @@ class Alignment {
   public:
     typedef NodeType node_index;
     typedef DBGAlignerConfig::score_t score_t;
-    typedef DPTable<NodeType> DPTable;
 
     // Used for constructing seeds
     Alignment(const std::string_view query = {},
@@ -246,10 +245,10 @@ class Alignment {
               size_t offset = 0);
 
     // TODO: construct multiple alignments from the same starting point
-    Alignment(const DPTable &dp_table,
+    Alignment(const DPTable<NodeType> &dp_table,
               const DBGAlignerConfig &config,
               const std::string_view query_view,
-              typename DPTable::const_iterator column,
+              typename DPTable<NodeType>::const_iterator column,
               size_t start_pos,
               size_t offset,
               NodeType *start_node,
