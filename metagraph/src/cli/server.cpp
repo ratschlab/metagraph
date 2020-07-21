@@ -190,7 +190,7 @@ std::string process_align_request(const std::string &received_message,
 
     config.alignment_num_alternative_paths = json.get(
         "max_alternative_alignments",
-        config.alignment_num_alternative_paths).asDouble();
+        (uint64_t)config.alignment_num_alternative_paths).asInt();
 
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();

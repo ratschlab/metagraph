@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/logger.hpp"
 
+
 using mtg::common::logger;
 
 
