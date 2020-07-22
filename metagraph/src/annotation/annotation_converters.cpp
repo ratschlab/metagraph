@@ -398,7 +398,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
     std::vector<uint64_t> row_classes;
     uint64_t max_class = 0;
 
-    ProgressBar progress_bar(num_columns, "Columns iterated",
+    ProgressBar progress_bar(num_columns, "Iterate columns",
                              std::cerr, !common::get_verbose());
 
     tsl::hopscotch_map<uint64_t, uint64_t> new_class;
@@ -522,7 +522,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
     logger->trace("Started matrix reduction");
 
-    ProgressBar progress_bar(num_columns, "Columns reduced",
+    ProgressBar progress_bar(num_columns, "Reduce columns",
                              std::cerr, !common::get_verbose());
 
     std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
@@ -540,7 +540,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     });
     thread_pool.join();
 
-    logger->trace("Compressing assignment vector");
+    logger->trace("Start compressing the assignment vector");
 
     sdsl::bit_vector code_bv(total_code_length);
     sdsl::bit_vector boundary_bv(total_code_length, false);
@@ -554,8 +554,10 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     }
     assert(pos == code_bv.size());
 
-    bit_vector_rrr<> row_codes(std::move(code_bv));
     bit_vector_rrr<> row_code_delimiters(std::move(boundary_bv));
+    logger->trace("Assignment vector constructed"
+                  "\nRow codes: {} bits\nBoundary bitmap: {} bits, {} set",
+                  total_code_length, total_code_length, row_code_delimiters.num_set_bits());
 
     logger->trace("Building Multi-BRWT");
 
@@ -578,7 +580,7 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
         BRWTOptimizer::relax(&reduced_matrix, max_brwt_arity, num_threads);
 
     return std::make_unique<Rainbow<BRWT>>(std::move(reduced_matrix),
-                                           std::move(row_codes),
+                                           std::move(code_bv),
                                            std::move(row_code_delimiters),
                                            num_ones);
 }
