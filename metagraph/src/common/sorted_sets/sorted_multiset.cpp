@@ -107,6 +107,7 @@ template class SortedMultiset<sdsl::uint256_t, uint16_t>;
 template class SortedMultiset<uint64_t, uint32_t>;
 template class SortedMultiset<sdsl::uint128_t, uint32_t>;
 template class SortedMultiset<sdsl::uint256_t, uint32_t>;
+template class SortedMultiset<uint64_t, uint64_t>;
 
 } // namespace common
 } // namespace mtg

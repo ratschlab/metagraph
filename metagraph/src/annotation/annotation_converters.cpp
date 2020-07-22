@@ -9,9 +9,9 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
-#include "common/vector_map.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -424,9 +424,9 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
             #pragma omp critical
             {
                 for (uint64_t i : pos) {
-                    uint64_t &row_class = row_classes[i];
+                    uint64_t &c = row_classes[i];
 
-                    auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
+                    auto [it, inserted] = new_class.try_emplace(c, max_class + 1);
                     if (inserted) {
                         ++max_class;
 
@@ -436,7 +436,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
                         }
                     }
 
-                    row_class = it->second;
+                    c = it->second;
                 }
             }
         }
@@ -462,22 +462,23 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     logger->trace("Identifying unique rows");
     std::vector<uint64_t> row_classes = get_row_classes(call_columns, num_columns);
 
-    VectorMap<uint64_t /* class */,
-              uint64_t /* count */,
-              uint64_t /* index type */> row_counter;
+    size_t batch_size = 100'000'000;
+    common::SortedMultiset<uint64_t, uint64_t> row_counter(get_num_threads(), batch_size);
     {
-        ProgressBar progress_bar(row_classes.size(), "Counting row classes",
+        ProgressBar progress_bar(row_classes.size(),
+                                 "Counting row classes",
                                  std::cerr, !common::get_verbose());
-        for (uint64_t row_class : row_classes) {
-            row_counter[row_class]++;
-            ++progress_bar;
+        auto it = row_classes.begin();
+        while (it + batch_size < row_classes.end()) {
+            row_counter.insert(it, it + batch_size);
+            it += batch_size;
+            progress_bar += batch_size;
         }
+        row_counter.insert(it, row_classes.end());
+        progress_bar += row_classes.end() - it;
     }
-
-    logger->trace("Number of unique rows: {}", row_counter.size());
-
-    auto &pairs = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
-                    row_counter.values_container());
+    auto &pairs = row_counter.data();
+    logger->trace("Number of unique rows: {}", pairs.size());
 
     ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
                           get_num_threads());
@@ -511,10 +512,10 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
     uint64_t total_code_length = 0;
     for (size_t i = 0; i < row_classes.size(); ++i) {
-        uint64_t row_code = class_to_code[row_classes[i]];
-        row_classes[i] = row_code;
-        row_pointers[row_code] = i;
-        total_code_length += sdsl::bits::hi(row_code) + 1;
+        uint64_t &c = row_classes[i];
+        c = class_to_code[c];
+        row_pointers[c] = i;
+        total_code_length += sdsl::bits::hi(c) + 1;
     }
     class_to_code.clear();
 
@@ -544,11 +545,11 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     sdsl::bit_vector boundary_bv(total_code_length, false);
 
     uint64_t pos = 0;
-    for (uint64_t code : row_classes) {
-        uint8_t code_length = sdsl::bits::hi(code) + 1;
-        code_bv.set_int(pos, code, code_length);
-        boundary_bv[pos + code_length - 1] = true;
-        pos += code_length;
+    for (uint64_t c : row_classes) {
+        uint8_t code_len = sdsl::bits::hi(c) + 1;
+        code_bv.set_int(pos, c, code_len);
+        boundary_bv[pos + code_len - 1] = true;
+        pos += code_len;
     }
     assert(pos == code_bv.size());
 
