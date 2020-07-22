@@ -22,7 +22,8 @@ using namespace mtg::annot::binmat;
 namespace annot {
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns);
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+                       size_t max_brwt_arity = 1);
 } // namespace annot
 
 

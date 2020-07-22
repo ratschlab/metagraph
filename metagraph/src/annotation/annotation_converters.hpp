@@ -59,7 +59,8 @@ void relax_BRWT(StaticAnnotation *annotation,
 
 template <class StaticAnnotation>
 typename std::unique_ptr<StaticAnnotation>
-convert_to_RbBRWT(const std::vector<std::string> &annotation_files);
+convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
+                  size_t max_brwt_arity);
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,

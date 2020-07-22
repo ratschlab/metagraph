@@ -448,7 +448,8 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
 }
 
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns) {
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+                       size_t max_brwt_arity = 1) {
     uint64_t num_columns = 0;
     uint64_t num_ones = 0;
     call_columns([&](const auto &col_ptr) {
@@ -573,6 +574,9 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
                                                      num_parallel_nodes,
                                                      num_threads);
 
+    if (max_brwt_arity > 1)
+        BRWTOptimizer::relax(&reduced_matrix, max_brwt_arity, num_threads);
+
     return std::make_unique<Rainbow<BRWT>>(std::move(reduced_matrix),
                                            std::move(row_codes),
                                            std::move(row_code_delimiters),
@@ -581,7 +585,8 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
 template <>
 std::unique_ptr<RbBRWTAnnotator>
-convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files) {
+convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                                   size_t max_brwt_arity) {
     LEncoder label_encoder;
 
     auto call_columns = [&](const CallColumn &call_column) {
@@ -603,7 +608,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
         }
     };
 
-    auto matrix = convert_to_RainbowBRWT(call_columns);
+    auto matrix = convert_to_RainbowBRWT(call_columns, max_brwt_arity);
 
     assert(matrix->num_columns() == label_encoder.size());
 
