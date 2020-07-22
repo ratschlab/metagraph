@@ -226,7 +226,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, Traversals2) {
         EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'C'), 'A'));
 
         EXPECT_EQ(DeBruijnGraph::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it + 1, 'G'));
+        EXPECT_EQ(DeBruijnGraph::npos, graph->traverse_back(it, 'G'));
 
         // reverse complement
         graph->map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
