@@ -12,9 +12,10 @@ PrimaryDeBruijnGraph::PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> 
 }
 
 
-void PrimaryDeBruijnGraph::map_to_nodes(std::string_view sequence,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate) const {
+void PrimaryDeBruijnGraph
+::map_to_nodes_sequentially(std::string_view sequence,
+                            const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &terminate) const {
     std::string rev_seq(sequence);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
@@ -40,11 +41,12 @@ void PrimaryDeBruijnGraph::map_to_nodes(std::string_view sequence,
     }, terminate);
 }
 
-void PrimaryDeBruijnGraph
-::map_to_nodes_sequentially(std::string_view sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
-    map_to_nodes(sequence, callback, terminate);
+void PrimaryDeBruijnGraph::map_to_nodes(std::string_view sequence,
+                                        const std::function<void(node_index)> &callback,
+                                        const std::function<bool()> &terminate) const {
+    map_to_nodes_sequentially(sequence, [&](node_index i) {
+        callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
+    }, terminate);
 }
 
 void PrimaryDeBruijnGraph

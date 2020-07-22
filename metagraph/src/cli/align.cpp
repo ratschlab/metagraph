@@ -4,6 +4,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/primary_graph.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -238,6 +239,18 @@ int align_to_graph(Config *config) {
     // This speeds up mapping, and allows for node suffix matching
     if (dbg)
         dbg->reset_mask();
+
+    if (config->canonical) {
+        if (dbg && (config->alignment_length != graph->get_k()
+                    || config->alignment_min_seed_length != graph->get_k()
+                    || config->alignment_max_seed_length != graph->get_k())) {
+            logger->error("Matching k-mers shorter than k not supported with "
+                          "--canonical flag");
+            exit(1);
+        }
+
+        graph.reset(new PrimaryDeBruijnGraph(graph));
+    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
