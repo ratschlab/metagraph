@@ -10,6 +10,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class PrimaryDeBruijnGraph : public DeBruijnGraph {
   public:
     PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, size_t num_seqs_cached = 10'000);
@@ -78,7 +81,7 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_.get_k(); }
 
-    virtual bool is_canonical_mode() const override { return false; }
+    virtual bool is_canonical_mode() const override { return true; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
@@ -141,5 +144,7 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
     mutable std::mutex cache_mutex_;
 };
 
+} // namespace graph
+} // namespace mtg
 
 #endif // __PRIMARY_GRAPH_HPP__

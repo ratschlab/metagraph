@@ -4,6 +4,9 @@
 #include "common/seq_tools/reverse_complement.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 PrimaryDeBruijnGraph::PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                                            size_t num_seqs_cached)
       : graph_ptr_(graph), offset_(graph_.max_index()), seq_cache_(num_seqs_cached) {
@@ -241,3 +244,6 @@ bool PrimaryDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
 
     return DeBruijnGraph::operator==(other);
 }
+
+} // namespace graph
+} // namespace mtg
