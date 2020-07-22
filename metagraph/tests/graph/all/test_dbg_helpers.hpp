@@ -46,26 +46,26 @@ template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences = {},
-            bool canonical = false);
+            uint8_t mode = 0);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
                   const std::vector<std::string> &sequences = {},
-                  bool canonical = false);
+                  uint8_t mode = 0);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
                       std::function<void(std::function<void(const std::string&)>)> generate,
-                      bool canonical = false) {
+                      uint8_t mode = 0) {
     std::vector<std::string> sequences;
     generate([&](const auto &sequence) { sequences.push_back(sequence); });
-    return build_graph_batch<Graph>(k, sequences, canonical);
+    return build_graph_batch<Graph>(k, sequences, mode);
 }
 
 template <class Graph>
-bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence);
+bool check_graph(const std::string &alphabet, uint8_t mode, bool check_sequence);
 
 template <class Graph>
 bool check_graph_nodes(const Graph &graph) {
