@@ -47,6 +47,11 @@ int transform_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
+    if (!std::filesystem::exists(files.at(0))) {
+        logger->error("File {} does not exist", files.at(0));
+        exit(1);
+    }
+
     const Config::AnnotationType input_anno_type
         = parse_annotation_type(files.at(0));
 
