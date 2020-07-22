@@ -63,7 +63,7 @@ build-docker-bin:
 BIN_TMP := $(CODE_BASE_HOST)/metagraph/docker/bin_tmp
 
 build-docker:
-	[ -d $(BIN_TMP) ] && mkdir -p $(BIN_TMP)
+	[ -d $(BIN_TMP) ] || mkdir -p $(BIN_TMP)
 	docker create --name metagraph_bin_tmp metagraph_bin
 	docker cp metagraph_bin_tmp:/opt/metagraph/metagraph/build/metagraph_DNA $(BIN_TMP)/metagraph_docker
 	docker cp metagraph_bin_tmp:/usr/local/lib/libhts.so.1.10.2 $(BIN_TMP)/libhts_docker.so
