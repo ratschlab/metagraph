@@ -159,6 +159,11 @@ class GraphClient:
 
         def _df_per_seq_res(seq_res):
             df = pd.DataFrame(seq_res['alignments'])
+            if 'cigar' not in df:
+                # no results returned. add empty columns
+                df['cigar'] = ""
+                df['score'] = None
+                df['sequence'] = ""
             df['seq_description'] = seq_res['seq_description']
             return df
 

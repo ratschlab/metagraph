@@ -210,22 +210,18 @@ std::string process_align_request(const std::string &received_message,
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
 
         // not supporting reverse complement yet
-        if (!paths.empty()) {
-            Json::Value alignments = Json::Value(Json::arrayValue);
+        Json::Value alignments = Json::Value(Json::arrayValue);
 
-            for (const auto &path : paths) {
-                Json::Value a;
-                a[SCORE_JSON_FIELD] = path.get_score();
-                a[SEQUENCE_JSON_FIELD] = path.get_sequence();
-                a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+        for (const auto &path : paths) {
+            Json::Value a;
+            a[SCORE_JSON_FIELD] = path.get_score();
+            a[SEQUENCE_JSON_FIELD] = path.get_sequence();
+            a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
 
-                alignments.append(a);
-            };
+            alignments.append(a);
+        };
 
-            align_entry[ALIGNMENT_JSON_FIELD] = alignments;
-        } else {
-            align_entry[SEQUENCE_JSON_FIELD] = "";
-        }
+        align_entry[ALIGNMENT_JSON_FIELD] = alignments;
 
         root.append(align_entry);
     });
