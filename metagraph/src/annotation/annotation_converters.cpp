@@ -410,7 +410,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
             row_classes.assign(col_ptr->size(), 0);
 
         const size_t batch_size = 5'000'000;
-        #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t begin = 0; begin < col_ptr->size(); begin += batch_size) {
             uint64_t end = std::min(begin + batch_size, col_ptr->size());
 
@@ -602,7 +602,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
                 call_column(std::move(column));
                 label_encoder.insert_and_encode(label);
             },
-            1
+            0
         );
         if (!success) {
             logger->error("Can't load annotation columns");

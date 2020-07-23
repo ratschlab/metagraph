@@ -91,13 +91,13 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
         submatrices[i].nonzero_rows_.reset();
 
         results.push_back(thread_pool.enqueue(
-            [&,i,subindex(std::move(subindex))]() {
+            [&](size_t i, sdsl::bit_vector &subindex) {
                 // compress the subindex vector and set it to the child node
                 // all in a single thread
                 submatrices[i].nonzero_rows_
                     = std::make_unique<bit_vector_smallrank>(std::move(subindex));
                 parent.child_nodes_[i].reset(new BRWT(std::move(submatrices[i])));
-            }
+            }, i, std::move(subindex)
         ));
     }
 
