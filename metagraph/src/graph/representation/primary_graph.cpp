@@ -9,9 +9,24 @@ namespace graph {
 
 PrimaryDeBruijnGraph::PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                                            size_t num_seqs_cached)
-      : graph_ptr_(graph), offset_(graph_.max_index()), seq_cache_(num_seqs_cached) {
-    if (!(get_k() & 1))
-        throw std::runtime_error("PrimaryDeBruijnGraph not supported for even k.");
+      : const_graph_ptr_(graph),
+        offset_(graph_.max_index()),
+        seq_cache_(num_seqs_cached) {}
+
+PrimaryDeBruijnGraph::PrimaryDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph,
+                                           size_t num_seqs_cached)
+      : PrimaryDeBruijnGraph(std::dynamic_pointer_cast<const DeBruijnGraph>(graph),
+                             num_seqs_cached) { graph_ptr_ = graph; }
+
+void PrimaryDeBruijnGraph
+::add_sequence(std::string_view sequence,
+               const std::function<void(node_index)> &on_insertion) {
+    if (!graph_ptr_)
+        throw std::runtime_error("add_sequence only supported for non-const graphs.");
+
+    graph_ptr_->add_sequence(sequence, on_insertion);
+    offset_ = graph_.max_index();
+    seq_cache_.Clear();
 }
 
 

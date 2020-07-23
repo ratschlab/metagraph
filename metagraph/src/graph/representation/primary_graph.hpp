@@ -16,13 +16,12 @@ namespace graph {
 class PrimaryDeBruijnGraph : public DeBruijnGraph {
   public:
     PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, size_t num_seqs_cached = 10'000);
+    PrimaryDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph, size_t num_seqs_cached = 10'000);
 
     virtual ~PrimaryDeBruijnGraph() {}
 
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override {
-        throw std::runtime_error("Not implemented");
-    }
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion = [](node_index) {}) override;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -121,9 +120,11 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
     }
 
   private:
-    std::shared_ptr<const DeBruijnGraph> graph_ptr_;
-    const DeBruijnGraph &graph_ = *graph_ptr_;
+    std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
+    const DeBruijnGraph &graph_ = *const_graph_ptr_;
     size_t offset_;
+
+    std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     inline node_index set_offset(node_index node) const {
         assert(node <= offset_);
