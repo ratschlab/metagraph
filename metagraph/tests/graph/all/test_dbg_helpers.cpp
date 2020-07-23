@@ -1,7 +1,7 @@
 #include "test_dbg_helpers.hpp"
 
 #include "gtest/gtest.h"
-#include "graph/representation/primary_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
@@ -20,7 +20,7 @@ std::shared_ptr<DeBruijnGraph> make_graph_primary(std::shared_ptr<DeBruijnGraph>
         contigs.push_back(contig);
     }, 1, true);
 
-    return std::make_shared<PrimaryDeBruijnGraph>(
+    return std::make_shared<CanonicalDBG>(
         build_graph_batch<Graph>(graph->get_k(), contigs, 0)
     );
 }

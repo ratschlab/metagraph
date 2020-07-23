@@ -4,7 +4,7 @@
 #include "all/test_dbg_helpers.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "graph/representation/primary_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace {
@@ -18,12 +18,12 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 inline DeBruijnGraph::node_index get_rev_comp(const DeBruijnGraph &graph,
                                               DeBruijnGraph::node_index node) {
-    return dynamic_cast<const PrimaryDeBruijnGraph&>(graph).reverse_complement(node);
+    return dynamic_cast<const CanonicalDBG&>(graph).reverse_complement(node);
 }
 
 
 template <typename Graph>
-class DeBruijnGraphPrimaryTest : public DeBruijnGraphTest<Graph> { };
+class CanonicalDBGTest : public DeBruijnGraphTest<Graph> { };
 
 // TODO: add support for canonical mode in DBGHashString
 typedef ::testing::Types<DBGBitmap,
@@ -32,21 +32,21 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
                          DBGSuccinctBloom<4, 1>> CanonicalGraphTypes;
 
-TYPED_TEST_SUITE(DeBruijnGraphPrimaryTest, CanonicalGraphTypes);
+TYPED_TEST_SUITE(CanonicalDBGTest, CanonicalGraphTypes);
 
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CheckGraph) {
+TYPED_TEST(CanonicalDBGTest, CheckGraph) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", 2, false));
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", 2, true));
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CheckGraphInputWithN) {
+TYPED_TEST(CanonicalDBGTest, CheckGraphInputWithN) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", 2, false));
     EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
               check_graph<TypeParam>("ACGTN", 2, true));
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, InitializeEmpty) {
+TYPED_TEST(CanonicalDBGTest, InitializeEmpty) {
     auto graph = build_graph<TypeParam>(3, {}, 2);
 
     EXPECT_EQ(0u, graph->num_nodes());
@@ -56,7 +56,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, InitializeEmpty) {
     EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, InsertSequence) {
+TYPED_TEST(CanonicalDBGTest, InsertSequence) {
     auto graph = build_graph<TypeParam>(21, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "CATGTACTAGCTGATCGTAGCTAGCTAGC"
@@ -70,7 +70,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, InsertSequence) {
     EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, ReverseComplement) {
+TYPED_TEST(CanonicalDBGTest, ReverseComplement) {
     auto graph1 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, true);
     auto graph2 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, 2);
 
@@ -86,7 +86,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, ReverseComplement) {
     EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, Traversals1) {
+TYPED_TEST(CanonicalDBGTest, Traversals1) {
     for (size_t k = 3; k < 10; k += 2) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C')
@@ -138,7 +138,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, Traversals1) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, Traversals2) {
+TYPED_TEST(CanonicalDBGTest, Traversals2) {
     for (size_t k = 3; k < 11; k += 2) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
@@ -170,7 +170,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, Traversals2) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsEmptyGraphCanonical) {
+TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 10; k += 2) {
             auto empty = build_graph<TypeParam>(k, {}, 2);
@@ -189,7 +189,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsEmptyGraphCanonical) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsEmptyGraph) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 10; k += 2) {
             auto empty = build_graph<TypeParam>(k, {}, 2);
@@ -208,7 +208,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsEmptyGraph) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsOneSelfLoop) {
+TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 20; k += 2) {
             std::vector<std::string> sequences { std::string(100, 'A') };
@@ -235,7 +235,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsOneSelfLoop) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsOneSelfLoop) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 20; k += 2) {
             std::vector<std::string> sequences { std::string(100, 'A') };
@@ -262,7 +262,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsOneSelfLoop) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsThreeSelfLoops) {
+TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 20; k += 2) {
             std::vector<std::string> sequences { std::string(100, 'A'),
@@ -291,7 +291,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsThreeSelfLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsExtractsLongestOneLoop) {
+TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 7; k < 14; k += 2) {
             std::vector<std::string> sequences { "ATGCCGTACTCAG",
@@ -314,7 +314,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsExtractsLongestOneLoop) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallContigsUniqueKmers) {
+TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmers) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::string sequence = "GCAAATAAC";
         auto graph = build_graph<TypeParam>(3, { sequence }, 2);
@@ -329,7 +329,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallContigsUniqueKmers) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsUniqueKmersCycle) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsUniqueKmersCycle) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
@@ -348,7 +348,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsUniqueKmersCycle) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallContigsUniqueKmersCycle) {
+TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmersCycle) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
@@ -367,7 +367,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallContigsUniqueKmersCycle) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsFourLoops) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 20; k += 2) {
             std::vector<std::string> sequences { std::string(100, 'A'),
@@ -396,7 +396,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsFourLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPaths) {
+TYPED_TEST(CanonicalDBGTest, CallPaths) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 10; k += 2) {
             for (const std::vector<std::string> &sequences
@@ -441,7 +441,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPaths) {
 
 // TODO: A different combination of forward and reverse complement k-mers may be
 //       generated in the reconstruction.
-// TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsSingleKmerForm) {
+// TYPED_TEST(CanonicalDBGTest, CallPathsSingleKmerForm) {
 //     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
 //         for (size_t k = 3; k <= 10; k += 2) {
 //             for (const std::vector<std::string> &sequences
@@ -477,7 +477,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPaths) {
 //     }
 // }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsCheckHalfSingleKmerForm) {
+TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 15; k += 2) {
             for (const std::vector<std::string> &sequences
@@ -508,7 +508,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallPathsCheckHalfSingleKmerForm) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigs) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 10; k += 2) {
             for (const std::vector<std::string> &sequences
@@ -553,7 +553,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigs) {
 
 // TODO: A different combination of forward and reverse complement k-mers may be
 //       generated in the reconstruction.
-// TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsSingleKmerForm) {
+// TYPED_TEST(CanonicalDBGTest, CallUnitigsSingleKmerForm) {
 //     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
 //         for (size_t k = 3; k <= 10; k += 2) {
 //             for (const std::vector<std::string> &sequences
@@ -596,7 +596,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigs) {
 //     }
 // }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsCheckHalfSingleKmerForm) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 3; k <= 15; k += 2) {
             for (const std::vector<std::string> &sequences
@@ -627,7 +627,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsCheckHalfSingleKmerForm) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsWithoutTips) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 3;
         std::mutex seq_mutex;
@@ -889,7 +889,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsWithoutTips) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsWithoutTips2) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips2) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         auto graph = build_graph<TypeParam>(k, { "ACTATAGCTAGTCTATGCGA",
@@ -951,7 +951,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsWithoutTips2) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallKmersEmptyGraph) {
+TYPED_TEST(CanonicalDBGTest, CallKmersEmptyGraph) {
     for (size_t k = 3; k <= 30; k += 2) {
         auto empty = build_graph<TypeParam>(k, {}, 2);
         size_t num_kmers = 0;
@@ -964,7 +964,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallKmersEmptyGraph) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallKmersTwoLoops) {
+TYPED_TEST(CanonicalDBGTest, CallKmersTwoLoops) {
     for (size_t k = 3; k <= 20; k += 2) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') }, 2);
 
@@ -980,7 +980,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallKmersTwoLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsCheckDegree) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckDegree) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::vector<std::string> sequences {
             "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
@@ -1040,7 +1040,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsCheckDegree) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsIndegreeFirstNodeIsZero) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsIndegreeFirstNodeIsZero) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::vector<std::string> sequences {
             "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -1071,7 +1071,7 @@ TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsIndegreeFirstNodeIsZero) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphPrimaryTest, CallUnitigsCross) {
+TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         // AATTT - ATTTT           TTTAA - TTAAA
         //               > TTTTA <

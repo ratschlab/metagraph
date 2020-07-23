@@ -4,7 +4,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/primary_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -249,7 +249,7 @@ int align_to_graph(Config *config) {
             exit(1);
         }
 
-        graph.reset(new PrimaryDeBruijnGraph(graph));
+        graph.reset(new CanonicalDBG(graph));
     }
 
     Timer timer;

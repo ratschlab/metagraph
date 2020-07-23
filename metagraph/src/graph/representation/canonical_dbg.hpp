@@ -1,5 +1,5 @@
-#ifndef __PRIMARY_GRAPH_HPP__
-#define __PRIMARY_GRAPH_HPP__
+#ifndef __CANONICAL_DBG_HPP__
+#define __CANONICAL_DBG_HPP__
 
 #include <mutex>
 #include <cassert>
@@ -13,12 +13,12 @@
 namespace mtg {
 namespace graph {
 
-class PrimaryDeBruijnGraph : public DeBruijnGraph {
+class CanonicalDBG : public DeBruijnGraph {
   public:
-    PrimaryDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, size_t num_seqs_cached = 10'000);
-    PrimaryDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph, size_t num_seqs_cached = 10'000);
+    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size_ = 100'000);
+    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size_ = 100'000);
 
-    virtual ~PrimaryDeBruijnGraph() {}
+    virtual ~CanonicalDBG() {}
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion = [](node_index) {}) override;
@@ -59,7 +59,7 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override;
 
-    virtual uint64_t num_nodes() const override { return graph_.num_nodes() * 2; }
+    virtual uint64_t num_nodes() const override;
     virtual uint64_t max_index() const override { return graph_.max_index() * 2; }
 
     virtual bool load(const std::string &) override {
@@ -95,7 +95,7 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
 
     virtual const DeBruijnGraph& get_graph() const { return graph_; }
 
-    virtual bool operator==(const PrimaryDeBruijnGraph &other) const {
+    virtual bool operator==(const CanonicalDBG &other) const {
         return graph_ == other.graph_;
     }
 
@@ -126,6 +126,8 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
 
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
+    std::array<size_t, 256> alph_map_;
+
     inline node_index set_offset(node_index node) const {
         assert(node <= offset_);
         assert(node);
@@ -140,12 +142,14 @@ class PrimaryDeBruijnGraph : public DeBruijnGraph {
         return node - offset_;
     }
 
-    mutable caches::fixed_sized_cache<node_index, std::string,
-                                      caches::LRUCachePolicy<node_index>> seq_cache_;
+    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
+                                      caches::LRUCachePolicy<node_index>> child_node_cache_;
+    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
+                                      caches::LRUCachePolicy<node_index>> parent_node_cache_;
     mutable std::mutex cache_mutex_;
 };
 
 } // namespace graph
 } // namespace mtg
 
-#endif // __PRIMARY_GRAPH_HPP__
+#endif // __CANONICAL_DBG_HPP__
