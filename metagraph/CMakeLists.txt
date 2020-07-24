@@ -445,6 +445,8 @@ add_custom_target(link_target ALL
     "metagraph"
 )
 
+add_executable(diff "src/diff.cpp")
+target_link_libraries(diff metagraph-core metagraph-cli)
 
 #-------------------
 # Experiments
