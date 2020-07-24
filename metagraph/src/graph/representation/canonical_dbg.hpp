@@ -1,7 +1,6 @@
 #ifndef __CANONICAL_DBG_HPP__
 #define __CANONICAL_DBG_HPP__
 
-#include <mutex>
 #include <cassert>
 
 #include <cache.hpp>
@@ -101,22 +100,12 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
-    inline node_index reverse_complement(node_index node) const {
-        assert(node);
-        assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node + offset_;
-    }
+    node_index reverse_complement(node_index node) const;
 
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
         return node > offset_ ? node - offset_ : node;
-    }
-
-    inline bool is_rev_comp(node_index node) const {
-        assert(node);
-        assert(node <= offset_ * 2);
-        return node > offset_;
     }
 
   private:
@@ -128,25 +117,12 @@ class CanonicalDBG : public DeBruijnGraph {
 
     std::array<size_t, 256> alph_map_;
 
-    inline node_index set_offset(node_index node) const {
-        assert(node <= offset_);
-        assert(node);
-        assert(is_rev_comp(node + offset_));
-        return node + offset_;
-    }
-
-    inline node_index unset_offset(node_index node) const {
-        assert(node > offset_);
-        assert(node <= offset_ * 2);
-        assert(!is_rev_comp(node - offset_));
-        return node - offset_;
-    }
-
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> child_node_cache_;
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> parent_node_cache_;
-    mutable std::mutex cache_mutex_;
+    mutable caches::fixed_sized_cache<node_index, bool,
+                                      caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 };
 
 } // namespace graph

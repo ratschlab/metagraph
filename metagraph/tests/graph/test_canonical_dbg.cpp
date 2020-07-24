@@ -87,7 +87,7 @@ TYPED_TEST(CanonicalDBGTest, ReverseComplement) {
 }
 
 TYPED_TEST(CanonicalDBGTest, Traversals1) {
-    for (size_t k = 3; k < 10; k += 2) {
+    for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C')
         }, 2);
@@ -139,7 +139,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals1) {
 }
 
 TYPED_TEST(CanonicalDBGTest, Traversals2) {
-    for (size_t k = 3; k < 11; k += 2) {
+    for (size_t k = 2; k < 11; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
             std::string(100, 'G') + std::string(100, 'T')
@@ -172,7 +172,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
 
 TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 10; k += 2) {
+        for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k, {}, 2);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
@@ -191,7 +191,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 10; k += 2) {
+        for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k, {}, 2);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
@@ -210,7 +210,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
 
 TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 20; k += 2) {
+        for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, 2);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
@@ -237,7 +237,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 20; k += 2) {
+        for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, 2);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
@@ -264,7 +264,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
 
 TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 20; k += 2) {
+        for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -293,7 +293,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
 
 TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 7; k < 14; k += 2) {
+        for (size_t k = 7; k < 14; ++k) {
             std::vector<std::string> sequences { "ATGCCGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
             auto graph = build_graph<TypeParam>(k, sequences, 2);
@@ -369,7 +369,7 @@ TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmersCycle) {
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 20; k += 2) {
+        for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -398,7 +398,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
 
 TYPED_TEST(CanonicalDBGTest, CallPaths) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 10; k += 2) {
+        for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -443,7 +443,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
 //       generated in the reconstruction.
 // TYPED_TEST(CanonicalDBGTest, CallPathsSingleKmerForm) {
 //     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-//         for (size_t k = 3; k <= 10; k += 2) {
+//         for (size_t k = 2; k <= 10; ++k) {
 //             for (const std::vector<std::string> &sequences
 //                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
 //                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -479,7 +479,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
 
 TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 15; k += 2) {
+        for (size_t k = 2; k <= 15; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -502,7 +502,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
                     num_kmers += path.size();
                 }, num_threads, true);
 
-                EXPECT_EQ(num_kmers_both, num_kmers * 2);
+                EXPECT_LE(num_kmers_both, num_kmers * 2);
             }
         }
     }
@@ -510,7 +510,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 10; k += 2) {
+        for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -555,7 +555,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
 //       generated in the reconstruction.
 // TYPED_TEST(CanonicalDBGTest, CallUnitigsSingleKmerForm) {
 //     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-//         for (size_t k = 3; k <= 10; k += 2) {
+//         for (size_t k = 2; k <= 10; ++k) {
 //             for (const std::vector<std::string> &sequences
 //                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
 //                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -598,7 +598,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        for (size_t k = 3; k <= 15; k += 2) {
+        for (size_t k = 2; k <= 15; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
@@ -621,7 +621,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
                     num_kmers += path.size();
                 }, num_threads, 1, true);
 
-                EXPECT_EQ(num_kmers_both, num_kmers * 2);
+                EXPECT_LE(num_kmers_both, num_kmers * 2);
             }
         }
     }
@@ -952,7 +952,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips2) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallKmersEmptyGraph) {
-    for (size_t k = 3; k <= 30; k += 2) {
+    for (size_t k = 2; k <= 30; ++k) {
         auto empty = build_graph<TypeParam>(k, {}, 2);
         size_t num_kmers = 0;
         empty->call_kmers([&](auto, const auto &sequence) {
@@ -965,7 +965,7 @@ TYPED_TEST(CanonicalDBGTest, CallKmersEmptyGraph) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallKmersTwoLoops) {
-    for (size_t k = 3; k <= 20; k += 2) {
+    for (size_t k = 2; k <= 20; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') }, 2);
 
         ASSERT_EQ(2u, graph->num_nodes());

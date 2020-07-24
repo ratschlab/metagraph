@@ -14,7 +14,8 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
         offset_(graph_.max_index()),
         alph_map_({ graph_.alphabet().size() }),
         child_node_cache_(cache_size),
-        parent_node_cache_(cache_size) {
+        parent_node_cache_(cache_size),
+        is_palindrome_cache_(graph_.get_k() & 1 ? 0 : cache_size) {
     if (graph_.is_canonical_mode())
         throw std::runtime_error("CanonicalDBG should not be used as a wrapper for a canonical graph");
 
@@ -42,6 +43,7 @@ void CanonicalDBG
     offset_ = graph_.max_index();
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
+    is_palindrome_cache_.Clear();
 }
 
 
@@ -49,29 +51,40 @@ void CanonicalDBG
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
+    std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
+
+    if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) == path.end()) {
+        // all nodes found
+        for (node_index i : path) {
+            if (!terminate())
+                callback(i);
+        }
+
+        return;
+    }
+
     std::string rev_seq(sequence);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
     std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
 
     auto it = rev_path.rbegin();
-    graph_.map_to_nodes_sequentially(sequence, [&](node_index i) {
+    for (node_index i : path) {
         assert(it != rev_path.rend());
 
-        // if k is even, then some k-mers may be palindromes
-        assert(!(get_k() & 1) || i == DeBruijnGraph::npos || *it == DeBruijnGraph::npos);
+        if (terminate())
+            break;
 
         if (i != DeBruijnGraph::npos) {
             assert(i <= offset_ * 2);
             callback(i);
         } else if (*it != DeBruijnGraph::npos) {
-            assert(set_offset(*it) <= offset_ * 2);
-            callback(set_offset(*it));
+            callback(*it + offset_);
         } else {
             callback(DeBruijnGraph::npos);
         }
         ++it;
-    }, terminate);
+    }
 }
 
 void CanonicalDBG::map_to_nodes(std::string_view sequence,
@@ -86,8 +99,8 @@ void CanonicalDBG
 ::call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
-    if (is_rev_comp(node)) {
-        call_incoming_kmers(unset_offset(node), [&](node_index next, char c) {
+    if (node > offset_) {
+        call_incoming_kmers(node - offset_, [&](node_index next, char c) {
             ::reverse_complement(&c, &c + 1);
             callback(reverse_complement(next), c);
         });
@@ -126,7 +139,7 @@ void CanonicalDBG
                 rev_seq[0] = c;
                 next = map_sequence_to_nodes(graph_, rev_seq)[0];
                 if (next != DeBruijnGraph::npos)
-                    children[alph_map_[d]] = set_offset(next);
+                    children[alph_map_[d]] = reverse_complement(next);
             }
         }
 
@@ -142,8 +155,8 @@ void CanonicalDBG
 ::call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
-    if (is_rev_comp(node)) {
-        call_outgoing_kmers(unset_offset(node), [&](node_index prev, char c) {
+    if (node > offset_) {
+        call_outgoing_kmers(node - offset_, [&](node_index prev, char c) {
             ::reverse_complement(&c, &c + 1);
             callback(reverse_complement(prev), c);
         });
@@ -182,7 +195,7 @@ void CanonicalDBG
                 rev_seq.back() = c;
                 prev = map_sequence_to_nodes(graph_, rev_seq)[0];
                 if (prev != DeBruijnGraph::npos)
-                    parents[alph_map_[d]] = set_offset(prev);
+                    parents[alph_map_[d]] = reverse_complement(prev);
             }
         }
 
@@ -254,9 +267,9 @@ std::string CanonicalDBG::get_node_sequence(node_index index) const {
 
 DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char) const {
     assert(node <= offset_ * 2);
-    if (is_rev_comp(node)) {
+    if (node > offset_) {
         ::reverse_complement(&next_char, &next_char + 1);
-        node = traverse_back(unset_offset(node), next_char);
+        node = traverse_back(node - offset_, next_char);
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
@@ -273,9 +286,9 @@ DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char
 DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
                                                       char prev_char) const {
     assert(node <= offset_ * 2);
-    if (is_rev_comp(node)) {
+    if (node > offset_) {
         ::reverse_complement(&prev_char, &prev_char + 1);
-        node = traverse(unset_offset(node), prev_char);
+        node = traverse(node - offset_, prev_char);
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
@@ -294,8 +307,11 @@ void CanonicalDBG::call_nodes(const std::function<void(node_index)> &callback,
                               const std::function<bool()> &stop_early) const {
     graph_.call_nodes([&](node_index i) {
                           callback(i);
-                          if (!stop_early())
-                              callback(set_offset(i));
+                          if (!stop_early()) {
+                              node_index j = reverse_complement(i);
+                              if (j != i)
+                                  callback(j);
+                          }
                       }, stop_early);
 }
 
@@ -305,6 +321,34 @@ bool CanonicalDBG::operator==(const DeBruijnGraph &other) const {
     }
 
     return DeBruijnGraph::operator==(other);
+}
+
+DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) const {
+    assert(node);
+    assert(node <= offset_ * 2);
+
+    if (graph_.get_k() & 1) {
+        // palindromes are not possible for odd k, so just add or subtract the offset
+        return node > offset_ ? node - offset_ : node + offset_;
+
+    } else if (node > offset_) {
+        // assume that if the index is greater than offset_, then it's not a palindrome
+        is_palindrome_cache_.Put(node - offset_, false);
+        return node - offset_;
+
+    } else {
+        bool is_palindrome;
+        try {
+            is_palindrome = is_palindrome_cache_.Get(node);
+        } catch (...) {
+            std::string seq = graph_.get_node_sequence(node);
+            std::string rev_seq = seq;
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            is_palindrome = (seq == rev_seq);
+            is_palindrome_cache_.Put(node, is_palindrome);
+        }
+        return is_palindrome ? node : node + offset_;
+    }
 }
 
 } // namespace graph
