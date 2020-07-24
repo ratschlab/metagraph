@@ -61,8 +61,9 @@ void CanonicalDBG
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
+    auto first_not_found = std::find(path.begin(), path.end(), DeBruijnGraph::npos);
 
-    if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) == path.end()) {
+    if (first_not_found == path.end()) {
         // all nodes found
         for (node_index i : path) {
             if (!terminate())
@@ -86,8 +87,16 @@ void CanonicalDBG
 
         if (i != DeBruijnGraph::npos) {
             assert(i <= offset_ * 2);
+
+            if (!primary_)
+                rev_comp_cache_.Put(i, *it != DeBruijnGraph::npos ? *it : i + offset_);
+
             callback(i);
+
         } else if (*it != DeBruijnGraph::npos) {
+            if (!primary_)
+                rev_comp_cache_.Put(*it, *it + offset_);
+
             callback(*it + offset_);
         } else {
             callback(DeBruijnGraph::npos);
@@ -148,8 +157,12 @@ void CanonicalDBG
 
                 rev_seq[0] = c;
                 next = map_sequence_to_nodes(graph_, rev_seq)[0];
-                if (next != DeBruijnGraph::npos)
-                    children[i] = reverse_complement(next);
+                if (next != DeBruijnGraph::npos) {
+                    if (!primary_)
+                        rev_comp_cache_.Put(next, next + offset_);
+
+                    children[i] = next + offset_;
+                }
             }
         }
 
@@ -205,8 +218,12 @@ void CanonicalDBG
 
                 rev_seq.back() = c;
                 prev = map_sequence_to_nodes(graph_, rev_seq)[0];
-                if (prev != DeBruijnGraph::npos)
-                    parents[i] = reverse_complement(prev);
+                if (prev != DeBruijnGraph::npos) {
+                    if (!primary_)
+                        rev_comp_cache_.Put(prev, prev + offset_);
+
+                    parents[i] = prev + offset_;
+                }
             }
         }
 
@@ -356,8 +373,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     }
 
-    // at this point, either k is even, or the underlying graph is not primary
-    if ((graph_.get_k() & 1) || !primary_) {
+    if (!primary_) {
         try {
             return rev_comp_cache_.Get(node);
 
@@ -366,8 +382,9 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
             node_index rev_node = map_sequence_to_nodes(graph_, rev_seq)[0];
-
-            return rev_node != DeBruijnGraph::npos ? rev_node : node + offset_;
+            rev_node = rev_node != DeBruijnGraph::npos ? rev_node : node + offset_;
+            rev_comp_cache_.Put(node, rev_node);
+            return rev_node;
         }
     }
 

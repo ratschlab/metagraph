@@ -241,15 +241,16 @@ int align_to_graph(Config *config) {
         dbg->reset_mask();
 
     if (config->canonical) {
-        if (dbg && (config->alignment_length != graph->get_k()
-                    || config->alignment_min_seed_length != graph->get_k()
-                    || config->alignment_max_seed_length != graph->get_k())) {
-            logger->error("Matching k-mers shorter than k not supported with "
-                          "--canonical flag");
-            exit(1);
-        }
+        // if (dbg && (config->alignment_length != graph->get_k()
+        //             || config->alignment_min_seed_length != graph->get_k()
+        //             || config->alignment_max_seed_length != graph->get_k())) {
+        //     logger->error("Matching k-mers shorter than k not supported with "
+        //                   "--canonical flag");
+        //     exit(1);
+        // }
+        logger->trace("Loading as canonical DBG");
 
-        graph.reset(new CanonicalDBG(graph));
+        graph.reset(new CanonicalDBG(graph, true));
     }
 
     Timer timer;
