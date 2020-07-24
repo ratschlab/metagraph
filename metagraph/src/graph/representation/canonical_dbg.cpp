@@ -9,13 +9,20 @@ namespace graph {
 
 using mtg::common::logger;
 
-CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
+// If the graph has even order and is primary, then only is_palindrome_cache_
+// is required. rev_comp_cache_ is only required if the underlying graph is not
+// primary.
+CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
+                           bool primary,
+                           size_t cache_size)
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         alph_map_({ graph_.alphabet().size() }),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
-        is_palindrome_cache_(graph_.get_k() & 1 ? 0 : cache_size) {
+        rev_comp_cache_(primary ? 0 : cache_size),
+        is_palindrome_cache_(graph_.get_k() % 2 || !primary_ ? 0 : cache_size),
+        primary_(primary) {
     if (graph_.is_canonical_mode())
         throw std::runtime_error("CanonicalDBG should not be used as a wrapper for a canonical graph");
 
@@ -24,9 +31,11 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
     }
 }
 
-CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
+CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph,
+                           bool primary,
+                           size_t cache_size)
       : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph),
-                             cache_size) { graph_ptr_ = graph; }
+                     primary, cache_size) { graph_ptr_ = graph; }
 
 uint64_t CanonicalDBG::num_nodes() const {
     logger->trace("Number of nodes may be overestimated if k is even or reverse complements are present in the graph");
@@ -43,7 +52,7 @@ void CanonicalDBG
     offset_ = graph_.max_index();
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
-    is_palindrome_cache_.Clear();
+    rev_comp_cache_.Clear();
 }
 
 
@@ -130,16 +139,17 @@ void CanonicalDBG
             std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
             assert(rev_seq[0] == '\0');
-            for (char c : graph_.alphabet()) {
-                char d = c;
-                ::reverse_complement(&d, &d + 1);
-                if (children[alph_map_[d]] != DeBruijnGraph::npos)
+            for (size_t i = 0; i < alphabet.size(); ++i) {
+                if (children[i] != DeBruijnGraph::npos)
                     continue;
+
+                char c = alphabet[i];
+                ::reverse_complement(&c, &c + 1);
 
                 rev_seq[0] = c;
                 next = map_sequence_to_nodes(graph_, rev_seq)[0];
                 if (next != DeBruijnGraph::npos)
-                    children[alph_map_[d]] = reverse_complement(next);
+                    children[i] = reverse_complement(next);
             }
         }
 
@@ -186,16 +196,17 @@ void CanonicalDBG
             std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
             assert(rev_seq.back() == '\0');
-            for (char c : graph_.alphabet()) {
-                char d = c;
-                ::reverse_complement(&d, &d + 1);
-                if (parents[alph_map_[d]] != DeBruijnGraph::npos)
+            for (size_t i = 0; i < alphabet.size(); ++i) {
+                if (parents[i] != DeBruijnGraph::npos)
                     continue;
+
+                char c = alphabet[i];
+                ::reverse_complement(&c, &c + 1);
 
                 rev_seq.back() = c;
                 prev = map_sequence_to_nodes(graph_, rev_seq)[0];
                 if (prev != DeBruijnGraph::npos)
-                    parents[alph_map_[d]] = reverse_complement(prev);
+                    parents[i] = reverse_complement(prev);
             }
         }
 
@@ -327,28 +338,56 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     assert(node);
     assert(node <= offset_ * 2);
 
-    if (graph_.get_k() & 1) {
-        // palindromes are not possible for odd k, so just add or subtract the offset
-        return node > offset_ ? node - offset_ : node + offset_;
+    if (node > offset_) {
+        // we know that this node is definitely not present in the base graph
 
-    } else if (node > offset_) {
-        // assume that if the index is greater than offset_, then it's not a palindrome
-        is_palindrome_cache_.Put(node - offset_, false);
+        if (!primary_) {
+            rev_comp_cache_.Put(node - offset_, node);
+        } else if (!(graph_.get_k() & 1)) {
+            is_palindrome_cache_.Put(node - offset_, false);
+        }
+
         return node - offset_;
 
-    } else {
-        bool is_palindrome;
-        try {
-            is_palindrome = is_palindrome_cache_.Get(node);
-        } catch (...) {
-            std::string seq = graph_.get_node_sequence(node);
-            std::string rev_seq = seq;
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            is_palindrome = (seq == rev_seq);
-            is_palindrome_cache_.Put(node, is_palindrome);
-        }
-        return is_palindrome ? node : node + offset_;
+    } else if ((graph_.get_k() & 1) && primary_) {
+        // if k is odd and the underlying graph is primary, then we know that
+        // the reverse complement doesn't exist, so we apply the offset
+        return node + offset_;
+
     }
+
+    // at this point, either k is even, or the underlying graph is not primary
+    if ((graph_.get_k() & 1) || !primary_) {
+        try {
+            return rev_comp_cache_.Get(node);
+
+        } catch (...) {
+            std::string rev_seq = graph_.get_node_sequence(node);
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+
+            node_index rev_node = map_sequence_to_nodes(graph_, rev_seq)[0];
+
+            return rev_node != DeBruijnGraph::npos ? rev_node : node + offset_;
+        }
+    }
+
+    try {
+        return is_palindrome_cache_.Get(node) ? node : node + offset_;
+
+    } catch (...) {
+        std::string seq = graph_.get_node_sequence(node);
+        std::string rev_seq = seq;
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        bool palindrome = (rev_seq == seq);
+
+        assert(palindrome || map_sequence_to_nodes(graph_, rev_seq)[0] == DeBruijnGraph::npos);
+
+        is_palindrome_cache_.Put(node, palindrome);
+        return palindrome ? node : node + offset_;
+    }
+
+    assert(false && "All cases should have been captured until now.");
+    return DeBruijnGraph::npos;
 }
 
 } // namespace graph

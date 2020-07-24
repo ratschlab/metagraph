@@ -502,7 +502,11 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
                     num_kmers += path.size();
                 }, num_threads, true);
 
-                EXPECT_LE(num_kmers_both, num_kmers * 2);
+                if (k % 2) {
+                    EXPECT_EQ(num_kmers_both, num_kmers * 2);
+                } else {
+                    EXPECT_LE(num_kmers_both, num_kmers * 2);
+                }
             }
         }
     }
@@ -538,6 +542,51 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
                     [&](const auto &callback) {
                         graph->call_unitigs([&](const auto &sequence, const auto &path) {
                             ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                            std::unique_lock<std::mutex> lock(seq_mutex);
+                            callback(sequence);
+                        }, num_threads);
+                    },
+                    false
+                );
+
+                EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
+            }
+        }
+    }
+}
+
+TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        for (size_t k = 2; k <= 10; ++k) {
+            for (const std::vector<std::string> &sequences
+                    : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
+                        std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
+                        std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
+                        std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
+                        std::vector<std::string>({ "AAACT", "AAATG" }),
+                        std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
+
+                auto graph = CanonicalDBG(build_graph_batch<TypeParam>(k, sequences),
+                                          false, /* primary */
+                                          2 /* cache_size */);
+
+                // in stable graphs the order of input sequences
+                // does not change the order of k-mers and their indexes
+                auto stable_graph = build_graph_iterative<DBGSuccinct>(k, [&](const auto callback) {
+                    for (const auto &seq : sequences) {
+                        callback(seq);
+                        std::string rev_seq(seq);
+                        reverse_complement(rev_seq.begin(), rev_seq.end());
+                        callback(rev_seq);
+                    }
+                }, false);
+
+                std::mutex seq_mutex;
+                auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
+                    k,
+                    [&](const auto &callback) {
+                        graph.call_unitigs([&](const auto &sequence, const auto &path) {
+                            ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
@@ -621,7 +670,11 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
                     num_kmers += path.size();
                 }, num_threads, 1, true);
 
-                EXPECT_LE(num_kmers_both, num_kmers * 2);
+                if (k % 2) {
+                    EXPECT_EQ(num_kmers_both, num_kmers * 2);
+                } else {
+                    EXPECT_LE(num_kmers_both, num_kmers * 2);
+                }
             }
         }
     }

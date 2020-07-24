@@ -21,7 +21,9 @@ std::shared_ptr<DeBruijnGraph> make_graph_primary(std::shared_ptr<DeBruijnGraph>
     }, 1, true);
 
     return std::make_shared<CanonicalDBG>(
-        build_graph_batch<Graph>(graph->get_k(), contigs, 0)
+        build_graph_batch<Graph>(graph->get_k(), contigs, 0),
+        true,
+        2 // make the cache tiny to test out thread safety for all graphs
     );
 }
 
