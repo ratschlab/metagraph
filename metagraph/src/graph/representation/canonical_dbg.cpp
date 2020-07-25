@@ -63,35 +63,33 @@ void CanonicalDBG
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
     auto first_not_found = std::find(path.begin(), path.end(), DeBruijnGraph::npos);
 
-    if (first_not_found == path.end()) {
-        // all nodes found
-        for (node_index i : path) {
-            if (!terminate())
-                callback(i);
-        }
+    for (auto jt = path.begin(); jt != first_not_found; ++jt) {
+        if (terminate())
+            return;
 
-        return;
+        callback(*jt);
     }
 
-    std::string rev_seq(sequence);
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    if (first_not_found == path.end())
+        return;
 
+    std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
+                        sequence.end());
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
     std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
 
     auto it = rev_path.rbegin();
-    for (node_index i : path) {
+    for (auto jt = first_not_found; jt != path.end(); ++jt) {
         assert(it != rev_path.rend());
 
         if (terminate())
-            break;
+            return;
 
-        if (i != DeBruijnGraph::npos) {
-            assert(i <= offset_ * 2);
-
+        if (*jt != DeBruijnGraph::npos) {
             if (!primary_)
-                rev_comp_cache_.Put(i, *it != DeBruijnGraph::npos ? *it : i + offset_);
+                rev_comp_cache_.Put(*jt, *it != DeBruijnGraph::npos ? *it : *jt + offset_);
 
-            callback(i);
+            callback(*jt);
 
         } else if (*it != DeBruijnGraph::npos) {
             if (!primary_)
@@ -405,6 +403,22 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     assert(false && "All cases should have been captured until now.");
     return DeBruijnGraph::npos;
+}
+
+void CanonicalDBG::reverse_complement(std::string &seq,
+                                      std::vector<node_index> &path) const {
+    ::reverse_complement(seq.begin(), seq.end());
+
+    if (primary_) {
+        std::vector<node_index> rev_path(path.size());
+        std::transform(path.begin(), path.end(), rev_path.rbegin(), [&](node_index i) {
+            return reverse_complement(i);
+        });
+        std::swap(path, rev_path);
+
+    } else {
+        path = map_sequence_to_nodes(*this, seq);
+    }
 }
 
 } // namespace graph

@@ -124,6 +124,7 @@ class CanonicalDBG : public DeBruijnGraph {
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
     node_index reverse_complement(node_index node) const;
+    void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
     inline node_index get_base_node(node_index node) const {
         assert(node);
