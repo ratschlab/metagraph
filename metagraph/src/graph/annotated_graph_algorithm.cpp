@@ -12,10 +12,13 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 
-using mtg::common::logger;
 
 namespace mtg {
 namespace graph {
+
+using mtg::graph::boss::BOSS;
+using mtg::graph::boss::BOSSConstructor;
+using mtg::common::logger;
 
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;

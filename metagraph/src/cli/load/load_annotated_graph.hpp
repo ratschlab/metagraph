@@ -22,8 +22,8 @@ std::unique_ptr<graph::MaskedDeBruijnGraph>
 mask_graph(const graph::AnnotatedDBG &anno_graph, Config *config);
 
 void
-call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
-                   const std::function<void(const MaskedDeBruijnGraph&,
+call_masked_graphs(const graph::AnnotatedDBG &anno_graph, Config *config,
+                   const std::function<void(const graph::MaskedDeBruijnGraph&,
                                             const std::string& /* header */)> &callback,
                    size_t num_threads = 1);
 

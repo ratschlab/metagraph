@@ -59,7 +59,7 @@ int assemble(Config *config) {
             }
             call_masked_graphs(
                 *anno_graph, config,
-                [&](const MaskedDeBruijnGraph &graph, const std::string &header) {
+                [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
                     write_sequences(*config, header, [&](const auto &callback) {
                         if (config->unitigs || config->min_tip_size > 1) {
                             graph.call_unitigs(callback,
