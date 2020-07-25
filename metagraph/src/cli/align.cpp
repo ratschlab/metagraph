@@ -241,15 +241,7 @@ int align_to_graph(Config *config) {
         dbg->reset_mask();
 
     if (config->canonical) {
-        // if (dbg && (config->alignment_length != graph->get_k()
-        //             || config->alignment_min_seed_length != graph->get_k()
-        //             || config->alignment_max_seed_length != graph->get_k())) {
-        //     logger->error("Matching k-mers shorter than k not supported with "
-        //                   "--canonical flag");
-        //     exit(1);
-        // }
         logger->trace("Loading as canonical DBG");
-
         graph.reset(new CanonicalDBG(graph, true));
     }
 
@@ -265,9 +257,10 @@ int align_to_graph(Config *config) {
             config->alignment_length = graph->get_k();
         }
 
-        if (!dbg && config->alignment_length != graph->get_k()) {
+        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
+                && config->alignment_length != graph->get_k()) {
             logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct");
+                          "supported for DBGSuccinct without --canonical flag");
             exit(1);
         }
 
@@ -293,6 +286,12 @@ int align_to_graph(Config *config) {
     }
 
     auto aligner = build_aligner(*graph, *config);
+
+    if (aligner->get_config().min_seed_length < graph->get_k()
+            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
+        logger->error("Seeds of length < k not supported with --canonical flag");
+        exit(1);
+    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
