@@ -24,6 +24,84 @@ typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
 
 
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+fill_count_vector(const AnnotatedDBG &anno_graph,
+                  const std::vector<Label> &labels_in,
+                  const std::vector<Label> &labels_out) {
+    // at this stage, the width of counts is twice what it should be, since
+    // the intention is to store the in label and out label counts interleaved
+    // in the beginning, it's the correct size, but double width
+    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+    size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
+    sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
+    sdsl::bit_vector indicator(counts.size());
+
+    size_t num_threads = get_num_threads();
+    bool async = num_threads > 1;
+    constexpr int memorder = __ATOMIC_RELAXED;
+
+    // TODO: replace locked increment operations on int_vector<> with actual
+    //       atomic operations when we figure out how to align int_vector<> storage
+    std::mutex count_mutex;
+
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
+    for (size_t i = 0; i < labels_in.size(); ++i) {
+        const std::string &label_in = labels_in[i];
+        anno_graph.call_annotated_nodes(label_in, [&](node_index i) {
+            set_bit(indicator.data(), i, async, memorder);
+            std::lock_guard<std::mutex> lock(count_mutex);
+            ++counts[i];
+        });
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    // correct the width of counts, making it single-width
+    counts.width(width);
+
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
+    for (size_t i = 0; i < labels_out.size(); ++i) {
+        const std::string &label_out = labels_out[i];
+        anno_graph.call_annotated_nodes(label_out, [&](node_index i) {
+            set_bit(indicator.data(), i, async, memorder);
+            std::lock_guard<std::mutex> lock(count_mutex);
+            ++counts[2 * i + 1];
+        });
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    // set the width to be double again
+    counts.width(width << 1);
+
+    if (graph->is_canonical_mode()) {
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        MaskedDeBruijnGraph masked_graph(
+            graph,
+            std::make_unique<bit_vector_stat>(std::move(indicator)),
+            true
+        );
+
+        masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
+            auto it = path.rbegin();
+            auto rev = unitig;
+            reverse_complement(rev.begin(), rev.end());
+            graph->map_to_nodes_sequentially(rev, [&](node_index i) {
+                assert(i != DeBruijnGraph::npos);
+                assert(it != path.rend());
+                set_bit(indicator.data(), i, async, memorder);
+                std::lock_guard<std::mutex> lock(count_mutex);
+                counts[i] += counts[*it];
+                ++it;
+            });
+        }, num_threads);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    }
+
+    return std::make_pair(std::move(counts), std::move(indicator));
+}
+
+
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
                      const KeepUnitigPath &keep_unitig) {
@@ -69,56 +147,9 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     const auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     logger->trace("Generating initial mask");
+
     // Construct initial masked graph from union of labels in labels_in
-    sdsl::bit_vector union_mask(graph_ptr->max_index() + 1, false);
-
-    bool parallel = get_num_threads() > 1;
-    int memorder = __ATOMIC_RELAXED;
-
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    #pragma omp parallel num_threads(get_num_threads())
-    #pragma omp single
-    {
-        #pragma omp taskloop default(shared)
-        for (size_t i = 0; i < labels_in.size(); ++i) {
-            const std::string &label = labels_in[i];
-            logger->trace("Adding label: {}", label);
-            anno_graph.call_annotated_nodes(label, [&](node_index node) {
-                set_bit(union_mask.data(), node, parallel, memorder);
-            });
-        }
-        //#pragma omp taskloop default(shared)
-        //for (size_t i = 0; i < labels_out.size(); ++i) {
-        //    const std::string &label = labels_out[i];
-        //    logger->trace("Adding label: {}", label);
-        //    anno_graph.call_annotated_nodes(label, [&](node_index node) {
-        //        set_bit(union_mask.data(), node, parallel, memorder);
-        //    });
-        //}
-    }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-    if (graph_ptr->is_canonical_mode()) {
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        MaskedDeBruijnGraph forward_masked(
-            graph_ptr,
-            std::make_unique<bit_vector_stat>(sdsl::bit_vector(union_mask)),
-            true // only_valid_nodes_in_mask
-        );
-
-        logger->trace("Starting with {} nodes", forward_masked.num_nodes());
-        logger->trace("Adding reverse complements");
-
-        forward_masked.call_unitigs([&](const std::string &unitig, const auto &) {
-            auto rev = unitig;
-            reverse_complement(rev.begin(), rev.end());
-            graph_ptr->map_to_nodes_sequentially(rev, [&](node_index node) {
-                assert(node);
-                set_bit(union_mask.data(), node, parallel, memorder);
-            });
-        }, get_num_threads());
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    }
+    auto [counts, union_mask] = fill_count_vector(anno_graph, labels_in, labels_out);
 
     auto masked_graph = std::make_unique<MaskedDeBruijnGraph>(
         graph_ptr,
@@ -230,96 +261,6 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     );
 }
 
-
-sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
-                                     const std::vector<Label> &labels_in,
-                                     const std::vector<Label> &labels_out) {
-    // at this stage, the width of counts is twice what it should be, since
-    // the intention is to store the in label and out label counts interleaved
-    // in the beginning, it's the correct size, but double width
-    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
-    size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
-    sdsl::bit_vector indicator(graph->is_canonical_mode() ? counts.size() : 0);
-
-    size_t num_threads = get_num_threads();
-    bool async = num_threads > 1;
-    constexpr int memorder = __ATOMIC_RELAXED;
-
-    // TODO: replace locked increment operations on int_vector<> with actual
-    //       atomic operations when we figure out how to align int_vector<> storage
-    std::mutex count_mutex;
-
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
-    for (size_t i = 0; i < labels_in.size(); ++i) {
-        const std::string &label_in = labels_in[i];
-        if (graph->is_canonical_mode()) {
-            anno_graph.call_annotated_nodes(label_in, [&](node_index i) {
-                set_bit(indicator.data(), i, async, memorder);
-                std::lock_guard<std::mutex> lock(count_mutex);
-                ++counts[i];
-            });
-        } else {
-            anno_graph.call_annotated_nodes(label_in, [&](node_index i) {
-                std::lock_guard<std::mutex> lock(count_mutex);
-                ++counts[i];
-            });
-        }
-    }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-    // correct the width of counts, making it single-width
-    counts.width(width);
-
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
-    for (size_t i = 0; i < labels_out.size(); ++i) {
-        const std::string &label_out = labels_out[i];
-        if (graph->is_canonical_mode()) {
-            anno_graph.call_annotated_nodes(label_out, [&](node_index i) {
-                set_bit(indicator.data(), i, async, memorder);
-                std::lock_guard<std::mutex> lock(count_mutex);
-                ++counts[2 * i + 1];
-            });
-        } else {
-            anno_graph.call_annotated_nodes(label_out, [&](node_index i) {
-                std::lock_guard<std::mutex> lock(count_mutex);
-                ++counts[2 * i + 1];
-            });
-        }
-    }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-    // set the width to be double again
-    counts.width(width << 1);
-
-    if (graph->is_canonical_mode()) {
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        MaskedDeBruijnGraph masked_graph(
-            graph,
-            std::make_unique<bit_vector_stat>(std::move(indicator)),
-            true
-        );
-
-        masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
-            auto it = path.rbegin();
-            auto rev = unitig;
-            reverse_complement(rev.begin(), rev.end());
-            graph->map_to_nodes_sequentially(rev, [&](node_index i) {
-                assert(i != DeBruijnGraph::npos);
-                assert(it != path.rend());
-                std::lock_guard<std::mutex> lock(count_mutex);
-                counts[i] += counts[*it];
-                ++it;
-            });
-        }, num_threads);
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    }
-
-    return counts;
-}
-
 std::function<uint64_t(SequenceGraph::node_index)>
 build_label_counter(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_to_check) {
@@ -364,8 +305,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
 
     if (columns) {
         size_t frequent_column_label_min_count
-            = anno_graph.get_graph().num_nodes()
-                * min_frequency_for_frequent_label;
+            = anno_graph.get_graph().num_nodes() * min_frequency_for_frequent_label;
 
         // Partition labels into frequent and infrequent sets
         std::vector<Label> labels_in_infrequent,
@@ -394,9 +334,9 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
         // If at least one infrequent label exists, construct a count vector to
         // reduce calls to the annotator
         if (labels_in_infrequent.size() || labels_out_infrequent.size()) {
-            sdsl::int_vector<> counts = fill_count_vector(anno_graph,
-                                                          labels_in_infrequent,
-                                                          labels_out_infrequent);
+            auto [counts, mask] = fill_count_vector(anno_graph,
+                                                    labels_in_infrequent,
+                                                    labels_out_infrequent);
 
             // the width of counts is double, since it's both in and out counts interleaved
             uint32_t width = counts.width() >> 1;
@@ -404,13 +344,11 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
 
             // Flatten count vector to bitmap if all labels were infrequent
             if (labels_in_frequent.empty() && labels_out_frequent.empty()) {
-                sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
-
+                mask[DeBruijnGraph::npos] = false;
                 call_nonzeros(counts, [&](node_index i, size_t count) {
-                    if (i != DeBruijnGraph::npos
-                            && is_node_in_mask(i, [&]() { return count & int_mask; },
-                                                  [&]() { return count >> width; }))
-                        mask[i] = true;
+                    if (!is_node_in_mask(i, [&]() { return count & int_mask; },
+                                            [&]() { return count >> width; }))
+                        mask[i] = false;
                 });
 
                 return std::make_unique<bitmap_vector>(std::move(mask));
@@ -433,21 +371,17 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     }
 
     if (min_frequency_for_frequent_label == 1.0) {
-        sdsl::int_vector<> counts = fill_count_vector(anno_graph,
-                                                      labels_in,
-                                                      labels_out);
+        auto [counts, mask] = fill_count_vector(anno_graph, labels_in, labels_out);
+        mask[DeBruijnGraph::npos] = false;
 
         // the width of counts is double, since it's both in and out counts interleaved
         uint32_t width = counts.width() >> 1;
         uint64_t int_mask = (uint64_t(1) << width) - 1;
 
-        sdsl::bit_vector mask(anno_graph.get_graph().max_index() + 1, false);
-
         call_nonzeros(counts, [&](node_index i, size_t count) {
-            if (i != DeBruijnGraph::npos
-                    && is_node_in_mask(i, [&]() { return count & int_mask; },
-                                          [&]() { return count >> width; }))
-                mask[i] = true;
+            if (!is_node_in_mask(i, [&]() { return count & int_mask; },
+                                    [&]() { return count >> width; }))
+                mask[i] = false;
         });
 
         return std::make_unique<bitmap_vector>(std::move(mask));
