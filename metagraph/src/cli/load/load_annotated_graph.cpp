@@ -163,6 +163,9 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             if (line_split.size() > 3)
                 throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
 
+            if (config->enumerate_out_sequences)
+                line_split[0] += ".";
+
             auto foreground_labels = utils::split_string(line_split[1], ",");
             auto background_labels = utils::split_string(
                 line_split.size() == 3 ? line_split[2] : "",
