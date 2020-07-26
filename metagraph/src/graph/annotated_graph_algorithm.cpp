@@ -75,6 +75,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     counts.width(width << 1);
 
     if (graph->is_canonical_mode()) {
+        logger->trace("Adding reverse complements");
+
         __atomic_thread_fence(__ATOMIC_RELEASE);
         MaskedDeBruijnGraph masked_graph(
             graph,
@@ -188,7 +190,15 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
                 }, get_num_threads(), true);
             });
 
-            graph_ptr = std::make_shared<const DBGSuccinct>(new BOSS(&constructor), true);
+            graph_ptr = std::make_shared<const DBGSuccinct>(
+                new BOSS(&constructor), true
+            );
+
+            masked_graph = std::make_unique<MaskedDeBruijnGraph>(
+                graph_ptr,
+                std::make_unique<bit_vector_stat>(graph_ptr->max_index() + 1, true),
+                false
+            );
 
             // since the graph was reconstructed, the mask is no logner needed
             union_mask = sdsl::bit_vector();
@@ -218,7 +228,7 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
 
         return MaskedDeBruijnGraph(
             graph_ptr,
-            mask_nodes_by_unitig(*graph_ptr, [&](const auto &, const auto &path) {
+            mask_nodes_by_unitig(*masked_graph, [&](const auto &, const auto &path) {
                 size_t in_label_counter = 0;
                 size_t out_label_counter = 0;
                 size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
