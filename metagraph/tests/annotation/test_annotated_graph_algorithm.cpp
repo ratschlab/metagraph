@@ -15,7 +15,7 @@ using namespace mtg::test;
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationCanonicalPairTypes);
 
 // TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
 //     size_t k = 4;
@@ -155,31 +155,144 @@ test_mask_unitigs(double inlabel_fraction,
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
-    std::unordered_set<std::string> ref_kmers;
+    for (double other_frac : std::vector<double>{ 0.0, 1.0 }) {
+        std::unordered_set<std::string> ref_kmers;
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.0, other_frac, ref_kmers);
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.0, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.24, other_frac, ref_kmers);
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.24, 0.0, ref_kmers);
+        ref_kmers.insert("GAA");
+        ref_kmers.insert("AAT");
+        ref_kmers.insert("ATG");
+        ref_kmers.insert("TGC");
 
-    ref_kmers.insert("GAA");
-    ref_kmers.insert("AAT");
-    ref_kmers.insert("ATG");
-    ref_kmers.insert("TGC");
-
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.25, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.25, other_frac, ref_kmers);
 
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.50, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.50, other_frac, ref_kmers);
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.75, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.75, other_frac, ref_kmers);
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 1.0, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 1.0, other_frac, ref_kmers);
+    }
+}
+
+
+template <class Graph, class Annotation = annot::ColumnCompressed<>>
+void
+test_mask_unitigs_canonical(double inlabel_fraction,
+                            double outlabel_fraction,
+                            double other_label_fraction,
+                            const std::unordered_set<std::string> &ref_kmers,
+                            bool add_canonical = false) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        set_num_threads(num_threads);
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
+        size_t k = 5;
+
+        {
+            /*
+                B                AB    AB
+               CGAAT             ATGCC-TGCCT
+                    \ BC   ABC  /
+                     GAATG-AATGC
+                 C  /           \  C     C
+               GGAAT             ATGCA-TGCAC
+                                   C  /  C                B
+                                 GTGCA-TGCAT             ATTCG
+                                            \ABC    BC  /
+                                             GCATT-CATTC
+                                 AB    AB   /           \  C
+                                 AGGCA-GGCAT             ATTCC
+            */
+            const std::vector<std::string> sequences {
+                  "AATGCCT",     // "AGGCATT"
+                "CGAATGCCT",     // "AGGCATTCG"
+                "GGAATGCAC",     // "GTGCATTCC"
+                "TTTTTTTTTTTTTT" // "AAAAAAAAAAAAAA"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D" };
+
+            auto anno_graph = build_anno_graph<Graph, Annotation>(
+                k, sequences, labels, !add_canonical
+            );
+
+            std::unordered_set<std::string> obs_kmers;
+
+            auto masked_dbg = make_masked_graph_by_unitig_labels(
+                *anno_graph,
+                ingroup, outgroup,
+                inlabel_fraction, outlabel_fraction,
+                other_label_fraction,
+                add_canonical
+            );
+
+            if (!add_canonical) {
+                EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
+            }
+
+            masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+
+            EXPECT_EQ(ref_kmers, obs_kmers)
+                << k << " "
+                << inlabel_fraction << " "
+                << outlabel_fraction << " "
+                << other_label_fraction << " "
+                << add_canonical << " "
+                << num_threads;
+        }
+    }
+    set_num_threads(1);
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
+    for (bool add_canonical : std::vector<bool>{ false, true }) {
+        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
+            std::unordered_set<std::string> ref_kmers;
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.0, other_frac, ref_kmers, add_canonical
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.25, other_frac, ref_kmers, add_canonical
+            );
+
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.49, other_frac, ref_kmers, add_canonical
+            );
+
+            ref_kmers.insert("GAATG");
+            ref_kmers.insert("AATGC");
+            ref_kmers.insert("GCATT");
+            ref_kmers.insert("CATTC");
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.50, other_frac, ref_kmers, add_canonical
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.75, other_frac, ref_kmers, add_canonical
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 1.0, other_frac, ref_kmers, add_canonical
+            );
+        }
+    }
 }
 
 } // namespace

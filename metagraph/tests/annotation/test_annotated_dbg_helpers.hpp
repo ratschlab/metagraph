@@ -29,7 +29,8 @@ using namespace mtg::graph;
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels);
+                                               const std::vector<std::string> &labels,
+                                               bool canonical = false);
 
 MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,
@@ -73,6 +74,16 @@ typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
+
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
+                        > GraphAnnotationCanonicalPairTypes;
 
 } // namespace test
 } // namespace mtg
