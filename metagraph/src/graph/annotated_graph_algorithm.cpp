@@ -35,7 +35,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         anno_graph.get_graph_ptr()
     );
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::int_vector<> counts(graph->max_index() + 1, 0, width << 1);
+    sdsl::int_vector<> counts(graph->max_index() + 1, 0, width * 2);
     sdsl::bit_vector indicator(counts.size(), false);
 
     size_t num_threads = get_num_threads();
@@ -72,7 +72,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     // set the width to be double again
-    counts.width(width << 1);
+    counts.width(width * 2);
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
@@ -154,7 +154,7 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
 
     // Construct initial masked graph from union of labels in labels_in
     auto [counts, union_mask] = fill_count_vector(anno_graph, labels_in, labels_out);
-    uint32_t width = counts.width() >> 1;
+    uint32_t width = counts.width() / 2;
     uint64_t int_mask = (uint64_t(1) << width) - 1;
 
     auto masked_graph = std::make_unique<MaskedDeBruijnGraph>(
@@ -165,198 +165,118 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     );
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
 
-    if (label_other_fraction == 1.0) {
-        // use the count information already gathered when constructing the mask
-
-        if (add_complement && !graph_ptr->is_canonical_mode()) {
-            // we can't guarantee that the reverse complement is present, so
-            // construct a new subgraph
-            logger->trace("Constructing canonical DBG from labeled subgraph");
-            std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
-            std::mutex add_mutex;
-            BOSSConstructor constructor(graph_ptr->get_k() - 1, true);
-            constructor.add_sequences([&](const CallString &callback) {
-                masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
-                    sdsl::int_vector<> path_counts(path.size(), 0, width << 1);
-                    auto it = path_counts.begin();
-                    for (node_index i : path) {
-                        *it = counts[i];
-                        ++it;
-                    }
-
-                    std::lock_guard<std::mutex> lock(add_mutex);
-                    contigs.emplace_back(seq, std::move(path_counts));
-                    callback(seq);
-                }, get_num_threads(), true);
-            });
-
-            graph_ptr = std::make_shared<const DBGSuccinct>(
-                new BOSS(&constructor), true
-            );
-
-            masked_graph = std::make_unique<MaskedDeBruijnGraph>(
-                graph_ptr,
-                std::make_unique<bit_vector_stat>(graph_ptr->max_index() + 1, true),
-                false
-            );
-
-            // since the graph was reconstructed, the mask is no logner needed
-            union_mask = sdsl::bit_vector();
-
-            logger->trace("Reconstructing count vector");
-            counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width << 1);
-            for (auto &[seq, seq_counts] : contigs) {
-                size_t j = 0;
-                graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    counts[i] += seq_counts[j++];
-                });
-                assert(j == seq_counts.size());
-
-                reverse_complement(seq.begin(), seq.end());
-                j = seq_counts.size();
-                graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    counts[i] += seq_counts[--j];
-                });
-                assert(!j);
-            }
-
-            logger->trace("Constructed canonical DBG with {} nodes", graph_ptr->num_nodes());;
-        }
-
-        // Filter unitigs from masked graph based on filtration criteria
-        logger->trace("Filtering out background");
-
-        return MaskedDeBruijnGraph(
-            graph_ptr,
-            mask_nodes_by_unitig(*masked_graph, [&](const auto &, const auto &path) {
-                size_t in_label_counter = 0;
-                size_t out_label_counter = 0;
-                size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
-                size_t label_out_cutoff = std::floor(label_mask_out_fraction * path.size());
-
-                for (node_index i : path) {
-                    uint64_t count = counts[i];
-                    uint64_t in_count = count & int_mask;
-                    uint64_t out_count = count >> width;
-
-                    if (in_count == labels_in.size())
-                        ++in_label_counter;
-
-                    if (out_count && ++out_label_counter > label_out_cutoff)
-                        return false;
-                }
-
-                return in_label_counter >= label_in_cutoff;
-            }),
-            true
-        );
-    }
-
-    tsl::hopscotch_set<std::string> label_in_set(labels_in.begin(), labels_in.end());
-    tsl::hopscotch_set<std::string> label_out_set(labels_out.begin(), labels_out.end());
-
-    size_t num_labels = anno_graph.get_annotation().num_labels();
-    double min_frac = std::min(std::min(label_mask_in_fraction, label_mask_out_fraction), label_other_fraction);
-
-    // returns whether a unitig should be kept based on a given label's count
-    auto check = [&](size_t path_size, const std::string &label, size_t count,
-                     size_t *in_label_counter) {
-        if (label_in_set.count(label)) {
-            if (count < label_mask_in_fraction * path_size) {
-                return false;
-            } else {
-                ++(*in_label_counter);
-            }
-        } else if (label_out_set.count(label)) {
-            if (count > label_mask_out_fraction * path_size)
-                return false;
-
-        } else if (count > label_other_fraction * path_size) {
-            return false;
-        }
-
-        return true;
-    };
-
     if (add_complement && !graph_ptr->is_canonical_mode()) {
+        // we can't guarantee that the reverse complement is present, so
+        // construct a new subgraph
+        logger->trace("Constructing canonical DBG from labeled subgraph");
+        std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
         std::mutex add_mutex;
         BOSSConstructor constructor(graph_ptr->get_k() - 1, true);
         constructor.add_sequences([&](const CallString &callback) {
-            masked_graph->call_sequences([&](const std::string &seq, const auto &) {
+            masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
+                sdsl::int_vector<> path_counts(path.size(), 0, width << 1);
+                auto it = path_counts.begin();
+                for (node_index i : path) {
+                    *it = counts[i];
+                    ++it;
+                }
+
                 std::lock_guard<std::mutex> lock(add_mutex);
+                contigs.emplace_back(seq, std::move(path_counts));
                 callback(seq);
             }, get_num_threads(), true);
         });
 
-        auto inlabel_graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
+        graph_ptr = std::make_shared<const DBGSuccinct>(new BOSS(&constructor), true);
 
-        return MaskedDeBruijnGraph(
-            inlabel_graph,
-            mask_nodes_by_unitig(*inlabel_graph, [&](const auto &unitig, const auto &path) {
-                // compute signatures for both the forward and reverse complement
-                VectorMap<std::string,
-                          std::pair<sdsl::bit_vector, sdsl::bit_vector>> label_signatures;
-                for (auto&& [label, signature]
-                        : anno_graph.get_top_label_signatures(unitig, num_labels)) {
-                    label_signatures.emplace(std::move(label),
-                                             std::make_pair(std::move(signature),
-                                                            sdsl::bit_vector()));
-                }
-
-                std::string rev = unitig;
-                reverse_complement(rev.begin(), rev.end());
-                for (auto&& [label, signature]
-                        : anno_graph.get_top_label_signatures(rev, num_labels)) {
-                    if (label_signatures.count(label)) {
-                        label_signatures[label].second = std::move(signature);
-                    } else {
-                        label_signatures.emplace(std::move(label),
-                                                 std::make_pair(sdsl::bit_vector(),
-                                                                std::move(signature)));
-                    }
-                }
-
-                // count matches
-                size_t in_label_counter = 0;
-                for (const auto &[label, sig_pair] : label_signatures) {
-                    const auto &[sig, rev_sig] = sig_pair;
-                    size_t count = 0;
-                    if (sig.size() && rev_sig.size()) {
-                        auto it = sig.begin();
-                        auto jt = rev_sig.end();
-                        for (--jt; it != sig.end(); ++it, --jt) {
-                            count += (*it) || (*jt);
-                        }
-                    } else if (sig.size()) {
-                        count = sdsl::util::cnt_one_bits(sig);
-                    } else {
-                        count = sdsl::util::cnt_one_bits(rev_sig);
-                    }
-
-                    if (!check(path.size(), label, count, &in_label_counter))
-                        return false;
-                }
-
-                return in_label_counter == labels_in.size();
-            }),
+        masked_graph = std::make_unique<MaskedDeBruijnGraph>(
+            graph_ptr,
+            std::make_unique<bit_vector_stat>(graph_ptr->max_index() + 1, true),
+            false,
             true
         );
+
+        // since the graph was reconstructed, the mask is no logner needed
+        union_mask = sdsl::bit_vector();
+
+        logger->trace("Reconstructing count vector");
+        counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width * 2);
+        for (auto &[seq, seq_counts] : contigs) {
+            size_t j = 0;
+            graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
+                assert(!counts[i]);
+                counts[i] = seq_counts[j++];
+            });
+            assert(j == seq_counts.size());
+
+            reverse_complement(seq.begin(), seq.end());
+
+            // counts stores counts for in labels and out labels interleaved,
+            // so to add values properly, it should be reshaped first
+            counts.width(width);
+            seq_counts.width(width);
+            j = seq_counts.size();
+            graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
+                j -= 2;
+                counts[i * 2] += seq_counts[j];
+                counts[(i * 2) + 1] += seq_counts[j + 1];
+            });
+            assert(!j);
+
+            // reshape back
+            counts.width(width * 2);
+            seq_counts.width(width * 2);
+        }
+
+        logger->trace("Constructed canonical DBG with {} nodes", graph_ptr->num_nodes());
+    }
+
+    // Filter unitigs from masked graph based on filtration criteria
+    logger->trace("Filtering out background");
+
+    tsl::hopscotch_set<std::string> masked_labels;
+
+    if (label_other_fraction != 1.0) {
+        masked_labels.insert(labels_in.begin(), labels_in.end());
+        masked_labels.insert(labels_out.begin(), labels_out.end());
     }
 
     return MaskedDeBruijnGraph(
         graph_ptr,
         mask_nodes_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
             size_t in_label_counter = 0;
-            for (const auto &[label, count]
-                    : anno_graph.get_top_labels(unitig, num_labels, min_frac)) {
-                if (!check(path.size(), label, count, &in_label_counter))
+            size_t out_label_counter = 0;
+            size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
+            size_t label_out_cutoff = std::floor(label_mask_out_fraction * path.size());
+
+            for (node_index i : path) {
+                uint64_t count = counts[i];
+                uint64_t in_count = count & int_mask;
+                uint64_t out_count = count >> width;
+
+                if (in_count == labels_in.size())
+                    ++in_label_counter;
+
+                if (out_count && ++out_label_counter > label_out_cutoff)
                     return false;
             }
-            return in_label_counter == labels_in.size();
+
+            if (in_label_counter < label_in_cutoff)
+                return false;
+
+            if (label_other_fraction != 1.0) {
+                for (const auto &label : anno_graph.get_labels(unitig, label_other_fraction)) {
+                    if (!masked_labels.count(label))
+                        return false;
+                }
+            }
+
+            return true;
         }),
         true
     );
 }
+
 
 std::function<uint64_t(SequenceGraph::node_index)>
 build_label_counter(const AnnotatedDBG &anno_graph,
