@@ -105,10 +105,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
 
 std::unique_ptr<bitmap_vector>
-mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const KeepUnitigPath &keep_unitig) {
+mask_nodes_by_unitig(const DeBruijnGraph &graph, const KeepUnitigPath &keep_unitig) {
     sdsl::bit_vector unitig_mask(graph.max_index() + 1, false);
-
     std::atomic<size_t> kept_unitigs(0);
     std::atomic<size_t> total_unitigs(0);
     std::atomic<size_t> num_kept_nodes(0);
@@ -119,11 +117,9 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
             kept_unitigs.fetch_add(1, memorder);
+            num_kept_nodes.fetch_add(path.size(), memorder);
             for (node_index node : path) {
-                num_kept_nodes.fetch_add(
-                    !fetch_and_set_bit(unitig_mask.data(), node, parallel),
-                    memorder
-                );
+                set_bit(unitig_mask.data(), node, parallel, memorder);
             }
         }
         total_unitigs.fetch_add(1, memorder);
