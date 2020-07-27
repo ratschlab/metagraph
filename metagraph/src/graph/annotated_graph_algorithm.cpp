@@ -248,24 +248,26 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
             size_t out_label_counter = 0;
             size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
             size_t label_out_cutoff = std::floor(label_mask_out_fraction * path.size());
+            double other_frac = label_other_fraction + 1.0 / (path.size() + 1);
 
-            for (node_index i : path) {
-                uint64_t count = counts[i];
+            for (size_t i = 0; i < path.size(); ++i) {
+                node_index node = path[i];
+                uint64_t count = counts[node];
                 uint64_t in_count = count & int_mask;
                 uint64_t out_count = count >> width;
 
                 if (in_count == labels_in.size())
                     ++in_label_counter;
 
-                if (out_count && ++out_label_counter > label_out_cutoff)
+                if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
+                        || (out_count && ++out_label_counter > label_out_cutoff))
                     return false;
             }
 
-            if (in_label_counter < label_in_cutoff)
-                return false;
-
             if (label_other_fraction != 1.0) {
-                for (const auto &label : anno_graph.get_labels(unitig, label_other_fraction)) {
+                // TODO: extract these beforehand and construct an annotator
+                // discard this unitig if other labels are found with too high frequency
+                for (const auto &label : anno_graph.get_labels(unitig, other_frac)) {
                     if (!masked_labels.count(label))
                         return false;
                 }
