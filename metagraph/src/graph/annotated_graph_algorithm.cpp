@@ -157,7 +157,7 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     uint32_t width = counts.width() / 2;
     uint64_t int_mask = (uint64_t(1) << width) - 1;
 
-    auto masked_graph = std::make_unique<MaskedDeBruijnGraph>(
+    std::shared_ptr<DeBruijnGraph> masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::make_unique<bit_vector_stat>(std::move(union_mask)),
         true, // only_valid_nodes_in_mask
@@ -187,17 +187,8 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
             }, get_num_threads(), true);
         });
 
-        graph_ptr = std::make_shared<const DBGSuccinct>(new BOSS(&constructor), true);
-
-        masked_graph = std::make_unique<MaskedDeBruijnGraph>(
-            graph_ptr,
-            std::make_unique<bit_vector_stat>(graph_ptr->max_index() + 1, true),
-            false,
-            true
-        );
-
-        // since the graph was reconstructed, the mask is no logner needed
-        union_mask = sdsl::bit_vector();
+        masked_graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
+        graph_ptr = masked_graph;
 
         logger->trace("Reconstructing count vector");
         counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width * 2);
