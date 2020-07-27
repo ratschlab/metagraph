@@ -71,9 +71,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     }
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-    // set the width to be double again
-    counts.width(width * 2);
-
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
@@ -93,12 +90,16 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                 assert(it != path.rend());
                 set_bit(indicator.data(), i, async, memorder);
                 std::lock_guard<std::mutex> lock(count_mutex);
-                counts[i] += counts[*it];
+                counts[i * 2] += counts[*it * 2];
+                counts[i * 2 + 1] += counts[*it * 2 + 1];
                 ++it;
             });
         }, num_threads);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
     }
+
+    // set the width to be double again
+    counts.width(width * 2);
 
     return std::make_pair(std::move(counts), std::move(indicator));
 }
