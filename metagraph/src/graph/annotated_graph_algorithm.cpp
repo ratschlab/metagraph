@@ -74,21 +74,32 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        MaskedDeBruijnGraph masked_graph(
-            graph,
-            std::make_unique<bit_vector_stat>(indicator),
-            true
-        );
+        std::unique_ptr<bit_vector_stat> mask;
+        sdsl::bit_vector *updated_indicator;
+        auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
+        if (dbg_succ) {
+            // This hack relies on the fact that call_sequences on a masked
+            // DBGSuccinct makes a copy of the mask before traversing, so directly
+            // modifying indicator won't have any side effects. This way, we
+            // avoid making another bit vector
+            mask = std::make_unique<bit_vector_stat>(std::move(indicator));
+            updated_indicator = &const_cast<sdsl::bit_vector&>(mask->data());
+        } else {
+            mask = std::make_unique<bit_vector_stat>(indicator);
+            updated_indicator = &indicator;
+        }
 
-        masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
+        MaskedDeBruijnGraph masked_graph(graph, std::move(mask), true);
+
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
             auto it = path.rbegin();
-            auto rev = unitig;
+            auto rev = seq;
             reverse_complement(rev.begin(), rev.end());
             graph->map_to_nodes_sequentially(rev, [&](node_index i) {
                 assert(i != DeBruijnGraph::npos);
                 assert(it != path.rend());
-                set_bit(indicator.data(), i, async, memorder);
+                set_bit(updated_indicator->data(), i, async, memorder);
                 std::lock_guard<std::mutex> lock(count_mutex);
                 counts[i * 2] += counts[*it * 2];
                 counts[i * 2 + 1] += counts[*it * 2 + 1];
@@ -96,6 +107,9 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             });
         }, num_threads);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+        if (dbg_succ)
+            std::swap(indicator, *updated_indicator);
     }
 
     // set the width to be double again
