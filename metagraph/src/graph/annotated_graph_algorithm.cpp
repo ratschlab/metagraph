@@ -189,9 +189,9 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
     uint32_t width = counts.width() / 2;
     uint64_t int_mask = (uint64_t(1) << width) - 1;
 
-    std::shared_ptr<DeBruijnGraph> masked_graph = std::make_shared<MaskedDeBruijnGraph>(
+    auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
-        std::make_unique<bit_vector_stat>(std::move(union_mask)),
+        std::make_unique<bitmap_vector>(std::move(union_mask)),
         true, // only_valid_nodes_in_mask
         graph_ptr->is_canonical_mode()
     );
@@ -219,8 +219,16 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
             }, num_threads, true);
         });
 
-        masked_graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
-        graph_ptr = masked_graph;
+        auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
+        dbg_succ->mask_dummy_kmers(num_threads, false);
+        graph_ptr = dbg_succ;
+        auto new_indicator = std::make_unique<bitmap_vector>(graph_ptr->max_index() + 1, true);
+        new_indicator->set(DeBruijnGraph::npos, false);
+        masked_graph = std::make_shared<MaskedDeBruijnGraph>(
+            graph_ptr,
+            std::move(new_indicator),
+            true
+        );
 
         logger->trace("Reconstructing count vector");
         counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width * 2);
@@ -264,42 +272,54 @@ make_masked_graph_by_unitig_labels(const AnnotatedDBG &anno_graph,
         masked_labels.insert(labels_out.begin(), labels_out.end());
     }
 
-    return MaskedDeBruijnGraph(
-        graph_ptr,
-        mask_nodes_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
-            size_t in_label_counter = 0;
-            size_t out_label_counter = 0;
-            size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
-            size_t label_out_cutoff = std::floor(label_mask_out_fraction * path.size());
-            double other_frac = label_other_fraction + 1.0 / (path.size() + 1);
+    std::unique_ptr<bitmap_vector> new_indicator;
+    bitmap_vector *update_indicator;
+    auto graph_base = std::dynamic_pointer_cast<const DBGSuccinct>(masked_graph->get_graph_ptr());
+    if (graph_base) {
+        update_indicator = dynamic_cast<bitmap_vector*>(&const_cast<bitmap&>(masked_graph->get_mask()));
+        assert(update_indicator);
+    } else {
+        new_indicator = std::make_unique<bitmap_vector>(masked_graph->max_index() + 1, false);
+        update_indicator = new_indicator.get();
+    }
 
-            for (size_t i = 0; i < path.size(); ++i) {
-                node_index node = path[i];
-                uint64_t count = counts[node];
-                uint64_t in_count = count & int_mask;
-                uint64_t out_count = count >> width;
+    mask_nodes_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
+        size_t in_label_counter = 0;
+        size_t out_label_counter = 0;
+        size_t label_in_cutoff = std::ceil(label_mask_in_fraction * path.size());
+        size_t label_out_cutoff = std::floor(label_mask_out_fraction * path.size());
+        double other_frac = label_other_fraction + 1.0 / (path.size() + 1);
 
-                if (in_count == labels_in.size())
-                    ++in_label_counter;
+        for (size_t i = 0; i < path.size(); ++i) {
+            node_index node = path[i];
+            uint64_t count = counts[node];
+            uint64_t in_count = count & int_mask;
+            uint64_t out_count = count >> width;
 
-                if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
-                        || (out_count && ++out_label_counter > label_out_cutoff))
+            if (in_count == labels_in.size())
+                ++in_label_counter;
+
+            if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
+                    || (out_count && ++out_label_counter > label_out_cutoff))
+                return false;
+        }
+
+        if (label_other_fraction != 1.0) {
+            // TODO: extract these beforehand and construct an annotator
+            // discard this unitig if other labels are found with too high frequency
+            for (const auto &label : anno_graph.get_labels(unitig, other_frac)) {
+                if (!masked_labels.count(label))
                     return false;
             }
+        }
 
-            if (label_other_fraction != 1.0) {
-                // TODO: extract these beforehand and construct an annotator
-                // discard this unitig if other labels are found with too high frequency
-                for (const auto &label : anno_graph.get_labels(unitig, other_frac)) {
-                    if (!masked_labels.count(label))
-                        return false;
-                }
-            }
+        return true;
+    }, update_indicator, graph_base != nullptr, num_threads);
 
-            return true;
-        }),
-        true
-    );
+    if (!graph_base)
+        masked_graph->set_mask(new_indicator.release());
+
+    return std::move(*masked_graph);
 }
 
 
