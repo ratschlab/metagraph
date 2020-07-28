@@ -1886,10 +1886,17 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     visited[0] = true;
 
     if (trim_sentinels) {
-        #pragma omp parallel for num_threads(num_threads) schedule(static, kBlockSize)
-        for (uint64_t i = 1; i < W_->size(); ++i) {
-            if (get_W(i) == kSentinelCode)
-                visited[i] = true;
+        if (subgraph_mask) {
+            call_zeros(visited, [&](uint64_t i) {
+                if (get_W(i) == kSentinelCode)
+                    visited[i] = true;
+            });
+        } else {
+            #pragma omp parallel for num_threads(num_threads) schedule(static, kBlockSize)
+            for (uint64_t i = 1; i < W_->size(); ++i) {
+                if (get_W(i) == kSentinelCode)
+                    visited[i] = true;
+            }
         }
     }
 
