@@ -44,7 +44,6 @@ TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationCanonicalPairTypes
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        set_num_threads(num_threads);
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
 
@@ -71,6 +70,7 @@ void test_mask_indices(double density_cutoff) {
             auto masked_dbg = build_masked_graph(*anno_graph,
                                                  ingroup,
                                                  outgroup,
+                                                 num_threads,
                                                  1.0,
                                                  0.0,
                                                  0.0,
@@ -90,7 +90,6 @@ void test_mask_indices(double density_cutoff) {
             EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
         }
     }
-    set_num_threads(1);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
@@ -108,7 +107,6 @@ test_mask_unitigs(double inlabel_fraction,
                   double other_label_fraction,
                   const std::unordered_set<std::string> &ref_kmers) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        set_num_threads(num_threads);
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
         size_t k = 3;
@@ -136,6 +134,7 @@ test_mask_unitigs(double inlabel_fraction,
             auto masked_dbg = make_masked_graph_by_unitig_labels(*anno_graph,
                                                                  ingroup,
                                                                  outgroup,
+                                                                 num_threads,
                                                                  inlabel_fraction,
                                                                  outlabel_fraction,
                                                                  other_label_fraction);
@@ -151,7 +150,6 @@ test_mask_unitigs(double inlabel_fraction,
                 << other_label_fraction;
         }
     }
-    set_num_threads(1);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
@@ -192,7 +190,6 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                             const std::unordered_set<std::string> &ref_kmers,
                             bool add_canonical = false) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        set_num_threads(num_threads);
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
         size_t k = 5;
@@ -229,6 +226,7 @@ test_mask_unitigs_canonical(double inlabel_fraction,
             auto masked_dbg = make_masked_graph_by_unitig_labels(
                 *anno_graph,
                 ingroup, outgroup,
+                num_threads,
                 inlabel_fraction, outlabel_fraction,
                 other_label_fraction,
                 add_canonical
@@ -249,7 +247,6 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                 << num_threads;
         }
     }
-    set_num_threads(1);
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {

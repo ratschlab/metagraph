@@ -50,7 +50,8 @@ std::unique_ptr<MaskedDeBruijnGraph>
 mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        std::vector<std::string> &label_mask_in,
                        std::vector<std::string> &label_mask_out,
-                       Config *config) {
+                       Config *config,
+                       size_t num_threads) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
@@ -90,6 +91,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                 anno_graph,
                 label_mask_in,
                 label_mask_out,
+                num_threads,
                 config->label_mask_in_fraction,
                 config->label_mask_out_fraction,
                 config->label_other_fraction,
@@ -127,6 +129,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                 return num_total_labels - num_in_labels - num_out_labels
                             <= config->label_other_fraction * num_total_labels;
             },
+            num_threads,
             config->identity == Config::ASSEMBLE ? 1.0 : 0.05
         )
     );
@@ -136,12 +139,15 @@ void
 call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                    const std::function<void(const MaskedDeBruijnGraph&,
                                             const std::string& /* header */)> &callback,
-                   size_t num_threads) {
+                   size_t num_parallel_graphs_masked,
+                   size_t num_threads_per_graph) {
     if (config->label_mask_file.empty()) {
         callback(*mask_graph_from_labels(anno_graph,
                                          config->label_mask_in,
                                          config->label_mask_out,
-                                         config), config->header);
+                                         config,
+                                         num_threads_per_graph),
+                 config->header);
         return;
     }
 
@@ -151,7 +157,7 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
         exit(1);
     }
 
-    ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_parallel_graphs_masked);
 
     std::string line;
     while (std::getline(fin, line)) {
@@ -175,7 +181,9 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels,
                                              background_labels,
-                                             config), line_split[0]);
+                                             config,
+                                             num_threads_per_graph),
+                     line_split[0]);
         }, line);
     }
 }
@@ -186,7 +194,8 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
     return mask_graph_from_labels(anno_graph,
                                   config->label_mask_in,
                                   config->label_mask_out,
-                                  config);
+                                  config,
+                                  get_num_threads());
 }
 
 } // namespace cli

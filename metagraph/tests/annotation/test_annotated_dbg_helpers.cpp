@@ -61,6 +61,7 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::Ro
 MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,
                                        const std::vector<std::string> &outgroup,
+                                       size_t num_threads,
                                        double mask_in_label_fraction,
                                        double mask_out_label_fraction,
                                        double other_label_fraction,
@@ -89,6 +90,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                 return (num_total_labels - num_in_labels - num_out_labels)
                     <= other_label_fraction * num_total_labels;
             },
+            num_threads,
             lazy_evaluation_density_cutoff
         )
     );

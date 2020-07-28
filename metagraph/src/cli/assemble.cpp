@@ -15,7 +15,7 @@ namespace cli {
 
 using mtg::common::logger;
 
-const size_t NUM_THREADS_PER_TRAVERSAL = 4;
+const unsigned int NUM_THREADS_PER_TRAVERSAL = 4;
 
 template <class Generator>
 void write_sequences(const Config &config,
@@ -73,7 +73,8 @@ int assemble(Config *config) {
                         }
                     }, true);
                 },
-                get_num_threads() / NUM_THREADS_PER_TRAVERSAL
+                get_num_threads() / NUM_THREADS_PER_TRAVERSAL,
+                std::max(get_num_threads(), NUM_THREADS_PER_TRAVERSAL)
             );
             return 0;
         }
