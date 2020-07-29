@@ -55,7 +55,6 @@ class Config {
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_both_strands = false;
-    bool filter_by_kmer = false;
     bool output_json = false;
 
     unsigned int k = 3;
@@ -111,9 +110,6 @@ class Config {
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
     double discovery_fraction = 0.7;
-    double label_mask_in_fraction = 1.0;
-    double label_mask_out_fraction = 0.0;
-    double label_other_fraction = 1.0;
     double min_count_quantile = 0.;
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
@@ -124,8 +120,6 @@ class Config {
     std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
-    std::vector<std::string> label_mask_in;
-    std::vector<std::string> label_mask_out;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;

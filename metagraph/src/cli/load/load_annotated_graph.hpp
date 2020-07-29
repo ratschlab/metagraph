@@ -18,9 +18,6 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
-std::unique_ptr<graph::MaskedDeBruijnGraph>
-mask_graph(const graph::AnnotatedDBG &anno_graph, Config *config);
-
 void
 call_masked_graphs(const graph::AnnotatedDBG &anno_graph, Config *config,
                    const std::function<void(const graph::MaskedDeBruijnGraph&,

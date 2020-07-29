@@ -112,8 +112,10 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
     virtual void set_mask(bitmap *mask) { kmers_in_graph_.reset(mask); }
-
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
+    virtual bitmap_dyn* get_updateable_mask() {
+        return dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
+    }
 
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;

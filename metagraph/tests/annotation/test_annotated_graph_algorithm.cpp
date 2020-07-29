@@ -17,32 +17,10 @@ template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationCanonicalPairTypes);
 
-// TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
-//     size_t k = 4;
-//     // TTGC      GCACGGGTC
-//     //      TGCA
-//     // ATGC      GCAGTGGTC
-//     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
-//     const std::vector<std::string> labels { "A", "B" };
-//     auto anno_graph = build_anno_graph<TypeParam,
-//                                        annot::ColumnCompressed<>>(
-//         k, sequences, labels
-//     );
 
-//     auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
-//     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
-//     std::unordered_multiset<std::string> obs;
-
-//     masked_dbg.call_unitigs([&](const auto &unitig, const auto &path) {
-//         ASSERT_EQ(path, map_sequence_to_nodes(masked_dbg, unitig));
-//         obs.insert(unitig);
-//     });
-
-//     EXPECT_EQ(obs, ref);
-// }
-
-template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void test_mask_indices(double density_cutoff) {
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
+    typedef typename TypeParam::first_type Graph;
+    typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -67,14 +45,17 @@ void test_mask_indices(double density_cutoff) {
                 "B", "C"
             };
 
-            auto masked_dbg = build_masked_graph(*anno_graph,
-                                                 ingroup,
-                                                 outgroup,
-                                                 num_threads,
-                                                 1.0,
-                                                 0.0,
-                                                 0.0,
-                                                 density_cutoff);
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = 0.0,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = 1.0,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = 1.0
+            };
+
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  config, num_threads);
 
             // FYI: num_nodes() throws exception for masked graph with lazy node mask
             // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
@@ -86,26 +67,17 @@ void test_mask_indices(double density_cutoff) {
                 obs_kmers.insert(kmer);
             });
 
-            EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
-            EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
+            EXPECT_EQ(ref_labels, obs_labels) << k;
+            EXPECT_EQ(ref_kmers, obs_kmers) << k;
         }
     }
 }
 
-TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
-    for (double d = 0.0; d <= 1.0; d += 0.05) {
-        test_mask_indices<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(d);
-    }
-}
-
-
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void
-test_mask_unitigs(double inlabel_fraction,
-                  double outlabel_fraction,
-                  double other_label_fraction,
-                  const std::unordered_set<std::string> &ref_kmers) {
+void test_mask_unitigs(double inlabel_fraction,
+                       double outlabel_fraction,
+                       double other_label_fraction,
+                       const std::unordered_set<std::string> &ref_kmers) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -131,13 +103,17 @@ test_mask_unitigs(double inlabel_fraction,
 
             std::unordered_set<std::string> obs_kmers;
 
-            auto masked_dbg = make_masked_graph_by_unitig_labels(*anno_graph,
-                                                                 ingroup,
-                                                                 outgroup,
-                                                                 num_threads,
-                                                                 inlabel_fraction,
-                                                                 outlabel_fraction,
-                                                                 other_label_fraction);
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = inlabel_fraction,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = outlabel_fraction,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = other_label_fraction
+            };
+
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  config, num_threads);
 
             EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
 
@@ -183,12 +159,11 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
 
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void
-test_mask_unitigs_canonical(double inlabel_fraction,
-                            double outlabel_fraction,
-                            double other_label_fraction,
-                            const std::unordered_set<std::string> &ref_kmers,
-                            bool add_canonical = false) {
+void test_mask_unitigs_canonical(double inlabel_fraction,
+                                 double outlabel_fraction,
+                                 double other_label_fraction,
+                                 const std::unordered_set<std::string> &ref_kmers,
+                                 bool add_canonical = false) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -223,14 +198,18 @@ test_mask_unitigs_canonical(double inlabel_fraction,
 
             std::unordered_set<std::string> obs_kmers;
 
-            auto masked_dbg = make_masked_graph_by_unitig_labels(
-                *anno_graph,
-                ingroup, outgroup,
-                num_threads,
-                inlabel_fraction, outlabel_fraction,
-                other_label_fraction,
-                add_canonical
-            );
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = inlabel_fraction,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = outlabel_fraction,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = other_label_fraction,
+                .add_complement = add_canonical
+            };
+
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  config, num_threads);
 
             if (!add_canonical) {
                 EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());

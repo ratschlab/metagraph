@@ -32,15 +32,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &labels,
                                                bool canonical = false);
 
-MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
-                                       const std::vector<std::string> &ingroup,
-                                       const std::vector<std::string> &outgroup,
-                                       size_t num_threads = 1,
-                                       double mask_in_label_fraction = 1.0,
-                                       double mask_out_label_fraction = 0.0,
-                                       double other_label_fraction = 1.0,
-                                       double lazy_evaluation_density_cutoff = 0.05);
-
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
                          DBGHashOrdered,

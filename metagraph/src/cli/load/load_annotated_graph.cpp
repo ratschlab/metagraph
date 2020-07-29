@@ -50,7 +50,7 @@ std::unique_ptr<MaskedDeBruijnGraph>
 mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        std::vector<std::string> &label_mask_in,
                        std::vector<std::string> &label_mask_out,
-                       Config *config,
+                       const DifferentialAssemblyConfig &diff_config,
                        size_t num_threads) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
@@ -85,54 +85,9 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
     logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
 
-    if (!config->filter_by_kmer) {
-        return std::make_unique<MaskedDeBruijnGraph>(
-            make_masked_graph_by_unitig_labels(
-                anno_graph,
-                label_mask_in,
-                label_mask_out,
-                num_threads,
-                config->label_mask_in_fraction,
-                config->label_mask_out_fraction,
-                config->label_other_fraction,
-                config->canonical
-            )
-        );
-    }
-
-    size_t num_mask_in = label_mask_in.size();
-    size_t num_mask_out = label_mask_out.size();
-
-    return std::make_unique<MaskedDeBruijnGraph>(
-        graph,
-        mask_nodes_by_node_label(
-            anno_graph,
-            label_mask_in,
-            label_mask_out,
-            [config,num_mask_in,num_mask_out,&anno_graph](auto index,
-                                                          auto get_num_in_labels,
-                                                          auto get_num_out_labels) {
-                assert(index != DeBruijnGraph::npos);
-
-                size_t num_in_labels = get_num_in_labels();
-
-                if (num_in_labels < config->label_mask_in_fraction * num_mask_in)
-                    return false;
-
-                size_t num_out_labels = get_num_out_labels();
-
-                if (num_out_labels < config->label_mask_out_fraction * num_mask_out)
-                    return false;
-
-                size_t num_total_labels = anno_graph.get_labels(index).size();
-
-                return num_total_labels - num_in_labels - num_out_labels
-                            <= config->label_other_fraction * num_total_labels;
-            },
-            num_threads,
-            config->identity == Config::ASSEMBLE ? 1.0 : 0.05
-        )
-    );
+    return std::make_unique<MaskedDeBruijnGraph>(mask_nodes_by_label(
+        anno_graph, label_mask_in, label_mask_out, diff_config, num_threads
+    ));
 }
 
 void
@@ -141,15 +96,7 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                                             const std::string& /* header */)> &callback,
                    size_t num_parallel_graphs_masked,
                    size_t num_threads_per_graph) {
-    if (config->label_mask_file.empty()) {
-        callback(*mask_graph_from_labels(anno_graph,
-                                         config->label_mask_in,
-                                         config->label_mask_out,
-                                         config,
-                                         num_threads_per_graph),
-                 config->header);
-        return;
-    }
+    assert(!config->label_mask_file.empty());
 
     std::ifstream fin(config->label_mask_file);
     if (!fin.good()) {
@@ -162,40 +109,62 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
     std::string line;
     while (std::getline(fin, line)) {
         thread_pool.enqueue([&](std::string line) {
-            auto line_split = utils::split_string(line, "\t");
-            if (line_split.size() <= 1)
-                return;
+            auto line_split = utils::split_string(line, "\t", false);
+            if (line_split.size() <= 2 || line_split.size() > 4)
+                throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
 
-            if (line_split.size() > 3)
-                throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
+            DifferentialAssemblyConfig diff_config;
+            diff_config.add_complement = config->canonical;
+
+            auto vals = utils::split_string(line_split[1], ",");
+            auto it = vals.begin();
+            if (it != vals.end()) {
+                diff_config.label_mask_in_kmer_fraction = std::stof(*it);
+                ++it;
+            }
+            if (it != vals.end()) {
+                diff_config.label_mask_in_unitig_fraction = std::stof(*it);
+                ++it;
+            }
+            if (it != vals.end()) {
+                diff_config.label_mask_out_kmer_fraction = std::stof(*it);
+                ++it;
+            }
+            if (it != vals.end()) {
+                diff_config.label_mask_out_unitig_fraction = std::stof(*it);
+                ++it;
+            }
+            if (it != vals.end()) {
+                diff_config.label_mask_other_unitig_fraction = std::stof(*it);
+                ++it;
+            }
+
+            assert(it == vals.end());
+
+            logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
+            logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
+            logger->trace("Per-kmer mask out fraction: {}", diff_config.label_mask_out_kmer_fraction);
+            logger->trace("Per-unitig mask out fraction: {}", diff_config.label_mask_out_unitig_fraction);
+            logger->trace("Per-unitig other label fraction: {}", diff_config.label_mask_other_unitig_fraction);
+            logger->trace("Include reverse complements: {}", diff_config.add_complement);
 
             if (config->enumerate_out_sequences)
                 line_split[0] += ".";
 
-            auto foreground_labels = utils::split_string(line_split[1], ",");
+            auto foreground_labels = utils::split_string(line_split[2], ",");
             auto background_labels = utils::split_string(
-                line_split.size() == 3 ? line_split[2] : "",
+                line_split.size() == 4 ? line_split[3] : "",
                 ","
             );
 
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels,
                                              background_labels,
-                                             config,
+                                             diff_config,
                                              num_threads_per_graph),
                      line_split[0]);
         }, line);
     }
-}
-
-std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
-    assert(config->label_mask_file.empty());
-    return mask_graph_from_labels(anno_graph,
-                                  config->label_mask_in,
-                                  config->label_mask_out,
-                                  config,
-                                  get_num_threads());
 }
 
 } // namespace cli

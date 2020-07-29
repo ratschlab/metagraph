@@ -47,43 +47,37 @@ int assemble(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    std::unique_ptr<graph::AnnotatedDBG> anno_graph;
     if (config->infbase_annotators.size()) {
-        anno_graph = initialize_annotated_dbg(graph, *config);
+        assert(config->label_mask_file.size());
+        auto anno_graph = initialize_annotated_dbg(graph, *config);
 
-        if (config->label_mask_file.size()) {
-            logger->trace("Generating masked graphs...");
-            {
-                // overwrite
-                std::ofstream out(config->outfbase);
-            }
-            call_masked_graphs(
-                *anno_graph, config,
-                [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
-                    write_sequences(*config, header, [&](const auto &callback) {
-                        if (config->unitigs || config->min_tip_size > 1) {
-                            graph.call_unitigs(callback,
-                                               NUM_THREADS_PER_TRAVERSAL,
-                                               config->min_tip_size,
-                                               config->kmers_in_single_form);
-                        } else {
-                            graph.call_sequences(callback,
-                                                 NUM_THREADS_PER_TRAVERSAL,
-                                                 config->kmers_in_single_form);
-                        }
-                    }, true);
-                },
-                get_num_threads() / NUM_THREADS_PER_TRAVERSAL,
-                std::max(get_num_threads(), NUM_THREADS_PER_TRAVERSAL)
-            );
-            return 0;
+        logger->trace("Generating masked graphs...");
+
+        {
+            // overwrite
+            std::ofstream out(config->outfbase);
         }
 
-        logger->trace("Masking graph...");
+        call_masked_graphs(*anno_graph, config,
+            [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
+                write_sequences(*config, header, [&](const auto &callback) {
+                    if (config->unitigs || config->min_tip_size > 1) {
+                        graph.call_unitigs(callback,
+                                           NUM_THREADS_PER_TRAVERSAL,
+                                           config->min_tip_size,
+                                           config->kmers_in_single_form);
+                    } else {
+                        graph.call_sequences(callback,
+                                             NUM_THREADS_PER_TRAVERSAL,
+                                             config->kmers_in_single_form);
+                    }
+                }, true);
+            },
+            get_num_threads() / NUM_THREADS_PER_TRAVERSAL,
+            std::min(get_num_threads(), NUM_THREADS_PER_TRAVERSAL)
+        );
 
-        graph = mask_graph(*anno_graph, config);
-
-        logger->trace("Masked in {} sec", timer.elapsed());
+        return 0;
     }
 
     logger->trace("Extracting sequences from graph...");
