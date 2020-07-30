@@ -252,7 +252,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                   size_t num_threads) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
-    // in the beginning, it's the correct size, but double width
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -260,21 +259,17 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     sdsl::int_vector<> counts(graph->max_index() + 1, 0, width * 2);
     sdsl::bit_vector indicator(counts.size(), false);
 
-    bool async = num_threads > 1;
-    constexpr int memorder = __ATOMIC_RELAXED;
-
     // TODO: replace locked increment operations on int_vector<> with actual
     //       atomic operations when we figure out how to align int_vector<> storage
     std::mutex count_mutex;
 
-    __atomic_thread_fence(__ATOMIC_RELEASE);
     #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
     for (size_t i = 0; i < labels_in.size(); ++i) {
         const std::string &label_in = labels_in[i];
-        anno_graph.call_annotated_nodes(label_in, [&](node_index i) {
-            set_bit(indicator.data(), i, async, memorder);
+        anno_graph.call_annotated_nodes(label_in, [&](node_index j) {
             std::lock_guard<std::mutex> lock(count_mutex);
-            ++counts[i];
+            indicator[j] = true;
+            ++counts[j];
         });
     }
 
@@ -284,13 +279,12 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
     for (size_t i = 0; i < labels_out.size(); ++i) {
         const std::string &label_out = labels_out[i];
-        anno_graph.call_annotated_nodes(label_out, [&](node_index i) {
-            set_bit(indicator.data(), i, async, memorder);
+        anno_graph.call_annotated_nodes(label_out, [&](node_index j) {
             std::lock_guard<std::mutex> lock(count_mutex);
-            ++counts[2 * i + 1];
+            indicator[j] = true;
+            ++counts[j * 2 + 1];
         });
     }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
@@ -311,23 +305,20 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         }
 
         MaskedDeBruijnGraph masked_graph(graph, std::move(mask), true);
-
-        __atomic_thread_fence(__ATOMIC_RELEASE);
         masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
             auto it = path.rbegin();
             auto rev = seq;
             reverse_complement(rev.begin(), rev.end());
             graph->map_to_nodes_sequentially(rev, [&](node_index i) {
+                std::lock_guard<std::mutex> lock(count_mutex);
                 assert(i != DeBruijnGraph::npos);
                 assert(it != path.rend());
-                set_bit(updated_indicator->data(), i, async, memorder);
-                std::lock_guard<std::mutex> lock(count_mutex);
+                (*updated_indicator)[i] = true;
                 counts[i * 2] += counts[*it * 2];
                 counts[i * 2 + 1] += counts[*it * 2 + 1];
                 ++it;
             });
         }, num_threads);
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
         if (dbg_succ)
             std::swap(indicator, *updated_indicator);
