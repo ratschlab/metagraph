@@ -287,19 +287,16 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     // call_sequences is running.
     // So, we apply a hack where bitmap_vector is used to store the mask when
     // the underlying graph is DBGSuccinct, and bit_vector_stat otherwise
-    auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
+    if (std::dynamic_pointer_cast<const DBGSuccinct>(graph)) {
+        union_mask = std::make_unique<bitmap_vector>(std::move(indicator));
+    } else {
+        union_mask = std::make_unique<bit_vector_stat>(std::move(indicator));
+    }
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
-        std::unique_ptr<bitmap> mask;
-        if (dbg_succ) {
-            mask = std::make_unique<bitmap_vector>(std::move(indicator));
-        } else {
-            mask = std::make_unique<bit_vector_stat>(std::move(indicator));
-        }
-
-        MaskedDeBruijnGraph masked_graph(graph, std::move(mask), true);
+        MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask), true);
 
         std::mutex count_mutex;
         masked_graph.update_mask([&](const auto &callback) {
@@ -319,14 +316,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             }, num_threads);
         }, true /* only valid nodes */);
 
-        union_mask.reset(masked_graph.release_mask());
-
-    } else {
-        if (dbg_succ) {
-            union_mask = std::make_unique<bitmap_vector>(std::move(indicator));
-        } else {
-            union_mask = std::make_unique<bit_vector_stat>(std::move(indicator));
-        }
+        union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
     }
 
     // set the width to be double again
