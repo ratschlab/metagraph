@@ -32,7 +32,7 @@ typedef std::function<bool(const std::string&, const std::vector<node_index>&)> 
 typedef std::function<bool(node_index)> KeepNode;
 
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
@@ -49,7 +49,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                           sdsl::int_vector<> &counts,
-                          sdsl::bit_vector&& union_mask,
+                          std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
                           size_t num_threads);
 
@@ -152,21 +152,9 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                           sdsl::int_vector<> &counts,
-                          sdsl::bit_vector&& union_mask,
+                          std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
                           size_t num_threads) {
-    std::unique_ptr<bitmap> mask;
-
-    // This hack relies on the fact that MaskedDeBruijnGraph::call_sequences
-    // makes a copy of the mask when the underlying graph is DBGSuccinct.
-    // By making the mask derive from bitmap_vector, we are indicating that
-    // it can be safely modified by the callback of call_sequences.
-    if (std::dynamic_pointer_cast<const DBGSuccinct>(graph_ptr)) {
-        mask = std::make_unique<bitmap_vector>(std::move(union_mask));
-    } else {
-        mask = std::make_unique<bit_vector_stat>(std::move(union_mask));
-    }
-
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::move(mask),
@@ -249,7 +237,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
 }
 
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
@@ -265,30 +253,35 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
     // TODO: replace locked increment operations on int_vector<> with actual
     //       atomic operations when we figure out how to align int_vector<> storage
-    std::mutex count_mutex;
-
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
+    #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
     for (size_t i = 0; i < labels_in.size(); ++i) {
         const std::string &label_in = labels_in[i];
         anno_graph.call_annotated_nodes(label_in, [&](node_index j) {
-            std::lock_guard<std::mutex> lock(count_mutex);
-            indicator[j] = true;
-            ++counts[j];
+            #pragma omp critical
+            {
+                indicator[j] = true;
+                ++counts[j];
+            }
         });
     }
 
     // correct the width of counts, making it single-width
     counts.width(width);
 
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
+    #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
     for (size_t i = 0; i < labels_out.size(); ++i) {
         const std::string &label_out = labels_out[i];
         anno_graph.call_annotated_nodes(label_out, [&](node_index j) {
-            std::lock_guard<std::mutex> lock(count_mutex);
-            indicator[j] = true;
-            ++counts[j * 2 + 1];
+            #pragma omp critical
+            {
+                indicator[j] = true;
+                ++counts[j * 2 + 1];
+            }
         });
     }
+
+    std::unique_ptr<bitmap> union_mask;
+    auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
@@ -297,7 +290,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         // makes a copy of the mask before traversal, so we can safely write to
         // the mask in MaskedDeBruijnGraph
         std::unique_ptr<bitmap> mask;
-        auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
         if (dbg_succ) {
             mask = std::make_unique<bitmap_vector>(std::move(indicator));
         } else {
@@ -306,6 +298,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
         MaskedDeBruijnGraph masked_graph(graph, std::move(mask), true);
 
+        std::mutex count_mutex;
         masked_graph.update_mask([&](const auto &callback) {
             masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
                 auto it = path.rbegin();
@@ -323,21 +316,24 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             }, num_threads);
         }, true /* only valid nodes */);
 
+        union_mask.reset(masked_graph.release_mask());
+
+    } else {
+        // This hack is based on the fact that MaskedDeBruijnGraph::call_sequences
+        // makes a copy of the mask when the underlying graph is DBGSuccinct.
+        // By making the mask derive from bitmap_vector, we are indicating that
+        // it can be safely modified by the callback of call_sequences.
         if (dbg_succ) {
-            auto *cast = dynamic_cast<bitmap_vector*>(masked_graph.release_mask());
-            assert(cast);
-            indicator = const_cast<sdsl::bit_vector&&>(std::shared_ptr<bitmap_vector>(cast)->data());
+            union_mask = std::make_unique<bitmap_vector>(std::move(indicator));
         } else {
-            auto *cast = dynamic_cast<bit_vector_stat*>(masked_graph.release_mask());
-            assert(cast);
-            indicator = const_cast<sdsl::bit_vector&&>(std::shared_ptr<bit_vector_stat>(cast)->data());
+            union_mask = std::make_unique<bit_vector_stat>(std::move(indicator));
         }
     }
 
     // set the width to be double again
     counts.width(width * 2);
 
-    return std::make_pair(std::move(counts), std::move(indicator));
+    return std::make_pair(std::move(counts), std::move(union_mask));
 }
 
 
