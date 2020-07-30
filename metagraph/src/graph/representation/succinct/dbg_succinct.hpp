@@ -106,6 +106,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
     virtual void reset_mask() final;
+    virtual bit_vector* release_mask() final;
 
     virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override;

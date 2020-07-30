@@ -891,6 +891,10 @@ void DBGSuccinct::reset_mask() {
     valid_edges_.reset();
 }
 
+bit_vector* DBGSuccinct::release_mask() {
+    return valid_edges_.release();
+}
+
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 

@@ -278,5 +278,38 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     return DeBruijnGraph::operator==(other);
 }
 
+void MaskedDeBruijnGraph::update_mask(const GenerateNodes &generate_nodes,
+                                      bool only_valid_nodes_in_mask,
+                                      bool canonical,
+                                      bool async,
+                                      int memorder) {
+    only_valid_nodes_in_mask_ = only_valid_nodes_in_mask;
+    is_canonical_ = canonical;
+
+    auto *mask_updateable = dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
+    if (mask_updateable) {
+        auto *mask_vector = dynamic_cast<bitmap_vector*>(mask_updateable);
+        if (mask_vector) {
+            auto &mask_sdsl = const_cast<sdsl::bit_vector&>(mask_vector->data());
+            generate_nodes([&](node_index i, bool val) {
+                if (val) {
+                    set_bit(mask_sdsl.data(), i, async, memorder);
+                } else {
+                    unset_bit(mask_sdsl.data(), i, async, memorder);
+                }
+            });
+        } else {
+            generate_nodes([&](node_index i, bool val) { mask_updateable->set(i, val); });
+        }
+    } else {
+        sdsl::bit_vector mask_updated(kmers_in_graph_->size(), false);
+        kmers_in_graph_->add_to(&mask_updated);
+        generate_nodes([&](node_index i, bool val) { mask_updated[i] = val; });
+
+        // if kmers_in_graph_ was not bitmap_dyn before, don't make it now
+        kmers_in_graph_ = std::make_unique<bit_vector_stat>(std::move(mask_updated));
+    }
+}
+
 } // namespace graph
 } // namespace mtg

@@ -134,8 +134,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         }
 
         if (config.label_mask_other_unitig_fraction != 1.0) {
-            // TODO: extract these beforehand and construct an annotator
             // discard this unitig if other labels are found with too high frequency
+            // TODO: extract these beforehand and construct an annotator
             for (const auto &label : anno_graph.get_labels(unitig, other_frac)) {
                 if (!masked_labels.count(label))
                     return false;
@@ -199,13 +199,17 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         });
 
         auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
+
+        // instead of keeping multiple masks (one for valid nodes and another
+        // for the masked graph), transfer the valid node mask to the masked graph
         dbg_succ->mask_dummy_kmers(num_threads, false);
+        std::unique_ptr<bit_vector> dummy_mask(dbg_succ->release_mask());
         graph_ptr = dbg_succ;
-        auto new_indicator = std::make_unique<bitmap_vector>(graph_ptr->max_index() + 1, true);
-        new_indicator->set(DeBruijnGraph::npos, false);
+        sdsl::bit_vector new_indicator(graph_ptr->max_index() + 1, false);
+        dummy_mask->add_to(&new_indicator);
         masked_graph = std::make_shared<MaskedDeBruijnGraph>(
             graph_ptr,
-            std::move(new_indicator),
+            std::make_unique<bitmap_vector>(std::move(new_indicator)),
             true
         );
 
@@ -289,39 +293,45 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
-        std::unique_ptr<bit_vector_stat> mask;
-        sdsl::bit_vector *updated_indicator;
+        // this hack relies on the fact that call_sequences on a masked DBGSuccinct
+        // makes a copy of the mask before traversal, so we can safely write to
+        // the mask in MaskedDeBruijnGraph
+        std::unique_ptr<bitmap> mask;
         auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
         if (dbg_succ) {
-            // This hack relies on the fact that call_sequences on a masked
-            // DBGSuccinct makes a copy of the mask before traversing, so directly
-            // modifying indicator won't have any side effects. This way, we
-            // avoid making another bit vector
-            mask = std::make_unique<bit_vector_stat>(std::move(indicator));
-            updated_indicator = &const_cast<sdsl::bit_vector&>(mask->data());
+            mask = std::make_unique<bitmap_vector>(std::move(indicator));
         } else {
-            mask = std::make_unique<bit_vector_stat>(indicator);
-            updated_indicator = &indicator;
+            mask = std::make_unique<bit_vector_stat>(std::move(indicator));
         }
 
         MaskedDeBruijnGraph masked_graph(graph, std::move(mask), true);
-        masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
-            auto it = path.rbegin();
-            auto rev = seq;
-            reverse_complement(rev.begin(), rev.end());
-            graph->map_to_nodes_sequentially(rev, [&](node_index i) {
-                std::lock_guard<std::mutex> lock(count_mutex);
-                assert(i != DeBruijnGraph::npos);
-                assert(it != path.rend());
-                (*updated_indicator)[i] = true;
-                counts[i * 2] += counts[*it * 2];
-                counts[i * 2 + 1] += counts[*it * 2 + 1];
-                ++it;
-            });
-        }, num_threads);
 
-        if (dbg_succ)
-            std::swap(indicator, *updated_indicator);
+        masked_graph.update_mask([&](const auto &callback) {
+            masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
+                auto it = path.rbegin();
+                auto rev = seq;
+                reverse_complement(rev.begin(), rev.end());
+                graph->map_to_nodes_sequentially(rev, [&](node_index i) {
+                    std::lock_guard<std::mutex> lock(count_mutex);
+                    assert(i != DeBruijnGraph::npos);
+                    assert(it != path.rend());
+                    callback(i, true);
+                    counts[i * 2] += counts[*it * 2];
+                    counts[i * 2 + 1] += counts[*it * 2 + 1];
+                    ++it;
+                });
+            }, num_threads);
+        }, true /* only valid nodes */);
+
+        if (dbg_succ) {
+            auto *cast = dynamic_cast<bitmap_vector*>(masked_graph.release_mask());
+            assert(cast);
+            indicator = const_cast<sdsl::bit_vector&&>(std::shared_ptr<bitmap_vector>(cast)->data());
+        } else {
+            auto *cast = dynamic_cast<bit_vector_stat*>(masked_graph.release_mask());
+            assert(cast);
+            indicator = const_cast<sdsl::bit_vector&&>(std::shared_ptr<bit_vector_stat>(cast)->data());
+        }
     }
 
     // set the width to be double again
@@ -340,50 +350,21 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     bool parallel = num_threads > 1;
     constexpr auto memorder = std::memory_order_relaxed;
 
-    // If the underlying storage derives from bitmap_dyn, then we can safely
-    // update it. Otherwise, populate a new bit vector and replace the one in
-    // masked_graph after.
-    // Also, we require that the underlying mask is bitmap_vector so we can update
-    // it with atomic operations.
-    auto updateable_mask = dynamic_cast<bitmap_vector*>(masked_graph.get_updateable_mask());
-    std::unique_ptr<sdsl::bit_vector> tmp_mask;
-    sdsl::bit_vector &unitig_mask = updateable_mask
-        ? const_cast<sdsl::bit_vector&>(updateable_mask->data())
-        : *(tmp_mask = std::make_unique<sdsl::bit_vector>(masked_graph.max_index() + 1, false));
-
-    if (updateable_mask) {
-        assert(!tmp_mask);
-        std::atomic_thread_fence(std::memory_order_release);
+    std::atomic_thread_fence(std::memory_order_release);
+    masked_graph.update_mask([&](const auto &callback) {
         masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
             if (keep_unitig(unitig, path)) {
                 kept_unitigs.fetch_add(1, memorder);
                 num_kept_nodes.fetch_add(path.size(), memorder);
             } else {
                 for (node_index node : path) {
-                    unset_bit(unitig_mask.data(), node, parallel, memorder);
+                    callback(node, false);
                 }
             }
             total_unitigs.fetch_add(1, memorder);
         }, num_threads);
-        std::atomic_thread_fence(std::memory_order_acquire);
-    } else {
-        assert(tmp_mask);
-        std::atomic_thread_fence(std::memory_order_release);
-        masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
-            if (keep_unitig(unitig, path)) {
-                kept_unitigs.fetch_add(1, memorder);
-                num_kept_nodes.fetch_add(path.size(), memorder);
-                for (node_index node : path) {
-                    set_bit(unitig_mask.data(), node, parallel, memorder);
-                }
-            }
-            total_unitigs.fetch_add(1, memorder);
-        }, num_threads);
-        std::atomic_thread_fence(std::memory_order_acquire);
-    }
-
-    if (tmp_mask)
-        masked_graph.set_mask(new bit_vector_stat(std::move(*tmp_mask)));
+    }, true, false, parallel, memorder);
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace("Kept {} out of {} unitigs with average length {}",
                   kept_unitigs, total_unitigs,
@@ -394,40 +375,22 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads) {
-    std::atomic<size_t> kept_nodes(0);
-    bool parallel = num_threads > 1;
-    constexpr auto memorder = std::memory_order_relaxed;
+    // TODO: parallel
+    std::ignore = num_threads;
+    size_t kept_nodes = 0;
+    size_t total_nodes = masked_graph.num_nodes();
 
-    // If the underlying storage derives from bitmap_dyn, then we can safely
-    // update it. Otherwise, populate a new bit vector and replace the one in
-    // masked_graph after.
-    // Also, we require that the underlying mask is bitmap_vector so we can update
-    // it with atomic operations.
-    auto updateable_mask = dynamic_cast<bitmap_vector*>(masked_graph.get_updateable_mask());
-    std::unique_ptr<sdsl::bit_vector> tmp_mask;
-    sdsl::bit_vector &unitig_mask = updateable_mask
-        ? const_cast<sdsl::bit_vector&>(updateable_mask->data())
-        : *(tmp_mask = std::make_unique<sdsl::bit_vector>(masked_graph.max_index() + 1, false));
-
-    if (updateable_mask) {
-        assert(!tmp_mask);
-        std::atomic_thread_fence(std::memory_order_release);
-        call_ones(unitig_mask, [&](node_index node) {
-            if (!keep_node(node))
-                unset_bit(unitig_mask.data(), node, parallel, memorder);
-        }, parallel, memorder);
-        std::atomic_thread_fence(std::memory_order_acquire);
-    } else {
-        // TODO: parallel
-        assert(tmp_mask);
+    masked_graph.update_mask([&](const auto &callback) {
         masked_graph.call_nodes([&](node_index node) {
-            if (keep_node(node))
-                unitig_mask[node] = true;
+            if (keep_node(node)) {
+                ++kept_nodes;
+            } else {
+                callback(node, false);
+            }
         });
-    }
+    }, true);
 
-    if (tmp_mask)
-        masked_graph.set_mask(new bit_vector_stat(std::move(*tmp_mask)));
+    logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 }
 
 
