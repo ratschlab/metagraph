@@ -281,14 +281,17 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     }
 
     std::unique_ptr<bitmap> union_mask;
+
+    // When graph is of type DBGSuccinct, a copy of the mask is made before
+    // traversal in call_sequences/unitigs, so it's safe to edit the mask while
+    // call_sequences is running.
+    // So, we apply a hack where bitmap_vector is used to store the mask when
+    // the underlying graph is DBGSuccinct, and bit_vector_stat otherwise
     auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(graph);
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
-        // this hack relies on the fact that call_sequences on a masked DBGSuccinct
-        // makes a copy of the mask before traversal, so we can safely write to
-        // the mask in MaskedDeBruijnGraph
         std::unique_ptr<bitmap> mask;
         if (dbg_succ) {
             mask = std::make_unique<bitmap_vector>(std::move(indicator));
@@ -319,10 +322,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         union_mask.reset(masked_graph.release_mask());
 
     } else {
-        // This hack is based on the fact that MaskedDeBruijnGraph::call_sequences
-        // makes a copy of the mask when the underlying graph is DBGSuccinct.
-        // By making the mask derive from bitmap_vector, we are indicating that
-        // it can be safely modified by the callback of call_sequences.
         if (dbg_succ) {
             union_mask = std::make_unique<bitmap_vector>(std::move(indicator));
         } else {
