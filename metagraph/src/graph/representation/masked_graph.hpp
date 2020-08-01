@@ -111,10 +111,10 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual bool operator==(const MaskedDeBruijnGraph &other) const;
     virtual bool operator==(const DeBruijnGraph &other) const override;
 
-    virtual void set_mask(bitmap *mask) {
-        kmers_in_graph_.reset(mask);
-        assert(kmers_in_graph_.get());
-        assert(kmers_in_graph_->size() == graph->max_index() + 1);
+    virtual void set_mask(std::unique_ptr<bitmap>&& mask) {
+        assert(mask.get());
+        assert(mask->size() == graph->max_index() + 1);
+        kmers_in_graph_ = std::move(mask);
     }
 
     typedef std::function<void(const std::function<void(node_index, bool)>&)> GenerateNodes;

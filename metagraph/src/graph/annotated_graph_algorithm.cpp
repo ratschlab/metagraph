@@ -255,8 +255,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     //       atomic operations when we figure out how to align int_vector<> storage
     #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
     for (size_t i = 0; i < labels_in.size(); ++i) {
-        const std::string &label_in = labels_in[i];
-        anno_graph.call_annotated_nodes(label_in, [&](node_index j) {
+        anno_graph.call_annotated_nodes(labels_in[i], [&](node_index j) {
             #pragma omp critical
             {
                 indicator[j] = true;
@@ -270,8 +269,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
     #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
     for (size_t i = 0; i < labels_out.size(); ++i) {
-        const std::string &label_out = labels_out[i];
-        anno_graph.call_annotated_nodes(label_out, [&](node_index j) {
+        anno_graph.call_annotated_nodes(labels_out[i], [&](node_index j) {
             #pragma omp critical
             {
                 indicator[j] = true;
