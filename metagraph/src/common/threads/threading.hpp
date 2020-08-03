@@ -114,4 +114,46 @@ class AsyncActivity {
     std::condition_variable cond_var_;
 };
 
+// TODO: simplify??
+//class interrupt_flag
+//{
+//  public:
+//    interrupt_flag() {
+//        flag = false;
+//    }
+//
+//    void set() {
+//        flag = true;
+//    }
+//
+//    bool is_set() const {
+//        return flag;
+//    }
+//  private:
+//    bool flag;
+//};
+
+// following C++ Concurrency in Action, Second Edition
+
+class thread_interrupted {};
+
+void interruption_point();
+
+class interruptible_thread {
+    std::thread internal_thread;
+    bool *flag;
+
+  public:
+    interruptible_thread(const std::function<void()>);
+    void interrupt();
+
+    void join();
+
+    void detach();
+    bool joinable() const;
+
+
+};
+
+
 #endif // __THREADING_HPP__

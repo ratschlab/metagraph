@@ -238,7 +238,9 @@ Config::Config(int argc, char *argv[]) {
             port = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--address")) {
             host_address = get_value(i++);
-        }else if (!strcmp(argv[i], "--suffix")) {
+        } else if (!strcmp(argv[i], "--timeout")) {
+            server_timeout = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
@@ -1052,6 +1054,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+            fprintf(stderr, "\t--timeout [FLOAT] \tmax seconds for a single request. 0 or negative means no limit [0]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
     }

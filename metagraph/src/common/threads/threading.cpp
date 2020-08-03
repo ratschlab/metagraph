@@ -1,4 +1,5 @@
 #include "threading.hpp"
+#include <iostream>
 
 #include <cassert>
 
@@ -81,4 +82,41 @@ void ThreadPool::initialize(size_t num_workers) {
             }
         });
     }
+}
+
+thread_local bool this_thread_interrupt_flag;
+void interruption_point() {
+    auto id = std::this_thread::get_id;
+    std::cout << "checking interruption!  " << id << " " << this_thread_interrupt_flag << std::endl;
+    if (this_thread_interrupt_flag) {
+        // TODO: better exception
+        //std::cout << "inttreuppted!" << std::endl;
+        throw thread_interrupted(); //std::runtime_error("thread interrupted");
+        //throw std::domain_error("thread interrupted");
+    }
+}
+
+interruptible_thread::interruptible_thread(const std::function<void()> f) {
+    std::promise<bool *> p;
+    internal_thread = std::thread([f, &p] {
+        p.set_value(&this_thread_interrupt_flag);
+        f();
+    });
+    flag = p.get_future().get();
+}
+
+void interruptible_thread::interrupt() {
+    if (flag) {
+        *flag = true;
+    }
+}
+void interruptible_thread::join() {
+    internal_thread.join();
+}
+
+void interruptible_thread::detach() {
+    internal_thread.detach();
+}
+bool interruptible_thread::joinable() const {
+    return internal_thread.joinable();
 }

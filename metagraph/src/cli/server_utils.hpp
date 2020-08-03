@@ -11,6 +11,8 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
+                     const bool execute_separate_thread,
+                     const float timeout,
                      const std::function<std::string(const std::string &)> &process);
 
 Json::Value parse_json_string(const std::string &msg);

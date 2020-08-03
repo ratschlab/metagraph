@@ -28,6 +28,10 @@ const std::string SEQUENCE_JSON_FIELD = "sequence";
 const std::string ALIGNMENT_JSON_FIELD = "alignments";
 const std::string CIGAR_JSON_FIELD = "cigar";
 
+//bool is_interrupted() {
+//    return this_thread_interrupt_flag.is_set();
+//}
+
 // convert values into proper types, i.e. 'nan' -> null, strings representing numbers -> numbers
 Json::Value adjust_for_types(const std::string &v) {
     if (v == "nan")
@@ -118,6 +122,7 @@ std::string process_search_request(const std::string &received_message,
                                    const Config &config_orig) {
     Json::Value json = parse_json_string(received_message);
 
+    logger->trace("starting with search query");
     const auto &fasta = json["FASTA"];
     if (fasta.isNull())
         throw std::domain_error("No input sequences received from client");
@@ -165,14 +170,20 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, aligner.get(), dummy_pool);
+    QueryExecutor engine(config, anno_graph, aligner.get(), dummy_pool, interruption_point);
 
-    engine.query_fasta(tf.name(),
-        [&](const std::string &res) {
+    logger->trace("running on {}", std::this_thread::get_id());
+    try {
+        engine.query_fasta(tf.name(), [&](const std::string &res) {
+            logger->trace("callback running on {}", std::this_thread::get_id());
+            //throw std::runtime_error("thread interrupted");
+            //interruption_point();
             std::lock_guard<std::mutex> lock(oss_mutex);
             oss << res;
-        }
-    );
+        });
+    } catch (const std::exception &e) {
+        logger->info("[Server] caught soemtihg");
+    }
 
     return convert_query_response_to_json(oss.str());
 }
@@ -288,6 +299,8 @@ int run_server(Config *config) {
 
     assert(config->infbase_annotators.size() == 1);
 
+    float timeout = config->server_timeout;
+
     HttpServer initial_server;
     initial_server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> /* request */) {
@@ -315,28 +328,28 @@ int run_server(Config *config) {
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &content) {
+        process_request(response, request, true, timeout, [&](const std::string &content) {
             return process_search_request(content, *anno_graph, *config);
         });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &content) {
+        process_request(response, request, true, timeout, [&](const std::string &content) {
             return process_align_request(content, *graph, *config);
         });
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &) {
+        process_request(response, request, false, timeout, [&](const std::string &) {
             return process_column_label_request(*anno_graph);
         });
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &) {
+        process_request(response, request, false, timeout, [&](const std::string &) {
             return process_stats_request(*graph, *anno_graph, config->infbase,
                                          config->infbase_annotators.front());
         });

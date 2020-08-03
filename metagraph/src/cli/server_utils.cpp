@@ -4,6 +4,8 @@
 
 #include "common/logger.hpp"
 #include "server_utils.hpp"
+#include "common/unix_tools.hpp"
+#include "common/threads/threading.hpp"
 
 
 namespace mtg {
@@ -97,24 +99,69 @@ std::string json_str_with_error_msg(const std::string &msg) {
     return Json::writeString(Json::StreamWriterBuilder(), root);
 }
 
+std::string execute_on_thread(const std::function<std::string(const std::string &)> &process, std::string &content, float timeout) {
+    std::promise<std::string> ret;
+
+    // TODO: use a pool
+    interruptible_thread ithread = interruptible_thread([&]() {
+        try {
+            ret.set_value(process(content));
+        } catch (...) {
+            ret.set_exception(std::current_exception());
+        }
+    });
+
+    std::future<std::string> ret_fut = ret.get_future();
+    std::future_status stat = ret_fut.wait_for(std::chrono::milliseconds((int) (timeout*1000.0)));
+
+    if(stat == std::future_status::ready) {
+        ithread.join();
+        return ret_fut.get();
+    } else {
+        ithread.interrupt();
+        ithread.join();
+
+        throw thread_interrupted();
+    }
+}
+
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
+                     const bool execute_separate_thread,
+                     const float timeout,
                      const std::function<std::string(const std::string &)> &process) {
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
     // Retrieve string:
     std::string content = request->content.string();
     logger->info("[Server] {} request from {}", request->path,
                  request->remote_endpoint().address().to_string());
 
     try {
-        std::string ret = process(content);
+        std::string ret = (execute_separate_thread && timeout > 0.0)
+                ? execute_on_thread(process, content, timeout)
+                : process(content);
+
         write_response(SimpleWeb::StatusCode::success_ok, ret, response,
-                       is_compression_requested(request));
+                                       is_compression_requested(request));
+
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+        logger->info("[Server] benchmark: rtt {} {}",
+                     std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(),
+                     get_curr_RSS());
+
     } catch (const std::exception &e) {
         logger->info("[Server] Error on request\n{}", e.what());
         response->write(SimpleWeb::StatusCode::client_error_bad_request,
                         json_str_with_error_msg(e.what()));
-    } catch (...) {
-        logger->info("[Server] Error on request");
+    } catch (const thread_interrupted &e) {
+        logger->trace("got interrupted, sending back timeout");
+        write_response(SimpleWeb::StatusCode::server_error_internal_server_error, json_str_with_error_msg("timeout"), response,
+                       is_compression_requested(request));
+    }
+    catch (...) {
+        logger->info("[Server] Error on request {}");
         response->write(SimpleWeb::StatusCode::server_error_internal_server_error,
                         json_str_with_error_msg("Internal server error"));
     }

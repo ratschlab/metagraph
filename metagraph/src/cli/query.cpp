@@ -575,6 +575,7 @@ void QueryExecutor::query_fasta(const string &file,
                     return;
                 }
 
+                maybe_interrupt_();
                 // query the alignment matches against the annotator
                 auto matches = aligner_->align(seq);
 
@@ -603,9 +604,11 @@ void QueryExecutor
     seq_io::FastaParser::iterator it;
 
     size_t seq_count = 0;
+
     while (begin != end) {
         Timer batch_timer;
 
+        maybe_interrupt_();
         std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
         uint64_t num_bytes_read = 0;
 
@@ -637,6 +640,7 @@ void QueryExecutor
             for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, std::string &seq) {
+                        maybe_interrupt_();
                         // Align the sequence, then add the best match
                         // in the graph to the query graph.
                         auto matches = aligner_->align(seq);
@@ -661,6 +665,7 @@ void QueryExecutor
             thread_pool_.join();
         };
 
+        maybe_interrupt_();
         auto query_graph = construct_query_graph(
             anno_graph_,
             generate_batch,
@@ -678,8 +683,10 @@ void QueryExecutor
             for ( ; begin != it; ++begin) {
                 assert(begin != end);
 
+                maybe_interrupt_();
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
+                        //logger->trace("calling back in {}", std::this_thread::get_id());
                         callback(query_sequence(id, name, seq, *query_graph, config_));
                     },
                     seq_count++, std::string(begin->name.s),
@@ -688,8 +695,10 @@ void QueryExecutor
             }
         } else {
             for (auto&& [id, name, seq] : named_alignments) {
+                maybe_interrupt_();
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
+                        //logger->trace("calling back in {}", std::this_thread::get_id());
                         callback(query_sequence(id, name, seq, *query_graph, config_));
                     },
                     id, std::move(name), std::move(seq)

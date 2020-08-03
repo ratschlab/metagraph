@@ -137,6 +137,7 @@ class Config {
     std::string annotation_label = "";
     std::string header = "";
     std::string host_address;
+    float server_timeout = 0.0;
 
     std::filesystem::path tmp_dir;
 

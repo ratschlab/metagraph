@@ -41,11 +41,14 @@ class QueryExecutor {
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
                   const graph::align::IDBGAligner *aligner,
-                  ThreadPool &thread_pool)
+                  ThreadPool &thread_pool,
+                  const std::function<void()> maybe_interrupt = []{})
       : config_(config),
         anno_graph_(anno_graph),
         aligner_(aligner),
-        thread_pool_(thread_pool) {}
+        thread_pool_(thread_pool),
+        maybe_interrupt_(maybe_interrupt) {}
+
 
     void query_fasta(const std::string &file_path,
                      const std::function<void(const std::string &)> &callback);
@@ -65,6 +68,7 @@ class QueryExecutor {
     const graph::AnnotatedDBG &anno_graph_;
     const graph::align::IDBGAligner *aligner_;
     ThreadPool &thread_pool_;
+    const std::function<void()> maybe_interrupt_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                              const std::function<void(const std::string &)> &callback);

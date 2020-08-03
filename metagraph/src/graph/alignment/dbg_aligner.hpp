@@ -12,6 +12,9 @@
 #include "aligner_methods.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
+#if defined(SERVER_BUILD)
+#include "common/threads/threading.hpp"
+#endif
 
 namespace mtg {
 namespace graph {
@@ -342,6 +345,10 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     while (path_queue.size()) {
         assert(path_queue.maximum().is_valid(graph_, &config_));
+        #if defined(SERVER_BUILD)
+        interruption_point();
+        #endif
+
         callback(DBGAlignment(path_queue.maximum()));
         path_queue.pop_maximum();
     }
