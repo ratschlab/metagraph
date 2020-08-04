@@ -55,8 +55,11 @@ make build-server
 make start-server
 ```
 
-The latter command may needs some tweaking in the `Makefile` on your system. The data directory on the host can be set using an additional file `metagraph_local.mk` in the same directory as the `Makefile`:
+The latter command may needs some tweaking in the `Makefile` on your system. The data directory on the host can be set using an additional file `metagraph_local.mk` in the same directory as the `Makefile`. The directory in `DATA_DIR_HOST` gets mapped to `/data` in the container. The variables `SERVER_GRAPH_FILE` and `SERVER_ANNOT_FILE` are paths in the container. In the example below, the graph file would be in `/local/metagraph/my_graph.dbg` on the host filesystem.
 
 ```
-DATA_DIR_HOST := /data/metagraph
+DATA_DIR_HOST := /local/metagraph
+SERVER_GRAPH_FILE := /data/my_graph.dbg
+SERVER_ANNOT_FILE := /data/my_graph.relaxed.brwt.annodbg
+
 ```

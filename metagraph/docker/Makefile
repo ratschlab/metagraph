@@ -25,7 +25,7 @@ ifeq ($(docker), false)
 else
 	CODE_BASE := /opt/metagraph
 	BUILD_DIR := /opt/metagraph_build
-  BUILD_DIR_STATIC := /opt/metagraph_build_static
+	BUILD_DIR_STATIC := /opt/metagraph_build_static
 endif
 
 DATA_DIR := /data
@@ -42,6 +42,7 @@ DOCKER_BASE_CMD := docker run --rm $(DOCKER_OPTS) $(IMG_NAME_DEV)
 ifeq ($(docker), false)
   EXEC_CMD := bash -c
 else
+  $(shell mkdir -p $(BUILD_DIR_HOST_DOCKER) $(BUILD_DIR_STATIC_HOST_DOCKER) )	
   EXEC_CMD := $(DOCKER_BASE_CMD) bash -c
 endif
 
@@ -95,7 +96,7 @@ integration-tests:
 build-server: sync build-docker-dev-env build-sdsl-lite build-libmaus build-metagraph api-integration-tests
 
 start-server:
-	docker run -d --restart=always -it $(DOCKER_OPTS) -p 5555:5555 metagraph server_query -i $(DATA_DIR)/bigsi/graph_subset_3000.dbg -a $(DATA_DIR)/bigsi/annotation_subset_3000.relaxed.brwt.annodbg -v -p 8
+	docker run -d --restart=always -it $(DOCKER_OPTS) -p 5555:5555 $(IMG_NAME_DEV) /opt/metagraph_build/metagraph server_query -i $(SERVER_GRAPH_FILE) -a $(SERVER_ANNOT_FILE) -v -p 8
 
 run-interactive:
-	docker run -it $(DOCKER_OPTS) --entrypoint bash $(IMG_NAME_DEV)
+	docker run --rm -it $(DOCKER_OPTS) --entrypoint bash $(IMG_NAME_DEV)
