@@ -138,6 +138,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             if (in_count >= config.label_mask_in_kmer_fraction * labels_in.size())
                 ++in_label_counter;
 
+            // if there are not enough k-mers left to satisfy the in-label criteria,
+            // or if there are too many k-mers with out-labels
             if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
                     || (out_count > config.label_mask_out_kmer_fraction * labels_out.size()
                         && ++out_label_counter > label_out_cutoff))

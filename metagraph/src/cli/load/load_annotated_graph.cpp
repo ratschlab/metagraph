@@ -146,6 +146,9 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
 
     std::string line;
     while (std::getline(fin, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+
         thread_pool.enqueue([&](std::string line) {
             auto line_split = utils::split_string(line, "\t", false);
             if (line_split.size() <= 2 || line_split.size() > 4)

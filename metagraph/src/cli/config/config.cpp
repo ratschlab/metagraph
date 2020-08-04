@@ -893,8 +893,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-file [STR] \t\tfile describing labels to mask in and out\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-file [STR] \tfile describing labels to mask in and out and their relative fractions []\n");
+            fprintf(stderr, "\t                       \t\tA k-mer is an in-k-mer if it has at least in_kmer_frac in-labels.\n");
+            fprintf(stderr, "\t                       \t\tA k-mer is an out-k-mer if it has more than out_kmer_frac out-labels.\n");
+            fprintf(stderr, "\t                       \t\tA unitig is included if it has at least in_unitig_frac in-k-mers and at most out_unitig_frac out-k-mers.\n");
+            fprintf(stderr, "\t                       \t\tA unitig is excluded if more than other_unitig_frac of its k-mers are not in the in- or out-label sets.\n");
+            fprintf(stderr, "\t                       \t\texample: '<exp_label>\\t<in_kmer_frac>,<in_unitig_frac>,<out_kmer_frac>,<out_unitig_frac>,<other_unitig_frac>\\t<inlabel1>,<inlabel2>,...\\t<outlabel1>,<outlabel2>,...'\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
