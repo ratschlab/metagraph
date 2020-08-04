@@ -18,12 +18,13 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
-void
-call_masked_graphs(const graph::AnnotatedDBG &anno_graph, Config *config,
-                   const std::function<void(const graph::MaskedDeBruijnGraph&,
-                                            const std::string& /* header */)> &callback,
-                   size_t num_parallel_graphs_masked = 1,
-                   size_t num_threads_per_graph = 1);
+typedef std::function<void(const graph::MaskedDeBruijnGraph&,
+                           const std::string& /* header */)> CallMaskedGraphHeader;
+
+void call_masked_graphs(const graph::AnnotatedDBG &anno_graph, Config *config,
+                        const CallMaskedGraphHeader &callback,
+                        size_t num_parallel_graphs_masked = 1,
+                        size_t num_threads_per_graph = 1);
 
 } // namespace cli
 } // namespace mtg

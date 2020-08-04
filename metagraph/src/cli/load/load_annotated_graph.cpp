@@ -90,12 +90,50 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     ));
 }
 
-void
-call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
-                   const std::function<void(const MaskedDeBruijnGraph&,
-                                            const std::string& /* header */)> &callback,
-                   size_t num_parallel_graphs_masked,
-                   size_t num_threads_per_graph) {
+DifferentialAssemblyConfig parse_diff_config(const std::string &config_str,
+                                             bool canonical) {
+    DifferentialAssemblyConfig diff_config;
+    diff_config.add_complement = canonical;
+
+    auto vals = utils::split_string(config_str, ",");
+    auto it = vals.begin();
+    if (it != vals.end()) {
+        diff_config.label_mask_in_kmer_fraction = std::stof(*it);
+        ++it;
+    }
+    if (it != vals.end()) {
+        diff_config.label_mask_in_unitig_fraction = std::stof(*it);
+        ++it;
+    }
+    if (it != vals.end()) {
+        diff_config.label_mask_out_kmer_fraction = std::stof(*it);
+        ++it;
+    }
+    if (it != vals.end()) {
+        diff_config.label_mask_out_unitig_fraction = std::stof(*it);
+        ++it;
+    }
+    if (it != vals.end()) {
+        diff_config.label_mask_other_unitig_fraction = std::stof(*it);
+        ++it;
+    }
+
+    assert(it == vals.end());
+
+    logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
+    logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
+    logger->trace("Per-kmer mask out fraction: {}", diff_config.label_mask_out_kmer_fraction);
+    logger->trace("Per-unitig mask out fraction: {}", diff_config.label_mask_out_unitig_fraction);
+    logger->trace("Per-unitig other label fraction: {}", diff_config.label_mask_other_unitig_fraction);
+    logger->trace("Include reverse complements: {}", diff_config.add_complement);
+
+    return diff_config;
+}
+
+void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
+                        const CallMaskedGraphHeader &callback,
+                        size_t num_parallel_graphs_masked,
+                        size_t num_threads_per_graph) {
     assert(!config->label_mask_file.empty());
 
     std::ifstream fin(config->label_mask_file);
@@ -113,40 +151,7 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             if (line_split.size() <= 2 || line_split.size() > 4)
                 throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
 
-            DifferentialAssemblyConfig diff_config;
-            diff_config.add_complement = config->canonical;
-
-            auto vals = utils::split_string(line_split[1], ",");
-            auto it = vals.begin();
-            if (it != vals.end()) {
-                diff_config.label_mask_in_kmer_fraction = std::stof(*it);
-                ++it;
-            }
-            if (it != vals.end()) {
-                diff_config.label_mask_in_unitig_fraction = std::stof(*it);
-                ++it;
-            }
-            if (it != vals.end()) {
-                diff_config.label_mask_out_kmer_fraction = std::stof(*it);
-                ++it;
-            }
-            if (it != vals.end()) {
-                diff_config.label_mask_out_unitig_fraction = std::stof(*it);
-                ++it;
-            }
-            if (it != vals.end()) {
-                diff_config.label_mask_other_unitig_fraction = std::stof(*it);
-                ++it;
-            }
-
-            assert(it == vals.end());
-
-            logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
-            logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
-            logger->trace("Per-kmer mask out fraction: {}", diff_config.label_mask_out_kmer_fraction);
-            logger->trace("Per-unitig mask out fraction: {}", diff_config.label_mask_out_unitig_fraction);
-            logger->trace("Per-unitig other label fraction: {}", diff_config.label_mask_other_unitig_fraction);
-            logger->trace("Include reverse complements: {}", diff_config.add_complement);
+            auto diff_config = parse_diff_config(line_split[1], config->canonical);
 
             if (config->enumerate_out_sequences)
                 line_split[0] += ".";
@@ -158,10 +163,8 @@ call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             );
 
             callback(*mask_graph_from_labels(anno_graph,
-                                             foreground_labels,
-                                             background_labels,
-                                             diff_config,
-                                             num_threads_per_graph),
+                                             foreground_labels, background_labels,
+                                             diff_config, num_threads_per_graph),
                      line_split[0]);
         }, line);
     }
