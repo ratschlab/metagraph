@@ -72,7 +72,7 @@ int clean_graph(Config *config) {
             // skip zero k-mer counts for dummy k-mers in DBGSuccinct
             const auto _graph = dynamic_cast<graph::DBGSuccinct*>(graph.get())
                     ? std::make_shared<graph::MaskedDeBruijnGraph>(graph,
-                        [&](auto i) { return (*node_weights)[i] > 0; }, true)
+                        [&](auto i) { return (*node_weights)[i] > 0; })
                     : graph;
 
             uint64_t cutoff
@@ -100,7 +100,6 @@ int clean_graph(Config *config) {
             graph = std::make_shared<graph::MaskedDeBruijnGraph>(graph,
                 [&](auto i) { return weights[i] >= config->min_count
                                     && weights[i] <= config->max_count; },
-                true,
                 graph->is_canonical_mode()
             );
             graph->add_extension(node_weights);
@@ -271,7 +270,6 @@ int clean_graph(Config *config) {
 
             graph::MaskedDeBruijnGraph graph_slice(graph,
                 [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; },
-                false,
                 graph->is_canonical_mode()
             );
 

@@ -35,7 +35,9 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
-                MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+                auto mask = std::make_unique<bitmap_vector>(graph->max_index() + 1, false);
+                graph->call_nodes([&](auto i) { mask->set(i, true); });
+                MaskedDeBruijnGraph masked(graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(masked));
 
                 std::mutex seq_mutex;
@@ -66,7 +68,9 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
-                MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+                auto mask = std::make_unique<bitmap_vector>(graph->max_index() + 1, false);
+                graph->call_nodes([&](auto i) { mask->set(i, true); });
+                MaskedDeBruijnGraph masked(graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(masked));
 
                 std::mutex seq_mutex;
@@ -97,7 +101,9 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
-                MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+                auto mask = std::make_unique<bitmap_vector>(graph->max_index() + 1, false);
+                graph->call_nodes([&](auto i) { mask->set(i, true); });
+                MaskedDeBruijnGraph masked(graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(masked));
 
                 auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
@@ -130,7 +136,9 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
                 auto graph = build_graph_batch<TypeParam>(k, sequences);
-                MaskedDeBruijnGraph masked(graph, [](auto) { return true; });
+                auto mask = std::make_unique<bitmap_vector>(graph->max_index() + 1, false);
+                graph->call_nodes([&](auto i) { mask->set(i, true); });
+                MaskedDeBruijnGraph masked(graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(masked));
 
                 auto stable_graph = build_graph_batch<DBGSuccinct>(k, sequences);
@@ -165,13 +173,12 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
                 auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-                MaskedDeBruijnGraph graph(
-                    full_graph,
-                    [&](const auto &index) {
-                        return index != DeBruijnGraph::npos
-                            && full_graph->get_node_sequence(index) != first_kmer;
-                    }
-                );
+                auto mask = std::make_unique<bitmap_vector>(full_graph->max_index() + 1, false);
+                full_graph->call_nodes([&](auto i) { mask->set(i, true); });
+                for (auto node : map_sequence_to_nodes(*full_graph, first_kmer)) {
+                    mask->set(node, false);
+                }
+                MaskedDeBruijnGraph graph(full_graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(graph));
 
                 std::mutex seq_mutex;
@@ -229,13 +236,12 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
                 auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-                MaskedDeBruijnGraph graph(
-                    full_graph,
-                    [&](const auto &index) {
-                        return index != DeBruijnGraph::npos
-                            && full_graph->get_node_sequence(index) != first_kmer;
-                    }
-                );
+                auto mask = std::make_unique<bitmap_vector>(full_graph->max_index() + 1, false);
+                full_graph->call_nodes([&](auto i) { mask->set(i, true); });
+                for (auto node : map_sequence_to_nodes(*full_graph, first_kmer)) {
+                    mask->set(node, false);
+                }
+                MaskedDeBruijnGraph graph(full_graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(graph));
 
                 std::mutex seq_mutex;
@@ -293,13 +299,12 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
                 auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-                MaskedDeBruijnGraph graph(
-                    full_graph,
-                    [&](const auto &index) {
-                        return index != DeBruijnGraph::npos
-                            && full_graph->get_node_sequence(index) != first_kmer;
-                    }
-                );
+                auto mask = std::make_unique<bitmap_vector>(full_graph->max_index() + 1, false);
+                full_graph->call_nodes([&](auto i) { mask->set(i, true); });
+                for (auto node : map_sequence_to_nodes(*full_graph, first_kmer)) {
+                    mask->set(node, false);
+                }
+                MaskedDeBruijnGraph graph(full_graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(graph));
 
                 std::mutex seq_mutex;
@@ -357,13 +362,12 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 auto full_graph = build_graph_batch<TypeParam>(k, sequences);
 
                 auto first_kmer = sequences[0].substr(0, std::min(k, sequences[0].length()));
-                MaskedDeBruijnGraph graph(
-                    full_graph,
-                    [&](const auto &index) {
-                        return index != DeBruijnGraph::npos
-                            && full_graph->get_node_sequence(index) != first_kmer;
-                    }
-                );
+                auto mask = std::make_unique<bitmap_vector>(full_graph->max_index() + 1, false);
+                full_graph->call_nodes([&](auto i) { mask->set(i, true); });
+                for (auto node : map_sequence_to_nodes(*full_graph, first_kmer)) {
+                    mask->set(node, false);
+                }
+                MaskedDeBruijnGraph graph(full_graph, std::move(mask));
                 // EXPECT_TRUE(check_graph_nodes(graph));
 
                 std::mutex seq_mutex;
@@ -426,7 +430,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
                 );
 
                 MaskedDeBruijnGraph graph(full_graph,
-                                          std::make_unique<bit_vector_stat>(std::move(mask)), true);
+                                          std::make_unique<bit_vector_stat>(std::move(mask)));
 
                 EXPECT_EQ(*full_graph, graph.get_graph());
                 EXPECT_TRUE(check_graph_nodes(graph));
@@ -558,15 +562,16 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                 reverse_complement(rev.begin(), rev.end());
 
                 auto full_graph = build_graph_batch<TypeParam>(k, sequences, true);
-                sdsl::bit_vector mask(full_graph->max_index() + 1, true);
+                auto mask = std::make_unique<bitmap_vector>(full_graph->max_index() + 1, false);
+                full_graph->call_nodes([&](auto i) { mask->set(i, true); });
+                mask->set(0, false);
                 full_graph->map_to_nodes_sequentially(sequences[0], [&](auto i) {
-                    mask[i] = false;
+                    mask->set(i, false);
                 });
                 full_graph->map_to_nodes_sequentially(rev, [&](auto i) {
-                    mask[i] = false;
+                    mask->set(i, false);
                 });
-                MaskedDeBruijnGraph graph(full_graph,
-                                          std::make_unique<bit_vector_stat>(std::move(mask)));
+                MaskedDeBruijnGraph graph(full_graph, std::move(mask));
 
                 graph.map_to_nodes(sequences[0], [&](auto node) {
                     EXPECT_EQ(DeBruijnGraph::npos, node);
@@ -592,6 +597,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                 // does not change the order of k-mers and their indexes
                 auto full_stable_graph = build_graph_batch<DBGSuccinct>(k, sequences, true);
                 sdsl::bit_vector stable_mask(full_stable_graph->max_index() + 1, true);
+                stable_mask[0] = false;
                 full_stable_graph->map_to_nodes_sequentially(sequences[0], [&](auto i) {
                     stable_mask[i] = false;
                 });
@@ -662,6 +668,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
                     dbg_succ->reset_mask();
                     const auto &boss = dbg_succ->get_boss();
                     sdsl::bit_vector mask(boss.num_edges() + 1, true);
+                    mask[0] = false;
                     size_t num_kmers = mask.size() - 1;
                     for (size_t i = 1; i < mask.size(); ++i) {
                         if (boss.get_last(i) || boss.get_node_seq(i)[0] == boss.kSentinelCode) {

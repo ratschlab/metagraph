@@ -8,14 +8,14 @@
 namespace mtg {
 namespace graph {
 
+using mtg::common::logger;
+
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::unique_ptr<bitmap>&& kmers_in_graph,
-                      bool only_valid_nodes_in_mask,
                       bool canonical)
       : graph_(graph),
         kmers_in_graph_(std::move(kmers_in_graph)),
-        only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
         is_canonical_(canonical) {
     assert(kmers_in_graph_.get());
     assert(kmers_in_graph_->size() == graph->max_index() + 1);
@@ -25,12 +25,10 @@ MaskedDeBruijnGraph
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::function<bool(node_index)>&& callback,
-                      bool only_valid_nodes_in_mask,
                       bool canonical)
       : MaskedDeBruijnGraph(graph,
                             std::make_unique<bitmap_lazy>(std::move(callback),
                                                           graph->max_index() + 1),
-                            only_valid_nodes_in_mask,
                             canonical) {}
 
 // Traverse the outgoing edge
@@ -87,54 +85,44 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_outgoing_kmers(node_index kmer,
-                      const OutgoingEdgeCallback &callback) const {
+::call_outgoing_kmers(node_index kmer, const OutgoingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
-    graph_->call_outgoing_kmers(
-        kmer,
-        [&](const auto &index, auto c) {
-            if (in_subgraph(index))
-                callback(index, c);
-        }
-    );
+    graph_->call_outgoing_kmers(kmer, [&](const auto &index, auto c) {
+        if (in_subgraph(index))
+            callback(index, c);
+    });
 }
 
 void MaskedDeBruijnGraph
-::call_incoming_kmers(node_index kmer,
-                      const IncomingEdgeCallback &callback) const {
+::call_incoming_kmers(node_index kmer, const IncomingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
-    graph_->call_incoming_kmers(
-        kmer,
-        [&](const auto &index, auto c) {
-            if (in_subgraph(index))
-                callback(index, c);
-        }
-    );
+    graph_->call_incoming_kmers(kmer, [&](const auto &index, auto c) {
+        if (in_subgraph(index))
+            callback(index, c);
+    });
 }
 
-bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
-                              const bitmap &kmers_in_graph,
-                              bool only_valid_nodes_in_mask) {
-    sdsl::bit_vector mask_bv(dbg_succ.get_boss().num_edges() + 1, false);
-    if (only_valid_nodes_in_mask) {
-        kmers_in_graph.call_ones(
-            [&](auto i) {
-                assert(dbg_succ.kmer_to_boss_index(i));
-                mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
-            }
-        );
+bitmap_vector get_boss_mask(const DBGSuccinct &dbg_succ, const bitmap &kmers_in_graph) {
+    sdsl::bit_vector mask_bv;
+    const auto *mask_vector = dynamic_cast<const bitmap_vector*>(&kmers_in_graph);
+    const auto *mask_stat = dynamic_cast<const bit_vector_stat*>(&kmers_in_graph);
+
+    if (dbg_succ.get_mask() || (!mask_vector || !mask_stat)) {
+        mask_bv = sdsl::bit_vector(dbg_succ.get_boss().num_edges() + 1, false);
+        kmers_in_graph.call_ones([&](auto i) {
+            assert(dbg_succ.kmer_to_boss_index(i));
+            mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
+        });
+    } else if (mask_vector) {
+        mask_bv = mask_vector->data();
     } else {
-        dbg_succ.call_nodes(
-            [&](auto i) {
-                assert(dbg_succ.kmer_to_boss_index(i));
-                if (kmers_in_graph[i])
-                    mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
-            }
-        );
+        assert(mask_stat);
+        mask_bv = mask_stat->data();
     }
-    return bit_vector_stat(std::move(mask_bv));
+
+    return bitmap_vector(std::move(mask_bv));
 }
 
 void MaskedDeBruijnGraph
@@ -142,8 +130,7 @@ void MaskedDeBruijnGraph
                  size_t num_threads,
                  bool kmers_in_single_form) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
-                                             only_valid_nodes_in_mask_);
+        bitmap_vector mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
 
         dbg_succ->get_boss().call_sequences([&](std::string&& sequence, auto&& path) {
             for (auto &node : path) {
@@ -164,8 +151,7 @@ void MaskedDeBruijnGraph
                size_t min_tip_size,
                bool kmers_in_single_form) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
-                                             only_valid_nodes_in_mask_);
+        bitmap_vector mask = get_boss_mask(*dbg_succ, *kmers_in_graph_);
 
         dbg_succ->get_boss().call_unitigs([&](std::string&& sequence, auto&& path) {
             for (auto &node : path) {
@@ -190,33 +176,20 @@ void MaskedDeBruijnGraph
 
     bool stop = false;
 
-    if (only_valid_nodes_in_mask_) {
-        // iterate only through the nodes marked in the mask
-        // TODO: add terminate<bool(void)> to call_ones
-        kmers_in_graph_->call_ones(
-            [&](auto index) {
-                if (stop || !index)
-                    return;
+    // iterate only through the nodes marked in the mask
+    // TODO: add terminate<bool(void)> to call_ones
+    kmers_in_graph_->call_ones([&](auto index) {
+        if (stop)
+            return;
 
-                assert(in_subgraph(index));
+        assert(in_subgraph(index));
 
-                if (stop_early()) {
-                    stop = true;
-                } else {
-                    callback(index);
-                }
-            }
-        );
-    } else {
-        // call all nodes in the base graph and check the mask
-        graph_->call_nodes(
-            [&](auto index) {
-                if (in_subgraph(index))
-                    callback(index);
-            },
-            stop_early
-        );
-    }
+        if (stop_early()) {
+            stop = true;
+        } else {
+            callback(index);
+        }
+    });
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -225,13 +198,9 @@ void MaskedDeBruijnGraph
 ::map_to_nodes(std::string_view sequence,
                const std::function<void(node_index)> &callback,
                const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_subgraph(index) ? index : npos);
-        },
-        terminate
-    );
+    graph_->map_to_nodes(sequence, [&](const node_index &index) {
+        callback(index && in_subgraph(index) ? index : npos);
+    }, terminate);
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -241,13 +210,9 @@ void MaskedDeBruijnGraph
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes_sequentially(
-        sequence,
-        [&](const node_index &index) {
-            callback(index && in_subgraph(index) ? index : npos);
-        },
-        terminate
-    );
+    graph_->map_to_nodes_sequentially(sequence, [&](const node_index &index) {
+        callback(index && in_subgraph(index) ? index : npos);
+    }, terminate);
 }
 
 // Get string corresponding to |node_index|.
@@ -279,15 +244,12 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
 }
 
 void MaskedDeBruijnGraph::update_mask(const GenerateNodes &generate_nodes,
-                                      bool only_valid_nodes_in_mask,
-                                      bool canonical,
+                                      bool in_place,
                                       bool async,
                                       int memorder) {
-    only_valid_nodes_in_mask_ = only_valid_nodes_in_mask;
-    is_canonical_ = canonical;
-
+    std::mutex set_mutex;
     auto *mask_updateable = dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
-    if (mask_updateable) {
+    if (in_place && mask_updateable) {
         auto *mask_vector = dynamic_cast<bitmap_vector*>(mask_updateable);
         if (mask_vector) {
             auto &mask_sdsl = const_cast<sdsl::bit_vector&>(mask_vector->data());
@@ -299,14 +261,30 @@ void MaskedDeBruijnGraph::update_mask(const GenerateNodes &generate_nodes,
                 }
             });
         } else {
-            generate_nodes([&](node_index i, bool val) { mask_updateable->set(i, val); });
+            if (async) {
+                generate_nodes([&](node_index i, bool val) {
+                    std::lock_guard<std::mutex> lock(set_mutex);
+                    mask_updateable->set(i, val);
+                });
+            } else {
+                generate_nodes([&](node_index i, bool val) {
+                    mask_updateable->set(i, val);
+                });
+            }
         }
     } else {
+        if (in_place)
+            logger->warn("Mask not updateable. Making a copy instead");
+
         sdsl::bit_vector mask_updated(kmers_in_graph_->size(), false);
         kmers_in_graph_->add_to(&mask_updated);
-        generate_nodes([&](node_index i, bool val) { mask_updated[i] = val; });
-
-        // if kmers_in_graph_ was not bitmap_dyn before, don't make it now
+        generate_nodes([&](node_index i, bool val) {
+            if (val) {
+                set_bit(mask_updated.data(), i, async, memorder);
+            } else {
+                unset_bit(mask_updated.data(), i, async, memorder);
+            }
+        });
         kmers_in_graph_ = std::make_unique<bit_vector_stat>(std::move(mask_updated));
     }
 }

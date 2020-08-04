@@ -15,12 +15,10 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
-                        bool only_valid_nodes_in_mask = false,
                         bool canonical = false);
 
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::function<bool(node_index)>&& callback,
-                        bool only_valid_nodes_in_mask = false,
                         bool canonical = false);
 
     virtual void add_sequence(std::string_view,
@@ -86,6 +84,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual size_t get_k() const override { return graph_->get_k(); }
 
     virtual bool is_canonical_mode() const override { return is_canonical_; }
+    virtual void set_canonical_mode(bool is_canonical_mode) { is_canonical_ = is_canonical_mode; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
@@ -113,14 +112,13 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual void set_mask(std::unique_ptr<bitmap>&& mask) {
         assert(mask.get());
-        assert(mask->size() == graph->max_index() + 1);
+        assert(mask->size() == graph_->max_index() + 1);
         kmers_in_graph_ = std::move(mask);
     }
 
     typedef std::function<void(const std::function<void(node_index, bool)>&)> GenerateNodes;
     virtual void update_mask(const GenerateNodes &generate_nodes,
-                             bool only_valid_nodes_in_mask = false,
-                             bool canonical = false,
+                             bool in_place = false,
                              bool async = false,
                              int memorder = __ATOMIC_SEQ_CST);
 
@@ -130,7 +128,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> kmers_in_graph_;
-    bool only_valid_nodes_in_mask_;
     bool is_canonical_;
 };
 

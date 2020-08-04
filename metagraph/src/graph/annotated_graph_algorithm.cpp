@@ -36,15 +36,18 @@ std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
-                  size_t num_threads);
+                  size_t num_threads,
+                  bool update_in_place);
 
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const KeepUnitig &keep_unitig,
-                                   size_t num_threads);
+                                   size_t num_threads,
+                                   bool update_in_place);
 
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
-                                 size_t num_threads);
+                                 size_t num_threads,
+                                 bool update_in_place);
 
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
@@ -63,12 +66,20 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         anno_graph.get_graph_ptr()
     );
 
+    // TODO: find a way to avoid this hack
+    // Since call_unitigs/sequences on a masked DBGSuccinct makes a copy of the
+    // mask before traversal, we can safely update the mask in the callback
+    bool update_in_place = static_cast<bool>(
+        std::dynamic_pointer_cast<const DBGSuccinct>(graph_ptr)
+    );
+
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
     auto [counts, union_mask] = fill_count_vector(anno_graph,
                                                   labels_in, labels_out,
-                                                  num_threads);
+                                                  num_threads,
+                                                  update_in_place);
 
     // counts is a double-width, interleaved vector where the significant bits
     // represent the out-label count and the least significant bits represent
@@ -104,7 +115,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             uint64_t sum = in_count + out_count;
             return in_count >= config.label_mask_in_kmer_fraction * sum
                 && out_count <= config.label_mask_out_kmer_fraction * sum;
-        }, num_threads);
+        }, num_threads, update_in_place);
 
         return std::move(*masked_graph);
     }
@@ -143,7 +154,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         }
 
         return true;
-    }, num_threads);
+    }, num_threads, update_in_place);
 
     return std::move(*masked_graph);
 }
@@ -158,7 +169,6 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::move(mask),
-        true, // only_valid_nodes_in_mask
         graph_ptr->is_canonical_mode()
     );
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
@@ -241,7 +251,8 @@ std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
-                  size_t num_threads) {
+                  size_t num_threads,
+                  bool update_in_place) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
@@ -278,23 +289,14 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         });
     }
 
-    std::unique_ptr<bitmap> union_mask;
-
-    // When graph is of type DBGSuccinct, a copy of the mask is made before
-    // traversal in call_sequences/unitigs, so it's safe to edit the mask while
-    // call_sequences is running.
-    // So, we apply a hack where bitmap_vector is used to store the mask when
-    // the underlying graph is DBGSuccinct, and bit_vector_stat otherwise
-    if (std::dynamic_pointer_cast<const DBGSuccinct>(graph)) {
-        union_mask = std::make_unique<bitmap_vector>(std::move(indicator));
-    } else {
-        union_mask = std::make_unique<bit_vector_stat>(std::move(indicator));
-    }
+    std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(
+        std::move(indicator)
+    );
 
     if (graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
-        MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask), true);
+        MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask));
 
         std::mutex count_mutex;
         masked_graph.update_mask([&](const auto &callback) {
@@ -312,7 +314,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                     ++it;
                 });
             }, num_threads);
-        }, true /* only valid nodes */);
+        }, update_in_place);
 
         union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
     }
@@ -326,7 +328,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const KeepUnitig &keep_unitig,
-                                   size_t num_threads) {
+                                   size_t num_threads,
+                                   bool update_in_place) {
     std::atomic<size_t> kept_unitigs(0);
     std::atomic<size_t> total_unitigs(0);
     std::atomic<size_t> num_kept_nodes(0);
@@ -346,7 +349,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
             }
             total_unitigs.fetch_add(1, memorder);
         }, num_threads);
-    }, true, false, parallel, memorder);
+    }, update_in_place, parallel, memorder);
     std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace("Kept {} out of {} unitigs with average length {}",
@@ -357,9 +360,13 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
-                                 size_t num_threads) {
+                                 size_t num_threads,
+                                 bool update_in_place) {
     // TODO: parallel
     std::ignore = num_threads;
+    bool parallel = false;
+    constexpr auto memorder = std::memory_order_relaxed;
+
     size_t kept_nodes = 0;
     size_t total_nodes = masked_graph.num_nodes();
 
@@ -371,7 +378,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                 callback(node, false);
             }
         });
-    }, true);
+    }, update_in_place, parallel, memorder);
 
     logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 }

@@ -887,6 +887,10 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(!(*valid_edges_)[0]);
 }
 
+const bit_vector* DBGSuccinct::get_mask() const {
+    return valid_edges_.get();
+}
+
 void DBGSuccinct::reset_mask() {
     valid_edges_.reset();
 }
