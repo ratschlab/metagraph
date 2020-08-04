@@ -59,4 +59,4 @@ RUN git clone https://github.com/facebook/folly.git && cd folly && mkdir _build 
 RUN mkdir -p /opt/metagraph/build_docker
 RUN chmod o+rwx /opt/metagraph
 
-ENV CCACHE_DIR=/opt/metagraph/build/ccache_docker
+ENV CCACHE_DIR=/opt/metagraph_build/ccache_docker
