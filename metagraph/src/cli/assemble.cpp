@@ -17,21 +17,6 @@ using mtg::common::logger;
 
 const unsigned int NUM_THREADS_PER_TRAVERSAL = 4;
 
-template <class Generator>
-void write_sequences(const Config &config,
-                     const std::string &header,
-                     const Generator &generate_paths,
-                     bool append = false) {
-    seq_io::FastaWriter writer(config.outfbase, header, config.enumerate_out_sequences,
-                               get_num_threads() > 1, /* async write */
-                               append);
-    std::mutex write_mutex;
-    generate_paths([&](const std::string &sequence, auto&&) {
-        std::lock_guard<std::mutex> lock(write_mutex);
-        writer.write(sequence);
-    });
-}
-
 int assemble(Config *config) {
     assert(config);
 
@@ -53,25 +38,35 @@ int assemble(Config *config) {
 
         logger->trace("Generating masked graphs...");
 
-        {
-            // overwrite
-            std::ofstream out(config->outfbase);
-        }
+        std::filesystem::remove(
+            utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
+        );
+
+        std::mutex write_mutex;
 
         call_masked_graphs(*anno_graph, config,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
-                write_sequences(*config, header, [&](const auto &callback) {
-                    if (config->unitigs || config->min_tip_size > 1) {
-                        graph.call_unitigs(callback,
-                                           NUM_THREADS_PER_TRAVERSAL,
-                                           config->min_tip_size,
-                                           config->kmers_in_single_form);
-                    } else {
-                        graph.call_sequences(callback,
-                                             NUM_THREADS_PER_TRAVERSAL,
-                                             config->kmers_in_single_form);
-                    }
-                }, true);
+                seq_io::FastaWriter writer(config->outfbase, header,
+                                           config->enumerate_out_sequences,
+                                           get_num_threads() > 1, /* async write */
+                                           true /* append */);
+
+                if (config->unitigs || config->min_tip_size > 1) {
+                    graph.call_unitigs([&](const auto &unitig, auto&&) {
+                                           std::lock_guard<std::mutex> lock(write_mutex);
+                                           writer.write(unitig);
+                                       },
+                                       NUM_THREADS_PER_TRAVERSAL,
+                                       config->min_tip_size,
+                                       config->kmers_in_single_form);
+                } else {
+                    graph.call_sequences([&](const auto &seq, auto&&) {
+                                             std::lock_guard<std::mutex> lock(write_mutex);
+                                             writer.write(seq);
+                                         },
+                                         NUM_THREADS_PER_TRAVERSAL,
+                                         config->kmers_in_single_form);
+                }
             },
             get_num_threads() / NUM_THREADS_PER_TRAVERSAL,
             std::min(get_num_threads(), NUM_THREADS_PER_TRAVERSAL)
@@ -130,19 +125,26 @@ int assemble(Config *config) {
         return 0;
     }
 
+    seq_io::FastaWriter writer(config->outfbase, config->header,
+                               config->enumerate_out_sequences,
+                               get_num_threads() > 1);
+    std::mutex write_mutex;
+
     if (config->unitigs || config->min_tip_size > 1) {
-        write_sequences(*config, config->header, [&](const auto &callback) {
-            graph->call_unitigs(callback,
-                                get_num_threads(),
-                                config->min_tip_size,
-                                config->kmers_in_single_form);
-        });
+        graph->call_unitigs([&](const auto &unitig, auto&&) {
+                                std::lock_guard<std::mutex> lock(write_mutex);
+                                writer.write(unitig);
+                            },
+                            get_num_threads(),
+                            config->min_tip_size,
+                            config->kmers_in_single_form);
     } else {
-        write_sequences(*config, config->header, [&](const auto &callback) {
-            graph->call_sequences(callback,
-                                  get_num_threads(),
-                                  config->kmers_in_single_form);
-        });
+        graph->call_sequences([&](const auto &contig, auto&&) {
+                                  std::lock_guard<std::mutex> lock(write_mutex);
+                                  writer.write(contig);
+                              },
+                              get_num_threads(),
+                              config->kmers_in_single_form);
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());
