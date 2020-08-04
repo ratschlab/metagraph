@@ -18,7 +18,10 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 inline DeBruijnGraph::node_index get_rev_comp(const DeBruijnGraph &graph,
                                               DeBruijnGraph::node_index node) {
-    return dynamic_cast<const CanonicalDBG&>(graph).reverse_complement(node);
+    std::string seq = graph.get_node_sequence(node);
+    std::vector<DeBruijnGraph::node_index> path { node };
+    dynamic_cast<const CanonicalDBG&>(graph).reverse_complement(seq, path);
+    return path.front();
 }
 
 
