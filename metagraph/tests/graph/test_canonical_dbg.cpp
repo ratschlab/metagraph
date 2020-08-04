@@ -36,18 +36,18 @@ TYPED_TEST_SUITE(CanonicalDBGTest, CanonicalGraphTypes);
 
 
 TYPED_TEST(CanonicalDBGTest, CheckGraph) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGT", 2, false));
-    EXPECT_TRUE(check_graph<TypeParam>("ACGT", 2, true));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", BuildMode::WRAPPER, false));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", BuildMode::WRAPPER, true));
 }
 
 TYPED_TEST(CanonicalDBGTest, CheckGraphInputWithN) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", 2, false));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", BuildMode::WRAPPER, false));
     EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
-              check_graph<TypeParam>("ACGTN", 2, true));
+              check_graph<TypeParam>("ACGTN", BuildMode::WRAPPER, true));
 }
 
 TYPED_TEST(CanonicalDBGTest, InitializeEmpty) {
-    auto graph = build_graph<TypeParam>(3, {}, 2);
+    auto graph = build_graph<TypeParam>(3, {}, BuildMode::WRAPPER);
 
     EXPECT_EQ(0u, graph->num_nodes());
     EXPECT_FALSE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -60,7 +60,7 @@ TYPED_TEST(CanonicalDBGTest, InsertSequence) {
     auto graph = build_graph<TypeParam>(21, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "CATGTACTAGCTGATCGTAGCTAGCTAGC"
-    }, 2);
+    }, BuildMode::WRAPPER);
 
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -71,13 +71,13 @@ TYPED_TEST(CanonicalDBGTest, InsertSequence) {
 }
 
 TYPED_TEST(CanonicalDBGTest, ReverseComplement) {
-    auto graph1 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, true);
-    auto graph2 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, 2);
+    auto graph1 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, BuildMode::CANONICAL);
+    auto graph2 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, BuildMode::WRAPPER);
 
     EXPECT_EQ(graph1->num_nodes(), graph2->num_nodes());
 
     auto graph = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                                              "CATGTACTAGCTGATCGTAGCTAGCTAGC" }, 2);
+                                              "CATGTACTAGCTGATCGTAGCTAGCTAGC" }, BuildMode::WRAPPER);
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
     EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -90,7 +90,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals1) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C')
-        }, 2);
+        }, BuildMode::WRAPPER);
 
         auto it = DeBruijnGraph::npos;
         auto jt = DeBruijnGraph::npos;
@@ -143,7 +143,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C'),
             std::string(100, 'G') + std::string(100, 'T')
-        }, 2);
+        }, BuildMode::WRAPPER);
 
         auto it = DeBruijnGraph::npos;
 
@@ -173,7 +173,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
 TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
-            auto empty = build_graph<TypeParam>(k, {}, 2);
+            auto empty = build_graph<TypeParam>(k, {}, BuildMode::WRAPPER);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
             empty->call_sequences([&](const auto &sequence, const auto &path) {
@@ -183,8 +183,8 @@ TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
             }, num_threads);
             ASSERT_EQ(0u, sequences.size());
 
-            EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences, 2));
-            EXPECT_EQ(*empty, *build_graph_batch<TypeParam>(k, sequences, 2));
+            EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER));
+            EXPECT_EQ(*empty, *build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER));
         }
     }
 }
@@ -192,7 +192,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
 TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 10; ++k) {
-            auto empty = build_graph<TypeParam>(k, {}, 2);
+            auto empty = build_graph<TypeParam>(k, {}, BuildMode::WRAPPER);
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
             empty->call_unitigs([&](const auto &sequence, const auto &path) {
@@ -202,8 +202,8 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
             }, num_threads);
             ASSERT_EQ(0u, sequences.size());
 
-            EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences, 2));
-            EXPECT_EQ(*empty, *build_graph_batch<TypeParam>(k, sequences, 2));
+            EXPECT_EQ(*empty, *build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER));
+            EXPECT_EQ(*empty, *build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER));
         }
     }
 }
@@ -212,8 +212,8 @@ TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
-            auto graph = build_graph<TypeParam>(k, sequences, 2);
-            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
+            auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
+            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
             ASSERT_EQ(2u, graph->num_nodes());
             ASSERT_EQ(2u, graph_batch->num_nodes());
 
@@ -239,8 +239,8 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
-            auto graph = build_graph<TypeParam>(k, sequences, 2);
-            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
+            auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
+            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
             ASSERT_EQ(2u, graph->num_nodes());
             ASSERT_EQ(2u, graph_batch->num_nodes());
 
@@ -268,8 +268,8 @@ TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
-            auto graph = build_graph<TypeParam>(k, sequences, 2);
-            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
+            auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
+            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
             ASSERT_EQ(4u, graph->num_nodes());
             ASSERT_EQ(4u, graph_batch->num_nodes());
 
@@ -296,7 +296,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
         for (size_t k = 7; k < 14; ++k) {
             std::vector<std::string> sequences { "ATGCCGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
-            auto graph = build_graph<TypeParam>(k, sequences, 2);
+            auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
 
             std::vector<std::string> contigs;
             std::mutex seq_mutex;
@@ -317,7 +317,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
 TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmers) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         std::string sequence = "GCAAATAAC";
-        auto graph = build_graph<TypeParam>(3, { sequence }, 2);
+        auto graph = build_graph<TypeParam>(3, { sequence }, BuildMode::WRAPPER);
 
         std::atomic<size_t> num_kmers = 0;
         graph->call_sequences([&](const auto &sequence, const auto &path) {
@@ -333,7 +333,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsUniqueKmersCycle) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
-        auto graph = build_graph<TypeParam>(k, { sequence }, 2);
+        auto graph = build_graph<TypeParam>(k, { sequence }, BuildMode::WRAPPER);
 
         std::atomic<size_t> num_unitigs = 0;
         std::atomic<size_t> num_kmers = 0;
@@ -352,7 +352,7 @@ TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmersCycle) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
-        auto graph = build_graph<TypeParam>(k, { sequence }, 2);
+        auto graph = build_graph<TypeParam>(k, { sequence }, BuildMode::WRAPPER);
 
         std::atomic<size_t> num_contigs = 0;
         std::atomic<size_t> num_kmers = 0;
@@ -373,8 +373,8 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
-            auto graph = build_graph<TypeParam>(k, sequences, 2);
-            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, 2);
+            auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
+            auto graph_batch = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
             ASSERT_EQ(4u, graph->num_nodes());
             ASSERT_EQ(4u, graph_batch->num_nodes());
 
@@ -407,7 +407,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, 2);
+                auto graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
 
                 // in stable graphs the order of input sequences
                 // does not change the order of k-mers and their indexes
@@ -418,7 +418,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
                         reverse_complement(rev_seq.begin(), rev_seq.end());
                         callback(rev_seq);
                     }
-                }, false);
+                });
 
                 std::mutex seq_mutex;
                 auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
@@ -429,8 +429,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
-                    },
-                    false
+                    }
                 );
 
                 EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
@@ -488,7 +487,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, 2);
+                auto graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
 
                 std::atomic<size_t> num_kmers_both = 0;
                 graph->call_sequences([&](const auto &sequence, const auto &path) {
@@ -523,7 +522,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, 2);
+                auto graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
 
                 // in stable graphs the order of input sequences
                 // does not change the order of k-mers and their indexes
@@ -534,7 +533,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
                         reverse_complement(rev_seq.begin(), rev_seq.end());
                         callback(rev_seq);
                     }
-                }, false);
+                });
 
                 std::mutex seq_mutex;
                 auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
@@ -545,8 +544,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
-                    },
-                    false
+                    }
                 );
 
                 EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
@@ -579,7 +577,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
                         reverse_complement(rev_seq.begin(), rev_seq.end());
                         callback(rev_seq);
                     }
-                }, false);
+                });
 
                 std::mutex seq_mutex;
                 auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
@@ -590,8 +588,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
-                    },
-                    false
+                    }
                 );
 
                 EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
@@ -656,7 +653,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, 2);
+                auto graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::WRAPPER);
 
                 std::atomic<size_t> num_kmers_both = 0;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
@@ -687,7 +684,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
         std::set<std::string> unitigs;
 
         auto graph = build_graph<TypeParam>(k, { "ACTAAGC",
-                                                 "TCTAAGC" }, 2);
+                                                 "TCTAAGC" }, BuildMode::WRAPPER);
         ASSERT_EQ(12u, graph->num_nodes());
 
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
@@ -726,7 +723,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
                                           "TAAG", "TAG", "TCT" }), unitigs);
 
         graph = build_graph<TypeParam>(k, { "ACTAAGC",
-                                            "ACTAAGT" }, 2);
+                                            "ACTAAGT" }, BuildMode::WRAPPER);
         ASSERT_EQ(10u, graph->num_nodes());
 
         unitigs.clear();
@@ -763,7 +760,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
 
         graph = build_graph<TypeParam>(k, { "ACTAAGCCC",
                                             "AAAGC",
-                                            "TAAGCA" }, 2);
+                                            "TAAGCA" }, BuildMode::WRAPPER);
         ASSERT_EQ(18u, graph->num_nodes());
 
         unitigs.clear();
@@ -823,7 +820,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
 
         graph = build_graph<TypeParam>(k, { "ACGAAGCCT",
                                             "AAGC",
-                                            "TAAGCA" }, 2);
+                                            "TAAGCA" }, BuildMode::WRAPPER);
         ASSERT_EQ(18u, graph->num_nodes());
 
         // TODO: make DBGSuccinct work properly even if it has redundant source dummy edges
@@ -882,7 +879,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
 
         graph = build_graph<TypeParam>(k, { "TCTAAGCCG",
                                             "CATAAGCCG",
-                                            "CATAACCGA" }, 2);
+                                            "CATAACCGA" }, BuildMode::WRAPPER);
         ASSERT_EQ(24u, graph->num_nodes());
 
         unitigs.clear();
@@ -949,7 +946,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips2) {
                                                  "ACTATAGCTAGTCTAA",
                                                  "ACTATAGCTA",
                                                  "ACTATAGCTT",
-                                                 "ACTATC", }, 2);
+                                                 "ACTATC", }, BuildMode::WRAPPER);
         std::mutex seq_mutex;
         ASSERT_EQ(34u, graph->num_nodes());
         std::set<std::string> unitigs;
@@ -1006,7 +1003,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips2) {
 
 TYPED_TEST(CanonicalDBGTest, CallKmersEmptyGraph) {
     for (size_t k = 2; k <= 30; ++k) {
-        auto empty = build_graph<TypeParam>(k, {}, 2);
+        auto empty = build_graph<TypeParam>(k, {}, BuildMode::WRAPPER);
         size_t num_kmers = 0;
         empty->call_kmers([&](auto, const auto &sequence) {
             EXPECT_FALSE(true) << sequence;
@@ -1019,7 +1016,7 @@ TYPED_TEST(CanonicalDBGTest, CallKmersEmptyGraph) {
 
 TYPED_TEST(CanonicalDBGTest, CallKmersTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') }, 2);
+        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') }, BuildMode::WRAPPER);
 
         ASSERT_EQ(2u, graph->num_nodes());
 
@@ -1046,7 +1043,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckDegree) {
             "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
         };
 
-        auto graph = build_graph_batch<TypeParam>(9, sequences, 2);
+        auto graph = build_graph_batch<TypeParam>(9, sequences, BuildMode::WRAPPER);
 
         std::multiset<std::string> unitigs {
             "AAATATTTACACAGAGTAGGAGACAAAT",
@@ -1101,7 +1098,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsIndegreeFirstNodeIsZero) {
             "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
         };
 
-        auto graph = build_graph_batch<TypeParam>(31, sequences, 2);
+        auto graph = build_graph_batch<TypeParam>(31, sequences, BuildMode::WRAPPER);
 
         std::multiset<std::string> unitigs {
             "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
@@ -1145,7 +1142,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
                                        "GGTTTTA",
                                        "TTTTAAA",
                                        "TTTTAGG", }) }) {
-            auto graph = build_graph_batch<TypeParam>(5, sequences, 2);
+            auto graph = build_graph_batch<TypeParam>(5, sequences, BuildMode::WRAPPER);
 
             std::multiset<std::string> unitigs {
                 "AAAACC",
