@@ -394,7 +394,7 @@ bool check_graph(const std::string &alphabet, uint8_t mode, bool check_sequence)
         sequences.push_back(seq);
     }
 
-    auto graph = build_graph<Graph>(21, sequences, mode);
+    auto graph = build_graph<Graph>(20, sequences, mode);
 
     bool node_remap_failed = false;
     graph->call_nodes(

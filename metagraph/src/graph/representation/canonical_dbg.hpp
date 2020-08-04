@@ -102,7 +102,7 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_.get_k(); }
 
-    virtual bool is_canonical_mode() const override { return true; }
+    virtual constexpr bool is_canonical_mode() const override { return true; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
