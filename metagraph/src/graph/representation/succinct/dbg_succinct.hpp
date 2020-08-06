@@ -63,7 +63,8 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const override final;
+                                bool kmers_in_single_form = false,
+                                bool select_first_edge = false) const override final;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t num_threads = 1,
@@ -102,6 +103,10 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool has_no_incoming(node_index) const override final;
     virtual bool has_single_incoming(node_index) const override final;
 
+    /**
+     * Returns the number of nodes (k-mers) in the graph, which is equal to the number of
+     * edges in the BOSS graph (because an edge in the BOSS graph represents a k-mer).
+     */
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
