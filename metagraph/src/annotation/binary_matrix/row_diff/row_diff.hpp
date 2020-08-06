@@ -1,7 +1,9 @@
 #pragma once
 
-
-class DiffAnnotation {
+namespace mtg {
+namespace annot {
+namespace binmat {
+class RowDiff {
   private:
     sdsl::enc_vector<> diffs_;
     sdsl::bit_vector boundary_;
@@ -9,16 +11,18 @@ class DiffAnnotation {
     sdsl::select_support_mcl<> sboundary;
 
   public:
-    const sdsl::bit_vector& terminal() const { return terminal_; }
-    const sdsl::bit_vector& bundary() const { return boundary_; }
-    const sdsl::enc_vector<>& diffs() const { return diffs_; }
+    RowDiff() {}
 
-    DiffAnnotation(const std::vector<uint64_t> &diffs,
+    RowDiff(const std::vector<uint64_t> &diffs,
                    const sdsl::bit_vector &boundary,
                    const sdsl::bit_vector &terminal)
-            : diffs_(diffs), boundary_(boundary), terminal_(terminal) {
+        : diffs_(diffs), boundary_(boundary), terminal_(terminal) {
         sdsl::util::init_support(sboundary, &boundary);
     }
+
+    const sdsl::bit_vector &terminal() const { return terminal_; }
+    const sdsl::bit_vector &bundary() const { return boundary_; }
+    const sdsl::enc_vector<> &diffs() const { return diffs_; }
 
     std::vector<uint64_t> get_diff(uint64_t node_id) const {
         std::vector<uint64_t> result;
@@ -51,3 +55,6 @@ class DiffAnnotation {
         f.close();
     }
 };
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

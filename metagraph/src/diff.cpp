@@ -9,6 +9,7 @@
 #include <sdsl/util.hpp>
 #include <sdsl/select_support_mcl.hpp>
 
+#include "annotation//binary_matrix/row_diff/row_diff.hpp"
 #include "annotation//binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation//binary_matrix/row_flat/flat_matrix.hpp"
 #include "cli/load/load_annotation.hpp"
@@ -32,8 +33,8 @@ DEFINE_string(kmer, "ACTA", "Kmer to read the annotation for");
 
 using namespace mtg;
 
-std::shared_ptr<DBGSuccinct> load_graph(const std::string &name) {
-    std::shared_ptr<DBGSuccinct> result = std::make_shared<DBGSuccinct>(20);
+std::shared_ptr<graph::DBGSuccinct> load_graph(const std::string &name) {
+    std::shared_ptr<graph::DBGSuccinct> result = std::make_shared<graph::DBGSuccinct>(20);
     if (!result->load(name)) {
         std::cerr << "Cannot load graph " << name << std::endl;
         std::exit(1);
@@ -44,9 +45,9 @@ std::shared_ptr<DBGSuccinct> load_graph(const std::string &name) {
     return result;
 }
 
-std::unique_ptr<annotate::MultiLabelEncoded<std::string>>
+std::unique_ptr<annot::MultiLabelEncoded<std::string>>
 load_annotation(const std::string &anno_file) {
-    std::unique_ptr<annotate::MultiLabelEncoded<std::string>> annotation
+    std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
             = cli::initialize_annotation(anno_file);
 
     if (!annotation->load(anno_file)) {
@@ -58,20 +59,20 @@ load_annotation(const std::string &anno_file) {
 }
 
 std::vector<uint64_t>
-get_annotation(const DeBruijnGraph &graph, const DiffAnnotation &anno, uint64_t node_id) {
+get_annotation(const graph::DeBruijnGraph &graph, const annot::binmat::RowDiff &anno, uint64_t node_id) {
     std::vector<uint64_t> result = anno.get_diff(node_id);
     while (!anno.terminal_[node_id]) {
     };
     return result;
 }
 
-void store_diff(const AnnotatedDBG &annotated_dbg) __attribute__((optnone)) {
+void store_diff(const graph::AnnotatedDBG &annotated_dbg) __attribute__((optnone)) {
     uint64_t nnodes = annotated_dbg.get_graph().num_nodes();
     std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
     sdsl::bit_vector terminal(nnodes + 1);
 
     uint64_t max_id = 0;
-    const DeBruijnGraph &graph = annotated_dbg.get_graph();
+    const graph::DeBruijnGraph &graph = annotated_dbg.get_graph();
     ProgressBar progress_bar(graph.num_nodes(), "Building Diff-anno");
     _Pragma("clang optimize off") graph.call_sequences(
             [&](const std::string &seq, const std::vector<uint64_t> &path) {
@@ -140,7 +141,7 @@ void store_diff(const AnnotatedDBG &annotated_dbg) __attribute__((optnone)) {
         sboundary[i] = boundary[i];
     }
 
-    DiffAnnotation diff_annotation { diff, sboundary, terminal };
+    annot::binmat::RowDiff diff_annotation { diff, sboundary, terminal };
     diff_annotation.serialize(FLAGS_o);
 
     _Pragma("clang optimize on")
@@ -154,9 +155,9 @@ std::string to_string(const std::vector<uint64_t> &v) {
     return result;
 }
 
-void store_zip(const AnnotatedDBG &annotated_dbg) {
+void store_zip(const graph::AnnotatedDBG &annotated_dbg) {
     std::ofstream out(FLAGS_o);
-    const DeBruijnGraph &graph = annotated_dbg.get_graph();
+    const graph::DeBruijnGraph &graph = annotated_dbg.get_graph();
     ProgressBar progress_bar(graph.num_nodes(), "Building Diff-anno");
     graph.call_sequences([&](const std::string &, const std::vector<uint64_t> &path) {
         std::vector<uint64_t> anno_ids;
@@ -186,10 +187,10 @@ int main(int argc, char* argv[]) {
 
     spdlog::set_level(spdlog::level::trace);
 
-    std::unique_ptr<annotate::MultiLabelEncoded<std::string>> annotation
+    std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
             = load_annotation(FLAGS_annotation);
-    std::shared_ptr<DeBruijnGraph> graph = load_graph(FLAGS_graph);
-    AnnotatedDBG annotated_dbg(graph, std::move(annotation), false);
+    std::shared_ptr<graph::DeBruijnGraph> graph = load_graph(FLAGS_graph);
+    graph::AnnotatedDBG annotated_dbg(graph, std::move(annotation), false);
     if (FLAGS_action == "store") {
         if (FLAGS_format == "diff") {
             store_diff(annotated_dbg);
@@ -200,7 +201,7 @@ int main(int argc, char* argv[]) {
             std::exit(1);
         }
     } else if (FLAGS_action == "load") {
-        DiffAnnotation anno;
+        annot::binmat::RowDiff anno;
         anno.load(FLAGS_annotation);
         uint64_t node_id = graph->kmer_to_node(FLAGS_kmer);
         if (node_id == 0) {
