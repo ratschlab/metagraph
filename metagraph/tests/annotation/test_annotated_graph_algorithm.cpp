@@ -10,6 +10,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::graph;
 using namespace mtg::test;
 
 template <typename GraphAnnotationPair>
@@ -24,7 +25,7 @@ TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 //     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
 //     const std::vector<std::string> labels { "A", "B" };
 //     auto anno_graph = build_anno_graph<TypeParam,
-//                                        annotate::ColumnCompressed<>>(
+//                                        annot::ColumnCompressed<>>(
 //         k, sequences, labels
 //     );
 
@@ -40,7 +41,7 @@ TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 //     EXPECT_EQ(obs, ref);
 // }
 
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
@@ -96,7 +97,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
 }
 
 
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void
 test_mask_unitigs(double inlabel_fraction,
                   double outlabel_fraction,
@@ -128,7 +129,7 @@ test_mask_unitigs(double inlabel_fraction,
 
         MaskedDeBruijnGraph masked_dbg(
             std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
-            annotated_graph_algorithm::mask_nodes_by_unitig_labels(
+            mask_nodes_by_unitig_labels(
                 *anno_graph,
                 ingroup,
                 outgroup,

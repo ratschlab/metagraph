@@ -9,9 +9,9 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
-#include "common/vector_map.hpp"
 #include "common/algorithms.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -22,9 +22,12 @@
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
 
-namespace annotate {
 
-using namespace mtg;
+namespace mtg {
+namespace annot {
+
+using namespace mtg::annot::binmat;
+
 using mtg::common::logger;
 
 typedef LabelEncoder<std::string> LEncoder;
@@ -395,7 +398,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
     std::vector<uint64_t> row_classes;
     uint64_t max_class = 0;
 
-    ProgressBar progress_bar(num_columns, "Columns iterated",
+    ProgressBar progress_bar(num_columns, "Iterate columns",
                              std::cerr, !common::get_verbose());
 
     tsl::hopscotch_map<uint64_t, uint64_t> new_class;
@@ -407,7 +410,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
             row_classes.assign(col_ptr->size(), 0);
 
         const size_t batch_size = 5'000'000;
-        #pragma omp parallel for ordered num_threads(get_num_threads()) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t begin = 0; begin < col_ptr->size(); begin += batch_size) {
             uint64_t end = std::min(begin + batch_size, col_ptr->size());
 
@@ -421,9 +424,9 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
             #pragma omp critical
             {
                 for (uint64_t i : pos) {
-                    uint64_t &row_class = row_classes[i];
+                    uint64_t &c = row_classes[i];
 
-                    auto [it, inserted] = new_class.try_emplace(row_class, max_class + 1);
+                    auto [it, inserted] = new_class.try_emplace(c, max_class + 1);
                     if (inserted) {
                         ++max_class;
 
@@ -433,7 +436,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
                         }
                     }
 
-                    row_class = it->second;
+                    c = it->second;
                 }
             }
         }
@@ -445,7 +448,8 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
 }
 
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns) {
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+                       size_t max_brwt_arity = 1) {
     uint64_t num_columns = 0;
     uint64_t num_ones = 0;
     call_columns([&](const auto &col_ptr) {
@@ -459,22 +463,23 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     logger->trace("Identifying unique rows");
     std::vector<uint64_t> row_classes = get_row_classes(call_columns, num_columns);
 
-    VectorMap<uint64_t /* class */,
-              uint64_t /* count */,
-              uint64_t /* index type */> row_counter;
+    size_t batch_size = 100'000'000;
+    common::SortedMultiset<uint64_t, uint64_t> row_counter(get_num_threads(), batch_size);
     {
-        ProgressBar progress_bar(row_classes.size(), "Counting row classes",
+        ProgressBar progress_bar(row_classes.size(),
+                                 "Counting row classes",
                                  std::cerr, !common::get_verbose());
-        for (uint64_t row_class : row_classes) {
-            row_counter[row_class]++;
-            ++progress_bar;
+        auto it = row_classes.begin();
+        while (it + batch_size < row_classes.end()) {
+            row_counter.insert(it, it + batch_size);
+            it += batch_size;
+            progress_bar += batch_size;
         }
+        row_counter.insert(it, row_classes.end());
+        progress_bar += row_classes.end() - it;
     }
-
-    logger->trace("Number of unique rows: {}", row_counter.size());
-
-    auto &pairs = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
-                    row_counter.values_container());
+    auto &pairs = row_counter.data();
+    logger->trace("Number of unique rows: {}", pairs.size());
 
     ips4o::parallel::sort(pairs.begin(), pairs.end(), utils::GreaterSecond(),
                           get_num_threads());
@@ -508,16 +513,16 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
 
     uint64_t total_code_length = 0;
     for (size_t i = 0; i < row_classes.size(); ++i) {
-        uint64_t row_code = class_to_code[row_classes[i]];
-        row_classes[i] = row_code;
-        row_pointers[row_code] = i;
-        total_code_length += sdsl::bits::hi(row_code) + 1;
+        uint64_t &c = row_classes[i];
+        c = class_to_code[c];
+        row_pointers[c] = i;
+        total_code_length += sdsl::bits::hi(c) + 1;
     }
     class_to_code.clear();
 
     logger->trace("Started matrix reduction");
 
-    ProgressBar progress_bar(num_columns, "Columns reduced",
+    ProgressBar progress_bar(num_columns, "Reduce columns",
                              std::cerr, !common::get_verbose());
 
     std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
@@ -535,22 +540,24 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
     });
     thread_pool.join();
 
-    logger->trace("Compressing assignment vector");
+    logger->trace("Start compressing the assignment vector");
 
     sdsl::bit_vector code_bv(total_code_length);
     sdsl::bit_vector boundary_bv(total_code_length, false);
 
     uint64_t pos = 0;
-    for (uint64_t code : row_classes) {
-        uint8_t code_length = sdsl::bits::hi(code) + 1;
-        code_bv.set_int(pos, code, code_length);
-        boundary_bv[pos + code_length - 1] = true;
-        pos += code_length;
+    for (uint64_t c : row_classes) {
+        uint8_t code_len = sdsl::bits::hi(c) + 1;
+        code_bv.set_int(pos, c, code_len);
+        boundary_bv[pos + code_len - 1] = true;
+        pos += code_len;
     }
     assert(pos == code_bv.size());
 
-    bit_vector_rrr<> row_codes(std::move(code_bv));
     bit_vector_rrr<> row_code_delimiters(std::move(boundary_bv));
+    logger->trace("Assignment vector constructed"
+                  "\nRow codes: {} bits\nBoundary bitmap: {} bits, {} set",
+                  total_code_length, total_code_length, row_code_delimiters.num_set_bits());
 
     logger->trace("Building Multi-BRWT");
 
@@ -569,15 +576,19 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
                                                      num_parallel_nodes,
                                                      num_threads);
 
+    if (max_brwt_arity > 1)
+        BRWTOptimizer::relax(&reduced_matrix, max_brwt_arity, num_threads);
+
     return std::make_unique<Rainbow<BRWT>>(std::move(reduced_matrix),
-                                           std::move(row_codes),
+                                           std::move(code_bv),
                                            std::move(row_code_delimiters),
                                            num_ones);
 }
 
 template <>
 std::unique_ptr<RbBRWTAnnotator>
-convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files) {
+convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                                   size_t max_brwt_arity) {
     LEncoder label_encoder;
 
     auto call_columns = [&](const CallColumn &call_column) {
@@ -591,7 +602,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
                 call_column(std::move(column));
                 label_encoder.insert_and_encode(label);
             },
-            1
+            0
         );
         if (!success) {
             logger->error("Can't load annotation columns");
@@ -599,7 +610,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
         }
     };
 
-    auto matrix = convert_to_RainbowBRWT(call_columns);
+    auto matrix = convert_to_RainbowBRWT(call_columns, max_brwt_arity);
 
     assert(matrix->num_columns() == label_encoder.size());
 
@@ -967,4 +978,5 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg

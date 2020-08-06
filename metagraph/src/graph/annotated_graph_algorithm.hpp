@@ -9,12 +9,14 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/masked_graph.hpp"
 
+
+namespace mtg {
+namespace graph {
+
 typedef std::function<size_t()> LabelCountCallback;
 
 template <typename NodeType>
 class Alignment;
-
-namespace annotated_graph_algorithm {
 
 typedef std::function<bool(const std::string&,
                            const std::vector<DeBruijnGraph::node_index>&)> KeepUnitigPath;
@@ -63,7 +65,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                                                   const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
                          double min_frequency_for_frequent_label = 0.05);
 
-
-} // namespace annotated_graph_algorithm
+} // namespace graph
+} // namespace mtg
 
 #endif // __ANNOTATED_GRAPH_ALGORITHM_HPP__

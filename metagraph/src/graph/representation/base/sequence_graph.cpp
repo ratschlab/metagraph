@@ -9,7 +9,9 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace graph {
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -347,14 +349,14 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
                                    bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
+    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t num_threads,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
+    ::mtg::graph::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
 }
 
 /**
@@ -471,3 +473,6 @@ map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
 
     return nodes;
 }
+
+} // namespace graph
+} // namespace mtg

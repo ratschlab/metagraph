@@ -9,10 +9,14 @@
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
+
+namespace mtg {
+namespace annot {
+namespace binmat {
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                          uint64_t num_columns,
@@ -297,3 +301,7 @@ void Rainbowfish::serialize(std::ostream &out) const {
 uint64_t Rainbowfish::num_relations() const {
     return num_relations_;
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

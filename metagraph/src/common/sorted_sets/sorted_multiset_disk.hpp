@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/sorted_set_disk_base.hpp"
+#include "sorted_set_disk_base.hpp"
 
 
 namespace mtg {

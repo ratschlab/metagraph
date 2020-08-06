@@ -6,6 +6,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class DBGHashOrdered : public DeBruijnGraph {
   public:
     explicit DBGHashOrdered(size_t k,
@@ -140,5 +143,8 @@ class DBGHashOrdered : public DeBruijnGraph {
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_HASH_ORDERED_HPP__

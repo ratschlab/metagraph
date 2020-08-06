@@ -9,6 +9,8 @@
 namespace mtg {
 namespace cli {
 
+using namespace mtg::graph;
+
 using mtg::common::logger;
 
 
@@ -81,7 +83,7 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
     if (!config->filter_by_kmer) {
         return std::make_unique<MaskedDeBruijnGraph>(
             graph,
-            annotated_graph_algorithm::mask_nodes_by_unitig_labels(
+            mask_nodes_by_unitig_labels(
                 anno_graph,
                 config->label_mask_in,
                 config->label_mask_out,
@@ -94,7 +96,7 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
     return std::make_unique<MaskedDeBruijnGraph>(
         graph,
-        annotated_graph_algorithm::mask_nodes_by_node_label(
+        mask_nodes_by_node_label(
             anno_graph,
             config->label_mask_in,
             config->label_mask_out,

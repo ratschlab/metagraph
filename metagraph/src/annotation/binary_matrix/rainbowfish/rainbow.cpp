@@ -10,12 +10,17 @@
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 
+
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 const size_t kRowBatchSize = 1'000'000;
 
 
 template <class MatrixType>
 Rainbow<MatrixType>::Rainbow(MatrixType&& reduced_matrix,
-                             bit_vector_rrr<>&& row_codes,
+                             sdsl::bit_vector&& row_codes,
                              bit_vector_rrr<>&& row_code_delimiters,
                              uint64_t num_relations)
       : num_relations_(num_relations),
@@ -130,8 +135,8 @@ template <class MatrixType>
 bool Rainbow<MatrixType>::load(std::istream &in) {
     try {
         num_relations_ = load_number(in);
-        return row_codes_.load(in)
-                && row_code_delimiters_.load(in)
+        row_codes_.load(in);
+        return row_code_delimiters_.load(in)
                 && reduced_matrix_.load(in);
     } catch (...) {
         return false;
@@ -147,3 +152,7 @@ void Rainbow<MatrixType>::serialize(std::ostream &out) const {
 }
 
 template class Rainbow<BRWT>;
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

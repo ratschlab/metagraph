@@ -4,10 +4,10 @@
 
 #include "common/elias_fano_file_merger.hpp"
 #include "common/logger.hpp"
-#include "common/sorted_multiset.hpp"
-#include "common/sorted_multiset_disk.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_set_disk.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_multiset_disk.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_set_disk.hpp"
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
@@ -19,7 +19,8 @@
 
 
 namespace mtg {
-namespace succinct {
+namespace graph {
+namespace boss {
 
 using mtg::common::logger;
 using mtg::common::ChunkedWaitQueue;
@@ -984,5 +985,6 @@ IBOSSChunkConstructor::initialize(size_t k,
     }
 }
 
-} // namespace succinct
+} // namespace boss
+} // namespace graph
 } // namespace mtg

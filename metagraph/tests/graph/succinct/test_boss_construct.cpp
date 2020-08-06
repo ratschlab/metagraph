@@ -11,9 +11,9 @@
 #define private public
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_multiset.hpp"
-#include "common/sorted_multiset_disk.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_multiset_disk.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "kmer/kmer_collector.hpp"
@@ -23,7 +23,8 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::succinct;
+using namespace mtg::graph::boss;
+
 using mtg::kmer::KmerExtractorBOSS;
 
 const std::string test_data_dir = TEST_DATA_DIR;

@@ -6,6 +6,9 @@
 #include "graph/representation/base/sequence_graph.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class DBGHashFast : public DeBruijnGraph {
   public:
     DBGHashFast(size_t k,
@@ -136,5 +139,8 @@ class DBGHashFast : public DeBruijnGraph {
 
     std::unique_ptr<DBGHashFastInterface> hash_dbg_;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_HASH_FAST_HPP__

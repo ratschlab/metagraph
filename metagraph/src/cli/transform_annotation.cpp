@@ -1,7 +1,5 @@
 #include "transform_annotation.hpp"
 
-#include <fmt/format.h>
-
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -17,9 +15,10 @@
 namespace mtg {
 namespace cli {
 
+using namespace mtg::annot;
+
 using mtg::common::logger;
 using mtg::common::get_verbose;
-using namespace annotate;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
@@ -47,6 +46,11 @@ int transform_annotation(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
+
+    if (!std::filesystem::exists(files.at(0))) {
+        logger->error("File {} does not exist", files.at(0));
+        exit(1);
+    }
 
     const Config::AnnotationType input_anno_type
         = parse_annotation_type(files.at(0));
@@ -191,8 +195,8 @@ int transform_annotation(Config *config) {
                         if (row_indexes.empty()) {
                             num_rows = column->size();
                             row_indexes
-                                = sample_row_indexes(num_rows,
-                                                     config->num_rows_subsampled);
+                                = binmat::sample_row_indexes(num_rows,
+                                                             config->num_rows_subsampled);
                         } else if (column->size() != num_rows) {
                             logger->error("Size of column {} is {} != {}",
                                           label, column->size(), num_rows);
@@ -233,9 +237,9 @@ int transform_annotation(Config *config) {
             subcolumns.push_back(std::move(*col_ptr));
         }
 
-        LinkageMatrix linkage_matrix
-                = agglomerative_greedy_linkage(std::move(subcolumns),
-                                               get_num_threads());
+        binmat::LinkageMatrix linkage_matrix
+                = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
+                                                       get_num_threads());
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
@@ -259,22 +263,22 @@ int transform_annotation(Config *config) {
 
         switch (config->anno_type) {
             case Config::RowFlat: {
-                auto annotator = annotate::convert<RowFlatAnnotator>(files.at(0));
+                auto annotator = annot::convert<RowFlatAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::RBFish: {
-                auto annotator = annotate::convert<RainbowfishAnnotator>(files.at(0));
+                auto annotator = annot::convert<RainbowfishAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                auto annotator = annotate::convert<BinRelWT_sdslAnnotator>(files.at(0));
+                auto annotator = annot::convert<BinRelWT_sdslAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
             case Config::BinRelWT: {
-                auto annotator = annotate::convert<BinRelWTAnnotator>(files.at(0));
+                auto annotator = annot::convert<BinRelWTAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
@@ -392,7 +396,8 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RbBRWT: {
-                auto rb_brwt_annotator = convert_to_RbBRWT<RbBRWTAnnotator>(files);
+                auto rb_brwt_annotator
+                    = convert_to_RbBRWT<RbBRWTAnnotator>(files, config->relax_arity_brwt);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 logger->trace("Serializing to '{}'", config->outfbase);
                 rb_brwt_annotator->serialize(config->outfbase);
@@ -475,7 +480,7 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    auto annotator = std::make_unique<annotate::MultiBRWTAnnotator>();
+    auto annotator = std::make_unique<MultiBRWTAnnotator>();
 
     logger->trace("Loading annotator...");
 
@@ -487,9 +492,9 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    annotate::relax_BRWT<annotate::MultiBRWTAnnotator>(annotator.get(),
-                                                       config->relax_arity_brwt,
-                                                       get_num_threads());
+    relax_BRWT<MultiBRWTAnnotator>(annotator.get(),
+                                   config->relax_arity_brwt,
+                                   get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

@@ -32,6 +32,7 @@ class Config {
     bool to_fasta = false;
     bool enumerate_out_sequences = false;
     bool to_gfa = false;
+    bool output_compacted = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
@@ -51,8 +52,6 @@ class Config {
     bool cluster_linkage = false;
     bool separately = false;
     bool files_sequentially = false;
-    bool call_bubbles = false;
-    bool call_breakpoints = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_both_strands = false;
@@ -78,7 +77,6 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
-    // unsigned int row_cache_size = 0;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -106,13 +104,13 @@ class Config {
     int32_t alignment_xdrop = 30;
 
     size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = 16;
+    size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
-    double discovery_fraction = 1.0;
+    double discovery_fraction = 0.7;
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;
@@ -120,6 +118,7 @@ class Config {
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
+    double alignment_max_nodes_per_seq_char = 10.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
@@ -130,7 +129,6 @@ class Config {
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
-    std::string dbpath;
     std::string refpath;
     std::string suffix;
     std::string fasta_header_delimiter;
@@ -138,7 +136,6 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string annotation_label = "";
     std::string header = "";
-    std::string accession2taxid;
     std::string host_address;
 
     std::filesystem::path tmp_dir;
@@ -167,10 +164,10 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    BOSS::State state = BOSS::State::SMALL;
+    graph::boss::BOSS::State state = graph::boss::BOSS::State::SMALL;
 
-    static std::string state_to_string(BOSS::State state);
-    static BOSS::State string_to_state(const std::string &string);
+    static std::string state_to_string(graph::boss::BOSS::State state);
+    static graph::boss::BOSS::State string_to_state(const std::string &string);
 
     enum AnnotationType {
         ColumnCompressed = 1,

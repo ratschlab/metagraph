@@ -2,8 +2,10 @@
 
 #include "kmer/alphabets.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace graph {
+namespace align {
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
@@ -47,24 +49,24 @@ DBGAlignerConfig::score_t DBGAlignerConfig
 
     for (const auto &op : cigar) {
         switch (op.first) {
-            case Cigar::Operator::CLIPPED:
+            case Cigar::CLIPPED:
                 break;
-            case Cigar::Operator::MATCH: {
+            case Cigar::MATCH: {
                 score += match_score(std::string_view(ref_it, op.second));
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Cigar::Operator::MISMATCH: {
+            case Cigar::MISMATCH: {
                 score += score_sequences(std::string_view(ref_it, op.second),
                                          std::string_view(alt_it, op.second));
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Cigar::Operator::DELETION: {
+            case Cigar::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 alt_it += op.second;
             } break;
-            case Cigar::Operator::INSERTION: {
+            case Cigar::INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
             } break;
@@ -200,3 +202,7 @@ DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
 
 const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
     = blosum62_scoring_matrix();
+
+} // namespace align
+} // namespace graph
+} // namespace mtg

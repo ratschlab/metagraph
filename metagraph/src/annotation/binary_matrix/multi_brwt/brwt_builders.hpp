@@ -11,6 +11,10 @@
 #include "brwt.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class BRWTBottomUpBuilder {
   public:
     typedef std::vector<const bit_vector *> VectorPtrs;
@@ -70,5 +74,8 @@ class BRWTOptimizer {
     static double pruning_delta(const BRWT &node);
 };
 
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __BRWT_BUILDERS_HPP__

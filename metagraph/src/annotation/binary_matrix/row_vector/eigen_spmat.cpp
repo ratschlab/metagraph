@@ -3,6 +3,10 @@
 #include "common/serialization.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {
     initialize(num_rows, max_num_cols);
 }
@@ -121,3 +125,7 @@ uint64_t EigenSpMat::num_relations() const {
 double EigenSpMat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

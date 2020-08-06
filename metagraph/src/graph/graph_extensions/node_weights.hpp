@@ -10,6 +10,9 @@
 #include "common/vectors/bitmap.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class NodeWeights : public SequenceGraph::GraphExtension {
   public:
     using node_index = typename SequenceGraph::node_index;
@@ -44,5 +47,8 @@ class NodeWeights : public SequenceGraph::GraphExtension {
 
     static constexpr auto kWeightsExtension = ".weights";
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __NODE_WEIGHTS_HPP__
