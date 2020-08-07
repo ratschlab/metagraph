@@ -679,11 +679,12 @@ void QueryExecutor
 
         batch_timer.reset();
 
+        maybe_interrupt_();
+
         if (!aligner_) {
             for ( ; begin != it; ++begin) {
                 assert(begin != end);
 
-                maybe_interrupt_();
                 thread_pool_.enqueue(
                     [&](size_t id, const std::string &name, const std::string &seq) {
                         //logger->trace("calling back in {}", std::this_thread::get_id());

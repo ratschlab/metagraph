@@ -212,13 +212,18 @@ std::string process_align_request(const std::string &received_message,
 
     std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
 
-    seq_io::read_fasta_from_string(fasta.asString(),
-                                   [&](seq_io::kseq_t *read_stream) {
-        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
-                = aligner->align(read_stream->seq.s);
+    // parsing entire fasta file as read_fasta_from_string doesn't play nice with the
+    // current interruption mechanism ues
+    std::vector<std::pair<std::string, std::string> > seqs;
+    seq_io::read_fasta_from_string(fasta.asString(), [&](seq_io::kseq_t *read_stream) {
+        seqs.push_back(std::make_pair(read_stream->name.s, read_stream->seq.s));
+    });
 
+    for(auto& [name,seq] : seqs) {
+        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
+                = aligner->align(seq);
         Json::Value align_entry;
-        align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
+        align_entry[SEQ_DESCRIPTION_JSON_FIELD] = name;
 
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
@@ -230,12 +235,12 @@ std::string process_align_request(const std::string &received_message,
             a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
 
             alignments.append(a);
-        };
+        }
 
         align_entry[ALIGNMENT_JSON_FIELD] = alignments;
 
         root.append(align_entry);
-    });
+    }
 
     Json::StreamWriterBuilder builder;
     return Json::writeString(builder, root);
