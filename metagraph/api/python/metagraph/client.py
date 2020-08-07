@@ -10,6 +10,7 @@ import requests
 DEFAULT_TOP_LABELS = 10000
 DEFAULT_DISCOVERY_THRESHOLD = 0.7
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
+DEFAULT_TIMEOUT = 0.0
 
 JsonDict = Dict[str, Any]
 JsonStrList = List[str]
@@ -22,11 +23,12 @@ class GraphClientJson:
     returning error message in the second element of the tuple returned.
     """
 
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None, timeout: float = DEFAULT_TIMEOUT):
         self.host = host
         self.port = port
         self.label = label
         self.api_path = api_path
+        self.timeout = timeout
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -41,7 +43,8 @@ class GraphClientJson:
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "align": align,
-                      "max_num_nodes_per_seq_char": max_num_nodes_per_seq_char}
+                      "max_num_nodes_per_seq_char": max_num_nodes_per_seq_char,
+                      "timeout": self.timeout}
 
         return self._json_seq_query(sequence, param_dict, "search")
 
@@ -51,7 +54,9 @@ class GraphClientJson:
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
-                  'discovery_fraction': discovery_threshold}
+                  'discovery_fraction': discovery_threshold,
+                  'timeout': self.timeout}
+
         return self._json_seq_query(sequence, params, "align")
 
     # noinspection PyTypeChecker
@@ -98,8 +103,8 @@ class GraphClientJson:
 
 
 class GraphClient:
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
-        self._json_client = GraphClientJson(host, port, api_path=api_path)
+    def __init__(self, host: str, port: int, label: str = None, api_path: str = None, timeout: float = DEFAULT_TIMEOUT):
+        self._json_client = GraphClientJson(host, port, api_path=api_path, timeout=timeout)
         self.label = label
 
     def search(self, sequence: Union[str, Iterable[str]],
@@ -187,11 +192,11 @@ class MultiGraphClient:
     def __init__(self):
         self.graphs = {}
 
-    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
+    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None, timeout: float = DEFAULT_TIMEOUT) -> None:
         if not label:
             label = f"{host}:{port}"
 
-        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
+        self.graphs[label] = GraphClient(host, port, label, api_path=api_path, timeout=timeout)
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in

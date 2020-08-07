@@ -125,10 +125,17 @@ std::string execute_on_thread(const std::function<std::string(const std::string 
     }
 }
 
+float get_timeout(std::string content, float server_timeout) {
+    Json::Value json = parse_json_string(content);
+
+    float req_timeout = json.get("timeout", 0.0).asFloat();
+    return std::min(req_timeout, server_timeout);
+}
+
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
                      const bool execute_separate_thread,
-                     const float timeout,
+                     const float server_timeout,
                      const std::function<std::string(const std::string &)> &process) {
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
@@ -138,6 +145,12 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                  request->remote_endpoint().address().to_string());
 
     try {
+        float timeout = 0.0;
+
+        if(execute_separate_thread) {
+            timeout = get_timeout(content, server_timeout);
+        }
+
         std::string ret = (execute_separate_thread && timeout > 0.0)
                 ? execute_on_thread(process, content, timeout)
                 : process(content);
@@ -148,7 +161,7 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
         logger->info("[Server] benchmark: rtt {} {}",
-                     std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(),
+                     std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count(),
                      get_curr_RSS());
 
     } catch (const std::exception &e) {
