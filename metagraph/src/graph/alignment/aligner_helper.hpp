@@ -172,6 +172,7 @@ class DBGAlignerConfig {
 
     double exact_kmer_match_fraction = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
+    double max_ram_per_alignment = std::numeric_limits<double>::max();
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
@@ -521,6 +522,21 @@ class DPTable {
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
+        }
+
+        size_t cell_size() const {
+            return sizeof(score_t) * 2 + sizeof(Cigar::Operator)
+                 + sizeof(uint8_t) * 2 + sizeof(int32_t);
+        }
+
+        size_t bytes_taken() const {
+            return sizeof(Column)
+                + sizeof(score_t) * scores.capacity()
+                + sizeof(score_t) * gap_scores.capacity()
+                + sizeof(Cigar::Operator) * ops.capacity()
+                + sizeof(uint8_t) * prev_nodes.capacity()
+                + sizeof(uint8_t) * gap_prev_nodes.capacity()
+                + sizeof(int32_t) * gap_count.capacity();
         }
 
         size_t size() const { return size_; }

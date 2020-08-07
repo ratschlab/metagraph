@@ -130,6 +130,8 @@ std::string process_search_request(const std::string &received_message,
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
+    config.alignment_max_ram = json.get("max_ram_per_alignment",
+                                        config.alignment_max_ram).asDouble();
 
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
         throw std::domain_error(
@@ -201,6 +203,8 @@ std::string process_align_request(const std::string &received_message,
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
+    config.alignment_max_ram = json.get("max_ram_per_alignment",
+                                        config.alignment_max_ram).asDouble();
 
     std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
 
