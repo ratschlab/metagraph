@@ -57,12 +57,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                                                   ingroup, outgroup,
                                                   config, num_threads);
 
-            // FYI: num_nodes() throws exception for masked graph with lazy node mask
-            // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-            ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
-
-            masked_dbg.call_kmers([&](auto i, const auto &kmer) {
-                auto cur_labels = anno_graph->get_labels(i);
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) {
+                auto cur_labels = anno_graph->get_labels(kmer, 0.0);
                 obs_labels.insert(cur_labels.begin(), cur_labels.end());
                 obs_kmers.insert(kmer);
             });
@@ -115,9 +111,7 @@ void test_mask_unitigs(double inlabel_fraction,
                                                   ingroup, outgroup,
                                                   config, num_threads);
 
-            EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
-
-            masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
             EXPECT_EQ(ref_kmers, obs_kmers)
                 << k << " "
@@ -211,11 +205,7 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                                                   ingroup, outgroup,
                                                   config, num_threads);
 
-            if (!add_canonical) {
-                EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
-            }
-
-            masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
             EXPECT_EQ(ref_kmers, obs_kmers)
                 << k << " "
