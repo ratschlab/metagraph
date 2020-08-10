@@ -31,6 +31,8 @@ typedef std::function<size_t()> LabelCountCallback;
 typedef std::function<bool(const std::string&, const std::vector<node_index>&)> KeepUnitig;
 typedef std::function<bool(node_index)> KeepNode;
 
+constexpr bool MAKE_BOSS = true;
+
 
 std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
@@ -54,6 +56,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                           sdsl::int_vector<> &counts,
                           std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
+                          bool make_boss,
                           size_t num_threads);
 
 
@@ -89,7 +92,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     auto masked_graph = make_initial_masked_graph(graph_ptr,
                                                   counts, std::move(union_mask),
-                                                  config.add_complement, num_threads);
+                                                  config.add_complement, MAKE_BOSS,
+                                                  num_threads);
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
@@ -167,6 +171,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                           sdsl::int_vector<> &counts,
                           std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
+                          bool make_boss,
                           size_t num_threads) {
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
@@ -174,18 +179,19 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         graph_ptr->is_canonical_mode()
     );
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
+    bool masked_canonical = add_complement || graph_ptr->is_canonical_mode();
 
-    if (add_complement && !graph_ptr->is_canonical_mode()) {
+    if (make_boss || (add_complement && !graph_ptr->is_canonical_mode())) {
         // we can't guarantee that the reverse complement is present, so
         // construct a new subgraph
-        logger->trace("Constructing canonical DBG from labeled subgraph");
+        logger->trace("Constructing BOSS from labeled subgraph");
         uint32_t width = counts.width() / 2;
         std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
         std::mutex add_mutex;
-        BOSSConstructor constructor(graph_ptr->get_k() - 1, true);
+        BOSSConstructor constructor(graph_ptr->get_k() - 1, masked_canonical);
         constructor.add_sequences([&](const CallString &callback) {
             masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
-                sdsl::int_vector<> path_counts(path.size(), 0, width << 1);
+                sdsl::int_vector<> path_counts(path.size(), 0, width * 2);
                 auto it = path_counts.begin();
                 for (node_index i : path) {
                     *it = counts[i];
@@ -195,10 +201,11 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 std::lock_guard<std::mutex> lock(add_mutex);
                 contigs.emplace_back(seq, std::move(path_counts));
                 callback(seq);
-            }, num_threads, true);
+            }, num_threads, masked_canonical);
         });
 
-        auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor), true);
+        auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor),
+                                                      masked_canonical);
 
         // instead of keeping multiple masks (one for valid nodes and another
         // for the masked graph), transfer the valid node mask to the masked graph
@@ -210,7 +217,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         masked_graph = std::make_shared<MaskedDeBruijnGraph>(
             graph_ptr,
             std::make_unique<bitmap_vector>(std::move(new_indicator)),
-            true
+            masked_canonical
         );
 
         logger->trace("Reconstructing count vector");
@@ -223,27 +230,31 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
             });
             assert(j == seq_counts.size());
 
-            reverse_complement(seq.begin(), seq.end());
+            if (masked_canonical) {
+                reverse_complement(seq.begin(), seq.end());
 
-            // counts stores counts for in labels and out labels interleaved,
-            // so to add values properly, it should be reshaped first
-            counts.width(width);
-            seq_counts.width(width);
-            j = seq_counts.size();
-            graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                j -= 2;
-                counts[i * 2] += seq_counts[j];
-                counts[(i * 2) + 1] += seq_counts[j + 1];
-            });
-            assert(!j);
+                // counts stores counts for in labels and out labels interleaved,
+                // so to add values properly, it should be reshaped first
+                counts.width(width);
+                seq_counts.width(width);
+                j = seq_counts.size();
+                graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
+                    j -= 2;
+                    counts[i * 2] += seq_counts[j];
+                    counts[(i * 2) + 1] += seq_counts[j + 1];
+                });
+                assert(!j);
 
-            // reshape back
-            counts.width(width * 2);
-            seq_counts.width(width * 2);
+                // reshape back
+                counts.width(width * 2);
+                seq_counts.width(width * 2);
+            }
         }
 
-        logger->trace("Constructed canonical DBG with {} nodes", graph_ptr->num_nodes());
+        logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
     }
+
+    assert(counts.size() == graph_ptr->max_index() + 1);
 
     return masked_graph;
 }
@@ -295,7 +306,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         std::move(indicator)
     );
 
-    if (graph->is_canonical_mode()) {
+    if (!MAKE_BOSS && graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
         MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask));
