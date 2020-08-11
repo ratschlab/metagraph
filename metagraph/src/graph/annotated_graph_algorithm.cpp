@@ -4,7 +4,6 @@
 
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/vectors/bitmap.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
@@ -34,13 +33,6 @@ typedef std::function<bool(node_index)> KeepNode;
 constexpr bool MAKE_BOSS = true;
 
 
-std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
-fill_count_vector(const AnnotatedDBG &anno_graph,
-                  const std::vector<Label> &labels_in,
-                  const std::vector<Label> &labels_out,
-                  size_t num_threads,
-                  bool update_in_place);
-
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const KeepUnitig &keep_unitig,
                                    size_t num_threads,
@@ -64,7 +56,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                         const std::vector<Label> &labels_in,
                                         const std::vector<Label> &labels_out,
                                         const DifferentialAssemblyConfig &config,
-                                        size_t num_threads) {
+                                        size_t num_threads,
+                                        const sdsl::int_vector<> *init_counts) {
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -82,7 +75,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     auto [counts, union_mask] = fill_count_vector(anno_graph,
                                                   labels_in, labels_out,
                                                   num_threads,
-                                                  update_in_place);
+                                                  update_in_place,
+                                                  init_counts);
 
     // counts is a double-width, interleaved vector where the significant bits
     // represent the out-label count and the least significant bits represent
@@ -265,7 +259,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
                   size_t num_threads,
-                  bool update_in_place) {
+                  bool update_in_place,
+                  const sdsl::int_vector<> *init_counts) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
@@ -274,6 +269,13 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::int_vector<> counts(graph->max_index() + 1, 0, width * 2);
     sdsl::bit_vector indicator(counts.size(), false);
+
+    if (init_counts) {
+        assert(init_counts->size() == graph->max_index() + 1);
+        call_nonzeros(*init_counts, [&](uint64_t i, uint64_t val) {
+            counts[i] = val;
+        });
+    }
 
     // TODO: replace locked increment operations on int_vector<> with actual
     //       atomic operations when we figure out how to align int_vector<> storage

@@ -5,6 +5,7 @@
 #include <functional>
 
 #include "graph/annotated_dbg.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 namespace mtg {
@@ -34,6 +35,14 @@ struct DifferentialAssemblyConfig {
     bool add_complement = false;
 };
 
+std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
+fill_count_vector(const AnnotatedDBG &anno_graph,
+                  const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
+                  const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                  size_t num_threads,
+                  bool update_in_place,
+                  const sdsl::int_vector<> *init_counts = nullptr);
+
 
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
 // return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
@@ -42,7 +51,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                         const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
                                         const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
                                         const DifferentialAssemblyConfig &config,
-                                        size_t num_threads = 1);
+                                        size_t num_threads = 1,
+                                        const sdsl::int_vector<> *init_counts = nullptr);
 
 } // namespace graph
 } // namespace mtg

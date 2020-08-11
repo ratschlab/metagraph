@@ -51,7 +51,8 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        std::vector<std::string> &label_mask_in,
                        std::vector<std::string> &label_mask_out,
                        const DifferentialAssemblyConfig &diff_config,
-                       size_t num_threads) {
+                       size_t num_threads,
+                       const sdsl::int_vector<> *init_counts) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
@@ -86,7 +87,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
 
     return std::make_unique<MaskedDeBruijnGraph>(mask_nodes_by_label(
-        anno_graph, label_mask_in, label_mask_out, diff_config, num_threads
+        anno_graph, label_mask_in, label_mask_out, diff_config, num_threads, init_counts
     ));
 }
 
@@ -149,6 +150,30 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
         if (line.empty() || line[0] == '#')
             continue;
 
+        std::unique_ptr<sdsl::int_vector<>> shared_counts;
+        if (line[0] == '@') {
+            logger->trace("Counting shared k-mers");
+
+            // shared in and out labels
+            auto line_split = utils::split_string(line, "\t", false);
+            if (line_split.size() <= 1 || line_split.size() > 3)
+                throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
+
+            auto foreground_labels = utils::split_string(line_split[1], ",");
+            auto background_labels = utils::split_string(
+                line_split.size() == 3 ? line_split[2] : "",
+                ","
+            );
+
+            auto [counts, indicator] = fill_count_vector(anno_graph,
+                                                         foreground_labels, background_labels,
+                                                         get_num_threads(),
+                                                         false);
+
+            shared_counts = std::make_unique<sdsl::int_vector<>>(std::move(counts));
+            continue;
+        }
+
         thread_pool.enqueue([&](std::string line) {
             auto line_split = utils::split_string(line, "\t", false);
             if (line_split.size() <= 2 || line_split.size() > 4)
@@ -167,7 +192,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
 
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels, background_labels,
-                                             diff_config, num_threads_per_graph),
+                                             diff_config, num_threads_per_graph,
+                                             shared_counts.get()),
                      line_split[0]);
         }, line);
     }
