@@ -242,7 +242,7 @@ int align_to_graph(Config *config) {
 
     if (config->canonical) {
         logger->trace("Loading as canonical DBG");
-        graph.reset(new CanonicalDBG(graph, true));
+        graph.reset(new CanonicalDBG(graph, config->kmers_in_single_form));
     }
 
     Timer timer;

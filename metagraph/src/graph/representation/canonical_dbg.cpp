@@ -18,14 +18,11 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         alph_map_({ graph_.alphabet().size() }),
+        primary_(primary && !graph->is_canonical_mode()),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
-        rev_comp_cache_(primary ? 0 : cache_size),
-        is_palindrome_cache_(graph_.get_k() % 2 || !primary_ ? 0 : cache_size),
-        primary_(primary) {
-    if (graph_.is_canonical_mode())
-        throw std::runtime_error("CanonicalDBG should not be used as a wrapper for a canonical graph");
-
+        rev_comp_cache_(primary_ ? 0 : cache_size),
+        is_palindrome_cache_(graph_.get_k() % 2 || !primary_ ? 0 : cache_size) {
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alph_map_[graph_.alphabet()[i]] = i;
     }
@@ -61,7 +58,9 @@ void CanonicalDBG
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
-    auto first_not_found = std::find(path.begin(), path.end(), DeBruijnGraph::npos);
+    auto first_not_found = graph_.is_canonical_mode()
+        ? path.end()
+        : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
 
     for (auto jt = path.begin(); jt != first_not_found; ++jt) {
         if (terminate())
@@ -106,9 +105,13 @@ void CanonicalDBG
 void CanonicalDBG::map_to_nodes(std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    map_to_nodes_sequentially(sequence, [&](node_index i) {
-        callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
-    }, terminate);
+    if (graph_.is_canonical_mode()) {
+        graph_.map_to_nodes(sequence, callback, terminate);
+    } else {
+        map_to_nodes_sequentially(sequence, [&](node_index i) {
+            callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
+        }, terminate);
+    }
 }
 
 void CanonicalDBG
@@ -141,7 +144,7 @@ void CanonicalDBG
             --alph_size;
         });
 
-        if (alph_size) {
+        if (!graph_.is_canonical_mode() && alph_size) {
             node_index next;
             std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
@@ -202,7 +205,7 @@ void CanonicalDBG
             --alph_size;
         });
 
-        if (alph_size) {
+        if (!graph_.is_canonical_mode() && alph_size) {
             node_index prev;
             std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
@@ -299,7 +302,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
-        if (next != DeBruijnGraph::npos)
+        if (next != DeBruijnGraph::npos || graph_.is_canonical_mode())
             return next;
 
         std::string rev_seq = get_node_sequence(node).substr(1) + next_char;
@@ -318,7 +321,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
-        if (prev != DeBruijnGraph::npos)
+        if (prev != DeBruijnGraph::npos || graph_.is_canonical_mode())
             return prev;
 
         std::string rev_seq = std::string(1, prev_char)

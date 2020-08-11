@@ -128,7 +128,9 @@ class CanonicalDBG : public DeBruijnGraph {
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node;
+        return !graph_.is_canonical_mode()
+            ? (node > offset_ ? node - offset_ : node)
+            : std::min(node, reverse_complement(node));
     }
 
   private:
@@ -139,6 +141,8 @@ class CanonicalDBG : public DeBruijnGraph {
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     std::array<size_t, 256> alph_map_;
+
+    mutable bool primary_;
 
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
@@ -157,8 +161,6 @@ class CanonicalDBG : public DeBruijnGraph {
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
-
-    mutable bool primary_;
 
     node_index reverse_complement(node_index node) const;
 };
