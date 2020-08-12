@@ -27,17 +27,16 @@ typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
 
-typedef std::function<bool(const std::string&, const std::vector<node_index>&)> KeepUnitig;
-typedef std::function<bool(node_index)> KeepNode;
-
 constexpr bool MAKE_BOSS = true;
 
 
+template <class GetKeptIntervals>
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
-                                   const KeepUnitig &keep_unitig,
+                                   const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads,
                                    bool update_in_place);
 
+template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads,
@@ -120,12 +119,18 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     logger->trace("Filtering by unitig");
 
+    size_t num_labels = anno_graph.get_annotation().num_labels();
+
     update_masked_graph_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
+        std::vector<std::pair<size_t, size_t>> kept_intervals;
+
         size_t in_label_counter = 0;
         size_t out_label_counter = 0;
+        size_t other_label_counter = 0;
+
         size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
         size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
-        double other_frac = config.label_mask_other_unitig_fraction + 1.0 / (path.size() + 1);
+        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
 
         for (size_t i = 0; i < path.size(); ++i) {
             node_index node = path[i];
@@ -136,24 +141,37 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             if (in_count >= config.label_mask_in_kmer_fraction * labels_in.size())
                 ++in_label_counter;
 
+            if (out_count > config.label_mask_out_kmer_fraction * labels_out.size())
+                ++out_label_counter;
+
             // if there are not enough k-mers left to satisfy the in-label criteria,
             // or if there are too many k-mers with out-labels
             if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
-                    || (out_count > config.label_mask_out_kmer_fraction * labels_out.size()
-                        && ++out_label_counter > label_out_cutoff))
-                return false;
+                    || (out_label_counter > label_out_cutoff)) {
+                kept_intervals.clear();
+                return kept_intervals;
+            }
         }
 
         if (config.label_mask_other_unitig_fraction != 1.0) {
             // discard this unitig if other labels are found with too high frequency
             // TODO: extract these beforehand and construct an annotator
-            for (const auto &label : anno_graph.get_labels(unitig, other_frac)) {
-                if (!masked_labels.count(label))
-                    return false;
+            for (auto &[label, sig] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
+                if (!masked_labels.count(label)) {
+                    bitmap_vector t(std::move(sig));
+                    other_label_counter += t.num_set_bits();
+                    if (other_label_counter > other_cutoff) {
+                        kept_intervals.clear();
+                        return kept_intervals;
+                    }
+                }
             }
         }
 
-        return true;
+        kept_intervals.emplace_back(0, path.size());
+
+        return kept_intervals;
+
     }, num_threads, update_in_place);
 
     return std::move(*masked_graph);
@@ -341,8 +359,9 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 }
 
 
+template <class GetKeptIntervals>
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
-                                   const KeepUnitig &keep_unitig,
+                                   const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads,
                                    bool update_in_place) {
     std::atomic<size_t> kept_unitigs(0);
@@ -354,15 +373,22 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic_thread_fence(std::memory_order_release);
     masked_graph.update_mask([&](const auto &callback) {
         masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
-            if (keep_unitig(unitig, path)) {
-                kept_unitigs.fetch_add(1, memorder);
-                num_kept_nodes.fetch_add(path.size(), memorder);
-            } else {
-                for (node_index node : path) {
-                    callback(node, false);
-                }
-            }
             total_unitigs.fetch_add(1, memorder);
+
+            size_t last = 0;
+            for (const auto &[begin, end] : get_kept_intervals(unitig, path)) {
+                kept_unitigs.fetch_add(1, memorder);
+                num_kept_nodes.fetch_add(end - begin, memorder);
+                for (size_t i = last; i < begin; ++i) {
+                    callback(path[i], false);
+                }
+                last = end;
+            }
+
+            for (size_t i = last; i < path.size(); ++i) {
+                callback(path[i], false);
+            }
+
         }, num_threads);
     }, update_in_place, parallel, memorder);
     std::atomic_thread_fence(std::memory_order_acquire);
@@ -373,6 +399,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                       / kept_unitigs);
 }
 
+template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads,
