@@ -15,6 +15,7 @@
 #include "cli/load/load_annotation.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/boss.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
@@ -58,21 +59,14 @@ load_annotation(const std::string &anno_file) {
     return annotation;
 }
 
-std::vector<uint64_t>
-get_annotation(const graph::DeBruijnGraph &graph, const annot::binmat::RowDiff &anno, uint64_t node_id) {
-    std::vector<uint64_t> result = anno.get_diff(node_id);
-    while (!anno.terminal_[node_id]) {
-    };
-    return result;
-}
-
-void store_diff(const graph::AnnotatedDBG &annotated_dbg) __attribute__((optnone)) {
-    uint64_t nnodes = annotated_dbg.get_graph().num_nodes();
+void store_diff(const graph::DBGSuccinct &graph,
+                const annot::MultiLabelEncoded<std::string> &annotation)
+        __attribute__((optnone)) {
+    uint64_t nnodes = graph.num_nodes();
     std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
     sdsl::bit_vector terminal(nnodes + 1);
 
     uint64_t max_id = 0;
-    const graph::DeBruijnGraph &graph = annotated_dbg.get_graph();
     ProgressBar progress_bar(graph.num_nodes(), "Building Diff-anno");
     _Pragma("clang optimize off") graph.call_sequences(
             [&](const std::string &seq, const std::vector<uint64_t> &path) {
@@ -81,10 +75,11 @@ void store_diff(const graph::AnnotatedDBG &annotated_dbg) __attribute__((optnone
 
                 for (const uint64_t node_id : path) {
                     assert(node_id <= nnodes);
-                    anno_ids.push_back(annotated_dbg.graph_to_anno_index(node_id));
+                    anno_ids.push_back(
+                            graph::AnnotatedSequenceGraph::graph_to_anno_index(node_id));
                 }
                 std::vector<Vector<uint64_t>> rows
-                        = annotated_dbg.get_annotation().get_matrix().get_rows(anno_ids);
+                        = annotation.get_matrix().get_rows(anno_ids);
 
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     uint64_t idx1 = 0;
@@ -141,13 +136,14 @@ void store_diff(const graph::AnnotatedDBG &annotated_dbg) __attribute__((optnone
         sboundary[i] = boundary[i];
     }
 
-    annot::binmat::RowDiff diff_annotation { diff, sboundary, terminal };
+    annot::binmat::RowDiff diff_annotation(annotation.num_labels(), &graph, diff,
+                                           sboundary, terminal);
     diff_annotation.serialize(FLAGS_o);
 
     _Pragma("clang optimize on")
 }
 
-std::string to_string(const std::vector<uint64_t> &v) {
+std::string to_string(const Vector<uint64_t> &v) {
     std::string result;
     for (const auto el : v) {
         result += (std::to_string(el) + " ");
@@ -163,7 +159,7 @@ void store_zip(const graph::AnnotatedDBG &annotated_dbg) {
         std::vector<uint64_t> anno_ids;
 
         for (const uint64_t node_id : path) {
-            anno_ids.push_back(annotated_dbg.graph_to_anno_index(node_id));
+            anno_ids.push_back(graph::AnnotatedSequenceGraph::graph_to_anno_index(node_id));
         }
         std::vector<Vector<uint64_t>> rows
                 = annotated_dbg.get_annotation().get_matrix().get_rows(anno_ids);
@@ -189,12 +185,13 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
             = load_annotation(FLAGS_annotation);
-    std::shared_ptr<graph::DeBruijnGraph> graph = load_graph(FLAGS_graph);
-    graph::AnnotatedDBG annotated_dbg(graph, std::move(annotation), false);
+    std::shared_ptr<graph::DBGSuccinct> graph = load_graph(FLAGS_graph);
+
     if (FLAGS_action == "store") {
         if (FLAGS_format == "diff") {
-            store_diff(annotated_dbg);
+            store_diff(*graph, *annotation);
         } else if (FLAGS_format == "zip") {
+            graph::AnnotatedDBG annotated_dbg(graph, std::move(annotation), false);
             store_zip(annotated_dbg);
         } else {
             std::cerr << "Invalid -format, only 'zip' and 'diff' supported.";
@@ -209,6 +206,6 @@ int main(int argc, char* argv[]) {
             std::exit(1);
         }
         std::cout << "Annotation for k-mer " << FLAGS_kmer << " is "
-                  << to_string(get_annotation(*graph, anno, node_id));
+                  << to_string(anno.get_row(node_id));
     }
 }

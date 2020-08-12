@@ -88,6 +88,10 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RbBRWTAnnotator());
             break;
         }
+        case Config::RowDiff: {
+            annotation.reset(new annot::RowDiffAnnotator());
+            break;
+        }
     }
 
     return annotation;

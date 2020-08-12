@@ -617,6 +617,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "rbfish";
         case RbBRWT:
             return "rb_brwt";
+        case RowDiff:
+            return "row_diff";
         default:
             assert(false);
             return "Never happens";
@@ -640,6 +642,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RBFish;
     } else if (string == "rb_brwt") {
         return AnnotationType::RbBRWT;
+    } else if (string == "row_diff") {
+        return AnnotationType::RowDiff;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -672,7 +676,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt')";
+    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
 
     switch (identity) {
         case NO_IDENTITY: {

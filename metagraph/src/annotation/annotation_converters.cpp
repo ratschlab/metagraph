@@ -18,6 +18,7 @@
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "binary_matrix/multi_brwt/clustering.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "representation/annotation_matrix/static_annotators_def.hpp"
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
@@ -973,10 +974,102 @@ void add_labels(const ColumnCompressed<Label> &source,
         *progress_bar += end - begin;
 }
 
-template
-void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
-                              RowCompressed<std::string> *annotator,
-                              size_t num_threads);
+template void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
+                                       RowCompressed<std::string> *annotator,
+                                       size_t num_threads);
+
+template <typename Label>
+typename std::unique_ptr<RowDiffAnnotator>
+convert_to_row_diff(const graph::DBGSuccinct &graph,
+                    const std::string& file_name,
+                    uint32_t num_threads) {
+
+    RowCompressed<Label> annotation;
+    uint64_t num_rows;
+    uint64_t num_relations;
+    RowCompressed<Label>::load_shape(file_name, &num_rows, &num_relations);
+
+
+    uint64_t nnodes = graph.num_nodes();
+    std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
+    sdsl::bit_vector terminal(nnodes + 1);
+
+    uint64_t max_id = 0;
+    ProgressBar progress_bar(graph.num_nodes(), "Building row-diff anno");
+    graph.call_sequences(
+            [&](const std::string &seq, const std::vector<uint64_t> &path) {
+                std::cout << seq << std::endl;
+                std::vector<uint64_t> anno_ids;
+
+                for (const uint64_t node_id : path) {
+                    assert(node_id <= nnodes);
+                    anno_ids.push_back(
+                            graph::AnnotatedSequenceGraph::graph_to_anno_index(node_id));
+                }
+                std::vector<Vector<uint64_t>> rows
+                        = annotation.get_matrix().get_rows(anno_ids);
+
+                for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                    uint64_t idx1 = 0;
+                    uint64_t idx2 = 0;
+                    while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
+                        if (rows[i][idx1] == rows[i + 1][idx2]) {
+                            idx1++;
+                            idx2++;
+                        } else {
+                            if (rows[i][idx1] < rows[i + 1][idx2]) {
+                                tdiffs[path[i]].push_back(rows[i][idx1]);
+                                idx1++;
+                            } else {
+                                tdiffs[path[i]].push_back(rows[i + 1][idx2]);
+                                idx2++;
+                            }
+                            if (max_id < tdiffs[path[i]].back()) {
+                                max_id = tdiffs[path[i]].back();
+                            }
+                        }
+                    }
+                    while (idx1 < rows[i].size()) {
+                        tdiffs[path[i]].push_back(rows[i][idx1]);
+                        idx1++;
+                    }
+                    while (idx2 < rows[i + 1].size()) {
+                        tdiffs[path[i]].push_back(rows[i + 1][idx2]);
+                        idx2++;
+                    }
+                    terminal[path[i]] = 0;
+                }
+
+                for (const auto v : rows[rows.size() - 1]) {
+                    tdiffs[path.back()].push_back(v);
+                }
+                terminal[path.back()] = 1;
+
+                progress_bar += path.size();
+            },
+            num_threads, false, true);
+
+    std::vector<uint64_t> diff;
+    std::vector<bool> boundary;
+    for (const auto &tdiff : tdiffs) {
+        diff.insert(diff.end(), tdiff.begin(), tdiff.end());
+        if (!tdiff.empty()) {
+            boundary.insert(boundary.end(), tdiff.size() - 1, false);
+        }
+        boundary.push_back(true);
+    }
+
+    sdsl::bit_vector sboundary(boundary.size());
+    for (uint64_t i = 0; i < diff.size(); ++i) {
+        sboundary[i] = boundary[i];
+    }
+
+    annot::binmat::RowDiff diff_annotation(annotation.num_labels(), &graph, diff,
+                                           sboundary, terminal);
+
+    return std::make_unique<RowDiffAnnotator>(diff_annotation,
+                                              annotation.get_label_encoder());
+}
 
 } // namespace annot
 } // namespace mtg

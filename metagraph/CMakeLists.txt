@@ -508,6 +508,7 @@ file(GLOB unit_tests_files
   "tests/*.cpp"
   "tests/*/*.cpp"
   "tests/*/*/*.cpp"
+  "tests/*/*/*/*.cpp"
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 

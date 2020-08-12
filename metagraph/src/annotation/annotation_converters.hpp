@@ -5,6 +5,7 @@
 #include <vector>
 #include <filesystem>
 
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
 namespace mtg {
 namespace annot {
@@ -76,6 +77,13 @@ template <typename Label>
 void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
+
+template <typename Label>
+typename std::unique_ptr<RowDiffAnnotator>
+convert_to_row_diff(const graph::DBGSuccinct &graph,
+                    RowCompressed<Label> &&annotation,
+                    uint32_t num_threads);
+
 
 } // namespace annot
 } // namespace mtg

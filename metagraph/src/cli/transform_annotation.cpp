@@ -282,11 +282,40 @@ int transform_annotation(Config *config) {
                 target_annotator = std::move(annotator);
                 break;
             }
+            case Config::RowDiff: {
+                logger->trace("Loading graph...");
+                graph::DBGSuccinct graph(2);
+                graph.load(config->infbase);
+
+                logger->trace("Loading annotation from disk...");
+                std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                        = initialize_annotation(files.at(0), *config);
+                if (!annotation->merge_load(files)) {
+                    logger->error("Cannot load annotations");
+                    exit(1);
+                }
+                logger->trace("Annotation loaded in {} sec", timer.elapsed());
+
+                std::unique_ptr<RowCompressed<>> annotator {
+                    dynamic_cast<RowCompressed<> *>(annotation.release())
+                };
+                assert(annotator);
+
+                timer.reset();
+                logger->trace("Converting to row-diff...");
+                std::unique_ptr<annot::RowDiffAnnotator> anno
+                        = convert_to_row_diff(graph, std::move(*annotator),
+                                              get_num_threads());
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                logger->trace("Serializing to '{}'", config->outfbase);
+                anno->serialize(config->outfbase);
+            }
             default:
-                logger->error("Streaming conversion from RowCompressed "
-                              "annotation is not implemented for the requested "
-                              "target type: {}",
-                              Config::annotype_to_string(config->anno_type));
+                logger->error(
+                        "Streaming conversion from RowCompressed "
+                        "annotation is not implemented for the requested "
+                        "target type: {}",
+                        Config::annotype_to_string(config->anno_type));
                 exit(1);
         }
 
@@ -299,14 +328,15 @@ int transform_annotation(Config *config) {
         logger->trace("Serialization done in {} sec", timer.elapsed());
 
     } else if (input_anno_type == Config::ColumnCompressed) {
-        auto annotation = initialize_annotation(files.at(0), *config);
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                = initialize_annotation(files.at(0), *config);
 
         // The entire annotation is loaded in all cases except for transforms
         // to BRWT with a hierarchical clustering of columns specified (infbase)
         // or RbBRWT, for which the construction is done with streaming columns
         // from disk.
         if ((config->anno_type != Config::BRWT || !config->infbase.size())
-                && config->anno_type != Config::RbBRWT) {
+            && config->anno_type != Config::RbBRWT) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -397,11 +427,30 @@ int transform_annotation(Config *config) {
             }
             case Config::RbBRWT: {
                 auto rb_brwt_annotator
-                    = convert_to_RbBRWT<RbBRWTAnnotator>(files, config->relax_arity_brwt);
+                        = convert_to_RbBRWT<RbBRWTAnnotator>(files, config->relax_arity_brwt);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 logger->trace("Serializing to '{}'", config->outfbase);
                 rb_brwt_annotator->serialize(config->outfbase);
                 break;
+            }
+            case Config::RowDiff: {
+                logger->trace("Loading graph...");
+                graph::DBGSuccinct graph(2);
+                graph.load(config->infbase);
+                logger->trace("Coverting annotation from column to row-compressed...");
+                RowCompressed<> row_annotator(annotator->num_objects());
+                convert_to_row_annotator(*annotator, &row_annotator, get_num_threads());
+                annotator.reset();
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                timer.reset();
+                logger->trace("Converting to row-diff...");
+                std::unique_ptr<annot::RowDiffAnnotator> anno
+                        = convert_to_row_diff(graph, std::move(row_annotator),
+                                              get_num_threads());
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                logger->trace("Serializing to '{}'", config->outfbase);
+                anno->serialize(config->outfbase);
             }
         }
 
