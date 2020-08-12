@@ -1,8 +1,8 @@
 #ifndef __KMER_BLOOM_FILTER_HPP__
 #define __KMER_BLOOM_FILTER_HPP__
 
-#include "common/hash/rolling_hasher.hpp"
-#include "common/hash/bloom_filter.hpp"
+#include "common/hashers/rolling_hasher.hpp"
+#include "common/bloom_filter.hpp"
 
 
 namespace mtg {

@@ -23,7 +23,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
     return graph;
 }
 
-std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename);
+std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
 
 } // namespace cli
 } // namespace mtg

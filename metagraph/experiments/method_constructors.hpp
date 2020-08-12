@@ -13,6 +13,9 @@
 namespace mtg {
 namespace experiments {
 
+using namespace mtg::annot::binmat;
+
+
 template <typename T>
 using UniquePtrs = typename std::vector<std::unique_ptr<T>>;
 

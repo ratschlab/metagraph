@@ -9,6 +9,9 @@
 namespace mtg {
 namespace test {
 
+using namespace mtg::graph::boss;
+
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,

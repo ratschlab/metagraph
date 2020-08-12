@@ -8,6 +8,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class EigenSpMat : public BinaryMatrixRowDynamic {
   public:
     EigenSpMat(uint64_t num_rows = 0, uint64_t max_num_cols = 10'000'000);
@@ -38,5 +42,9 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
     uint64_t num_columns_ = 0;
     Eigen::SparseMatrix<bool, Eigen::RowMajor> mat_;
 };
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __EIGEN_SPMAT_HPP__

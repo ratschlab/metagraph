@@ -6,7 +6,10 @@ from graphviz import Digraph
 
 
 """
-Script for plotting internal Multi-BRWT tree
+Script for viewing the internal Multi-BRWT tree
+
+Usage:
+    ./metagraph stats -v -a test.brwt.annodbg | plot_brwt.py
 """
 
 
@@ -26,14 +29,14 @@ def human_readable(value):
 
 
 def render_tree(text):
-    assert(text[14] == '==================== Multi-BRWT TREE ===================\n')
+    assert(text[11] == '==================== Multi-BRWT TREE ===================\n')
     assert(text[-1] == '========================================================\n')
 
-    annotation_name = text[4].strip().split()[-1]
+    annotation_name = text[1].strip().split()[-1][1:-1]
     print("Rendering Multi-BRWT structure for:", annotation_name)
-    d = Digraph(name=text[4].strip().split()[-1], graph_attr={'rankdir': 'LR'})
+    d = Digraph(name=text[1].strip().split()[-1], graph_attr={'rankdir': 'LR'})
 
-    text = text[15:-1]
+    text = text[12:-1]
 
     max_size = max([int(line.split(',')[1]) for line in text])
 
@@ -49,7 +52,7 @@ def render_tree(text):
         for child in tokens[3:]:
             d.edge(node, child)
 
-    d.render(annotation_name.split('/')[-1])
+    d.render(annotation_name.split('/')[-1] + '_view')
 
 
 if __name__ == '__main__':

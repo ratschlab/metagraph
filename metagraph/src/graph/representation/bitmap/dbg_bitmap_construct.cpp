@@ -3,14 +3,15 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 
+
 namespace mtg {
-namespace bitmap_graph {
+namespace graph {
 
 using mtg::common::logger;
 using mtg::kmer::KmerExtractor2Bit;
@@ -318,5 +319,5 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     }
 }
 
-} // namespace bitmap_graph
+} // namespace graph
 } // namespace mtg

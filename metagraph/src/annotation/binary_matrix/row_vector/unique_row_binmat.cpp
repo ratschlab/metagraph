@@ -3,10 +3,14 @@
 #include <sdsl/int_vector.hpp>
 #include <tsl/ordered_set.h>
 
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
+
+namespace mtg {
+namespace annot {
+namespace binmat {
 
 UniqueRowBinmat::UniqueRowBinmat(uint64_t num_rows)
       : unique_rows_(1), row_rank_(num_rows, 0) {}
@@ -160,3 +164,7 @@ void UniqueRowBinmat::serialize(std::ostream &outstream) const {
 double UniqueRowBinmat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

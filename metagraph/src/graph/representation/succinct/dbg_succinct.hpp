@@ -7,12 +7,15 @@
 #include "boss.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 class DBGSuccinct : public DeBruijnGraph {
   public:
     friend class MaskedDeBruijnGraph;
 
     explicit DBGSuccinct(size_t k, bool canonical_mode = false);
-    explicit DBGSuccinct(BOSS *boss_graph, bool canonical_mode = false);
+    explicit DBGSuccinct(boss::BOSS *boss_graph, bool canonical_mode = false);
 
     virtual ~DBGSuccinct() {}
 
@@ -110,14 +113,14 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual std::string file_extension() const override final { return kExtension; }
     std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 
-    virtual void switch_state(BOSS::State new_state) final;
-    virtual BOSS::State get_state() const final;
+    virtual void switch_state(boss::BOSS::State new_state) final;
+    virtual boss::BOSS::State get_state() const final;
 
     virtual bool is_canonical_mode() const override final { return canonical_mode_; }
 
-    virtual const BOSS& get_boss() const final { return *boss_graph_; }
-    virtual BOSS& get_boss() final { return *boss_graph_; }
-    virtual BOSS* release_boss() final { return boss_graph_.release(); }
+    virtual const boss::BOSS& get_boss() const final { return *boss_graph_; }
+    virtual boss::BOSS& get_boss() final { return *boss_graph_; }
+    virtual boss::BOSS* release_boss() final { return boss_graph_.release(); }
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
@@ -143,7 +146,7 @@ class DBGSuccinct : public DeBruijnGraph {
     static constexpr auto kBloomFilterExtension = ".bloom";
 
   private:
-    std::unique_ptr<BOSS> boss_graph_;
+    std::unique_ptr<boss::BOSS> boss_graph_;
     // all edges in boss except dummy
     std::unique_ptr<bit_vector> valid_edges_;
 
@@ -152,5 +155,7 @@ class DBGSuccinct : public DeBruijnGraph {
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 };
 
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_SUCCINCT_HPP__

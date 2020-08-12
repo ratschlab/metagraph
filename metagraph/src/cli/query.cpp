@@ -1,12 +1,11 @@
 #include "query.hpp"
 
 #include <ips4o.hpp>
-#include <fmt/format.h>
 #include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -27,6 +26,9 @@ namespace cli {
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
+
+using namespace mtg::annot::binmat;
+using namespace mtg::graph;
 
 using mtg::common::logger;
 
@@ -109,7 +111,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
  *
  * @return     Annotation submatrix in the UniqueRowAnnotator representation
  */
-std::unique_ptr<annotate::UniqueRowAnnotator>
+std::unique_ptr<annot::UniqueRowAnnotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  const std::vector<uint64_t> &index_in_full,
                  size_t num_threads) {
@@ -148,7 +150,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
 
         // copy annotations from the full graph to the query graph
-        return std::make_unique<annotate::UniqueRowAnnotator>(
+        return std::make_unique<annot::UniqueRowAnnotator>(
             std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                               std::vector<uint32_t>(row_indexes.begin(),
                                                                     row_indexes.end()),
@@ -214,7 +216,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     );
 
     // copy annotations from the full graph to the query graph
-    return std::make_unique<annotate::UniqueRowAnnotator>(
+    return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
                                           std::move(row_rank),
                                           full_annotation.num_labels()),
@@ -473,7 +475,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
 std::string get_alignment_header_and_swap_query(const std::string &name,
                                                 std::string *query_seq,
-                                                QueryAlignment<> *matches) {
+                                                align::QueryAlignment<> *matches) {
     std::string header;
 
     if (matches->size()) {
@@ -509,12 +511,18 @@ int query_graph(Config *config) {
 
     Timer timer;
 
-    std::unique_ptr<IDBGAligner> aligner;
+    std::unique_ptr<align::IDBGAligner> aligner;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
         aligner = build_aligner(*graph, *config);
+
+        // the fwd_and_reverse argument in the aligner config returns the best of
+        // the forward and reverse complement alignments, rather than both.
+        // so, we want to prevent it from doing this
+        auto &aligner_config = const_cast<align::DBGAlignerConfig&>(aligner->get_config());
+        aligner_config.forward_and_reverse_complement = false;
     }
 
     QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);

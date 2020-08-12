@@ -14,6 +14,7 @@
 namespace {
 
 using namespace mtg;
+
 using mtg::kmer::KmerExtractorBOSS;
 
 template <typename Kmer>

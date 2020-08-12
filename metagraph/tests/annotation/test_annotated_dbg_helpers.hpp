@@ -24,9 +24,9 @@
 namespace mtg {
 namespace test {
 
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 
-template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels);
@@ -48,30 +48,30 @@ typedef ::testing::Types<DBGBitmap,
 typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct> MaskedStableGraphTypes;
 
-typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashString, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashOrdered, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashFast, annotate::ColumnCompressed<>>,
-                         std::pair<DBGSuccinct, annotate::ColumnCompressed<>>,
-                         std::pair<DBGBitmap, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashString, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashOrdered, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashFast, annotate::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphAnnotationPairTypes;
 
-typedef ::testing::Types<std::pair<DBGBitmap, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashOrdered, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashFast, annotate::ColumnCompressed<>>,
-                         std::pair<DBGBitmap, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashOrdered, annotate::RowFlatAnnotator>,
-                         std::pair<DBGHashFast, annotate::RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
                         > GraphNoNAnnotationPairTypes;
 
-typedef ::testing::Types<std::pair<DBGHashString, annotate::ColumnCompressed<>>,
-                         std::pair<DBGSuccinct, annotate::ColumnCompressed<>>,
-                         std::pair<DBGHashString, annotate::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annotate::RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
 
 } // namespace test

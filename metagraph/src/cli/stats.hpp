@@ -3,19 +3,23 @@
 
 #include <cstdlib>
 
-class DeBruijnGraph;
-class BOSS;
-
-
 namespace mtg {
+
+namespace graph {
+    class DeBruijnGraph;
+    namespace boss {
+        class BOSS;
+    } // namespace boss
+} // namespace graph
+
 namespace cli {
 
 class Config;
 
 
-void print_stats(const DeBruijnGraph &graph);
+void print_stats(const graph::DeBruijnGraph &graph);
 
-void print_boss_stats(const BOSS &boss_graph,
+void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy = false,
                       size_t num_threads = 0,
                       bool verbose = false);

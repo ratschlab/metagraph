@@ -8,6 +8,10 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 template <typename BitVector>
 RowConcatenated<BitVector>::
 RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
@@ -95,3 +99,7 @@ void RowConcatenated<BitVector>::serialize(std::ostream &out) const {
 
 template class RowConcatenated<bit_vector_sd>;
 template class RowConcatenated<bit_vector_small>;
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

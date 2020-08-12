@@ -1,4 +1,4 @@
-#include "common/hash/bloom_filter.hpp"
+#include "common/bloom_filter.hpp"
 #include "../test_helpers.hpp"
 
 #include <gtest/gtest.h>

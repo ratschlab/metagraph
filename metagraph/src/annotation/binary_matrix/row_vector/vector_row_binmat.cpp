@@ -9,6 +9,10 @@
 #include "common/algorithms.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 template <typename RowType>
 VectorRowBinMat<RowType>::VectorRowBinMat(std::vector<RowType>&& rows,
                                           uint64_t num_columns)
@@ -160,3 +164,7 @@ double VectorRowBinMat<RowType>::density() const {
 
 template class VectorRowBinMat<SmallVector<uint32_t>>;
 template class VectorRowBinMat<Vector<uint64_t>>;
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

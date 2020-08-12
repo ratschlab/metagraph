@@ -6,8 +6,9 @@
 #include "common/serialization.hpp"
 #include "kmer/alphabets.hpp"
 
-using namespace mtg;
 
+namespace mtg {
+namespace graph {
 
 #if _PROTEIN_GRAPH
     const std::string DBGHashString::alphabet_ = kmer::alphabets::kAlphabetProtein;
@@ -403,3 +404,6 @@ std::vector<std::string> DBGHashString::encode_sequence(std::string_view sequenc
 }
 
 const std::string& DBGHashString::alphabet() const { return alphabet_; }
+
+} // namespace graph
+} // namespace mtg

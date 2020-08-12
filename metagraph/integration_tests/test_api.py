@@ -130,7 +130,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str})
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -146,9 +146,28 @@ class TestAPIRaw(TestAPIBase):
             [f"query{i}" for i in range(repetitions)]
         )
 
+    @parameterized.expand([(1,1), (3,1)])
+    def test_api_raw_align_bad_sequence(self, repetitions, dummy_arg):
+        fasta_str = '\n'.join([ f">query{i}\nNNNNNNNN" for i in range(repetitions)])
+
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+
+        ret = self.raw_post_request('align', payload)
+
+        self.assertEqual(ret.status_code, 200)
+
+        self.assertEqual(len(ret.json()), repetitions)
+        expected = {'seq_description': 'query0', 'alignments': []}
+        self.assertDictEqual(ret.json()[0], expected)
+
+        self.assertListEqual(
+            [ret.json()[i]['seq_description'] for i in range(repetitions)],
+            [f"query{i}" for i in range(repetitions)]
+        )
+
     def test_api_raw_align_empty_fasta_desc(self):
         fasta_str = ">\nTCGATCGA"
-        payload = json.dumps({"FASTA": fasta_str})
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
         ret = self.raw_post_request('align', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
@@ -214,6 +233,16 @@ class TestAPIClient(TestAPIBase):
         # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
         # but here it turns out to be the case
         self.assertEqual(len(align_res), repetitions *  alignment_cnt)
+
+    def test_api_align_df_too_divergent(self):
+        repetitions = 4
+        alignment_cnt = 3
+        seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
+        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, discovery_threshold=1.0)
+
+        align_res = ret[self.graph_name]
+        self.assertIn('cigar', align_res.columns)
+        self.assertEqual(len(align_res), 0)
 
 
 class TestAPIJson(TestAPIBase):

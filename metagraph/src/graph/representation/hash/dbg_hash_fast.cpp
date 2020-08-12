@@ -8,10 +8,14 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
+
+
+namespace mtg {
+namespace graph {
 
 using mtg::common::logger;
 using mtg::kmer::KmerExtractor2Bit;
@@ -608,3 +612,6 @@ bool DBGHashFast::load(const std::string &filename) {
                      std::ios::binary);
     return load(in);
 }
+
+} // namespace graph
+} // namespace mtg

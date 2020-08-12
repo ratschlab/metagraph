@@ -6,7 +6,8 @@
 #include <filesystem>
 
 
-namespace annotate {
+namespace mtg {
+namespace annot {
 
 template <typename Label>
 class RowCompressed;
@@ -58,7 +59,8 @@ void relax_BRWT(StaticAnnotation *annotation,
 
 template <class StaticAnnotation>
 typename std::unique_ptr<StaticAnnotation>
-convert_to_RbBRWT(const std::vector<std::string> &annotation_files);
+convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
+                  size_t max_brwt_arity);
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
@@ -75,6 +77,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg
 
 #endif // __ANNOTATION_CONVERTERS_HPP__
