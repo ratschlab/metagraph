@@ -120,60 +120,74 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     logger->trace("Filtering by unitig");
 
     size_t num_labels = anno_graph.get_annotation().num_labels();
+    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
 
     update_masked_graph_by_unitig(*masked_graph,
                                   [&](const auto &unitig, const auto &path)
                                       -> std::vector<std::pair<size_t, size_t>> {
         sdsl::bit_vector in_mask(path.size(), false);
-        sdsl::bit_vector out_mask(path.size(), true);
-        sdsl::bit_vector other_mask(path.size(), true);
+        sdsl::bit_vector out_mask(path.size(), false);
+        sdsl::bit_vector other_mask(check_other ? path.size() : 0, false);
 
         size_t min_label_in_count = config.label_mask_in_kmer_fraction * labels_in.size();
         size_t max_label_out_count = config.label_mask_out_kmer_fraction * labels_out.size();
-
-        size_t in_label_counter = 0;
-        size_t out_label_counter = 0;
-        size_t other_label_counter = 0;
 
         for (size_t i = 0; i < path.size(); ++i) {
             uint64_t count = counts[path[i]];
             uint64_t in_count = count & int_mask;
             uint64_t out_count = count >> width;
 
-            if (in_count >= min_label_in_count) {
-                ++in_label_counter;
+            if (in_count >= min_label_in_count)
                 in_mask[i] = true;
-            }
 
-            if (out_count > max_label_out_count) {
-                ++out_label_counter;
-                out_mask[i] = false;
-            }
+            if (out_count > max_label_out_count)
+                out_mask[i] = true;
         }
 
-        if (config.label_mask_other_unitig_fraction != 1.0) {
+        if (check_other) {
             for (auto &[label, sig] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
-                if (masked_labels.count(label))
-                    continue;
-
-                for (size_t i = 0; i < sig.size(); ++i) {
-                    ++other_label_counter;
-                    other_mask[i] = false;
-                }
+                if (!masked_labels.count(label))
+                    bitmap_vector(std::move(sig)).add_to(&other_mask);
             }
         }
+
+        size_t begin = next_bit(in_mask, 0);
+
+        if (begin == in_mask.size())
+            return {};
+
+        size_t end = prev_bit(in_mask, in_mask.size() - 1) + 1;
+        assert(end > begin);
+
+        size_t in_label_counter = 0;
+        size_t out_label_counter = 0;
+        size_t other_label_counter = 0;
 
         size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
         size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
         size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
 
-        if (in_label_counter < label_in_cutoff
-                || out_label_counter > label_out_cutoff
-                || other_label_counter > other_cutoff) {
-            return {};
+        for (size_t i = begin; i < end; ++i) {
+            if (in_label_counter + end - i < label_in_cutoff)
+                return {};
+
+            if (in_mask[i])
+                ++in_label_counter;
+
+            if (out_mask[i]) {
+                ++out_label_counter;
+                if (out_label_counter > label_out_cutoff)
+                    return {};
+            }
+
+            if (check_other && other_mask[i]) {
+                ++other_label_counter;
+                if (other_label_counter > other_cutoff)
+                    return {};
+            }
         }
 
-        return { std::make_pair(0, path.size()) };
+        return { std::make_pair(begin, end) };
 
     }, num_threads, update_in_place);
 
@@ -382,14 +396,14 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
             for (const auto &[begin, end] : get_kept_intervals(unitig, path)) {
                 kept_unitigs.fetch_add(1, memorder);
                 num_kept_nodes.fetch_add(end - begin, memorder);
-                for (size_t i = last; i < begin; ++i) {
-                    callback(path[i], false);
+                for ( ; last < begin; ++last) {
+                    callback(path[last], false);
                 }
                 last = end;
             }
 
-            for (size_t i = last; i < path.size(); ++i) {
-                callback(path[i], false);
+            for ( ; last < path.size(); ++last) {
+                callback(path[last], false);
             }
 
         }, num_threads);
