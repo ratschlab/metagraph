@@ -425,11 +425,11 @@ def check_status():
                 ack('clean', params)
                 start_transfer(sra_id, cleaned_dir, 'clean')
             else:
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
+                          'size_mb': cleaned_size_mb, 'return_code': return_code}
                 nack('clean', params)
                 logging.warning(f'[{sra_id}] Cleaning graph failed. Removing {cleaned_dir}')
                 subprocess.run(['rm', '-rf', cleaned_dir])
-                params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
-                          'size_mb': cleaned_size_mb, 'return_code': return_code}
         else:
             total_reserved_ram_gb += reserved_ram_gb
             used_cores += max(4, round(reserved_ram_gb / 3.75))
