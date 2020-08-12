@@ -121,56 +121,59 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     size_t num_labels = anno_graph.get_annotation().num_labels();
 
-    update_masked_graph_by_unitig(*masked_graph, [&](const auto &unitig, const auto &path) {
-        std::vector<std::pair<size_t, size_t>> kept_intervals;
+    update_masked_graph_by_unitig(*masked_graph,
+                                  [&](const auto &unitig, const auto &path)
+                                      -> std::vector<std::pair<size_t, size_t>> {
+        sdsl::bit_vector in_mask(path.size(), false);
+        sdsl::bit_vector out_mask(path.size(), true);
+        sdsl::bit_vector other_mask(path.size(), true);
+
+        size_t min_label_in_count = config.label_mask_in_kmer_fraction * labels_in.size();
+        size_t max_label_out_count = config.label_mask_out_kmer_fraction * labels_out.size();
 
         size_t in_label_counter = 0;
         size_t out_label_counter = 0;
         size_t other_label_counter = 0;
 
-        size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
-        size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
-        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
-
         for (size_t i = 0; i < path.size(); ++i) {
-            node_index node = path[i];
-            uint64_t count = counts[node];
+            uint64_t count = counts[path[i]];
             uint64_t in_count = count & int_mask;
             uint64_t out_count = count >> width;
 
-            if (in_count >= config.label_mask_in_kmer_fraction * labels_in.size())
+            if (in_count >= min_label_in_count) {
                 ++in_label_counter;
+                in_mask[i] = true;
+            }
 
-            if (out_count > config.label_mask_out_kmer_fraction * labels_out.size())
+            if (out_count > max_label_out_count) {
                 ++out_label_counter;
-
-            // if there are not enough k-mers left to satisfy the in-label criteria,
-            // or if there are too many k-mers with out-labels
-            if ((path.size() - 1 - i + in_label_counter < label_in_cutoff)
-                    || (out_label_counter > label_out_cutoff)) {
-                kept_intervals.clear();
-                return kept_intervals;
+                out_mask[i] = false;
             }
         }
 
         if (config.label_mask_other_unitig_fraction != 1.0) {
-            // discard this unitig if other labels are found with too high frequency
-            // TODO: extract these beforehand and construct an annotator
             for (auto &[label, sig] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
-                if (!masked_labels.count(label)) {
-                    bitmap_vector t(std::move(sig));
-                    other_label_counter += t.num_set_bits();
-                    if (other_label_counter > other_cutoff) {
-                        kept_intervals.clear();
-                        return kept_intervals;
-                    }
+                if (masked_labels.count(label))
+                    continue;
+
+                for (size_t i = 0; i < sig.size(); ++i) {
+                    ++other_label_counter;
+                    other_mask[i] = false;
                 }
             }
         }
 
-        kept_intervals.emplace_back(0, path.size());
+        size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
+        size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
+        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
 
-        return kept_intervals;
+        if (in_label_counter < label_in_cutoff
+                || out_label_counter > label_out_cutoff
+                || other_label_counter > other_cutoff) {
+            return {};
+        }
+
+        return { std::make_pair(0, path.size()) };
 
     }, num_threads, update_in_place);
 
