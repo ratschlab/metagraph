@@ -71,4 +71,22 @@ static void BM_anno_get_rows(benchmark::State &state) {
 }
 BENCHMARK(BM_anno_get_rows) -> Unit(benchmark::kMillisecond);
 
+static void BM_anno_get_rows_unique(benchmark::State &state) {
+    auto anno = load_annotation();
+    if (!dynamic_cast<const RainbowMatrix*>(&anno->get_matrix())) {
+        state.SkipWithError("This is not a Rainbow type of matrix. Skipped.");
+        return;
+    }
+    const RainbowMatrix &rb_matrix
+        = dynamic_cast<const RainbowMatrix&>(anno->get_matrix());
+
+    auto rows = random_numbers(100'000, 0, rb_matrix.num_rows() - 1);
+    std::sort(rows.begin(), rows.end());
+
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(rb_matrix.get_rows(&rows));
+    }
+}
+BENCHMARK(BM_anno_get_rows_unique) -> Unit(benchmark::kMillisecond);
+
 } // namespace

@@ -11,7 +11,6 @@ bool is_unreliable_unitig(const std::vector<SequenceGraph::node_index> &path,
 
 uint64_t estimate_min_kmer_abundance(const DeBruijnGraph &graph,
                                      const NodeWeights &node_weights,
-                                     int fallback_cutoff,
                                      uint64_t num_singleton_kmers = 0);
 
 #endif // __GRAPH_CLEANING_HPP__

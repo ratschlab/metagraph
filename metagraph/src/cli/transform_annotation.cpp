@@ -297,7 +297,12 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::ColumnCompressed) {
         auto annotation = initialize_annotation(files.at(0), *config);
 
-        if (config->anno_type != Config::BRWT || !config->infbase.size()) {
+        // The entire annotation is loaded in all cases except for transforms
+        // to BRWT with a hierarchical clustering of columns specified (infbase)
+        // or RbBRWT, for which the construction is done with streaming columns
+        // from disk.
+        if ((config->anno_type != Config::BRWT || !config->infbase.size())
+                && config->anno_type != Config::RbBRWT) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -384,6 +389,13 @@ int transform_annotation(Config *config) {
             }
             case Config::RBFish: {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                break;
+            }
+            case Config::RbBRWT: {
+                auto rb_brwt_annotator = convert_to_RbBRWT<RbBRWTAnnotator>(files);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                logger->trace("Serializing to '{}'", config->outfbase);
+                rb_brwt_annotator->serialize(config->outfbase);
                 break;
             }
         }

@@ -138,42 +138,25 @@ void print_stats(const Annotator &annotation) {
     std::cout << "density: " << static_cast<double>(annotation.num_relations())
                                     / annotation.num_objects()
                                     / annotation.num_labels() << std::endl;
-    std::cout << "representation: ";
+    std::cout << "representation: "
+              << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
-    if (dynamic_cast<const annotate::ColumnCompressed<std::string> *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::ColumnCompressed) << std::endl;
+    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
+        std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
+        std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
+    }
 
-    } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
-
-    } else if (dynamic_cast<const annotate::MultiBRWTAnnotator *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
-        const auto &brwt = dynamic_cast<const annotate::MultiBRWTAnnotator &>(annotation).get_matrix();
+    if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
         std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
-        std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
-        std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
-        std::cout << "shrinkage: " << brwt.shrinking_rate() << std::endl;
+        std::cout << "num nodes: " << brwt->num_nodes() << std::endl;
+        std::cout << "avg arity: " << brwt->avg_arity() << std::endl;
+        std::cout << "shrinkage: " << brwt->shrinking_rate() << std::endl;
         if (get_verbose()) {
             std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
-            brwt.print_tree_structure(std::cout);
+            brwt->print_tree_structure(std::cout);
         }
-
-    } else if (dynamic_cast<const annotate::BinRelWT_sdslAnnotator *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
-
-    } else if (dynamic_cast<const annotate::BinRelWTAnnotator *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::BinRelWT) << std::endl;
-
-    } else if (dynamic_cast<const annotate::RowFlatAnnotator *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::RowFlat) << std::endl;
-
-    } else if (dynamic_cast<const annotate::RainbowfishAnnotator *>(&annotation)) {
-        std::cout << Config::annotype_to_string(Config::RBFish) << std::endl;
-
-    } else {
-        assert(false);
-        throw std::runtime_error("Unknown annotator");
     }
+
     std::cout << "========================================================" << std::endl;
 }
 

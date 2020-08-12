@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include <tsl/ordered_map.h>
+#include "common/vector_map.hpp"
 
 #include "../test_helpers.hpp"
 #include "test_annotation.hpp"
@@ -10,13 +10,6 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::test;
-
-template <typename Key, typename T>
-using VectorOrderedMap = tsl::ordered_map<Key, T,
-                                          std::hash<Key>, std::equal_to<Key>,
-                                          std::allocator<std::pair<Key, T>>,
-                                          std::vector<std::pair<Key, T>>,
-                                          uint64_t>;
 
 
 std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
@@ -111,7 +104,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
 std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    VectorOrderedMap<uint64_t, size_t> index_counts;
+    VectorMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
@@ -289,7 +282,7 @@ get_top_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotato
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    VectorOrderedMap<uint64_t, size_t> index_counts;
+    VectorMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }

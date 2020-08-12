@@ -2,20 +2,12 @@
 
 #include <unordered_set>
 
-#include <tsl/ordered_map.h>
-
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/vector_map.hpp"
 #include "kmer/alphabets.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "graph/representation/masked_graph.hpp"
-
-template <typename Key, typename T>
-using VectorOrderedMap = tsl::ordered_map<Key, T,
-                                          std::hash<Key>, std::equal_to<Key>,
-                                          std::allocator<std::pair<Key, T>>,
-                                          std::vector<std::pair<Key, T>>,
-                                          uint64_t>;
 
 
 namespace annotated_graph_algorithm {
@@ -71,7 +63,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     }
 
     return mask_nodes_by_unitig(dbg, [&](const auto &, const auto &path) {
-        VectorOrderedMap<row_index, size_t> index_counts;
+        VectorMap<row_index, size_t> index_counts;
         for (node_index i : path) {
             index_counts[anno_graph.graph_to_anno_index(i)]++;
         }

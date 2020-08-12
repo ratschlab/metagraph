@@ -75,10 +75,22 @@ int clean_graph(Config *config) {
                         [&](auto i) { return (*node_weights)[i] > 0; }, true)
                     : graph;
 
-            config->min_unitig_median_kmer_abundance
+            uint64_t cutoff
                 = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->fallback_abundance_cutoff,
                                               config->num_singleton_kmers);
+
+            if (cutoff != static_cast<uint64_t>(-1)) {
+                config->min_unitig_median_kmer_abundance = cutoff;
+            } else {
+                if (config->fallback_abundance_cutoff == -1) {
+                    logger->error("Cannot estimate expected minimum k-mer abundance"
+                                  " and fallback is disabled (--fallback -1). Terminating.");
+                    std::exit(129);
+                }
+                logger->warn("Cannot estimate expected minimum k-mer abundance."
+                             " Using fallback value: {}", config->fallback_abundance_cutoff);
+                config->min_unitig_median_kmer_abundance = config->fallback_abundance_cutoff;
+            }
         }
 
         if (config->min_count > 1

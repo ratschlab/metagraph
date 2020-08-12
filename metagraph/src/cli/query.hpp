@@ -27,7 +27,8 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
-                      size_t num_threads);
+                      size_t num_threads,
+                      bool canonical = false);
 
 
 class QueryExecutor {
