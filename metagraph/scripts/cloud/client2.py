@@ -165,13 +165,12 @@ def start_download(download_resp):
     sra_info[sra_id] = (time.time(),)
 
 
-def write_log_header(log_file_name, operation, sra_id, required_ram_gb, available_ram_gb):
-    with open(log_file_name, 'w') as f:
-        free_ram_gb = psutil.virtual_memory().available / 1e9
-        f.write(
-            f'[{sra_id}] Starting {operation} on {util.internal_ip()}, required RAM {round(required_ram_gb, 2)}, free RAM '
-            f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB')
-        f.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{util.internal_ip()}/client.log"')
+def write_log_header(log_file, operation, sra_id, required_ram_gb, available_ram_gb):
+    free_ram_gb = psutil.virtual_memory().available / 1e9
+    log_file.write(
+        f'[{sra_id}] Starting {operation} on {util.internal_ip()}, required RAM {round(required_ram_gb, 2)}, free RAM '
+        f'{round(free_ram_gb, 2)}GB, available for {operation} (not reserved) RAM {round(available_ram_gb, 2)}GB\n')
+    log_file.write(f'[{sra_id}] Full machine log: "gsutil cat {args.destination}logs/{util.internal_ip()}/client.log"\n')
 
 
 def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_gb, available_ram_gb):
@@ -182,8 +181,8 @@ def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_
                  f'on {num_cores} cores')
     util.make_dir_if_needed(build_dir(sra_id))
     log_file_name = os.path.join(build_dir(sra_id), 'build.log')
-    write_log_header(log_file_name, 'build', sra_id, required_ram_gb, available_ram_gb)
     log_file = util.TeeLogger(log_file_name)
+    write_log_header(log_file, 'build', sra_id, required_ram_gb, available_ram_gb)
     build_processes[sra_id] = (subprocess.Popen(
         ['./build.sh', sra_id, input_dir, output_dir, str(buffer_size_gb), str(num_cores), container_type], stdout=log_file,
         stderr=log_file), time.time(), wait_time, required_ram_gb)
@@ -196,8 +195,8 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram
     num_cores = max(4, round(required_ram_gb / 3.75))
     logging.info(f'[{sra_id}] Starting clean from {input_file} to {output_file} on {num_cores} cores')
     log_file_name = os.path.join(clean_dir(sra_id), 'clean.log')
-    write_log_header(log_file_name, 'clean', sra_id, required_ram_gb, available_ram_gb)
     log_file = util.TeeLogger(log_file_name, '%,')  # %, eliminates the progress bar spam
+    write_log_header(log_file, 'clean', sra_id, required_ram_gb, available_ram_gb)
     clean_processes[sra_id] = (
         subprocess.Popen(
             ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback), str(num_cores)],
@@ -217,7 +216,7 @@ def start_transfer(sra_id, source, top_folder):
         pending_processes.remove(sra_id)
         dump_pending(pending_processes)
     else:
-        logging.error(f'[sra_id] just transferred successfully but not present in pending_ids. Something is messed up.')
+        logging.error(f'[{sra_id}] just transferred successfully but not present in pending_ids. Something is messed up.')
 
 
 def ack(operation, params):
@@ -292,6 +291,7 @@ def check_status():
     global must_quit
     if must_quit:
         return False
+    total_reserved_ram_gb = 0  # how much memory all active processes need
     completed_downloads = set()
     for sra_id, (download_process, start_time) in download_processes.items():
         return_code = download_process.poll()
@@ -359,11 +359,13 @@ def check_status():
                 params = {'id': sra_id, 'time': int(time.time() - start_time), 'size_mb': sra_size_mb,
                           'download_size_mb': download_size_mb, 'kmc_size_mb': kmc_size_mb, 'exit_code': return_code}
                 nack('download', params)
+        else:
+            total_reserved_ram_gb += 2  # approximate 2GB of RAM for each download process (bc of KMC)
     for d in completed_downloads:
         del download_processes[d]
 
     completed_builds = set()
-    total_reserved_ram_gb = 0  # how much memory all active processes need
+    used_cores = 0
     for sra_id, (build_process, start_time, wait_time, reserved_ram_gb) in build_processes.items():
         return_code = build_process.poll()
 
@@ -396,6 +398,7 @@ def check_status():
                 nack('build', params)
         else:
             total_reserved_ram_gb += reserved_ram_gb
+            used_cores += max(4, round(reserved_ram_gb / 3.75))
     for d in completed_builds:
         del build_processes[d]
 
@@ -417,18 +420,19 @@ def check_status():
             if return_code == 0:
                 logging.info(f'[{sra_id}] Cleaning graph completed successfully.')
 
-                params = {'id': sra_id, 'time': int(time.time() - start_time),
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
                           'size_mb': cleaned_size_mb}
                 ack('clean', params)
                 start_transfer(sra_id, cleaned_dir, 'clean')
             else:
+                nack('clean', params)
                 logging.warning(f'[{sra_id}] Cleaning graph failed. Removing {cleaned_dir}')
                 subprocess.run(['rm', '-rf', cleaned_dir])
-                params = {'id': sra_id, 'time': int(time.time() - start_time),
+                params = {'id': sra_id, 'time': int(time.time() - start_time), 'wait_time': int(wait_time),
                           'size_mb': cleaned_size_mb, 'return_code': return_code}
-                nack('clean', params)
         else:
             total_reserved_ram_gb += reserved_ram_gb
+            used_cores += max(4, round(reserved_ram_gb / 3.75))
     for d in completed_cleans:
         del clean_processes[d]
 
@@ -457,18 +461,17 @@ def check_status():
 
     # for cleaning we allow using all the available RAM
     total_ram_gb = psutil.virtual_memory().total / 1e9
-    available_ram_gb = total_ram_gb - total_reserved_ram_gb
-    used_cores = max(4 * (len(clean_processes) + len(build_processes)), math.ceil(total_reserved_ram_gb / 3.75));
-    if used_cores <= CORES and waiting_cleans:
+    not_reserved_ram_gb = total_ram_gb - total_reserved_ram_gb
+    if used_cores < CORES and waiting_cleans:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
             build_path = build_dir(sra_id)
             build_size_gb = util.dir_size_MB(build_path) / 1e3
-            required_ram_gb = max(build_size_gb * 1.1, build_size_gb + 1)
-            if available_ram_gb > required_ram_gb:
+            required_ram_gb = max(build_size_gb * 2, build_size_gb + 1)
+            if not_reserved_ram_gb > required_ram_gb:
                 logging.info(
-                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {available_ram_gb} GB')
+                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {not_reserved_ram_gb} GB')
                 kmer_count_unique = sra_info[sra_id][2]
                 kmer_coverage = sra_info[sra_id][3]
                 kmer_count_singletons = sra_info[sra_id][4]
@@ -476,14 +479,14 @@ def check_status():
 
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
                 start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback, required_ram_gb,
-                            available_ram_gb)
-                available_ram_gb -= required_ram_gb
+                            not_reserved_ram_gb)
+                not_reserved_ram_gb -= required_ram_gb
                 del waiting_cleans[sra_id]
                 break
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
-                         f'Have {round(available_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
+                         f'Have {round(not_reserved_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
-    if used_cores <= CORES and waiting_builds:
+    if used_cores < CORES and waiting_builds:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
@@ -500,21 +503,21 @@ def check_status():
                 nack('build', params)
                 del waiting_builds[sra_id]
                 break
-            elif required_ram_gb < available_ram_gb and available_ram_gb > 2:
+            elif required_ram_gb < not_reserved_ram_gb and not_reserved_ram_gb > 2:
                 logging.info(
-                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {available_ram_gb} GB')
+                    f'[{sra_id}] Estimated {required_ram_gb}GB needed for building, available {not_reserved_ram_gb} GB')
                 # how much memory does it take to load all unique kmers into RAM: 8B for the kmer, 2B for the count
                 required_ram_all_mem_gb = num_kmers * (8 + 2) * 3.5 / 1e9;  # also account for dummy kmers
-                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < available_ram_gb:
+                if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < not_reserved_ram_gb:
                     required_ram_gb = max(required_ram_gb, required_ram_all_mem_gb)
                     start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
-                                required_ram_gb, available_ram_gb)
+                                required_ram_gb, not_reserved_ram_gb)
                 else:
                     buffer_size_gb = max(2, min(round(required_ram_gb * 0.8 - 1), 20))
                     start_build(sra_id, time.time() - start_time, buffer_size_gb, 'vector_disk', required_ram_gb,
-                                available_ram_gb)
+                                not_reserved_ram_gb)
                 del waiting_builds[sra_id]
-                available_ram_gb -= required_ram_gb  # not that it matters
+                not_reserved_ram_gb -= required_ram_gb  # not that it matters
                 break
             else:
                 logging.info(
