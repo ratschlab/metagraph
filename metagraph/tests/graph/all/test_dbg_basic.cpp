@@ -167,7 +167,7 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
             std::string(k, 'G'),
             std::string(50, 'C')
         };
-        auto graph = build_graph<TypeParam>(k, sequences, false);
+        auto graph = build_graph<TypeParam>(k, sequences);
 
         graph->add_extension(std::make_shared<NodeWeights>(graph->max_index() + 1, kBitsPerCount));
         auto &weights = *graph->template get_extension<NodeWeights>();
@@ -213,13 +213,13 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGT", false, true));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", BuildMode::BASE, true));
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false, false));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", BuildMode::BASE, false));
     EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
-              check_graph<TypeParam>("ACGTN", false, true));
+              check_graph<TypeParam>("ACGTN", BuildMode::BASE, true));
 }
 
 TYPED_TEST(DeBruijnGraphTest, Alphabet) {
