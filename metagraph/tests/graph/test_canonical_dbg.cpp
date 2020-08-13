@@ -73,6 +73,22 @@ TYPED_TEST(CanonicalDBGTest, InsertSequence) {
     EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
 }
 
+TYPED_TEST(CanonicalDBGTest, InsertSequenceAliasingConstructor) {
+    auto init_graph = build_graph<TypeParam>(21, {
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "CATGTACTAGCTGATCGTAGCTAGCTAGC"
+    });
+
+    std::shared_ptr<DeBruijnGraph> graph = std::make_shared<CanonicalDBG>(*init_graph);
+
+    EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    EXPECT_TRUE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+    EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+    EXPECT_TRUE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
+    EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
+}
+
 TYPED_TEST(CanonicalDBGTest, ReverseComplement) {
     auto graph1 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, BuildMode::CANONICAL);
     auto graph2 = build_graph<TypeParam>(21, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }, BuildMode::WRAPPER);

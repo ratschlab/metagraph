@@ -18,6 +18,25 @@ namespace graph {
  */
 class CanonicalDBG : public DeBruijnGraph {
   public:
+    /**
+     * Constructs a CanonicalDBG
+     * @param graph a graph
+     * @param primary indicates whether the underlying graph is primary or not
+     * (i.e., only one of a k-mer and its reverse complement are in the graph)
+     * @param cache_size the number of graph traversal call results to be cached
+     */
+    CanonicalDBG(const DeBruijnGraph &graph,
+                 bool primary = false,
+                 size_t cache_size = 100'000);
+
+    /**
+     * Constructs a CanonicalDBG
+     * @param graph a graph
+     * @param primary indicates whether the underlying graph is primary or not
+     * (i.e., only one of a k-mer and its reverse complement are in the graph)
+     * @param cache_size the number of graph traversal call results to be cached
+     */
+    CanonicalDBG(DeBruijnGraph &graph, bool primary = false, size_t cache_size = 100'000);
 
     /**
      * Constructs a CanonicalDBG

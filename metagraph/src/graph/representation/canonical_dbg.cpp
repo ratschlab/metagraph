@@ -34,6 +34,16 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph,
       : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph),
                      primary, cache_size) { graph_ptr_ = graph; }
 
+CanonicalDBG::CanonicalDBG(const DeBruijnGraph &graph, bool primary, size_t cache_size)
+      : CanonicalDBG(std::shared_ptr<const DeBruijnGraph>(&graph, [](const auto*) {}),
+                     primary,
+                     cache_size) {}
+
+CanonicalDBG::CanonicalDBG(DeBruijnGraph &graph, bool primary, size_t cache_size)
+      : CanonicalDBG(std::shared_ptr<DeBruijnGraph>(&graph, [](const auto*) {}),
+                     primary,
+                     cache_size) {}
+
 uint64_t CanonicalDBG::num_nodes() const {
     logger->trace("Number of nodes may be overestimated if k is even or reverse complements are present in the graph");
     return graph_.num_nodes() * 2;
