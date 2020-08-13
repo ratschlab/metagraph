@@ -478,8 +478,7 @@ map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
 void reverse_complement_seq_path(const SequenceGraph &graph,
                                  std::string &seq,
                                  std::vector<SequenceGraph::node_index> &path) {
-    const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph);
-    if (canonical_dbg) {
+    if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
         canonical_dbg->reverse_complement(seq, path);
         return;
     }
