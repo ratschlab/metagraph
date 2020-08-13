@@ -42,7 +42,7 @@ build_graph(uint64_t k,
 
     [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<Graph>(graph);
 
     return graph;
@@ -71,7 +71,7 @@ build_graph<DBGHashString>(uint64_t k,
 
     [&]() { ASSERT_EQ(max_index, graph->max_index()); }();
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<DBGHashString>(graph);
 
     return graph;
@@ -89,7 +89,7 @@ build_graph<DBGBitmap>(uint64_t k,
 
     auto graph = std::make_shared<DBGBitmap>(&constructor);
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<DBGBitmap>(graph);
 
     return graph;
@@ -112,7 +112,7 @@ build_graph<DBGSuccinct>(uint64_t k,
 
     graph->mask_dummy_kmers(1, false);
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<DBGSuccinct>(graph);
 
     return graph;
@@ -123,14 +123,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctIndexed<1>>(uint64_t k,
                                    const std::vector<std::string> &sequences,
                                    BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).get_boss().index_suffix_ranges(1);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(1);
 
     return graph;
 }
@@ -140,16 +143,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctIndexed<2>>(uint64_t k,
                                    const std::vector<std::string> &sequences,
                                    BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph)
-        .get_boss()
-        .index_suffix_ranges(std::min(k - 1, (uint64_t)2));
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)2));
 
     return graph;
 }
@@ -159,16 +163,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctIndexed<10>>(uint64_t k,
                                     const std::vector<std::string> &sequences,
                                     BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph)
-        .get_boss()
-        .index_suffix_ranges(std::min(k - 1, (uint64_t)10));
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)10));
 
     return graph;
 }
@@ -178,14 +183,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
                                        const std::vector<std::string> &sequences,
                                        BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter_from_fpr(1.0);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter_from_fpr(1.0);
 
     return graph;
 }
@@ -195,14 +202,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
                                         const std::vector<std::string> &sequences,
                                         BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter_from_fpr(1.0 / 10);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter_from_fpr(1.0 / 10);
 
     return graph;
 }
@@ -212,14 +221,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloom<4, 1>>(uint64_t k,
                                     const std::vector<std::string> &sequences,
                                     BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(4.0, 1);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter(4.0, 1);
 
     return graph;
 }
@@ -229,14 +240,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctBloom<4, 50>>(uint64_t k,
                                      const std::vector<std::string> &sequences,
                                      BuildMode mode) {
-    auto graph = build_graph<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(4.0, 50);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter(4.0, 50);
 
     return graph;
 }
@@ -247,15 +260,7 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
                   const std::vector<std::string> &sequences,
                   BuildMode mode) {
-    auto graph = build_graph<Graph>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-
-    if (mode == 2)
-        return make_graph_primary<Graph>(graph);
-
-    return graph;
+    return build_graph<Graph>(k, sequences, mode);
 }
 
 template
@@ -279,7 +284,7 @@ build_graph_batch<DBGBitmap>(uint64_t k,
     constructor.add_sequences(std::vector<std::string>(sequences));
     auto graph = std::make_shared<DBGBitmap>(&constructor);
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<DBGBitmap>(graph);
 
     return graph;
@@ -297,7 +302,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     graph->mask_dummy_kmers(1, false);
     EXPECT_EQ(k, graph->get_k());
 
-    if (mode == 2)
+    if (mode == BuildMode::WRAPPER)
         return make_graph_primary<DBGSuccinct>(graph);
 
     return graph;
@@ -308,14 +313,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctIndexed<1>>(uint64_t k,
                                          const std::vector<std::string> &sequences,
                                          BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).get_boss().index_suffix_ranges(1);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(1);
 
     return graph;
 }
@@ -325,16 +333,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctIndexed<2>>(uint64_t k,
                                          const std::vector<std::string> &sequences,
                                          BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph)
-        .get_boss()
-        .index_suffix_ranges(std::min(k - 1, (uint64_t)2));
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)2));
 
     return graph;
 }
@@ -344,16 +353,17 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctIndexed<10>>(uint64_t k,
                                           const std::vector<std::string> &sequences,
                                           BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph)
-        .get_boss()
-        .index_suffix_ranges(std::min(k - 1, (uint64_t)10));
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    BOSS *boss;
+    if (mode == BuildMode::WRAPPER) {
+        DeBruijnGraph &mutable_graph = const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        );
+        boss = &dynamic_cast<DBGSuccinct&>(mutable_graph).get_boss();
+    } else {
+        boss = &dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+    }
+    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)10));
 
     return graph;
 }
@@ -363,14 +373,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
                                              const std::vector<std::string> &sequences,
                                              BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter_from_fpr(1.0);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter_from_fpr(1.0);
 
     return graph;
 }
@@ -380,14 +392,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
                                               const std::vector<std::string> &sequences,
                                               BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter_from_fpr(1.0 / 10);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter_from_fpr(1.0 / 10);
 
     return graph;
 }
@@ -397,14 +411,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctBloom<4, 1>>(uint64_t k,
                                           const std::vector<std::string> &sequences,
                                           BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(4.0, 1);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter(4.0, 1);
 
     return graph;
 }
@@ -414,14 +430,16 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctBloom<4, 50>>(uint64_t k,
                                            const std::vector<std::string> &sequences,
                                            BuildMode mode) {
-    auto graph = build_graph_batch<DBGSuccinct>(
-        k, sequences,
-        mode == BuildMode::CANONICAL ? BuildMode::CANONICAL : BuildMode::BASE
-    );
-    dynamic_cast<DBGSuccinct&>(*graph).initialize_bloom_filter(4.0, 50);
-
-    if (mode == 2)
-        return make_graph_primary<DBGSuccinct>(graph);
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct *dbg_succ;
+    if (mode == BuildMode::WRAPPER) {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(const_cast<DeBruijnGraph&>(
+            std::dynamic_pointer_cast<CanonicalDBG>(graph)->get_graph()
+        ));
+    } else {
+        dbg_succ = &dynamic_cast<DBGSuccinct&>(*graph);
+    }
+    dbg_succ->initialize_bloom_filter(4.0, 50);
 
     return graph;
 }
