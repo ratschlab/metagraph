@@ -814,7 +814,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
-                                     bits_per_count_);
+                                     bits_per_count_,
+                                     kmer_collector_.tmp_dir());
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
