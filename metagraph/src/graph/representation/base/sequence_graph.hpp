@@ -237,6 +237,10 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
 std::vector<SequenceGraph::node_index>
 map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence);
 
+void reverse_complement_seq_path(const SequenceGraph &graph,
+                                 std::string &seq,
+                                 std::vector<SequenceGraph::node_index> &path);
+
 } // namespace graph
 } // namespace mtg
 
