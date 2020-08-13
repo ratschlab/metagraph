@@ -691,7 +691,7 @@ if __name__ == '__main__':
                  f'{MAX_BUILD_PROCESSES}. Max cleans: {MAX_CLEAN_PROCESSES}')
 
     if not args.server:
-        logging.info('Trying to find server address...')
+        logging.info(f'Trying to find server address at {args.server_info}...')
         if subprocess.call(['gsutil', 'cp', args.server_info, '/tmp/server'], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE) != 0:
             logging.error('Cannot find server ip/port on Google Cloud Storage. Sorry, I tried.')
