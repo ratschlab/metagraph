@@ -469,6 +469,11 @@ void DefaultColumnExtender<NodeType>
 
     const auto &path = get_seed();
 
+    if (!graph_->outdegree(path.back())) {
+        callback(DBGAlignment(), NodeType());
+        return;
+    }
+
     // stop path early if it can't be better than the min_path_score
     if (path.get_score() + match_score_begin[1] < min_path_score)
         return;

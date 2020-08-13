@@ -42,13 +42,16 @@ class Sra:
     def get_total_sras(self):
         logging.info('Computing total number of SRAs...')
         total_sra_count = 0
+        ignore_count = 0
         for file in self.data_files:
             with open(file) as fp:
                 for line in fp:
                     total_sra_count += 1
-        to_process_count = total_sra_count - len(self.ignore_sras)
+                    if line.split(' ')[0] in self.ignore_sras:
+                        ignore_count += 1
+        to_process_count = total_sra_count - ignore_count
         logging.info(
-            f'Found {total_sra_count} SRAs, left out {len(self.ignore_sras)} SRAs, '
+            f'Found {total_sra_count} SRAs, left out {ignore_count} SRAs, '
             f'processing {to_process_count} SRAs')
         return to_process_count
 
