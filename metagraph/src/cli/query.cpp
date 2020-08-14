@@ -38,6 +38,27 @@ using mtg::graph::boss::BOSSConstructor;
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 
+void get_alignment_header_and_swap_query(std::string *name,
+                                         std::string *query_seq,
+                                         align::QueryAlignment<> *matches) {
+    std::string header;
+
+    if (matches->size()) {
+        // sequence for querying -- the best alignment
+        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
+        *name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                            *name, *query_seq, (*matches)[0].get_score(),
+                            (*matches)[0].get_cigar().to_string());
+
+    } else {
+        // no alignment was found
+        // the original sequence `query_seq` will be queried
+        *name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
+                            *name, *query_seq, 0,
+                            fmt::format("{}S", query_seq->length()));
+    }
+}
+
 std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          const std::string &sequence,
                                          bool count_labels,
@@ -743,30 +764,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 }
 
 
-std::string get_alignment_header_and_swap_query(const std::string &name,
-                                                std::string *query_seq,
-                                                align::QueryAlignment<> *matches) {
-    std::string header;
-
-    if (matches->size()) {
-        // sequence for querying -- the best alignment
-        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                             name, *query_seq, (*matches)[0].get_score(),
-                             (*matches)[0].get_cigar().to_string());
-
-    } else {
-        // no alignment was found
-        // the original sequence `query_seq` will be queried
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                             name, *query_seq, 0,
-                             fmt::format("{}S", query_seq->length()));
-    }
-
-    return header;
-}
-
-
 int query_graph(Config *config) {
     assert(config);
 
@@ -810,10 +807,16 @@ int query_graph(Config *config) {
 }
 
 inline std::string query_sequence(size_t id,
-                                  const std::string &name,
-                                  const std::string &seq,
+                                  std::string &name,
+                                  std::string &seq,
                                   const AnnotatedDBG &anno_graph,
-                                  const Config &config) {
+                                  const Config &config,
+                                  const align::IDBGAligner *aligner = nullptr) {
+    if (aligner) {
+        auto matches = aligner->align(seq);
+        get_alignment_header_and_swap_query(&name, &seq, &matches);
+    }
+
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
@@ -838,25 +841,9 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue(
-            [&](size_t id, const std::string &name, std::string &seq) {
-                if (!aligner_) {
-                    callback(query_sequence(id, name, seq, anno_graph_, config_));
-                    return;
-                }
-
-                // query the alignment matches against the annotator
-                auto matches = aligner_->align(seq);
-
-                std::string seq_header
-                    = get_alignment_header_and_swap_query(name, &seq, &matches);
-
-                callback(query_sequence(id, seq_header, seq, anno_graph_, config_));
-            },
-            seq_count++,
-            std::string(kseq.name.s),
-            std::string(kseq.seq.s)
-        );
+        thread_pool_.enqueue([&](size_t id, std::string &name, std::string &seq) {
+            callback(query_sequence(id, name, seq, anno_graph_, config_, aligner_));
+        }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
     // wait while all threads finish processing the current file
@@ -886,53 +873,11 @@ void QueryExecutor
         StringGenerator generate_batch = [&](auto call_sequence) {
             num_bytes_read = 0;
 
-            if (!aligner_) {
-                // basic query regime
-                // the query graph is constructed directly from the input sequences
-                for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
-                    call_sequence(it->seq.s);
-                    num_bytes_read += it->seq.l;
-                }
-                return;
+            // the query graph is constructed directly from the input sequences
+            for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
+                call_sequence(it->seq.s);
+                num_bytes_read += it->seq.l;
             }
-            // Query with alignment to graph
-
-            // Check if this isn't the first invocation,
-            // if the sequences have already been aligned and
-            // if the results are stored in |named_alignments|.
-            if (named_alignments.size()) {
-                for (const auto &[id, name, seq] : named_alignments) {
-                    call_sequence(seq);
-                }
-                return;
-            }
-
-            std::mutex sequence_mutex;
-            for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, std::string &seq) {
-                        // Align the sequence, then add the best match
-                        // in the graph to the query graph.
-                        auto matches = aligner_->align(seq);
-
-                        std::string seq_header
-                            = get_alignment_header_and_swap_query(name, &seq, &matches);
-
-                        std::lock_guard<std::mutex> lock(sequence_mutex);
-
-                        named_alignments.emplace_back(id, std::move(seq_header),
-                                                      std::move(seq));
-
-                        call_sequence(std::get<2>(named_alignments.back()));
-                    },
-                    seq_count++,
-                    std::string(begin->name.s),
-                    std::string(begin->seq.s)
-                );
-
-                num_bytes_read += begin->seq.l;
-            }
-            thread_pool_.join();
         };
 
         auto query_graph = construct_query_graph(
@@ -953,27 +898,12 @@ void QueryExecutor
 
         batch_timer.reset();
 
-        if (!aligner_) {
-            for ( ; begin != it; ++begin) {
-                assert(begin != end);
+        for ( ; begin != it; ++begin) {
+            assert(begin != end);
 
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq, *query_graph, config_));
-                    },
-                    seq_count++, std::string(begin->name.s),
-                    std::string(begin->seq.s)
-                );
-            }
-        } else {
-            for (auto&& [id, name, seq] : named_alignments) {
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq, *query_graph, config_));
-                    },
-                    id, std::move(name), std::move(seq)
-                );
-            }
+            thread_pool_.enqueue([&](size_t id, std::string &name, std::string &seq) {
+                callback(query_sequence(id, name, seq, *query_graph, config_, aligner_));
+            }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
         }
 
         thread_pool_.join();
