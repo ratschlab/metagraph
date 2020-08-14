@@ -417,16 +417,16 @@ std::shared_ptr<DBGSuccinct> convert_to_succinct(const Contigs &contigs,
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const auto &nodes_in_full = contigs[i].second;
-        constructor.add_sequences([&](const CallString &callback) {
-            auto it = nodes_in_full.begin();
-            while ((it = std::find_if(it, nodes_in_full.end(), [&](auto i) { return i; }))
-                    < nodes_in_full.end()) {
-                auto next = std::find(it, nodes_in_full.end(), 0);
-                callback(std::string(contig.data() + (it - nodes_in_full.begin()),
-                                     next - it + k - 1));
-                it = next;
-            }
-        });
+        auto it = nodes_in_full.begin();
+        while ((it = std::find_if(it, nodes_in_full.end(), [&](auto i) { return i; }))
+                < nodes_in_full.end()) {
+            auto next = std::find(it, nodes_in_full.end(), 0);
+            constructor.add_sequence(std::string_view(
+                contig.data() + (it - nodes_in_full.begin()),
+                next - it + k - 1
+            ));
+            it = next;
+        }
     }
 
     return std::make_shared<DBGSuccinct>(new BOSS(&constructor), canonical);
@@ -522,12 +522,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     if (max_fork_count) {
-        max_traversal_distance = max_traversal_distance
-            ? std::min(
-                max_traversal_distance,
-                static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char)
-              )
-            : static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char);
+        max_traversal_distance = std::min(
+            max_traversal_distance,
+            static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char)
+        );
 
         logger->trace("[Query graph extension] Computing query graph hull");
         logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",

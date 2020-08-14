@@ -1320,8 +1320,10 @@ TEST(BOSS, CallUnitigs) {
 TEST(BOSS, CallUnitigs1) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         BOSSConstructor constructor(3);
-        constructor.add_sequences(std::vector<std::string> { "ACTAGCTAGCTAGCTAGCTAGC",
-                                    "ACTCT" });
+        constructor.add_sequences(std::vector<std::string> {
+            "ACTAGCTAGCTAGCTAGCTAGC",
+            "ACTCT"
+        });
         BOSS graph(&constructor);
 
         std::multiset<std::string> contigs {

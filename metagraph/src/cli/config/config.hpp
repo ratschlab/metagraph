@@ -88,7 +88,8 @@ class Config {
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
     unsigned long long int num_singleton_kmers = 0;
-    unsigned long long int max_traversal_distance = 0;
+    unsigned long long int max_traversal_distance
+        = std::numeric_limits<unsigned long long int>::max();
 
     uint8_t count_width = 8;
 
