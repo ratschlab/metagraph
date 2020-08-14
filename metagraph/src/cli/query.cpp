@@ -167,6 +167,12 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     }
 }
 
+struct HullUnitig {
+    std::string unitig;
+    DeBruijnGraph::node_index start;
+    size_t fork_count;
+};
+
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_fork_count forks and traverse a linear path for
 // at most max_traversal_distance steps.
@@ -208,10 +214,10 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     // off earlier)
     auto update_node = [&](DeBruijnGraph::node_index node, size_t distance) {
         std::lock_guard<std::mutex> lock(map_mutex);
-        auto emplace = distance_traversed_until_node.emplace(node, distance);
-        if (!emplace.second) {
-            if (emplace.first->second > distance) {
-                emplace.first.value() = distance;
+        auto [it, inserted] = distance_traversed_until_node.emplace(node, distance);
+        if (!inserted) {
+            if (it->second > distance) {
+                it.value() = distance;
             } else {
                 return false;
             }
@@ -232,35 +238,38 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         }
 
         // DFS from branching points
-        std::string unitig(contig, j + 1, full_dbg.get_k() - 1);
-        std::vector<std::tuple<std::string,
-                               DeBruijnGraph::node_index,
-                               size_t>> unitig_traversal;
+        std::string init_unitig(contig, j + 1, full_dbg.get_k() - 1);
+
+        std::vector<HullUnitig> unitig_traversal;
         full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
-            if (update_node(next_node, unitig.size())) {
-                unitig_traversal.emplace_back(unitig + c, next_node, 0);
-                std::get<0>(unitig_traversal.back()).reserve(max_traversal_distance);
+            if (update_node(next_node, init_unitig.size())) {
+                unitig_traversal.emplace_back(init_unitig + c, next_node, 0);
+                unitig_traversal.back().unitig.reserve(max_traversal_distance);
             }
         });
 
-        DeBruijnGraph::node_index node;
-        size_t depth;
+        HullUnitig hull_unitig;
+        auto &unitig = hull_unitig.unitig;
+        auto &node = hull_unitig.start;
+        auto &fork_count = hull_unitig.fork_count;
         while (unitig_traversal.size()) {
-            std::tie(unitig, node, depth) = std::move(unitig_traversal.back());
+            std::tie(unitig, node, fork_count) = std::move(unitig_traversal.back());
             unitig_traversal.pop_back();
 
-            if (depth >= max_fork_count)
+            if (fork_count >= max_fork_count)
                 continue;
 
             bool continue_traversal = true;
-            call_while_linear(full_dbg, node, [&](auto next_node, char c) {
-                node = next_node;
-                if ((continue_traversal = update_node(node, unitig.size())))
-                    unitig += c;
+            call_while_linear(full_dbg, hull_unitig.start,
+                [&](auto next_node, char c) {
+                    node = next_node;
+                    if ((continue_traversal = update_node(node, unitig.size())))
+                        unitig += c;
 
-            }, [&]() {
-                return !continue_traversal || unitig.size() >= max_traversal_distance;
-            });
+                }, [&]() {
+                    return !continue_traversal || unitig.size() >= max_traversal_distance;
+                }
+            );
 
             callback(std::string(unitig), map_sequence_to_nodes(full_dbg, unitig));
 
@@ -270,12 +279,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
                 full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
                     if (update_node(next_node, unitig.size())) {
-                        unitig_traversal.emplace_back(unitig + c,
-                                                      next_node,
-                                                      depth + 1);
-                        std::get<0>(unitig_traversal.back()).reserve(
-                            max_traversal_distance
-                        );
+                        unitig_traversal.emplace_back(unitig + c, next_node, fork_count + 1);
+                        unitig_traversal.back().unitig.reserve(max_traversal_distance);
                     }
                 });
             }
