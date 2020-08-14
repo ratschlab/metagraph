@@ -9,6 +9,7 @@ namespace graph {
     class DeBruijnGraph;
     namespace align {
         class IDBGAligner;
+        class DBGAlignerConfig;
     }
 }
 
@@ -16,8 +17,14 @@ namespace cli {
 
 class Config;
 
+graph::align::DBGAlignerConfig
+initialize_aligner_config(const graph::DeBruijnGraph &graph, const Config &config);
+
 std::unique_ptr<graph::align::IDBGAligner>
 build_aligner(const graph::DeBruijnGraph &graph, const Config &config);
+
+std::unique_ptr<graph::align::IDBGAligner>
+build_aligner(const graph::DeBruijnGraph &graph, const graph::align::DBGAlignerConfig &aligner_config);
 
 int align_to_graph(Config *config);
 

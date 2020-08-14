@@ -18,6 +18,7 @@ namespace graph {
     class AnnotatedDBG;
     namespace align {
         class IDBGAligner;
+        class DBGAlignerConfig;
     }
 }
 
@@ -36,19 +37,16 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       bool canonical = false,
                       size_t sub_k = std::numeric_limits<size_t>::max(),
                       size_t max_fork_count = 0,
-                      size_t max_traversal_distance = 0);
+                      size_t max_traversal_distance = 0,
+                      double max_traversed_nodes_per_seq_char = 0.0);
 
 
 class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
-                  const graph::align::IDBGAligner *aligner,
-                  ThreadPool &thread_pool)
-      : config_(config),
-        anno_graph_(anno_graph),
-        aligner_(aligner),
-        thread_pool_(thread_pool) {}
+                  const graph::align::DBGAlignerConfig *aligner_config,
+                  ThreadPool &thread_pool);
 
     void query_fasta(const std::string &file_path,
                      const std::function<void(const std::string &)> &callback);
@@ -66,7 +64,7 @@ class QueryExecutor {
   private:
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
-    const graph::align::IDBGAligner *aligner_;
+    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,

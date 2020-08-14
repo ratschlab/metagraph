@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
+#include <fmt/format.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -38,25 +39,17 @@ using mtg::graph::boss::BOSSConstructor;
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 
-void get_alignment_header_and_swap_query(std::string *name,
-                                         std::string *query_seq,
-                                         align::QueryAlignment<> *matches) {
-    std::string header;
-
-    if (matches->size()) {
-        // sequence for querying -- the best alignment
-        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
-        *name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                            *name, *query_seq, (*matches)[0].get_score(),
-                            (*matches)[0].get_cigar().to_string());
-
-    } else {
-        // no alignment was found
-        // the original sequence `query_seq` will be queried
-        *name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                            *name, *query_seq, 0,
-                            fmt::format("{}S", query_seq->length()));
-    }
+QueryExecutor::QueryExecutor(const Config &config,
+                             const graph::AnnotatedDBG &anno_graph,
+                             const graph::align::DBGAlignerConfig *aligner_config,
+                             ThreadPool &thread_pool)
+      : config_(config),
+        anno_graph_(anno_graph),
+        aligner_config_(aligner_config
+            ? new graph::align::DBGAlignerConfig(*aligner_config): nullptr),
+        thread_pool_(thread_pool) {
+    if (aligner_config_)
+        aligner_config_->forward_and_reverse_complement = false;
 }
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
@@ -473,7 +466,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       bool canonical,
                       size_t sub_k,
                       size_t max_fork_count,
-                      size_t max_traversal_distance) {
+                      size_t max_traversal_distance,
+                      double max_traversed_nodes_per_seq_char) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
@@ -528,8 +522,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     if (max_fork_count) {
-        if (!max_traversal_distance)
-            max_traversal_distance = full_dbg.get_k() * 2;
+        max_traversal_distance = max_traversal_distance
+            ? std::min(
+                max_traversal_distance,
+                static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char)
+              )
+            : static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char);
 
         logger->trace("[Query graph extension] Computing query graph hull");
         logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",
@@ -778,21 +776,22 @@ int query_graph(Config *config) {
 
     Timer timer;
 
-    std::unique_ptr<align::IDBGAligner> aligner;
+    std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
-        aligner = build_aligner(*graph, *config);
+        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(
+            *graph, *config
+        )));
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
         // so, we want to prevent it from doing this
-        auto &aligner_config = const_cast<align::DBGAlignerConfig&>(aligner->get_config());
-        aligner_config.forward_and_reverse_complement = false;
+        aligner_config->forward_and_reverse_complement = false;
     }
 
-    QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);
+    QueryExecutor executor(*config, *anno_graph, aligner_config.get(), thread_pool);
 
     // iterate over input files
     for (const auto &file : files) {
@@ -807,14 +806,33 @@ int query_graph(Config *config) {
 }
 
 inline std::string query_sequence(size_t id,
-                                  std::string &name,
-                                  std::string &seq,
+                                  std::string &name, std::string &seq,
                                   const AnnotatedDBG &anno_graph,
                                   const Config &config,
-                                  const align::IDBGAligner *aligner = nullptr) {
-    if (aligner) {
-        auto matches = aligner->align(seq);
-        get_alignment_header_and_swap_query(&name, &seq, &matches);
+                                  const align::DBGAlignerConfig *aligner_config = nullptr) {
+    if (aligner_config) {
+        auto matches = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
+        if (matches.size()) {
+            auto &match = matches[0];
+            // sequence for querying -- the best alignment
+            if (match.get_offset()) {
+                seq.reserve(match.get_sequence().size() + match.get_offset());
+                seq = anno_graph.get_graph().get_node_sequence(match[0]).substr(
+                    0, match.get_offset()
+                ) + const_cast<std::string&&>(match.get_sequence());
+            } else {
+                seq = const_cast<std::string&&>(match.get_sequence());
+            }
+
+            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                               match.get_score(), match.get_cigar().to_string());
+
+        } else {
+            // no alignment was found
+            // the original sequence will be queried
+            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                               0, fmt::format("{}S", seq.length()));
+        }
     }
 
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
@@ -841,8 +859,8 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](size_t id, std::string &name, std::string &seq) {
-            callback(query_sequence(id, name, seq, anno_graph_, config_, aligner_));
+        thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
+            callback(query_sequence(id, name, seq, anno_graph_, config_, aligner_config_.get()));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -860,14 +878,13 @@ void QueryExecutor
     seq_io::FastaParser::iterator it;
 
     size_t seq_count = 0;
-    size_t sub_k = aligner_
-        ? aligner_->get_config().min_seed_length
+    size_t sub_k = aligner_config_
+        ? aligner_config_->min_seed_length
         : std::numeric_limits<size_t>::max();
 
     while (begin != end) {
         Timer batch_timer;
 
-        std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
         uint64_t num_bytes_read = 0;
 
         StringGenerator generate_batch = [&](auto call_sequence) {
@@ -889,8 +906,9 @@ void QueryExecutor
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
             sub_k,
-            aligner_ ? config_.max_fork_count : 0,
-            config_.max_traversal_distance
+            aligner_config_ ? config_.max_fork_count : 0,
+            config_.max_traversal_distance,
+            config_.alignment_max_nodes_per_seq_char
         );
 
         logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
@@ -901,8 +919,8 @@ void QueryExecutor
         for ( ; begin != it; ++begin) {
             assert(begin != end);
 
-            thread_pool_.enqueue([&](size_t id, std::string &name, std::string &seq) {
-                callback(query_sequence(id, name, seq, *query_graph, config_, aligner_));
+            thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
+                callback(query_sequence(id, name, seq, *query_graph, config_, aligner_config_.get()));
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
         }
 

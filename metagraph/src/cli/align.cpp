@@ -79,9 +79,13 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     return aligner_config;
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
-    DBGAlignerConfig aligner_config = initialize_aligner_config(graph, config);
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
+                                           const Config &config) {
+    return build_aligner(graph, initialize_aligner_config(graph, config));
+}
 
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
+                                           const DBGAlignerConfig &aligner_config) {
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < graph.get_k()) {

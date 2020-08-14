@@ -141,15 +141,16 @@ std::string process_search_request(const std::string &received_message,
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
 
-    std::unique_ptr<graph::align::IDBGAligner> aligner;
+    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
-        aligner = build_aligner(anno_graph.get_graph(), config);
+        aligner_config.reset(new graph::align::DBGAlignerConfig(initialize_aligner_config(
+            anno_graph.get_graph(), config
+        )));
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
         // so, we want to prevent it from doing this
-        auto &aligner_config = const_cast<graph::align::DBGAlignerConfig&>(aligner->get_config());
-        aligner_config.forward_and_reverse_complement = false;
+        aligner_config->forward_and_reverse_complement = false;
     }
 
     std::ostringstream oss;
@@ -165,7 +166,7 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, aligner.get(), dummy_pool);
+    QueryExecutor engine(config, anno_graph, aligner_config.get(), dummy_pool);
 
     engine.query_fasta(tf.name(),
         [&](const std::string &res) {
