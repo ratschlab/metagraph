@@ -11,6 +11,7 @@
 
 #include "annotation//binary_matrix/row_diff/row_diff.hpp"
 #include "annotation//binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/annotation_converters.hpp"
 #include "annotation//binary_matrix/row_flat/flat_matrix.hpp"
 #include "cli/load/load_annotation.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -60,87 +61,18 @@ load_annotation(const std::string &anno_file) {
 }
 
 void store_diff(const graph::DBGSuccinct &graph,
-                const annot::MultiLabelEncoded<std::string> &annotation)
-        __attribute__((optnone)) {
+                annot::RowCompressed<std::string> &&annotation) __attribute__((optnone)) {
+    //_Pragma("clang optimize off")
     uint64_t nnodes = graph.num_nodes();
     std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
     sdsl::bit_vector terminal(nnodes + 1);
 
-    uint64_t max_id = 0;
-    ProgressBar progress_bar(graph.num_nodes(), "Building Diff-anno");
-    _Pragma("clang optimize off") graph.call_sequences(
-            [&](const std::string &seq, const std::vector<uint64_t> &path) {
-                std::cout << seq << std::endl;
-                std::vector<uint64_t> anno_ids;
+    std::unique_ptr<annot::RowDiffAnnotator> annotator
+            = annot::convert_to_row_diff(graph, std::move(annotation), 4);
 
-                for (const uint64_t node_id : path) {
-                    assert(node_id <= nnodes);
-                    anno_ids.push_back(
-                            graph::AnnotatedSequenceGraph::graph_to_anno_index(node_id));
-                }
-                std::vector<Vector<uint64_t>> rows
-                        = annotation.get_matrix().get_rows(anno_ids);
+    annotator->serialize(FLAGS_o);
 
-                for (uint32_t i = 0; i < rows.size() - 1; ++i) {
-                    uint64_t idx1 = 0;
-                    uint64_t idx2 = 0;
-                    while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
-                        if (rows[i][idx1] == rows[i + 1][idx2]) {
-                            idx1++;
-                            idx2++;
-                        } else {
-                            if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                tdiffs[path[i]].push_back(rows[i][idx1]);
-                                idx1++;
-                            } else {
-                                tdiffs[path[i]].push_back(rows[i + 1][idx2]);
-                                idx2++;
-                            }
-                            if (max_id < tdiffs[path[i]].back()) {
-                                max_id = tdiffs[path[i]].back();
-                            }
-                        }
-                    }
-                    while (idx1 < rows[i].size()) {
-                        tdiffs[path[i]].push_back(rows[i][idx1]);
-                        idx1++;
-                    }
-                    while (idx2 < rows[i + 1].size()) {
-                        tdiffs[path[i]].push_back(rows[i + 1][idx2]);
-                        idx2++;
-                    }
-                    terminal[path[i]] = 0;
-                }
-
-                for (const auto v : rows[rows.size() - 1]) {
-                    tdiffs[path.back()].push_back(v);
-                }
-                terminal[path.back()] = 1;
-
-                progress_bar += path.size();
-            },
-            FLAGS_threads, false, true);
-
-    std::vector<uint64_t> diff;
-    std::vector<bool> boundary;
-    for (const auto &tdiff : tdiffs) {
-        diff.insert(diff.end(), tdiff.begin(), tdiff.end());
-        if (!tdiff.empty()) {
-            boundary.insert(boundary.end(), tdiff.size() - 1, false);
-        }
-        boundary.push_back(true);
-    }
-
-    sdsl::bit_vector sboundary(boundary.size());
-    for (uint64_t i = 0; i < diff.size(); ++i) {
-        sboundary[i] = boundary[i];
-    }
-
-    annot::binmat::RowDiff diff_annotation(annotation.num_labels(), &graph, diff,
-                                           sboundary, terminal);
-    diff_annotation.serialize(FLAGS_o);
-
-    _Pragma("clang optimize on")
+    //_Pragma("clang optimize on")
 }
 
 std::string to_string(const Vector<uint64_t> &v) {
