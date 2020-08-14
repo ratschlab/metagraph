@@ -83,6 +83,8 @@ class KmerCollector {
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
+    void add_sequences(std::vector<std::string>&& sequences);
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences);
 
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
@@ -99,11 +101,6 @@ class KmerCollector {
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
     inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
     inline size_t max_disk_space() const { return max_disk_space_; }
-
-    /**
-     * Sends sequences accumulated in #batcher_ for processing
-     * on the thread pool. */
-    void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
 
   private:
     void join();

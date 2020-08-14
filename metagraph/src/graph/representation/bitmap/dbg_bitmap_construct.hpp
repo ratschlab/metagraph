@@ -19,12 +19,6 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
                                                size_t num_threads = 1,
                                                double memory_preallocated = 0);
 
-    virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
-    virtual void add_sequences(const std::function<void(CallString)> &generator) = 0;
-    virtual void add_sequences(const std::function<void(CallStringCount)> &generator) = 0;
-
-    virtual DBGBitmap::Chunk* build_chunk() = 0;
-
     virtual size_t get_k() const = 0;
     virtual bool is_canonical_mode() const = 0;
 
@@ -47,20 +41,11 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     }
 
     void add_sequences(std::vector<std::string>&& sequences) {
-        auto seqs = std::make_shared<std::vector<std::string>>(std::move(sequences));
-        constructor_->add_sequences(
-            [seqs](const CallString &callback) {
-                std::for_each(seqs->begin(), seqs->end(), callback);
-            }
-        );
+        constructor_->add_sequences(std::move(sequences));
     }
 
-    void add_sequences(const std::function<void(CallString)> &generate_sequences) {
-        constructor_->add_sequences(generate_sequences);
-    }
-
-    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-        constructor_->add_sequences(generate_sequences);
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+        constructor_->add_sequences(std::move(sequences));
     }
 
     void build_graph(DBGBitmap *graph);
