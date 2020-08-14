@@ -119,8 +119,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 }
 
 void call_while_linear(const DeBruijnGraph &graph,
-                       DeBruijnGraph::node_index node,
-                       const std::function<void(DeBruijnGraph::node_index, char)> &callback,
+                       node_index node,
+                       const std::function<void(node_index, char)> &callback,
                        const std::function<bool()> &terminate = []() { return false; }) {
     while (!terminate() && graph.has_single_outgoing(node)) {
         graph.call_outgoing_kmers(node, [&](auto next, char c) {
@@ -169,9 +169,11 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
 
 struct HullUnitig {
     std::string unitig;
-    DeBruijnGraph::node_index start;
+    std::vector<node_index> path;
     size_t fork_count;
 };
+
+typedef tsl::hopscotch_map<node_index, size_t> NodeToDistanceMap;
 
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_fork_count forks and traverse a linear path for
@@ -185,7 +187,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const ContigCallback &callback,
                          size_t max_fork_count,
                          size_t max_traversal_distance,
-                         tsl::hopscotch_map<DeBruijnGraph::node_index, size_t> &distance_traversed_until_node,
+                         NodeToDistanceMap &distance_traversed_until_node,
                          std::mutex &map_mutex,
                          size_t num_threads,
                          size_t sub_k) {
@@ -196,14 +198,18 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     assert(max_fork_count || dbg_succ);
 
     if (dbg_succ) {
-        call_suffix_match_sequences(*dbg_succ, contig, [&](std::string&& suff_contig, auto&& path) {
-            callback(std::move(suff_contig), std::move(path));
-            if (max_fork_count) {
-                call_hull_sequences(full_dbg, suff_contig, callback, max_fork_count,
-                                    max_traversal_distance, distance_traversed_until_node,
-                                    map_mutex, num_threads, full_dbg.get_k());
-            }
-        }, sub_k);
+        call_suffix_match_sequences(*dbg_succ, contig,
+            [&](std::string&& suff_contig, auto&& path) {
+                callback(std::move(suff_contig), std::move(path));
+                if (max_fork_count) {
+                    call_hull_sequences(full_dbg, suff_contig, callback,
+                                        max_fork_count, max_traversal_distance,
+                                        distance_traversed_until_node, map_mutex,
+                                        num_threads, full_dbg.get_k());
+                }
+            },
+            sub_k
+        );
     }
 
     if (!max_fork_count)
@@ -212,7 +218,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     // when a node which has already been accessed is visited, only continue
     // traversing if the previous access was in a longer path (i.e., it cut
     // off earlier)
-    auto update_node = [&](DeBruijnGraph::node_index node, size_t distance) {
+    auto update_node = [&](node_index node, size_t distance) {
         std::lock_guard<std::mutex> lock(map_mutex);
         auto [it, inserted] = distance_traversed_until_node.emplace(node, distance);
         if (!inserted) {
@@ -245,7 +251,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             if (update_node(next_node, init_unitig.size())) {
                 unitig_traversal.emplace_back(HullUnitig{
                     .unitig = init_unitig + c,
-                    .start = next_node,
+                    .path = std::vector<node_index>{ next_node },
                     .fork_count = 0
                 });
                 unitig_traversal.back().unitig.reserve(max_traversal_distance);
@@ -254,7 +260,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
         HullUnitig hull_unitig;
         auto &unitig = hull_unitig.unitig;
-        auto &node = hull_unitig.start;
+        auto &path = hull_unitig.path;
         auto &fork_count = hull_unitig.fork_count;
         while (unitig_traversal.size()) {
             hull_unitig = std::move(unitig_traversal.back());
@@ -264,10 +270,10 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 continue;
 
             bool continue_traversal = true;
-            call_while_linear(full_dbg, hull_unitig.start,
+            call_while_linear(full_dbg, path.back(),
                 [&](auto next_node, char c) {
-                    node = next_node;
-                    if ((continue_traversal = update_node(node, unitig.size())))
+                    path.push_back(next_node);
+                    if ((continue_traversal = update_node(next_node, unitig.size())))
                         unitig += c;
 
                 }, [&]() {
@@ -275,17 +281,22 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 }
             );
 
-            callback(std::string(unitig), map_sequence_to_nodes(full_dbg, unitig));
+            node_index node = path.back();
+            callback(std::string(unitig), std::move(path));
 
             if (node != DeBruijnGraph::npos
                     && continue_traversal
                     && full_dbg.has_multiple_outgoing(node)) {
+                // a fork has been reached before the path has reached
+                // length max_traversal_distance
                 unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
+
+                // start new traversals
                 full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
                     if (update_node(next_node, unitig.size())) {
                         unitig_traversal.emplace_back(HullUnitig{
                             .unitig = unitig + c,
-                            .start = next_node,
+                            .path = std::vector<node_index>{ next_node },
                             .fork_count = fork_count + 1
                         });
                         unitig_traversal.back().unitig.reserve(max_traversal_distance);
@@ -523,7 +534,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     std::shared_ptr<DeBruijnGraph> graph = std::move(graph_init);
 
     // pull contigs from query graph
-    std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
+    std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
 
     std::mutex seq_mutex;
     graph->call_sequences([&](auto&&... contig_args) {
@@ -547,7 +558,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         size_t old_size = contigs.size();
-        tsl::hopscotch_map<DeBruijnGraph::node_index, size_t> distance_traversed_until_node;
+        NodeToDistanceMap distance_traversed_until_node;
         std::mutex map_mutex;
 
         size_t hull_contig_count = 0;
@@ -708,7 +719,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             size_t num_kmers_discovered = 0;
             size_t num_kmers_missing = 0;
 
-            std::vector<DeBruijnGraph::node_index> nodes;
+            std::vector<node_index> nodes;
             nodes.reserve(num_kmers);
 
             graph->map_to_nodes(sequence,
