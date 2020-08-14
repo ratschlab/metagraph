@@ -462,7 +462,8 @@ def check_status():
     # for cleaning we allow using all the available RAM
     total_ram_gb = psutil.virtual_memory().total / 1e9
     not_reserved_ram_gb = total_ram_gb - total_reserved_ram_gb
-    if used_cores < CORES and waiting_cleans:
+    # TODO: figure out why we have so much free memory when all cores are exhausted
+    if used_cores < 2 * CORES and waiting_cleans:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_cleans.items():
             # remove the old clean waiting and append the new one after
@@ -486,7 +487,7 @@ def check_status():
             logging.info(f'[{sra_id}] Not enough RAM for cleaning. '
                          f'Have {round(not_reserved_ram_gb, 2)}GB need {round(build_size_gb + 0.5, 2)}GB')
 
-    if used_cores < CORES and waiting_builds:
+    if used_cores < 2 * CORES and waiting_builds:
         logging.info(f'Ram reserved {round(total_reserved_ram_gb, 2)}GB, total {round(total_ram_gb, 2)}')
         for sra_id, (start_time) in waiting_builds.items():
             num_kmers = sra_info[sra_id][2]
