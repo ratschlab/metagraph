@@ -225,8 +225,8 @@ for i in {33..1}; do
          -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_brwt_${N}_primary.lsf \
          -W 24:00 \
          -n 20 -R "rusage[mem=$((N + 1))] span[hosts=1]" \
-        "find ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary/ -name \"*.annodbg\" \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build/metagraph_DNA transform_anno -v \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type brwt --greedy \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
@@ -254,10 +254,10 @@ for i in {33..1}; do
     bsub -J "to_rbbrwt_${N}" \
          -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rbbrwt_${N}_primary.lsf \
          -W 96:00 \
-         -n 10 -R "rusage[mem=$((7 * N / 4 + 1000))] span[hosts=1]" \
-        "find ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary/ -name \"*.annodbg\" \
+         -n 20 -R "rusage[mem=$((7 * N / 4 + 1000))] span[hosts=1]" \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
-                --anno-type rb_brwt --greedy \
+                --anno-type rb_brwt --relax-arity 20 \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
                 2>&1"; \
@@ -265,7 +265,6 @@ done
 ```
 
 
-## Annotate graphs for subsets
 ```bash
 for i in {33..1}; do
     N=$((750 * i));
@@ -318,7 +317,7 @@ for i in {33..1}; do
         "~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno \
             --rename-cols ~/metagenome/data/BIGSI/subsets/rename_columns.txt \
             -o $annotation \
-            $old"; \
+            $old && rm $old"; \
 done
 ```
 
@@ -413,7 +412,7 @@ done
 
 ## Query graph
 ```bash
-METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph_DNA
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA
 
 # file to query
 for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta \
