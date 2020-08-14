@@ -154,6 +154,9 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_fork_count forks and traverse a linear path for
 // at most max_traversal_distance steps.
+// When the underlying graph is of type DBGSuccinct, the query graph is expanded
+// with nodes which match to suffixes of the contigs. sub_k defines the minimum
+// suffix length.
 void call_halo_sequences(const DeBruijnGraph &full_dbg,
                          const DeBruijnGraph &graph_init,
                          const std::function<void(std::string&&)> &callback,
@@ -165,8 +168,7 @@ void call_halo_sequences(const DeBruijnGraph &full_dbg,
     if (sub_k >= full_dbg.get_k())
         dbg_succ = nullptr;
 
-    if (!max_fork_count && !dbg_succ)
-        return;
+    assert(max_fork_count || dbg_succ);
 
     if (!max_traversal_distance)
         max_traversal_distance = full_dbg.get_k() * 2;
@@ -419,11 +421,11 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 }
 
 template <class Contigs>
-std::shared_ptr<DBGSuccinct> convert_to_succinct(const DeBruijnGraph &full_dbg,
-                                                 const Contigs &contigs,
+std::shared_ptr<DBGSuccinct> convert_to_succinct(const Contigs &contigs,
+                                                 size_t k,
                                                  bool canonical = false,
                                                  size_t num_threads = 1) {
-    BOSSConstructor constructor(full_dbg.get_k() - 1, canonical, 0, "", num_threads);
+    BOSSConstructor constructor(k - 1, canonical, 0, "", num_threads);
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const auto &nodes_in_full = contigs[i].second;
@@ -432,12 +434,8 @@ std::shared_ptr<DBGSuccinct> convert_to_succinct(const DeBruijnGraph &full_dbg,
             while ((it = std::find_if(it, nodes_in_full.end(), [&](auto i) { return i; }))
                     < nodes_in_full.end()) {
                 auto next = std::find(it, nodes_in_full.end(), 0);
-                assert(full_dbg.find(std::string_view(
-                    contig.data() + (it - nodes_in_full.begin()),
-                    next - it + full_dbg.get_k() - 1
-                )));
                 callback(std::string(contig.data() + (it - nodes_in_full.begin()),
-                                     next - it + full_dbg.get_k() - 1));
+                                     next - it + k - 1));
                 it = next;
             }
         });
@@ -611,7 +609,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
             graph = std::move(graph_init);
         } else {
-            graph = convert_to_succinct(full_dbg, contigs, true, num_threads);
+            graph = convert_to_succinct(contigs, full_dbg.get_k(), true, num_threads);
         }
 
         logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
@@ -652,7 +650,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 assert(j == path.size());
             }
         } else {
-            graph = convert_to_succinct(full_dbg, contigs, false, num_threads);
+            graph = convert_to_succinct(contigs, full_dbg.get_k(), false, num_threads);
             contigs = decltype(contigs)();
             index_in_full_graph.assign(graph->max_index() + 1, 0);
 
