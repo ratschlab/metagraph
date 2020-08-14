@@ -243,7 +243,11 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         std::vector<HullUnitig> unitig_traversal;
         full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
             if (update_node(next_node, init_unitig.size())) {
-                unitig_traversal.emplace_back(init_unitig + c, next_node, 0);
+                unitig_traversal.emplace_back(HullUnitig{
+                    .unitig = init_unitig + c,
+                    .start = next_node,
+                    .fork_count = 0
+                });
                 unitig_traversal.back().unitig.reserve(max_traversal_distance);
             }
         });
@@ -253,7 +257,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         auto &node = hull_unitig.start;
         auto &fork_count = hull_unitig.fork_count;
         while (unitig_traversal.size()) {
-            std::tie(unitig, node, fork_count) = std::move(unitig_traversal.back());
+            hull_unitig = std::move(unitig_traversal.back());
             unitig_traversal.pop_back();
 
             if (fork_count >= max_fork_count)
@@ -279,7 +283,11 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
                 full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
                     if (update_node(next_node, unitig.size())) {
-                        unitig_traversal.emplace_back(unitig + c, next_node, fork_count + 1);
+                        unitig_traversal.emplace_back(HullUnitig{
+                            .unitig = unitig + c,
+                            .start = next_node,
+                            .fork_count = fork_count + 1
+                        });
                         unitig_traversal.back().unitig.reserve(max_traversal_distance);
                     }
                 });
