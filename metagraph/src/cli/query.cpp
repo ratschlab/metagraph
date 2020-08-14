@@ -117,7 +117,8 @@ void call_while_linear(const DeBruijnGraph &graph,
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  const std::string &contig,
-                                 const std::function<void(std::string&&)> &callback,
+                                 const std::function<void(std::string&&,
+                                                          std::vector<node_index>&&)> &callback,
                                  size_t sub_k) {
     auto nodes_in_full = map_sequence_to_nodes(dbg_succ, contig);
     size_t k = dbg_succ.get_k();
@@ -157,9 +158,10 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
 // When the underlying graph is of type DBGSuccinct, the query graph is expanded
 // with nodes which match to suffixes of the contigs. sub_k defines the minimum
 // suffix length.
+template <class ContigCallback>
 void call_halo_sequences(const DeBruijnGraph &full_dbg,
-                         const DeBruijnGraph &graph_init,
-                         const std::function<void(std::string&&)> &callback,
+                         const std::string &contig,
+                         const ContigCallback &callback,
                          size_t max_fork_count,
                          size_t max_traversal_distance,
                          size_t num_threads = 1,
@@ -176,35 +178,45 @@ void call_halo_sequences(const DeBruijnGraph &full_dbg,
     logger->trace("[Query graph expansion] max traversal distance: {}", max_traversal_distance);
     logger->trace("[Query graph expansion] max fork count: {}", max_fork_count);
 
-    std::vector<std::string> contigs;
-    graph_init.call_sequences([&](const std::string &contig, const auto &) {
-        if (dbg_succ) {
-            call_suffix_match_sequences(*dbg_succ, contig, [&](std::string&& contig) {
-                if (max_fork_count)
-                    contigs.emplace_back(std::string(contig));
+    if (dbg_succ) {
+        call_suffix_match_sequences(*dbg_succ, contig, [&](std::string&& suff_contig) {
+            callback(std::move(suff_contig));
+            if (max_fork_count) {
+                call_halo_sequences(full_dbg, suff_contig, callback, max_fork_count,
+                                    max_traversal_distance, num_threads);
+            }
+        }, sub_k);
+    }
 
-                std::string rev = contig;
-                callback(std::move(contig));
+    // std::vector<std::string> contigs;
+    // graph_init.call_sequences([&](const std::string &contig, const auto &) {
+    //     if (dbg_succ) {
+    //         call_suffix_match_sequences(*dbg_succ, contig, [&](std::string&& contig) {
+    //             if (max_fork_count)
+    //                 contigs.emplace_back(std::string(contig));
 
-                reverse_complement(rev.begin(), rev.end());
+    //             std::string rev = contig;
+    //             callback(std::move(contig));
 
-                if (max_fork_count)
-                    contigs.emplace_back(std::string(rev));
+    //             reverse_complement(rev.begin(), rev.end());
 
-                callback(std::move(rev));
-            }, sub_k);
-        }
+    //             if (max_fork_count)
+    //                 contigs.emplace_back(std::string(rev));
 
-        if (!max_fork_count)
-            return;
+    //             callback(std::move(rev));
+    //         }, sub_k);
+    //     }
 
-        contigs.push_back(contig);
+    //     if (!max_fork_count)
+    //         return;
 
-        if (!graph_init.is_canonical_mode()) {
-            contigs.push_back(contig);
-            reverse_complement(contigs.back().begin(), contigs.back().end());
-        }
-    });
+    //     contigs.push_back(contig);
+
+    //     if (!graph_init.is_canonical_mode()) {
+    //         contigs.push_back(contig);
+    //         reverse_complement(contigs.back().begin(), contigs.back().end());
+    //     }
+    // });
 
     if (!max_fork_count)
         return;
@@ -229,67 +241,64 @@ void call_halo_sequences(const DeBruijnGraph &full_dbg,
         return true;
     };
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-    for (size_t i = 0; i < contigs.size(); ++i) {
-        auto nodes = map_sequence_to_nodes(full_dbg, contigs[i]);
+    auto nodes = map_sequence_to_nodes(full_dbg, contig);
 
-        for (size_t j = 0; j < nodes.size(); ++j) {
-            // if the next starting node is not in the graph, or if it has a single
-            // outgoing node which is also in this contig, skip
-            if (!nodes[j] || !update_node(nodes[j], 0)
-                    || (j + 1 < nodes.size() && nodes[j + 1] != DeBruijnGraph::npos
-                        && full_dbg.has_single_outgoing(nodes[j]))) {
-                continue;
+    for (size_t j = 0; j < nodes.size(); ++j) {
+        // if the next starting node is not in the graph, or if it has a single
+        // outgoing node which is also in this contig, skip
+        if (!nodes[j] || !update_node(nodes[j], 0)
+                || (j + 1 < nodes.size() && nodes[j + 1] != DeBruijnGraph::npos
+                    && full_dbg.has_single_outgoing(nodes[j]))) {
+            continue;
+        }
+
+        // DFS from branching points
+        std::string unitig(contig, j + 1, full_dbg.get_k() - 1);
+        std::vector<std::tuple<std::string,
+                               DeBruijnGraph::node_index,
+                               size_t>> unitig_traversal;
+        full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
+            if (update_node(next_node, unitig.size())) {
+                unitig_traversal.emplace_back(unitig + c, next_node, 0);
+                std::get<0>(unitig_traversal.back()).reserve(max_traversal_distance);
             }
+        });
 
-            // DFS from branching points
-            std::string unitig(contigs[i], j + 1, full_dbg.get_k() - 1);
-            std::vector<std::tuple<std::string,
-                                   DeBruijnGraph::node_index,
-                                   size_t>> unitig_traversal;
-            full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
-                if (update_node(next_node, unitig.size())) {
-                    unitig_traversal.emplace_back(unitig + c, next_node, 0);
-                    std::get<0>(unitig_traversal.back()).reserve(max_traversal_distance);
-                }
+        DeBruijnGraph::node_index node;
+        size_t depth;
+        while (unitig_traversal.size()) {
+            std::tie(unitig, node, depth) = std::move(unitig_traversal.back());
+            unitig_traversal.pop_back();
+
+            if (depth >= max_fork_count)
+                continue;
+
+            bool continue_traversal = true;
+            call_while_linear(full_dbg, node, [&](auto next_node, char c) {
+                node = next_node;
+                if ((continue_traversal = update_node(node, unitig.size())))
+                    unitig += c;
+
+            }, [&]() {
+                return !continue_traversal || unitig.size() >= max_traversal_distance;
             });
 
-            DeBruijnGraph::node_index node;
-            size_t depth;
-            while (unitig_traversal.size()) {
-                std::tie(unitig, node, depth) = std::move(unitig_traversal.back());
-                unitig_traversal.pop_back();
+            callback(std::string(unitig));
 
-                if (depth >= max_fork_count)
-                    continue;
-
-                bool continue_traversal = true;
-                call_while_linear(full_dbg, node, [&](auto next_node, char c) {
-                    node = next_node;
-                    if ((continue_traversal = update_node(node, unitig.size())))
-                        unitig += c;
-
-                }, [&]() {
-                    return !continue_traversal || unitig.size() >= max_traversal_distance;
+            if (node != DeBruijnGraph::npos
+                    && continue_traversal
+                    && full_dbg.has_multiple_outgoing(node)) {
+                unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
+                full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
+                    if (update_node(next_node, unitig.size())) {
+                        unitig_traversal.emplace_back(unitig + c,
+                                                      next_node,
+                                                      depth + 1);
+                        std::get<0>(unitig_traversal.back()).reserve(
+                            max_traversal_distance
+                        );
+                    }
                 });
-
-                callback(std::string(unitig));
-
-                if (node != DeBruijnGraph::npos
-                        && continue_traversal
-                        && full_dbg.has_multiple_outgoing(node)) {
-                    unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
-                    full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                        if (update_node(next_node, unitig.size())) {
-                            unitig_traversal.emplace_back(unitig + c,
-                                                          next_node,
-                                                          depth + 1);
-                            std::get<0>(unitig_traversal.back()).reserve(
-                                max_traversal_distance
-                            );
-                        }
-                    });
-                }
             }
         }
     }
@@ -518,40 +527,41 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] extracted {} k-mers",
                   graph_init->num_nodes());
 
-    if (max_fork_count || sub_k < full_dbg.get_k()) {
-        // extend graph_init with halo from full graph
-        std::vector<std::string> new_sequences;
-        std::mutex seq_mutex;
-        call_halo_sequences(full_dbg, *graph_init,
-            [&](std::string&& unitig) {
-                std::lock_guard<std::mutex> lock(seq_mutex);
-                new_sequences.emplace_back(std::move(unitig));
-            },
-            max_fork_count,
-            std::min(max_traversal_distance, max_sequence_length),
-            num_threads,
-            sub_k
-        );
+    // if (max_fork_count || sub_k < full_dbg.get_k()) {
+    //     // extend graph_init with halo from full graph
+    //     std::vector<std::string> new_sequences;
+    //     std::mutex seq_mutex;
+    //     call_halo_sequences(full_dbg, *graph_init,
+    //         [&](std::string&& unitig) {
+    //             std::lock_guard<std::mutex> lock(seq_mutex);
+    //             new_sequences.emplace_back(std::move(unitig));
+    //         },
+    //         max_fork_count,
+    //         std::min(max_traversal_distance, max_sequence_length),
+    //         num_threads,
+    //         sub_k
+    //     );
 
-        for (auto&& seq : new_sequences) {
-            graph_init->add_sequence(std::move(seq));
-        }
+    //     for (auto&& seq : new_sequences) {
+    //         graph_init->add_sequence(std::move(seq));
+    //     }
 
-        logger->trace("[Query graph construction] graph expansion took {} sec", timer.elapsed());
-        timer.reset();
+    //     logger->trace("[Query graph construction] graph expansion took {} sec", timer.elapsed());
+    //     timer.reset();
 
-        logger->trace("[Query graph construction] expanded to {} k-mers",
-                      graph_init->num_nodes());
-    }
+    //     logger->trace("[Query graph construction] expanded to {} k-mers",
+    //                   graph_init->num_nodes());
+    // }
 
     std::shared_ptr<DeBruijnGraph> graph = std::move(graph_init);
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
     std::mutex seq_mutex;
-    graph->call_sequences([&](auto&&... contig_args) {
+    graph->call_sequences([&](const std::string &seq, const auto &path) {
                               std::lock_guard<std::mutex> lock(seq_mutex);
-                              contigs.emplace_back(std::move(contig_args)...);
+                              contigs.emplace_back(seq, path);
+
                           },
                           get_num_threads(),
                           canonical);  // pull only primary contigs when building canonical query graph
