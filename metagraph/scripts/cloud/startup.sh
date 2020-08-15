@@ -1,14 +1,15 @@
+#bash /home/ddanciu/projects2014-metagenome/metagraph/scripts/cloud/startup.sh
 #!/bin/bash
 # script that gets excecuted when a cloud instance is started
 chmod a+rx $0
 
 echo "Executing script as: $(whoami)"
 # set up SSD disk
-sudo mdadm --create /dev/md0 --level=0 --raid-devices=4 /dev/nvme0n1 /dev/nvme0n2 /dev/nvme0n3 /dev/nvme0n4
+sudo mdadm --create /dev/md0 --level=0 --raid-devices=6 /dev/nvme0n1 /dev/nvme0n2 /dev/nvme0n3 /dev/nvme0n4 /dev/nvme0n5 /dev/nvme0n6
 sudo mkfs.ext4 -F /dev/md0
-sudo mkdir -p /mnt/disks/ssd
-sudo mount /dev/md0 /mnt/disks/ssd
-sudo chmod a+w /mnt/disks/ssd
+sudo mkdir -p /data
+sudo mount /dev/md0 /data
+sudo chmod a+w /data
 
 # starts the cloud metagraph client
 function start_client() {
@@ -26,7 +27,7 @@ function start_client() {
   make -j metagraph
 
   cd "$metagraph_path/scripts/cloud"
-  python3 ./client2.py --output_dir="/mnt/disks/ssd/"
+  python3 ./client2.py --output_dir="/data/" --destination="gs://metazoa1" --source=ncbi
 }
 
 export -f start_client
