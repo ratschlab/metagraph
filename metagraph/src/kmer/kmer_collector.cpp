@@ -137,7 +137,7 @@ KmerCollector<KMER, KmerExtractor, Container>
       : k_(k),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_), 1),
-        batcher_([this](auto&& sequences) { add_batch(std::move(sequences)); },
+        batcher_([this](auto&& sequences) { this->add_sequences(std::move(sequences)); },
                  kLargeBufferSize / sizeof(typename decltype(batcher_)::value_type),
                  kLargeBufferSize),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
@@ -207,7 +207,7 @@ void KmerCollector<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
-::add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+::add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
     // we capture only a pointer to #sequences in the lambda expression to avoid
     // copying the sequences when the lambda is transformed to a callback which is passed
     // to std::bind by const reference in #add_sequences and hence is copied with all
@@ -216,6 +216,17 @@ void KmerCollector<KMER, KmerExtractor, Container>
     add_sequences([seqs](CallStringCount callback) {
         for (const auto &[seq, count] : *seqs) {
             callback(seq, count);
+        }
+    });
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+void KmerCollector<KMER, KmerExtractor, Container>
+::add_sequences(std::vector<std::string>&& sequences) {
+    auto seqs = std::make_shared<std::vector<std::string>>(std::move(sequences));
+    add_sequences([seqs](CallString callback) {
+        for (const auto &seq : *seqs) {
+            callback(seq);
         }
     });
 }

@@ -20,21 +20,12 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         constructor_->add_sequence(sequence, count);
     }
 
-    void add_sequences(const std::function<void(CallString)> &generate_sequences) {
-        constructor_->add_sequences(generate_sequences);
-    }
-
-    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-        constructor_->add_sequences(generate_sequences);
-    }
-
     void add_sequences(std::vector<std::string>&& sequences) {
-        auto seqs = std::make_shared<std::vector<std::string>>(std::move(sequences));
-        constructor_->add_sequences(
-            [seqs](const CallString &callback) {
-                std::for_each(seqs->begin(), seqs->end(), callback);
-            }
-        );
+        constructor_->add_sequences(std::move(sequences));
+    }
+
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+        constructor_->add_sequences(std::move(sequences));
     }
 
     void build_graph(BOSS *graph) {
