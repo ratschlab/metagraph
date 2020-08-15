@@ -19,6 +19,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 
 DEFINE_string(action, "store", "Action to perform [load, store]");
 DEFINE_string(format, "diff", "Format to compress in: diff or zip");
@@ -117,11 +118,14 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
             = load_annotation(FLAGS_annotation);
+    std::unique_ptr<annot::RowCompressed<std::string>> annotator {
+            dynamic_cast<annot::RowCompressed<std::string> *>(annotation.release())
+    };
     std::shared_ptr<graph::DBGSuccinct> graph = load_graph(FLAGS_graph);
 
     if (FLAGS_action == "store") {
         if (FLAGS_format == "diff") {
-            store_diff(*graph, *annotation);
+            store_diff(*graph, std::move(*annotator));
         } else if (FLAGS_format == "zip") {
             graph::AnnotatedDBG annotated_dbg(graph, std::move(annotation), false);
             store_zip(annotated_dbg);
