@@ -4,6 +4,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -239,6 +240,11 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
+    if (config->canonical) {
+        logger->trace("Loading as canonical DBG");
+        graph.reset(new CanonicalDBG(graph, config->kmers_in_single_form));
+    }
+
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -251,9 +257,10 @@ int align_to_graph(Config *config) {
             config->alignment_length = graph->get_k();
         }
 
-        if (!dbg && config->alignment_length != graph->get_k()) {
+        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
+                && config->alignment_length != graph->get_k()) {
             logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct");
+                          "supported for DBGSuccinct without --canonical flag");
             exit(1);
         }
 
@@ -279,6 +286,12 @@ int align_to_graph(Config *config) {
     }
 
     auto aligner = build_aligner(*graph, *config);
+
+    if (aligner->get_config().min_seed_length < graph->get_k()
+            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
+        logger->error("Seeds of length < k not supported with --canonical flag");
+        exit(1);
+    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);

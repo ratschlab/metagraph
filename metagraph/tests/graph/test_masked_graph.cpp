@@ -557,7 +557,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                 std::string rev = sequences[0];
                 reverse_complement(rev.begin(), rev.end());
 
-                auto full_graph = build_graph_batch<TypeParam>(k, sequences, true);
+                auto full_graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::CANONICAL);
                 sdsl::bit_vector mask(full_graph->max_index() + 1, true);
                 full_graph->map_to_nodes_sequentially(sequences[0], [&](auto i) {
                     mask[i] = false;
@@ -590,7 +590,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
 
                 // in stable graphs the order of input sequences
                 // does not change the order of k-mers and their indexes
-                auto full_stable_graph = build_graph_batch<DBGSuccinct>(k, sequences, true);
+                auto full_stable_graph = build_graph_batch<DBGSuccinct>(k, sequences, BuildMode::CANONICAL);
                 sdsl::bit_vector stable_mask(full_stable_graph->max_index() + 1, true);
                 full_stable_graph->map_to_nodes_sequentially(sequences[0], [&](auto i) {
                     stable_mask[i] = false;
@@ -619,7 +619,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                             true // kmers_in_single_form
                         );
                     },
-                    true
+                    BuildMode::CANONICAL
                 );
                 auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
                     k,
@@ -635,7 +635,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                             true // kmers_in_single_form
                         );
                     },
-                    true
+                    BuildMode::CANONICAL
                 );
 
                 EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
@@ -655,7 +655,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, true);
+                auto graph = build_graph_batch<TypeParam>(k, sequences, BuildMode::CANONICAL);
                 auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
                 if (dbg_succ) {
