@@ -1,6 +1,7 @@
 #include "load_annotated_graph.hpp"
 
 #include "graph/annotated_graph_algorithm.hpp"
+#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/threads/threading.hpp"
@@ -83,8 +84,15 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
         label_mask_out.end()
     );
 
+    std::sort(label_mask_in.begin(), label_mask_in.end());
+    std::sort(label_mask_out.begin(), label_mask_out.end());
+
     logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
     logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
+
+    if (utils::count_intersection(label_mask_in.begin(), label_mask_in.end(),
+                                  label_mask_out.begin(), label_mask_out.end()))
+        logger->warn("In- and out-label sets overlap");
 
     return std::make_unique<MaskedDeBruijnGraph>(mask_nodes_by_label(
         anno_graph, label_mask_in, label_mask_out, diff_config, num_threads, init_counts
