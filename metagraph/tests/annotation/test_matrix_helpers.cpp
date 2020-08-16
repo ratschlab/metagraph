@@ -195,6 +195,41 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // check slice_columns
+    for (size_t m : { size_t(0),
+                      size_t(matrix.num_columns() / 2),
+                      size_t(matrix.num_columns()) }) {
+        std::vector<uint64_t> indices(m);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto slice = matrix.slice_columns(indices);
+
+        ASSERT_GE(slice.size(), indices.size());
+
+        auto column_begin = slice.begin();
+
+        for (size_t j = 0; j < indices.size(); ++j) {
+            // every row in `slice` ends with `-1`
+            auto column_end = std::find(column_begin, slice.end(),
+                                        std::numeric_limits<BinaryMatrix::Row>::max());
+            std::vector<BinaryMatrix::Row> column_set_bits(column_begin, column_end);
+            column_begin = column_end + 1;
+
+            // make sure all returned indexes are unique
+            ASSERT_EQ(column_set_bits.size(), convert_to_set(column_set_bits).size());
+
+            for (auto i : column_set_bits) {
+                ASSERT_TRUE(i < matrix.num_rows());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
+
+            auto set_bits = convert_to_set(column_set_bits);
+            for (size_t i = 0; i < matrix.num_rows(); ++i) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(i));
+            }
+        }
+    }
+
     // check get_row
     for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
         auto row_set_bits = matrix.get_row(i);

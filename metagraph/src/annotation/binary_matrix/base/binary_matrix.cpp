@@ -32,6 +32,20 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
     return slice;
 }
 
+std::vector<BinaryMatrix::Row>
+BinaryMatrix::slice_columns(const std::vector<Column> &column_ids) const {
+    std::vector<BinaryMatrix::Row> slice;
+
+    for (uint64_t j : column_ids) {
+        for (uint64_t i : get_column(j)) {
+            slice.push_back(i);
+        }
+        slice.push_back(std::numeric_limits<Row>::max());
+    }
+
+    return slice;
+}
+
 template <typename RowType>
 StreamRows<RowType>::StreamRows(const std::string &filename, size_t offset) {
     std::ifstream instream(filename, std::ios::binary);
