@@ -305,6 +305,9 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     sdsl::int_vector<> counts(graph->max_index() + 1, 0, width * 2);
     sdsl::bit_vector indicator(counts.size(), false);
 
+    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
+    const auto &binmat = anno_graph.get_annotation().get_matrix();
+
     if (init_counts) {
         assert(init_counts->size() == graph->max_index() + 1);
         call_nonzeros(*init_counts, [&](uint64_t i, uint64_t val) {
@@ -312,31 +315,40 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         });
     }
 
-    // TODO: replace locked increment operations on int_vector<> with actual
-    //       atomic operations when we figure out how to align int_vector<> storage
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
+    std::vector<uint64_t> label_in_codes(labels_in.size());
+    std::vector<uint64_t> label_out_codes(labels_out.size());
     for (size_t i = 0; i < labels_in.size(); ++i) {
-        anno_graph.call_annotated_nodes(labels_in[i], [&](node_index j) {
-            #pragma omp critical
-            {
-                indicator[j] = true;
-                ++counts[j];
-            }
-        });
+        label_in_codes[i] = label_encoder.encode(labels_in[i]);
+    }
+    for (size_t i = 0; i < labels_out.size(); ++i) {
+        label_out_codes[i] = label_encoder.encode(labels_out[i]);
     }
 
-    // correct the width of counts, making it single-width
-    counts.width(width);
+    const auto delim = std::numeric_limits<annot::binmat::BinaryMatrix::Row>::max();
 
-    #pragma omp parallel for schedule(dynamic) num_threads(num_threads) default(shared)
-    for (size_t i = 0; i < labels_out.size(); ++i) {
-        anno_graph.call_annotated_nodes(labels_out[i], [&](node_index j) {
-            #pragma omp critical
-            {
-                indicator[j] = true;
-                ++counts[j * 2 + 1];
+    #pragma omp parallel num_threads(num_threads)
+    #pragma omp single
+    {
+        for (auto row : binmat.slice_columns(label_in_codes)) {
+            if (row != delim) {
+                node_index i = AnnotatedDBG::anno_to_graph_index(row);
+
+                indicator[i] = true;
+                ++counts[i];
             }
-        });
+        }
+
+        // correct the width of counts, making it single-width
+        counts.width(width);
+
+        for (auto row : binmat.slice_columns(label_out_codes)) {
+            if (row != delim) {
+                node_index i = AnnotatedDBG::anno_to_graph_index(row);
+
+                indicator[i] = true;
+                ++counts[i * 2 + 1];
+            }
+        }
     }
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(
