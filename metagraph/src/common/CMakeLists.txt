@@ -46,6 +46,7 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
+set(SPDLOG_BUILD_TESTING FALSE)
 add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
 add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)

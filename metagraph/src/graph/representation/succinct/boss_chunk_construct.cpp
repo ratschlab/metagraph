@@ -982,7 +982,7 @@ IBOSSChunkConstructor::initialize(size_t k,
                         "Error: trying to allocate too many bits per k-mer count");
             }
         default:
-            logger->error("Invalid container type {}", container_type);
+            logger->error("Invalid container type {}", (int)container_type);
             std::exit(1);
     }
 }
