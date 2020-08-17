@@ -30,12 +30,6 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                const std::filesystem::path &swap_dir = "/tmp/",
                size_t max_disk_space_bytes = 1e9);
 
-    virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
-    virtual void add_sequences(const std::function<void(CallString)> &generator) = 0;
-    virtual void add_sequences(const std::function<void(CallStringCount)> &generator) = 0;
-
-    virtual BOSS::Chunk* build_chunk() = 0;
-
     virtual uint64_t get_k() const = 0;
 };
 

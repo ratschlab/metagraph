@@ -36,12 +36,12 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
         kmer_collector_.add_sequence(sequence, count);
     }
 
-    void add_sequences(const std::function<void(CallString)> &generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
+    void add_sequences(std::vector<std::string>&& sequences) {
+        kmer_collector_.add_sequences(std::move(sequences));
     }
 
-    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+        kmer_collector_.add_sequences(std::move(sequences));
     }
 
     size_t get_k() const { return kmer_collector_.get_k(); }

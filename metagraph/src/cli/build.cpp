@@ -33,17 +33,11 @@ void push_sequences(const std::vector<std::string> &files,
                     const Config &config,
                     const Timer &timer,
                     GraphConstructor *constructor) {
-    using Buffer = std::vector<std::pair<std::string, uint64_t>>;
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 1)
     for (size_t i = 0; i < files.size(); ++i) {
         BatchAccumulator<std::pair<std::string, uint64_t>> batcher(
-            [constructor](Buffer&& sequences) {
-                auto seqs = std::make_shared<Buffer>(std::move(sequences));
-                constructor->add_sequences([seqs](CallStringCount callback) {
-                    for (const auto &[seq, count] : *seqs) {
-                        callback(seq, count);
-                    }
-                });
+            [constructor](auto&& sequences) {
+                constructor->add_sequences(std::move(sequences));
             },
             1'000'000 / sizeof(std::pair<std::string, uint64_t>),
             1'000'000

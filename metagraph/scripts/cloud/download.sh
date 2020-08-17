@@ -180,7 +180,7 @@ fi
 
 echo singleton_kmers > "${kmc_dir}/${sra_id}.stats"
 rm -rf "${tmp_dir}" "${fastq_dir}"
-rm -rf /mnt/disks/ssd/fasterqtmp
+
 exit_with 0
 
 # Note: sra_dir is deleted later in the python client, because we want to measure its size

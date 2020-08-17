@@ -81,7 +81,7 @@ TYPED_TEST(DeBruijnGraphTest, Traversals) {
         EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'C'), 'A'));
 
         EXPECT_EQ(npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
+        EXPECT_EQ(npos, graph->traverse_back(it, 'G'));
     }
 }
 
