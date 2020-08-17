@@ -78,10 +78,9 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
-template <typename Label>
-typename std::unique_ptr<RowDiffAnnotator>
+std::unique_ptr<RowDiffAnnotator>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
-                    RowCompressed<Label> &&annotation,
+                    RowCompressed<std::string> &&annotation,
                     uint32_t num_threads);
 
 

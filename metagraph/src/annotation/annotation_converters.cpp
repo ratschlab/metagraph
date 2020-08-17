@@ -978,18 +978,9 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-template <typename Label>
-typename std::unique_ptr<RowDiffAnnotator>
-convert_to_row_diff(const graph::DBGSuccinct &graph,
-                    const std::string& file_name,
-                    uint32_t num_threads) {
-
-    RowCompressed<Label> annotation;
-    uint64_t num_rows;
-    uint64_t num_relations;
-    RowCompressed<Label>::load_shape(file_name, &num_rows, &num_relations);
-
-
+std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+                                                      RowCompressed<std::string> &&annotation,
+                                                      uint32_t num_threads) {
     uint64_t nnodes = graph.num_nodes();
     std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
     sdsl::bit_vector terminal(nnodes + 1);
@@ -1064,10 +1055,11 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
         sboundary[i] = boundary[i];
     }
 
-    annot::binmat::RowDiff diff_annotation(annotation.num_labels(), &graph, diff,
-                                           sboundary, terminal);
+    auto diff_annotation
+            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
+                                                       diff, sboundary, terminal);
 
-    return std::make_unique<RowDiffAnnotator>(diff_annotation,
+    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                               annotation.get_label_encoder());
 }
 
