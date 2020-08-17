@@ -173,10 +173,15 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                 ","
             );
 
-            auto [counts, indicator] = fill_count_vector(anno_graph,
-                                                         foreground_labels, background_labels,
-                                                         get_num_threads(),
-                                                         false);
+            // sync all assembly jobs before clearing current shared_counts
+            thread_pool.join();
+
+            auto [counts, indicator] = fill_count_vector(
+                anno_graph,
+                foreground_labels, background_labels,
+                get_num_threads(),
+                false /* update in place */
+            );
 
             shared_counts = std::make_unique<sdsl::int_vector<>>(std::move(counts));
             continue;
