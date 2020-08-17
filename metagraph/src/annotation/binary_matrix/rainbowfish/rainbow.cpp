@@ -132,6 +132,32 @@ Rainbow<MatrixType>::get_column(Column column) const {
 }
 
 template <class MatrixType>
+std::vector<BinaryMatrix::Row>
+Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns) const {
+    std::vector<Row> row_indices;
+    uint64_t rows = num_rows();
+
+    sdsl::bit_vector code_column(reduced_matrix_.num_rows(), false);
+    const Row delim = std::numeric_limits<Row>::max();
+    for (uint64_t r : reduced_matrix_.slice_columns(columns)) {
+        if (r == delim) {
+            // TODO: avoid multiple passes through the rows
+            for (uint64_t i = 0; i < rows; ++i) {
+                auto code = get_code(i);
+                if (code_column[code])
+                    row_indices.emplace_back(i);
+            }
+            row_indices.push_back(delim);
+            sdsl::util::set_to_value(code_column, false);
+        } else {
+            code_column[r] = true;
+        }
+    }
+
+    return row_indices;
+}
+
+template <class MatrixType>
 bool Rainbow<MatrixType>::load(std::istream &in) {
     try {
         num_relations_ = load_number(in);
