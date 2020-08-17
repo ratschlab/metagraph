@@ -178,42 +178,23 @@ typedef tsl::hopscotch_map<node_index, size_t> NodeToDistanceMap;
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_hull_forks forks and traverse a linear path for
 // at most max_hull_depth steps.
-// When the underlying graph is of type DBGSuccinct, the query graph is expanded
-// with nodes which match to suffixes of the contigs. sub_k defines the minimum
-// suffix length.
+// continue_traversal is given a node and the distrance traversed so far and
+// returns whether traversal should continue.
 template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const std::string_view &contig,
-                         const ContigCallback &callback,
                          size_t max_hull_forks,
                          size_t max_hull_depth,
-                         NodeToDistanceMap &distance_traversed_until_node,
-                         std::mutex &map_mutex) {
+                         const ContigCallback &callback,
+                         const std::function<bool(node_index, size_t)> &continue_traversal) {
     assert(max_hull_forks);
-
-    // when a node which has already been accessed is visited, only continue
-    // traversing if the previous access was in a longer path (i.e., it cut
-    // off earlier)
-    auto update_node = [&](node_index node, size_t distance) {
-        std::lock_guard<std::mutex> lock(map_mutex);
-        auto [it, inserted] = distance_traversed_until_node.emplace(node, distance);
-        if (!inserted) {
-            if (it->second > distance) {
-                it.value() = distance;
-            } else {
-                return false;
-            }
-        }
-
-        return true;
-    };
 
     auto nodes = map_sequence_to_nodes(full_dbg, contig);
 
     for (size_t j = 0; j < nodes.size(); ++j) {
         // if the next starting node is not in the graph, or if it has a single
         // outgoing node which is also in this contig, skip
-        if (!nodes[j] || !update_node(nodes[j], 0)
+        if (!nodes[j] || !continue_traversal(nodes[j], 0)
                 || (j + 1 < nodes.size() && nodes[j + 1] != DeBruijnGraph::npos
                     && full_dbg.has_single_outgoing(nodes[j]))) {
             continue;
@@ -224,7 +205,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
         std::vector<HullUnitig> unitig_traversal;
         full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
-            if (update_node(next_node, init_unitig.size())) {
+            if (continue_traversal(next_node, init_unitig.size())) {
                 unitig_traversal.emplace_back(HullUnitig{
                     .unitig = init_unitig + c,
                     .path = std::vector<node_index>{ next_node },
@@ -245,15 +226,15 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             if (fork_count >= max_hull_forks)
                 continue;
 
-            bool continue_traversal = true;
+            bool traverse = true;
             call_while_linear(full_dbg, path.back(),
                 [&](auto next_node, char c) {
                     path.push_back(next_node);
-                    if ((continue_traversal = update_node(next_node, unitig.size())))
+                    if ((traverse = continue_traversal(next_node, unitig.size())))
                         unitig += c;
 
                 }, [&]() {
-                    return !continue_traversal || unitig.size() >= max_hull_depth;
+                    return !traverse || unitig.size() >= max_hull_depth;
                 }
             );
 
@@ -269,7 +250,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
                 // start new traversals
                 full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                    if (update_node(next_node, unitig.size())) {
+                    if (continue_traversal(next_node, unitig.size())) {
                         unitig_traversal.emplace_back(HullUnitig{
                             .unitig = unitig + c,
                             .path = std::vector<node_index>{ next_node },
@@ -567,26 +548,45 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         NodeToDistanceMap distance_traversed_until_node;
-        std::mutex map_mutex;
 
         size_t hull_contig_count = 0;
 
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < old_size; ++i) {
             const std::string_view contig(contigs[i].first);
-            call_hull_sequences(full_dbg, contig, [&](auto&& seq, auto&& path) {
-                #pragma omp critical
-                {
-                    ++hull_contig_count;
-                    graph->add_sequence(seq);
-                    contigs.emplace_back(std::move(seq),
-                                         std::vector<node_index>(path.size()));
+            call_hull_sequences(full_dbg, contig, max_hull_forks, max_hull_depth,
+                [&](auto&& seq, auto&& path) {
+                    #pragma omp critical
+                    {
+                        ++hull_contig_count;
+                        graph->add_sequence(seq);
+                        contigs.emplace_back(std::move(seq),
+                                             std::vector<node_index>(path.size()));
+                    }
+                },
+                [&](node_index node, size_t distance) {
+                    // when a node which has already been accessed is visited,
+                    // only continue traversing if the previous access was in a
+                    // longer path (i.e., it cut off earlier)
+                    bool ret_val;
+                    #pragma omp critical
+                    {
+                        auto [it, inserted] = distance_traversed_until_node.emplace(
+                            node, distance
+                        );
+
+                        ret_val = inserted || it->second > distance;
+
+                        if (!inserted && ret_val)
+                            it.value() = distance;
+                    }
+                    return ret_val;
                 }
-            }, max_hull_forks, max_hull_depth, distance_traversed_until_node,
-               map_mutex);
+            );
         }
 
-        logger->trace("[Query graph extension] Added {} contigs in {} sec", hull_contig_count, timer.elapsed());
+        logger->trace("[Query graph extension] Added {} contigs in {} sec",
+                      hull_contig_count, timer.elapsed());
 
         if (!canonical) {
             logger->trace("[Query graph extension] Remapping contigs");
