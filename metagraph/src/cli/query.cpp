@@ -188,32 +188,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          size_t max_hull_forks,
                          size_t max_hull_depth,
                          NodeToDistanceMap &distance_traversed_until_node,
-                         std::mutex &map_mutex,
-                         size_t num_threads,
-                         size_t sub_k) {
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
-    if (sub_k >= full_dbg.get_k())
-        dbg_succ = nullptr;
-
-    assert(max_hull_forks || dbg_succ);
-
-    if (dbg_succ) {
-        call_suffix_match_sequences(*dbg_succ, contig,
-            [&](std::string&& suff_contig, auto&& path) {
-                callback(std::move(suff_contig), std::move(path));
-                if (max_hull_forks) {
-                    call_hull_sequences(full_dbg, suff_contig, callback,
-                                        max_hull_forks, max_hull_depth,
-                                        distance_traversed_until_node, map_mutex,
-                                        num_threads, full_dbg.get_k());
-                }
-            },
-            sub_k
-        );
-    }
-
-    if (!max_hull_forks)
-        return;
+                         std::mutex &map_mutex) {
+    assert(max_hull_forks);
 
     // when a node which has already been accessed is visited, only continue
     // traversing if the previous access was in a longer path (i.e., it cut
@@ -504,7 +480,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
     size_t max_sequence_length = 0;
-    if (kPrefilterWithBloom && dbg_succ) {
+    if (kPrefilterWithBloom && dbg_succ && sub_k >= full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
                     "[Query graph construction] Started indexing k-mers pre-filtered "
@@ -545,6 +521,39 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
+    size_t old_size = contigs.size();
+
+    if (sub_k < full_dbg.get_k()) {
+        if (dbg_succ) {
+            logger->trace("[Query graph construction] Adding k-mers with matching "
+                          "suffixes of length {}", sub_k);
+            timer.reset();
+
+            size_t num_added = 0;
+
+            #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+            for (size_t i = 0; i < old_size; ++i) {
+                const std::string_view contig(contigs[i].first);
+                call_suffix_match_sequences(*dbg_succ, contig,
+                    [&](std::string&& suff_contig, auto&& path) {
+                        #pragma omp critical
+                        {
+                            num_added += path.size();
+                            contigs.emplace_back(std::move(suff_contig),
+                                                 std::move(path));
+                        }
+                    },
+                    sub_k
+                );
+            }
+
+            logger->trace("[Query graph construction] Adding {} suffix-matching k-mers "
+                          "took {} sec", num_added, timer.elapsed());
+        } else {
+            logger->warn("Matching suffixes of k-mers only supported for DBGSuccinct");
+        }
+    }
+
     if (max_hull_forks) {
         max_hull_depth = std::min(
             max_hull_depth,
@@ -557,7 +566,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       max_hull_forks);
         timer.reset();
 
-        size_t old_size = contigs.size();
         NodeToDistanceMap distance_traversed_until_node;
         std::mutex map_mutex;
 
@@ -575,7 +583,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                          std::vector<node_index>(path.size()));
                 }
             }, max_hull_forks, max_hull_depth, distance_traversed_until_node,
-               map_mutex, 0, sub_k);
+               map_mutex);
         }
 
         logger->trace("[Query graph extension] Added {} contigs in {} sec", hull_contig_count, timer.elapsed());
