@@ -491,7 +491,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       size_t sub_k,
                       size_t max_hull_forks,
                       size_t max_hull_depth,
-                      double max_traversed_nodes_per_seq_char) {
+                      double max_hull_depth_per_seq_char) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
@@ -548,7 +548,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     if (max_hull_forks) {
         max_hull_depth = std::min(
             max_hull_depth,
-            static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char)
+            static_cast<size_t>(max_sequence_length * max_hull_depth_per_seq_char)
         );
 
         logger->trace("[Query graph extension] Computing query graph hull");
