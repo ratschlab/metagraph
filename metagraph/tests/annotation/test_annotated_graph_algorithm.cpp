@@ -157,7 +157,8 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                                  double outlabel_fraction,
                                  double other_label_fraction,
                                  const std::unordered_set<std::string> &ref_kmers,
-                                 bool add_canonical = false) {
+                                 bool add_complement,
+                                 BuildMode mode) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -186,8 +187,9 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
             };
             const std::vector<std::string> labels { "A", "B", "C", "D" };
 
+            // if add_complement, then the differential
             auto anno_graph = build_anno_graph<Graph, Annotation>(
-                k, sequences, labels, !add_canonical
+                k, sequences, labels, mode
             );
 
             std::unordered_set<std::string> obs_kmers;
@@ -198,7 +200,7 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                 .label_mask_out_unitig_fraction = outlabel_fraction,
                 .label_mask_out_kmer_fraction = 0.0,
                 .label_mask_other_unitig_fraction = other_label_fraction,
-                .add_complement = add_canonical
+                .add_complement = add_complement
             };
 
             auto masked_dbg = mask_nodes_by_label(*anno_graph,
@@ -212,51 +214,57 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                 << inlabel_fraction << " "
                 << outlabel_fraction << " "
                 << other_label_fraction << " "
-                << add_canonical << " "
+                << add_complement << " "
+                << mode << " "
                 << num_threads;
         }
     }
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
-    for (bool add_canonical : std::vector<bool>{ false, true }) {
-        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
-            std::unordered_set<std::string> ref_kmers;
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.0, other_frac, ref_kmers, add_canonical
-            );
+    for (bool add_complement : std::vector<bool>{ false, true }) {
+        for (BuildMode mode : std::vector<BuildMode>{ BuildMode::BASE, BuildMode::CANONICAL }) {
+            if (mode == BuildMode::BASE && !add_complement)
+                continue;
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.25, other_frac, ref_kmers, add_canonical
-            );
+            for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
+                std::unordered_set<std::string> ref_kmers;
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 0.0, other_frac, ref_kmers, add_complement, mode
+                );
+
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 0.25, other_frac, ref_kmers, add_complement, mode
+                );
 
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.49, other_frac, ref_kmers, add_canonical
-            );
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 0.49, other_frac, ref_kmers, add_complement, mode
+                );
 
-            ref_kmers.insert("GAATG");
-            ref_kmers.insert("AATGC");
-            ref_kmers.insert("GCATT");
-            ref_kmers.insert("CATTC");
+                ref_kmers.insert("GAATG");
+                ref_kmers.insert("AATGC");
+                ref_kmers.insert("GCATT");
+                ref_kmers.insert("CATTC");
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.50, other_frac, ref_kmers, add_canonical
-            );
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 0.50, other_frac, ref_kmers, add_complement, mode
+                );
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.75, other_frac, ref_kmers, add_canonical
-            );
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 0.75, other_frac, ref_kmers, add_complement, mode
+                );
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 1.0, other_frac, ref_kmers, add_canonical
-            );
+                test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                            typename TypeParam::second_type>(
+                    1.0, 1.0, other_frac, ref_kmers, add_complement, mode
+                );
+            }
         }
     }
 }

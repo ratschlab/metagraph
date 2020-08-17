@@ -218,20 +218,18 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
         std::mutex add_mutex;
         BOSSConstructor constructor(graph_ptr->get_k() - 1, masked_canonical);
-        constructor.add_sequences([&](const CallString &callback) {
-            masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
-                sdsl::int_vector<> path_counts(path.size(), 0, width * 2);
-                auto it = path_counts.begin();
-                for (node_index i : path) {
-                    *it = counts[i];
-                    ++it;
-                }
+        masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
+            sdsl::int_vector<> path_counts(path.size(), 0, width * 2);
+            auto it = path_counts.begin();
+            for (node_index i : path) {
+                *it = counts[i];
+                ++it;
+            }
 
-                std::lock_guard<std::mutex> lock(add_mutex);
-                contigs.emplace_back(seq, std::move(path_counts));
-                callback(seq);
-            }, num_threads, masked_canonical);
-        });
+            std::lock_guard<std::mutex> lock(add_mutex);
+            contigs.emplace_back(seq, std::move(path_counts));
+            constructor.add_sequence(seq);
+        }, num_threads, masked_canonical);
 
         auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor),
                                                       masked_canonical);

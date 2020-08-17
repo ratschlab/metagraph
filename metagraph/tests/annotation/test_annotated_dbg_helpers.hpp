@@ -20,6 +20,8 @@
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
 
+#include "../graph/all/test_dbg_helpers.hpp"
+
 
 namespace mtg {
 namespace test {
@@ -30,7 +32,7 @@ template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels,
-                                               bool canonical = false);
+                                               BuildMode mode = BASE);
 
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
