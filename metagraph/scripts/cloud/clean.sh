@@ -26,5 +26,5 @@ num_singletons=$4
 fallback=$5
 cores=$6
 # TODO, set back --fallback "${fallback}"
-execute metagraph clean -v -p "$cores" --min-count 1 --num-singletons "${num_singletons}"  --prune-unitigs 0 --fallback -1 --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
+execute metagraph clean -v -p "$cores" --min-count 1 --num-singletons "${num_singletons}"  --prune-unitigs 0 --fallback "${fallback}" --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
 rm -rf $(dirname "${input_file}")

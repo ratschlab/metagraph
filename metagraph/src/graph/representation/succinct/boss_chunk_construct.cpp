@@ -814,7 +814,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
-                                     bits_per_count_);
+                                     bits_per_count_,
+                                     kmer_collector_.tmp_dir());
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
@@ -831,7 +832,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                              kmer_collector_.get_k() - 1, \
                              kmer_collector_.is_both_strands_mode(), \
                              queue, \
-                             bits_per_count_)
+                             bits_per_count_,                                     \
+                             kmer_collector_.tmp_dir())
 
             if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
                 INIT_CHUNK(KmerExtractorBOSS::Kmer64);
@@ -980,7 +982,7 @@ IBOSSChunkConstructor::initialize(size_t k,
                         "Error: trying to allocate too many bits per k-mer count");
             }
         default:
-            logger->error("Invalid container type {}", container_type);
+            logger->error("Invalid container type {}", (int)container_type);
             std::exit(1);
     }
 }
