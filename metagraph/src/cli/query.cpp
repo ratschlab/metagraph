@@ -153,6 +153,8 @@ call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
             continue;
         }
 
+        assert(!last_k);
+
         dbg_succ.call_nodes_with_suffix(
             std::string_view(contig.data() + i, k),
             [&](node_index node, size_t seed_length) {
@@ -392,13 +394,12 @@ std::shared_ptr<DBGSuccinct> convert_to_succinct(const Contigs &contigs,
                                                  bool canonical = false,
                                                  size_t num_threads = 1) {
     BOSSConstructor constructor(k - 1, canonical, 0, "", num_threads);
-    for (size_t i = 0; i < contigs.size(); ++i) {
-        const std::string &contig = contigs[i].first;
-        const auto &nodes_in_full = contigs[i].second;
+    for (const auto &[contig, nodes_in_full] : contigs) {
         auto it = nodes_in_full.begin();
-        while ((it = std::find_if(it, nodes_in_full.end(), [&](auto i) { return i; }))
-                < nodes_in_full.end()) {
-            auto next = std::find(it, nodes_in_full.end(), 0);
+        auto end = nodes_in_full.end();
+        auto present_in_full = [&](node_index i) { return i != DeBruijnGraph::npos; };
+        while ((it = std::find_if(it, end, present_in_full)) < end) {
+            auto next = std::find(it, end, DeBruijnGraph::npos);
             constructor.add_sequence(std::string_view(
                 contig.data() + (it - nodes_in_full.begin()),
                 next - it + k - 1
