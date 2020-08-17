@@ -42,10 +42,12 @@ int assemble(Config *config) {
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
+        std::mutex file_open_mutex;
         std::mutex write_mutex;
 
         call_masked_graphs(*anno_graph, config,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
+                std::lock_guard<std::mutex> file_lock(file_open_mutex);
                 seq_io::FastaWriter writer(config->outfbase, header,
                                            config->enumerate_out_sequences,
                                            get_num_threads() > 1, /* async write */
