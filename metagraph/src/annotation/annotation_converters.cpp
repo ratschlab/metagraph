@@ -986,7 +986,6 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     sdsl::bit_vector terminal(nnodes + 1);
 
     uint64_t max_id = 0;
-    ProgressBar progress_bar(graph.num_nodes(), "Building row-diff anno");
     graph.call_sequences(
             [&](const std::string &, const std::vector<uint64_t> &path) {
                 std::vector<uint64_t> anno_ids;
@@ -1034,11 +1033,9 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                     tdiffs[path.back()].push_back(v);
                 }
                 terminal[path.back()] = 1;
-
-                progress_bar += path.size();
             },
             num_threads, false, true);
-
+    logger->info("Traversal done. Constructing data structures...");
     std::vector<uint64_t> diff;
     std::vector<bool> boundary;
     for (const auto &tdiff : tdiffs) {
