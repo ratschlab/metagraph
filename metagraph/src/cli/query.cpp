@@ -130,11 +130,12 @@ void call_while_linear(const DeBruijnGraph &graph,
     }
 }
 
-void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
-                                 const std::string_view &contig,
-                                 const std::function<void(std::string&&,
-                                                          std::vector<node_index>&&)> &callback,
-                                 size_t sub_k) {
+void
+call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
+                            const std::string_view &contig,
+                            const std::function<void(std::string&&,
+                                                     std::vector<node_index>&&)> &callback,
+                            size_t sub_k) {
     auto nodes_in_full = map_sequence_to_nodes(dbg_succ, contig);
     size_t k = dbg_succ.get_k();
     assert(sub_k < k);
@@ -154,15 +155,11 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
 
         dbg_succ.call_nodes_with_suffix(
             std::string_view(contig.data() + i, k),
-            [&](auto node, size_t seed_length) {
+            [&](node_index node, size_t seed_length) {
                 last_k = seed_length;
-                std::string next_seq;
-                next_seq.reserve(contig.size() * 2);
-                next_seq += dbg_succ.get_node_sequence(node);
-                callback(std::move(next_seq), { node });
+                callback(dbg_succ.get_node_sequence(node), { node });
             },
-            sub_k,
-            1 // max num nodes per suffix
+            sub_k, 1 // max num nodes per suffix
         );
     }
 }
