@@ -988,8 +988,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     uint64_t max_id = 0;
     ProgressBar progress_bar(graph.num_nodes(), "Building row-diff anno");
     graph.call_sequences(
-            [&](const std::string &seq, const std::vector<uint64_t> &path) {
-                std::cout << seq << std::endl;
+            [&](const std::string &, const std::vector<uint64_t> &path) {
                 std::vector<uint64_t> anno_ids;
 
                 for (const uint64_t node_id : path) {

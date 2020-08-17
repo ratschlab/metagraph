@@ -285,9 +285,13 @@ int transform_annotation(Config *config) {
             case Config::RowDiff: {
                 logger->trace("Loading graph...");
                 graph::DBGSuccinct graph(2);
-                graph.load(config->infbase);
+                bool result = graph.load(config->infbase);
+                if (!result) {
+                    logger->error("Cannot load graph from {}", config->infbase);
+                    std::exit(1);
+                }
 
-                logger->trace("Loading annotation from disk...");
+                logger->trace("Loading annotation...");
                 std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
                         = initialize_annotation(files.at(0), *config);
                 if (!annotation->merge_load(files)) {
@@ -303,12 +307,9 @@ int transform_annotation(Config *config) {
 
                 timer.reset();
                 logger->trace("Converting to row-diff...");
-                std::unique_ptr<annot::RowDiffAnnotator> anno
-                        = convert_to_row_diff(graph, std::move(*annotator),
+                target_annotator = convert_to_row_diff(graph, std::move(*annotator),
                                               get_num_threads());
-                logger->trace("Annotation converted in {} sec", timer.elapsed());
-                logger->trace("Serializing to '{}'", config->outfbase);
-                anno->serialize(config->outfbase);
+                break;
             }
             default:
                 logger->error(
@@ -451,6 +452,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 logger->trace("Serializing to '{}'", config->outfbase);
                 anno->serialize(config->outfbase);
+                break;
             }
         }
 
