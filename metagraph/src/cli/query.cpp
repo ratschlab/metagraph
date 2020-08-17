@@ -176,8 +176,8 @@ struct HullUnitig {
 typedef tsl::hopscotch_map<node_index, size_t> NodeToDistanceMap;
 
 // Expand the query graph by traversing around its nodes which are forks in the
-// full graph. Take at most max_fork_count forks and traverse a linear path for
-// at most max_traversal_distance steps.
+// full graph. Take at most max_hull_forks forks and traverse a linear path for
+// at most max_hull_depth steps.
 // When the underlying graph is of type DBGSuccinct, the query graph is expanded
 // with nodes which match to suffixes of the contigs. sub_k defines the minimum
 // suffix length.
@@ -185,8 +185,8 @@ template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const std::string_view &contig,
                          const ContigCallback &callback,
-                         size_t max_fork_count,
-                         size_t max_traversal_distance,
+                         size_t max_hull_forks,
+                         size_t max_hull_depth,
                          NodeToDistanceMap &distance_traversed_until_node,
                          std::mutex &map_mutex,
                          size_t num_threads,
@@ -195,15 +195,15 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     if (sub_k >= full_dbg.get_k())
         dbg_succ = nullptr;
 
-    assert(max_fork_count || dbg_succ);
+    assert(max_hull_forks || dbg_succ);
 
     if (dbg_succ) {
         call_suffix_match_sequences(*dbg_succ, contig,
             [&](std::string&& suff_contig, auto&& path) {
                 callback(std::move(suff_contig), std::move(path));
-                if (max_fork_count) {
+                if (max_hull_forks) {
                     call_hull_sequences(full_dbg, suff_contig, callback,
-                                        max_fork_count, max_traversal_distance,
+                                        max_hull_forks, max_hull_depth,
                                         distance_traversed_until_node, map_mutex,
                                         num_threads, full_dbg.get_k());
                 }
@@ -212,7 +212,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         );
     }
 
-    if (!max_fork_count)
+    if (!max_hull_forks)
         return;
 
     // when a node which has already been accessed is visited, only continue
@@ -254,7 +254,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                     .path = std::vector<node_index>{ next_node },
                     .fork_count = 0
                 });
-                unitig_traversal.back().unitig.reserve(max_traversal_distance);
+                unitig_traversal.back().unitig.reserve(max_hull_depth);
             }
         });
 
@@ -266,7 +266,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             hull_unitig = std::move(unitig_traversal.back());
             unitig_traversal.pop_back();
 
-            if (fork_count >= max_fork_count)
+            if (fork_count >= max_hull_forks)
                 continue;
 
             bool continue_traversal = true;
@@ -277,7 +277,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                         unitig += c;
 
                 }, [&]() {
-                    return !continue_traversal || unitig.size() >= max_traversal_distance;
+                    return !continue_traversal || unitig.size() >= max_hull_depth;
                 }
             );
 
@@ -288,7 +288,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                     && continue_traversal
                     && full_dbg.has_multiple_outgoing(node)) {
                 // a fork has been reached before the path has reached
-                // length max_traversal_distance
+                // length max_hull_depth
                 unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
 
                 // start new traversals
@@ -299,7 +299,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                             .path = std::vector<node_index>{ next_node },
                             .fork_count = fork_count + 1
                         });
-                        unitig_traversal.back().unitig.reserve(max_traversal_distance);
+                        unitig_traversal.back().unitig.reserve(max_hull_depth);
                     }
                 });
             }
@@ -489,8 +489,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       size_t num_threads,
                       bool canonical,
                       size_t sub_k,
-                      size_t max_fork_count,
-                      size_t max_traversal_distance,
+                      size_t max_hull_forks,
+                      size_t max_hull_depth,
                       double max_traversed_nodes_per_seq_char) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
@@ -545,16 +545,16 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    if (max_fork_count) {
-        max_traversal_distance = std::min(
-            max_traversal_distance,
+    if (max_hull_forks) {
+        max_hull_depth = std::min(
+            max_hull_depth,
             static_cast<size_t>(max_sequence_length * max_traversed_nodes_per_seq_char)
         );
 
         logger->trace("[Query graph extension] Computing query graph hull");
         logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",
-                      max_traversal_distance,
-                      max_fork_count);
+                      max_hull_depth,
+                      max_hull_forks);
         timer.reset();
 
         size_t old_size = contigs.size();
@@ -574,7 +574,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     contigs.emplace_back(std::move(seq),
                                          std::vector<node_index>(path.size()));
                 }
-            }, max_fork_count, max_traversal_distance, distance_traversed_until_node,
+            }, max_hull_forks, max_hull_depth, distance_traversed_until_node,
                map_mutex, 0, sub_k);
         }
 
@@ -928,8 +928,8 @@ void QueryExecutor
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
             sub_k,
-            aligner_config_ ? config_.max_fork_count : 0,
-            config_.max_traversal_distance,
+            aligner_config_ ? config_.max_hull_forks : 0,
+            config_.max_hull_depth,
             config_.alignment_max_nodes_per_seq_char
         );
 
