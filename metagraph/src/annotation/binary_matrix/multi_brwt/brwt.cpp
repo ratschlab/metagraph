@@ -214,7 +214,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        std::vector<Row> slice;
+        Vector<Row> slice;
         slice.reserve(num_nonzero_rows);
         nonzero_rows_->call_ones([&](Row i) { slice.push_back(i); });
 
