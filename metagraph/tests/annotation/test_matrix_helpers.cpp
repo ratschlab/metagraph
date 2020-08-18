@@ -202,7 +202,16 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         std::vector<uint64_t> indices(m);
         std::iota(indices.begin(), indices.end(), 0);
 
-        auto slice = matrix.slice_columns(indices);
+        std::vector<std::vector<BinaryMatrix::Row>> column_map(m);
+        matrix.slice_columns(indices, [&](auto i, auto j) {
+            ASSERT_GT(m, j);
+            column_map[j].push_back(i);
+        });
+        std::vector<uint64_t> slice;
+        for (size_t j = 0; j < column_map.size(); ++j) {
+            slice.insert(slice.end(), column_map[j].begin(), column_map[j].end());
+            slice.push_back(std::numeric_limits<BinaryMatrix::Row>::max());
+        }
 
         ASSERT_GE(slice.size(), indices.size());
 

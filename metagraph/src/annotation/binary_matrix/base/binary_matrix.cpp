@@ -32,18 +32,14 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
     return slice;
 }
 
-std::vector<BinaryMatrix::Row>
-BinaryMatrix::slice_columns(const std::vector<Column> &column_ids) const {
-    std::vector<BinaryMatrix::Row> slice;
-
-    for (uint64_t j : column_ids) {
-        for (uint64_t i : get_column(j)) {
-            slice.push_back(i);
+void BinaryMatrix::slice_columns(const std::vector<Column> &column_ids,
+                                 const ValueCallback &callback) const {
+    #pragma omp taskloop
+    for (size_t j = 0; j < column_ids.size(); ++j) {
+        for (uint64_t i : get_column(column_ids[j])) {
+            callback(i, j);
         }
-        slice.push_back(std::numeric_limits<Row>::max());
     }
-
-    return slice;
 }
 
 template <typename RowType>

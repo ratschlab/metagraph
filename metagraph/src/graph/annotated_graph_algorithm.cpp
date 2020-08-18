@@ -322,31 +322,29 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         label_out_codes[i] = label_encoder.encode(labels_out[i]);
     }
 
-    const auto delim = std::numeric_limits<annot::binmat::BinaryMatrix::Row>::max();
-
     #pragma omp parallel num_threads(num_threads)
     #pragma omp single
     {
-        for (auto row : binmat.slice_columns(label_in_codes)) {
-            if (row != delim) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(row);
-
+        binmat.slice_columns(label_in_codes, [&](auto row, auto) {
+            node_index i = AnnotatedDBG::anno_to_graph_index(row);
+            #pragma omp critical
+            {
                 indicator[i] = true;
                 ++counts[i];
             }
-        }
+        });
 
         // correct the width of counts, making it single-width
         counts.width(width);
 
-        for (auto row : binmat.slice_columns(label_out_codes)) {
-            if (row != delim) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(row);
-
+        binmat.slice_columns(label_out_codes, [&](auto row, auto) {
+            node_index i = AnnotatedDBG::anno_to_graph_index(row);
+            #pragma omp critical
+            {
                 indicator[i] = true;
                 ++counts[i * 2 + 1];
             }
-        }
+        });
     }
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(

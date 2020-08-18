@@ -40,8 +40,8 @@ class Rainbow : public RainbowMatrix {
                                           size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const;
 
-    // get all selected columns appended with -1 and concatenated
-    std::vector<Row> slice_columns(const std::vector<Column> &columns) const;
+    void slice_columns(const std::vector<Column> &columns,
+                       const ValueCallback &callback) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;

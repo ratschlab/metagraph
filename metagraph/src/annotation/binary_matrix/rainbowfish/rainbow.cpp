@@ -4,6 +4,7 @@
 #include <functional>
 
 #include <ips4o.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
@@ -132,29 +133,27 @@ Rainbow<MatrixType>::get_column(Column column) const {
 }
 
 template <class MatrixType>
-std::vector<BinaryMatrix::Row>
-Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns) const {
-    std::vector<Row> row_indices;
+void
+Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns,
+                                   const ValueCallback &callback) const {
     uint64_t rows = num_rows();
+    tsl::hopscotch_map<Column, std::vector<Row>> column_map;
+    reduced_matrix_.slice_columns(columns, [&](Row i, Column j) {
+        column_map[j].push_back(i);
+    });
 
-    sdsl::bit_vector code_column(reduced_matrix_.num_rows(), false);
-    const Row delim = std::numeric_limits<Row>::max();
-    for (uint64_t r : reduced_matrix_.slice_columns(columns)) {
-        if (r == delim) {
-            // TODO: avoid multiple passes through the rows
-            for (uint64_t i = 0; i < rows; ++i) {
-                auto code = get_code(i);
-                if (code_column[code])
-                    row_indices.emplace_back(i);
-            }
-            row_indices.push_back(delim);
-            sdsl::util::set_to_value(code_column, false);
-        } else {
-            code_column[r] = true;
+    sdsl::bit_vector code_column(reduced_matrix_.num_rows());
+    for (const auto &[column, reduced_rows] : column_map) {
+        sdsl::util::set_to_value(code_column, false);
+        for (Row i : reduced_rows) {
+            code_column[i] = true;
+        }
+
+        for (uint64_t i = 0; i < rows; ++i) {
+            if (code_column[get_code(i)])
+                callback(i, column);
         }
     }
-
-    return row_indices;
 }
 
 template <class MatrixType>

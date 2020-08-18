@@ -192,49 +192,49 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
     return slice;
 }
 
-std::vector<BRWT::Row> BRWT::slice_columns(const std::vector<Column> &column_ids) const {
-    std::vector<Row> slice;
-
+void BRWT::slice_columns(const std::vector<Column> &column_ids,
+                         const ValueCallback &callback) const {
     if (column_ids.empty())
-        return slice;
-
-    const Row delim = std::numeric_limits<Row>::max();
+        return;
 
     if (column_ids.size() == 1) {
-        slice = get_column(column_ids[0]);
-        slice.push_back(delim);
-        return slice;
+        Column column = column_ids[0];
+        #pragma omp task firstprivate(column)
+        {
+            for (auto i : get_column(column)) {
+                callback(i, column);
+            }
+        }
+        return;
     }
 
     auto num_nonzero_rows = nonzero_rows_->num_set_bits();
 
     // check if the column is empty
-    if (!num_nonzero_rows) {
-        slice.insert(slice.end(), column_ids.size(), delim);
-        return slice;
-    }
+    if (!num_nonzero_rows)
+        return;
 
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        slice.reserve((num_nonzero_rows + 1) * column_ids.size());
-        nonzero_rows_->call_ones([&](auto i) { slice.push_back(i); });
-        slice.push_back(delim);
-        size_t old_size = slice.size();
+        auto slice = std::make_shared<std::vector<Row>>();
+        slice->reserve(num_nonzero_rows);
+        nonzero_rows_->call_ones([&](Row i) { slice->push_back(i); });
 
-        for (size_t j = 1; j < column_ids.size(); ++j) {
-            slice.insert(slice.end(), slice.begin(), slice.begin() + old_size);
+        #pragma omp taskloop firstprivate(slice)
+        for (size_t k = 0; k < column_ids.size(); ++k) {
+            Column j = column_ids[k];
+            for (Row i : *slice) {
+                callback(i, j);
+            }
         }
 
-        return slice;
+        #pragma omp taskwait
+
+        return;
     }
 
-    // expect at least one relation per column
-    slice.reserve(column_ids.size() * 2);
-
     VectorMap<uint32_t, std::vector<Column>> child_columns_map;
-    std::vector<uint32_t> child_assignments;
-    child_assignments.reserve(column_ids.size());
     for (size_t i = 0; i < column_ids.size(); ++i) {
         assert(column_ids[i] < num_columns());
         auto child_node = assignments_.group(column_ids[i]);
@@ -242,86 +242,57 @@ std::vector<BRWT::Row> BRWT::slice_columns(const std::vector<Column> &column_ids
 
         auto [it, inserted] = child_columns_map.emplace(child_node, std::vector<Column>{});
         it.value().push_back(child_column);
-        child_assignments.push_back(it - child_columns_map.begin());
     }
 
-    std::vector<std::vector<Row>> child_slices(child_columns_map.size());
-
-    size_t i = 0;
     for (const auto &[child_node, child_columns] : child_columns_map) {
-        auto *child_slice = &child_slices[i++];
+        // auto *child_slice = &child_slices[k++];
         auto *child_columns_ptr = &child_columns;
-        #pragma omp task firstprivate(child_node, child_columns_ptr, child_slice)
+        #pragma omp task firstprivate(child_node, child_columns_ptr)
         {
-            BinaryMatrix *child_node_ptr = child_nodes_[child_node].get();
-            const BRWT *child_node_brwt = dynamic_cast<const BRWT*>(child_node_ptr);
-            if (child_node_brwt
-                    && child_columns_ptr->size() > 1
-                    && !child_node_brwt->child_nodes_.size()) {
-                // if there are multiple column ids corresponding to the same leaf
-                // node, then this branch avoids doing redundant select1 calls
-                const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
-                size_t num_nonzero_rows = nonzero_rows->num_set_bits();
-                if (!num_nonzero_rows) {
-                    child_slice->insert(child_slice->end(),
-                                        child_columns_ptr->size(),
-                                        delim);
-                } else {
-                    child_slice->reserve((num_nonzero_rows + 1) * child_columns_ptr->size());
-                    nonzero_rows->call_ones([&](auto i) {
-                        child_slice->push_back(nonzero_rows->select1(i + 1));
-                    });
-                    child_slice->push_back(delim);
-                    size_t old_size = child_slice->size();
-
-                    for (size_t j = 1; j < child_columns_ptr->size(); ++j) {
-                        child_slice->insert(child_slice->end(),
-                                            child_slice->begin(),
-                                            child_slice->begin() + old_size);
+            if (num_nonzero_rows == nonzero_rows_->size()) {
+                child_nodes_[child_node]->slice_columns(*child_columns_ptr,
+                    [&](Row i, Column j) {
+                        callback(i, assignments_.get(child_node, j));
                     }
-                }
+                );
             } else {
-                *child_slice = child_nodes_[child_node]->slice_columns(*child_columns_ptr);
-                assert(child_slice->size());
-                assert(child_slice->back() == delim);
+                const BRWT *child_node_brwt = dynamic_cast<const BRWT*>(
+                    child_nodes_[child_node].get()
+                );
+                if (child_node_brwt
+                        && child_columns_ptr->size() > 1
+                        && !child_node_brwt->child_nodes_.size()) {
+                    // if there are multiple column ids corresponding to the same leaf
+                    // node, then this branch avoids doing redundant select1 calls
+                    const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
+                    size_t num_nonzero_rows = nonzero_rows->num_set_bits();
+                    if (num_nonzero_rows) {
+                        Vector<Row> slice;
+                        slice.reserve(num_nonzero_rows);
+                        nonzero_rows->call_ones([&](auto i) {
+                            slice.push_back(nonzero_rows->select1(i + 1));
+                        });
 
-                if (num_nonzero_rows != nonzero_rows_->size()) {
-                    size_t block_size = child_slice->size() / omp_get_num_threads();
-                    #pragma omp taskloop
-                    for (size_t k = 0; k < child_slice->size(); k += block_size) {
-                        size_t end = std::min(child_slice->size(), k + block_size);
-                        for (size_t j = k; j < end; ++j) {
-                            if ((*child_slice)[j] != delim)
-                                (*child_slice)[j] = nonzero_rows_->select1((*child_slice)[j] + 1);
+                        for (auto column : *child_columns_ptr) {
+                            Column j = assignments_.get(child_node, column);
+                            for (Row i : slice) {
+                                callback(i, j);
+                            }
                         }
                     }
+                } else {
+                    child_nodes_[child_node]->slice_columns(*child_columns_ptr,
+                        [&](Row i, Column j) {
+                            callback(nonzero_rows_->select1(i + 1),
+                                     assignments_.get(child_node, j));
+                        }
+                    );
                 }
             }
         }
     }
 
     #pragma omp taskwait
-
-    std::vector<std::pair<std::vector<Row>::iterator,
-                          std::vector<Row>::iterator>> iterators;
-    iterators.reserve(child_slices.size());
-    for (auto &child_slice : child_slices) {
-        iterators.emplace_back(child_slice.begin(), child_slice.end());
-    }
-
-    for (auto child_assignment : child_assignments) {
-        auto &[it, end] = iterators[child_assignment];
-        do {
-            assert(it != end);
-            slice.push_back(*it);
-            ++it;
-        } while (slice.back() != delim);
-    }
-
-    assert(std::all_of(iterators.begin(), iterators.end(),
-                       [&](const auto &pair) { return pair.first == pair.second; }));
-
-    return slice;
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
