@@ -345,6 +345,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                 ++counts[i * 2 + 1];
             }
         });
+
+        #pragma omp taskwait
     }
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(

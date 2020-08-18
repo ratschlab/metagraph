@@ -199,11 +199,8 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
 
     if (column_ids.size() == 1) {
         Column column = column_ids[0];
-        #pragma omp task firstprivate(column)
-        {
-            for (auto i : get_column(column)) {
-                callback(i, column);
-            }
+        for (auto i : get_column(column)) {
+            callback(i, column);
         }
         return;
     }
@@ -221,15 +218,12 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         slice->reserve(num_nonzero_rows);
         nonzero_rows_->call_ones([&](Row i) { slice->push_back(i); });
 
-        #pragma omp taskloop firstprivate(slice)
         for (size_t k = 0; k < column_ids.size(); ++k) {
             Column j = column_ids[k];
             for (Row i : *slice) {
                 callback(i, j);
             }
         }
-
-        #pragma omp taskwait
 
         return;
     }
@@ -240,7 +234,8 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         auto child_node = assignments_.group(column_ids[i]);
         auto child_column = assignments_.rank(column_ids[i]);
 
-        auto [it, inserted] = child_columns_map.emplace(child_node, std::vector<Column>{});
+        auto [it, inserted] = child_columns_map.emplace(child_node,
+                                                        std::vector<Column>{});
         it.value().push_back(child_column);
     }
 
