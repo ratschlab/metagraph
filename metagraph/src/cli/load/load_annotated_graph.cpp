@@ -51,51 +51,60 @@ std::unique_ptr<MaskedDeBruijnGraph>
 mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        std::vector<std::string> &label_mask_in,
                        std::vector<std::string> &label_mask_out,
+                       std::vector<std::string> &label_mask_in_post,
+                       std::vector<std::string> &label_mask_out_post,
                        const DifferentialAssemblyConfig &diff_config,
                        size_t num_threads,
-                       const sdsl::int_vector<> *init_counts) {
+                       const sdsl::int_vector<> *init_counts = nullptr) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
+    std::vector<std::vector<std::string>*> label_sets {
+        &label_mask_in, &label_mask_out,
+        &label_mask_in_post, &label_mask_out_post
+    };
+
     // Remove non-present labels
-    label_mask_in.erase(
-        std::remove_if(label_mask_in.begin(), label_mask_in.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-in label {}", label);
+    for (auto *label_set : label_sets) {
+        assert(label_set);
+        label_set->erase(
+            std::remove_if(label_set->begin(), label_set->end(),
+                           [&](const std::string &label) {
+                               bool exists = anno_graph.label_exists(label);
+                               if (!exists)
+                                   logger->trace("Removing label {}", label);
 
-                           return !exists;
-                       }),
-        label_mask_in.end()
-    );
+                               return !exists;
+                           }),
+            label_set->end()
+        );
 
-    label_mask_out.erase(
-        std::remove_if(label_mask_out.begin(), label_mask_out.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-out label {}", label);
+        std::sort(label_set->begin(), label_set->end());
+    }
 
-                           return !exists;
-                       }),
-        label_mask_out.end()
-    );
+    for (auto *label_set : label_sets) {
+        for (auto *other_label_set : label_sets) {
+            if (label_set == other_label_set)
+                continue;
 
-    std::sort(label_mask_in.begin(), label_mask_in.end());
-    std::sort(label_mask_out.begin(), label_mask_out.end());
+            if (utils::count_intersection(label_set->begin(), label_set->end(),
+                                          other_label_set->begin(), other_label_set->end()))
+                logger->warn("Overlapping label sets");
+        }
+    }
 
     logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
+    logger->trace("Masked in (post-processing): {}", fmt::join(label_mask_in_post, " "));
     logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
-
-    if (utils::count_intersection(label_mask_in.begin(), label_mask_in.end(),
-                                  label_mask_out.begin(), label_mask_out.end()))
-        logger->warn("In- and out-label sets overlap");
+    logger->trace("Masked out (post-processing): {}", fmt::join(label_mask_out_post, " "));
 
     return std::make_unique<MaskedDeBruijnGraph>(mask_nodes_by_label(
-        anno_graph, label_mask_in, label_mask_out, diff_config, num_threads, init_counts
+        anno_graph,
+        label_mask_in, label_mask_out,
+        label_mask_in_post, label_mask_out_post,
+        diff_config, num_threads, init_counts
     ));
 }
 
@@ -152,6 +161,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
     }
 
     ThreadPool thread_pool(num_parallel_graphs_masked);
+    std::vector<std::string> shared_foreground_labels;
+    std::vector<std::string> shared_background_labels;
 
     std::string line;
     while (std::getline(fin, line)) {
@@ -167,23 +178,15 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             if (line_split.size() <= 1 || line_split.size() > 3)
                 throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
 
-            auto foreground_labels = utils::split_string(line_split[1], ",");
-            auto background_labels = utils::split_string(
+            // sync all assembly jobs before clearing current shared_counts
+            thread_pool.join();
+
+            shared_foreground_labels = utils::split_string(line_split[1], ",");
+            shared_background_labels = utils::split_string(
                 line_split.size() == 3 ? line_split[2] : "",
                 ","
             );
 
-            // sync all assembly jobs before clearing current shared_counts
-            thread_pool.join();
-
-            auto [counts, indicator] = fill_count_vector(
-                anno_graph,
-                foreground_labels, background_labels,
-                get_num_threads(),
-                false /* update in place */
-            );
-
-            shared_counts = std::make_unique<sdsl::int_vector<>>(std::move(counts));
             continue;
         }
 
@@ -205,11 +208,14 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
 
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels, background_labels,
-                                             diff_config, num_threads_per_graph,
-                                             shared_counts.get()),
+                                             shared_foreground_labels,
+                                             shared_background_labels,
+                                             diff_config, num_threads_per_graph),
                      line_split[0]);
         }, line);
     }
+
+    thread_pool.join();
 }
 
 } // namespace cli

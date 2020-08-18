@@ -54,6 +54,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
 MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                         const std::vector<Label> &labels_in,
                                         const std::vector<Label> &labels_out,
+                                        const std::vector<Label> &labels_in_post,
+                                        const std::vector<Label> &labels_out_post,
                                         const DifferentialAssemblyConfig &config,
                                         size_t num_threads,
                                         const sdsl::int_vector<> *init_counts) {
@@ -92,12 +94,17 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     logger->trace("Filtering out background");
 
     tsl::hopscotch_set<std::string> masked_labels;
+    tsl::hopscotch_set<std::string> labels_in_post_set(labels_in_post.begin(),
+                                                       labels_in_post.end());
+    tsl::hopscotch_set<std::string> labels_out_post_set(labels_out_post.begin(),
+                                                        labels_out_post.end());
 
     if (config.label_mask_other_unitig_fraction != 1.0) {
         masked_labels.insert(labels_in.begin(), labels_in.end());
         masked_labels.insert(labels_out.begin(), labels_out.end());
     } else if (config.label_mask_in_unitig_fraction == 0.0
-            && config.label_mask_out_unitig_fraction == 1.0) {
+            && config.label_mask_out_unitig_fraction == 1.0
+            && labels_in_post.empty() && labels_out_post.empty()) {
         if (config.label_mask_in_kmer_fraction == 0.0
                 && config.label_mask_out_kmer_fraction == 1.0) {
             logger->trace("Bypassing background filtration");
@@ -121,6 +128,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     size_t num_labels = anno_graph.get_annotation().num_labels();
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
+    counts.width(width);
 
     update_masked_graph_by_unitig(*masked_graph,
                                   [&](const auto &unitig, const auto &path)
@@ -132,22 +140,54 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         size_t min_label_in_count = config.label_mask_in_kmer_fraction * labels_in.size();
         size_t max_label_out_count = config.label_mask_out_kmer_fraction * labels_out.size();
 
+        size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
+        size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
+        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
+        size_t in_kmer_count = 0;
+        size_t out_kmer_count = 0;
+
         for (size_t i = 0; i < path.size(); ++i) {
-            uint64_t count = counts[path[i]];
-            uint64_t in_count = count & int_mask;
-            uint64_t out_count = count >> width;
-
-            if (in_count >= min_label_in_count)
+            if (counts[2 * path[i]] >= min_label_in_count && !in_mask[i]) {
                 in_mask[i] = true;
+                ++in_kmer_count;
+            }
 
-            if (out_count > max_label_out_count)
+            if (counts[2 * path[i] + 1] > max_label_out_count && !out_mask[i]) {
                 out_mask[i] = true;
+                ++out_kmer_count;
+            }
         }
 
-        if (check_other) {
+        if (check_other
+                || (in_kmer_count < label_in_cutoff && labels_in_post.size())
+                || (out_kmer_count < label_out_cutoff && labels_out_post.size())) {
             for (auto &[label, sig] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
-                if (!masked_labels.count(label))
+                if (check_other && !masked_labels.count(label))
                     bitmap_vector(std::move(sig)).add_to(&other_mask);
+
+                if (in_kmer_count < label_in_cutoff && labels_in_post_set.count(label)) {
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        if (!sig[i])
+                            continue;
+
+                        if (!in_mask[i] && ++counts[2 * path[i]] >= min_label_in_count) {
+                            in_mask[i] = true;
+                            ++in_kmer_count;
+                        }
+                    }
+                }
+
+                if (out_kmer_count < label_out_cutoff && labels_out_post_set.count(label)) {
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        if (!sig[i])
+                            continue;
+
+                        if (!out_mask[i] && ++counts[2 * path[i] + 1] >= max_label_out_count) {
+                            out_mask[i] = true;
+                            ++out_kmer_count;
+                        }
+                    }
+                }
             }
         }
 
@@ -158,34 +198,14 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         size_t end = prev_bit(in_mask, in_mask.size() - 1) + 1;
         assert(end > begin);
+        out_kmer_count -= count_ones(out_mask, 0, begin) + count_ones(out_mask, end, out_mask.size());
+        size_t other_kmer_count = check_other ? count_ones(other_mask, begin, end) : 0;
 
-        size_t in_label_counter = 0;
-        size_t out_label_counter = 0;
-        size_t other_label_counter = 0;
+        if (out_kmer_count > label_out_cutoff)
+            return {};
 
-        size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * path.size());
-        size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * path.size());
-        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * path.size());
-
-        for (size_t i = begin; i < end; ++i) {
-            if (in_label_counter + end - i < label_in_cutoff)
-                return {};
-
-            if (in_mask[i])
-                ++in_label_counter;
-
-            if (out_mask[i]) {
-                ++out_label_counter;
-                if (out_label_counter > label_out_cutoff)
-                    return {};
-            }
-
-            if (check_other && other_mask[i]) {
-                ++other_label_counter;
-                if (other_label_counter > other_cutoff)
-                    return {};
-            }
-        }
+        if (other_kmer_count > other_cutoff)
+            return {};
 
         return { std::make_pair(begin, end) };
 
@@ -217,7 +237,12 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         uint32_t width = counts.width() / 2;
         std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
         std::mutex add_mutex;
-        BOSSConstructor constructor(graph_ptr->get_k() - 1, masked_canonical);
+        BOSSConstructor constructor(
+            graph_ptr->get_k() - 1,
+            masked_canonical,
+            0 /* count width */, "" /* suffix */, 1 /* num_threads */,
+            masked_graph->num_nodes() * 32
+        );
         masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
             sdsl::int_vector<> path_counts(path.size(), 0, width * 2);
             auto it = path_counts.begin();
