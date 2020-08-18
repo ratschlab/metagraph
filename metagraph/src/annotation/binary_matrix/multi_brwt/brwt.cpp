@@ -193,15 +193,12 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 }
 
 void BRWT::slice_columns(const std::vector<Column> &column_ids,
-                         const ValueCallback &callback) const {
+                         const ColumnCallback &callback) const {
     if (column_ids.empty())
         return;
 
     if (column_ids.size() == 1) {
-        Column column = column_ids[0];
-        for (auto i : get_column(column)) {
-            callback(i, column);
-        }
+        callback(column_ids[0], get_column(column_ids[0]));
         return;
     }
 
@@ -214,16 +211,15 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        Vector<Row> slice;
+        std::vector<Row> slice;
         slice.reserve(num_nonzero_rows);
         nonzero_rows_->call_ones([&](Row i) { slice.push_back(i); });
 
-        for (size_t k = 0; k < column_ids.size(); ++k) {
-            Column j = column_ids[k];
-            for (Row i : slice) {
-                callback(i, j);
-            }
+        for (size_t k = 0; k + 1 < column_ids.size(); ++k) {
+            callback(column_ids[k], std::vector<Row>(slice));
         }
+
+        callback(column_ids.back(), std::move(slice));
 
         return;
     }
@@ -246,8 +242,8 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         {
             if (num_nonzero_rows == nonzero_rows_->size()) {
                 child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                    [&](Row i, Column j) {
-                        callback(i, assignments_.get(child_node, j));
+                    [&](Column j, std::vector<Row>&& rows) {
+                        callback(assignments_.get(child_node, j), std::move(rows));
                     }
                 );
             } else {
@@ -262,24 +258,27 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                     const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
                     size_t num_nonzero_rows = nonzero_rows->num_set_bits();
                     if (num_nonzero_rows) {
-                        Vector<Row> slice;
+                        std::vector<Row> slice;
                         slice.reserve(num_nonzero_rows);
                         nonzero_rows->call_ones([&](auto i) {
                             slice.push_back(nonzero_rows->select1(i + 1));
                         });
 
-                        for (auto column : *child_columns_ptr) {
-                            Column j = assignments_.get(child_node, column);
-                            for (Row i : slice) {
-                                callback(i, j);
-                            }
+                        for (size_t k = 0; k + 1 < child_columns_ptr->size(); ++k) {
+                            callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
+                                     std::vector<Row>(slice));
                         }
+
+                        callback(assignments_.get(child_node, child_columns_ptr->back()),
+                                 std::move(slice));
                     }
                 } else {
                     child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                        [&](Row i, Column j) {
-                            callback(nonzero_rows_->select1(i + 1),
-                                     assignments_.get(child_node, j));
+                        [&](Column j, std::vector<Row>&& rows) {
+                            for (Row &i : rows) {
+                                i = nonzero_rows_->select1(i + 1);
+                            }
+                            callback(assignments_.get(child_node, j), std::move(rows));
                         }
                     );
                 }

@@ -135,11 +135,11 @@ Rainbow<MatrixType>::get_column(Column column) const {
 template <class MatrixType>
 void
 Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns,
-                                   const ValueCallback &callback) const {
-    uint64_t rows = num_rows();
+                                   const ColumnCallback &callback) const {
+    uint64_t nrows = num_rows();
     tsl::hopscotch_map<Column, std::vector<Row>> column_map;
-    reduced_matrix_.slice_columns(columns, [&](Row i, Column j) {
-        column_map[j].push_back(i);
+    reduced_matrix_.slice_columns(columns, [&](Column j, auto&& rows) {
+        column_map[j] = std::move(rows);
     });
 
     sdsl::bit_vector code_column(reduced_matrix_.num_rows());
@@ -149,10 +149,13 @@ Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns,
             code_column[i] = true;
         }
 
-        for (uint64_t i = 0; i < rows; ++i) {
+        std::vector<Row> rows;
+        for (uint64_t i = 0; i < nrows; ++i) {
             if (code_column[get_code(i)])
-                callback(i, column);
+                rows.push_back(i);
         }
+
+        callback(column, std::move(rows));
     }
 }
 

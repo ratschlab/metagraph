@@ -41,7 +41,7 @@ class Rainbow : public RainbowMatrix {
     std::vector<Row> get_column(Column column) const;
 
     void slice_columns(const std::vector<Column> &columns,
-                       const ValueCallback &callback) const;
+                       const ColumnCallback &callback) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;

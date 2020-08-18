@@ -37,7 +37,7 @@ class BRWT : public BinaryMatrix {
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
     void slice_columns(const std::vector<Column> &columns,
-                       const ValueCallback &callback) const;
+                       const ColumnCallback &callback) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;

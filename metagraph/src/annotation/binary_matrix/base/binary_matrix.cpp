@@ -33,13 +33,14 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
 }
 
 void BinaryMatrix::slice_columns(const std::vector<Column> &column_ids,
-                                 const ValueCallback &callback) const {
+                                 const ColumnCallback &callback) const {
     #pragma omp taskloop
-    for (size_t j = 0; j < column_ids.size(); ++j) {
-        for (uint64_t i : get_column(column_ids[j])) {
-            callback(i, j);
-        }
+    for (size_t k = 0; k < column_ids.size(); ++k) {
+        Column j = column_ids[k];
+        callback(j, get_column(j));
     }
+
+    #pragma omp taskwait
 }
 
 template <typename RowType>

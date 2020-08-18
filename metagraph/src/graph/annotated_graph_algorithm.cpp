@@ -325,24 +325,30 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     #pragma omp parallel num_threads(num_threads)
     #pragma omp single
     {
-        binmat.slice_columns(label_in_codes, [&](auto row, auto) {
-            node_index i = AnnotatedDBG::anno_to_graph_index(row);
+        binmat.slice_columns(label_in_codes, [&](auto, const auto &rows) {
             #pragma omp critical
             {
-                indicator[i] = true;
-                ++counts[i];
+                for (auto r : rows) {
+                    node_index i = AnnotatedDBG::anno_to_graph_index(r);
+                    indicator[i] = true;
+                    ++counts[i];
+                }
             }
         });
+
+        #pragma omp taskwait
 
         // correct the width of counts, making it single-width
         counts.width(width);
 
-        binmat.slice_columns(label_out_codes, [&](auto row, auto) {
-            node_index i = AnnotatedDBG::anno_to_graph_index(row);
+        binmat.slice_columns(label_out_codes, [&](auto, const auto &rows) {
             #pragma omp critical
             {
-                indicator[i] = true;
-                ++counts[i * 2 + 1];
+                for (auto r : rows) {
+                    node_index i = AnnotatedDBG::anno_to_graph_index(r);
+                    indicator[i] = true;
+                    ++counts[i * 2 + 1];
+                }
             }
         });
 
