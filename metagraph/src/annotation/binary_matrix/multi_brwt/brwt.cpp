@@ -214,13 +214,13 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        auto slice = std::make_shared<std::vector<Row>>();
-        slice->reserve(num_nonzero_rows);
-        nonzero_rows_->call_ones([&](Row i) { slice->push_back(i); });
+        std::vector<Row> slice;
+        slice.reserve(num_nonzero_rows);
+        nonzero_rows_->call_ones([&](Row i) { slice.push_back(i); });
 
         for (size_t k = 0; k < column_ids.size(); ++k) {
             Column j = column_ids[k];
-            for (Row i : *slice) {
+            for (Row i : slice) {
                 callback(i, j);
             }
         }
