@@ -253,10 +253,6 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/src
 )
 
-# use external fmt library in spdlog
-set(SPDLOG_FMT_EXTERNAL TRUE)
-set(SPDLOG_BUILD_TESTING FALSE)
-
 # makes ASIO not depend on boost
 string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
 
