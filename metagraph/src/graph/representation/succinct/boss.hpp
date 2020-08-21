@@ -128,7 +128,7 @@ class BOSS {
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
                     bool trim_sentinels = false,
-                    bool select_first_edge = false) const;
+                    bool select_last_edge = false) const;
 
     /**
      * Call contigs (dummy edges are skipped).
@@ -137,7 +137,7 @@ class BOSS {
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL,
-                        bool select_first_edge = false) const;
+                        bool select_last_edge = false) const;
 
     /**
      * Call unitigs (dummy edges are skipped).

@@ -81,7 +81,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
 std::unique_ptr<RowDiffAnnotator>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
                     RowCompressed<std::string> &&annotation,
-                    uint32_t num_threads);
+                    uint32_t num_threads = 1);
 
 
 } // namespace annot

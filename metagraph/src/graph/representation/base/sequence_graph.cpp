@@ -349,7 +349,7 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
                                    bool kmers_in_single_form,
-                                   bool /* select_first_edge */) const {
+                                   bool /* select_last_edge */) const {
     ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
 }
 

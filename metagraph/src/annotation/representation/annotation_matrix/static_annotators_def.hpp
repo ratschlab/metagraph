@@ -46,7 +46,7 @@ inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
 template <>
-inline const std::string RowDiffAnnotator::kExtension = ".rowdiff.annodbg";
+inline const std::string RowDiffAnnotator::kExtension = ".row_diff.annodbg";
 } // namespace annot
 } // namespace mtg
 

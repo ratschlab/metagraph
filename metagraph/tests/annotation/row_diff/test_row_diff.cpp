@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+
+// work around clang-related bug in GMock
 namespace testing {
 namespace internal {
 using UInt64 = uint64_t;
@@ -29,7 +31,8 @@ TEST(RowDiff, Serialize) {
     std::vector<uint64_t> diffs = { 1, 2, 3, 4 };
     sdsl::bit_vector boundary = { 0, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 1 };
-    annot::binmat::RowDiff annot(2, nullptr, sdsl::enc_vector<>(diffs), boundary, terminal);
+    sdsl::enc_vector<> ediffs(diffs);
+    annot::binmat::RowDiff annot(2, nullptr, ediffs, boundary, terminal);
 
     utils::TempFile tempfile;
     std::ofstream &out = tempfile.ofstream();
@@ -91,33 +94,33 @@ TEST(RowDiff, GetAnnotation) {
     graph.add_sequence("ACTCTAG");
 
     std::vector<uint64_t> diffs = { 0, 1, 1, 1 };
-    sdsl::bit_vector boundary = { 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
+    sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
     annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(4), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(5), ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(6), ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(8), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(9));
-    ASSERT_THAT(annot.get_row(9), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(8), ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(10));
-    ASSERT_THAT(annot.get_row(10), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(9), ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(11));
-    ASSERT_THAT(annot.get_row(11), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(10), ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(12));
-    ASSERT_THAT(annot.get_row(12), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(11), ElementsAre(0));
 }
 
 /**
@@ -132,33 +135,123 @@ TEST(RowDiff, GetAnnotationMasked) {
     graph.mask_dummy_kmers(1, false);
 
     std::vector<uint64_t> diffs = { 0, 1, 1, 1 };
-    sdsl::bit_vector boundary = { 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::bit_vector boundary = { 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
+    sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
     annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
-    ASSERT_THAT(annot.get_row(1), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(2));
-    ASSERT_THAT(annot.get_row(2), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(1), ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(3));
-    ASSERT_THAT(annot.get_row(3), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(2), ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(3), ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(5));
-    ASSERT_THAT(annot.get_row(5), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(5), ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+    ASSERT_THAT(annot.get_row(6), ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(8), ElementsAre(0));
+    ASSERT_THAT(annot.get_row(7), ElementsAre(0));
+}
+
+/**
+ *  Tests that annotations for the graph in
+ *  https://docs.google.com/document/d/1siWApHWBDtiYCsetb6vHPuT7WwBkVFJp5fgti_AJK-s/edit
+ *  are correctly retrieved.
+ */
+TEST(RowDiff, GetAnnotationBifurcation) {
+    graph::DBGSuccinct graph(4);
+    graph.add_sequence("TACTAGCTAGCTAGCTAGCTAGC");
+    graph.add_sequence("ACTCTAGCTAT");
+
+    std::vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
+    sdsl::bit_vector boundary
+            = { 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
+    sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+
+    EXPECT_EQ("CTAG", graph.get_node_sequence(4));
+    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
+
+    EXPECT_EQ("CTAT", graph.get_node_sequence(5));
+    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+
+    EXPECT_EQ("TACT", graph.get_node_sequence(6));
+    ASSERT_THAT(annot.get_row(5), ElementsAre(0));
+
+    EXPECT_EQ("AGCT", graph.get_node_sequence(7));
+    ASSERT_THAT(annot.get_row(6), ElementsAre(0, 1));
+
+    EXPECT_EQ("CTCT", graph.get_node_sequence(8));
+    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+
+    EXPECT_EQ("TAGC", graph.get_node_sequence(9));
+    ASSERT_THAT(annot.get_row(8), ElementsAre(0, 1));
+
+    EXPECT_EQ("ACTA", graph.get_node_sequence(12));
+    ASSERT_THAT(annot.get_row(11), ElementsAre(0));
+
+    EXPECT_EQ("ACTC", graph.get_node_sequence(13));
+    ASSERT_THAT(annot.get_row(12), ElementsAre(1));
+
+    EXPECT_EQ("GCTA", graph.get_node_sequence(14));
+    ASSERT_THAT(annot.get_row(13), ElementsAre(0, 1));
+
+    EXPECT_EQ("TCTA", graph.get_node_sequence(15));
+    ASSERT_THAT(annot.get_row(14), ElementsAre(1));
+}
+
+TEST(RowDiff, GetAnnotationBifurcationMasked) {
+    graph::DBGSuccinct graph(4);
+    graph.add_sequence("TACTAGCTAGCTAGCTAGCTAGC");
+    graph.add_sequence("ACTCTAGCTAT");
+    graph.mask_dummy_kmers(1, false);
+
+    std::vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
+    sdsl::bit_vector boundary
+            = { 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
+    sdsl::bit_vector terminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
+    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+
+    EXPECT_EQ("CTAG", graph.get_node_sequence(1));
+    ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
+
+    EXPECT_EQ("CTAT", graph.get_node_sequence(2));
+    ASSERT_THAT(annot.get_row(1), ElementsAre(1));
+
+    EXPECT_EQ("TACT", graph.get_node_sequence(3));
+    ASSERT_THAT(annot.get_row(2), ElementsAre(0));
+
+    EXPECT_EQ("AGCT", graph.get_node_sequence(4));
+    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
+
+    EXPECT_EQ("CTCT", graph.get_node_sequence(5));
+    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+
+    EXPECT_EQ("TAGC", graph.get_node_sequence(6));
+    ASSERT_THAT(annot.get_row(5), ElementsAre(0, 1));
+
+    EXPECT_EQ("ACTA", graph.get_node_sequence(7));
+    ASSERT_THAT(annot.get_row(6), ElementsAre(0));
+
+    EXPECT_EQ("ACTC", graph.get_node_sequence(8));
+    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+
+    EXPECT_EQ("GCTA", graph.get_node_sequence(9));
+    ASSERT_THAT(annot.get_row(8), ElementsAre(0, 1));
+
+    EXPECT_EQ("TCTA", graph.get_node_sequence(10));
+    ASSERT_THAT(annot.get_row(9), ElementsAre(1));
 }
 
 } // namespace

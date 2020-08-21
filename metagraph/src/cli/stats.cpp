@@ -195,8 +195,9 @@ int print_stats(Config *config) {
             std::cout << *graph;
     }
 
-    for (const auto &file : config->infbase_annotators) {
-        auto annotation = initialize_annotation(file, *config);
+    for (const std::string &file : config->infbase_annotators) {
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
             annot::LabelEncoder<std::string> label_encoder;
@@ -233,8 +234,18 @@ int print_stats(Config *config) {
             logger->error("Cannot load annotations from file '{}'", file);
             exit(1);
         }
+        std::shared_ptr<graph::DeBruijnGraph> graph;
+        if (utils::ends_with(file, annot::RowDiffAnnotator::kExtension)) {
+            auto& row_diff
+                    = dynamic_cast<const annot::binmat::RowDiff &>(annotation->get_matrix());
+
+            graph = load_critical_dbg(files[0]);
+            auto dbg_graph = dynamic_cast<graph::DBGSuccinct *>(graph.get());
+            const_cast<annot::binmat::RowDiff &>(row_diff).set_graph(dbg_graph);
+        }
 
         logger->info("Statistics for annotation '{}'", file);
+
         print_stats(*annotation);
     }
 

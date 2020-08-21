@@ -875,9 +875,10 @@ void merge<MultiBRWTAnnotator, std::string>(
 }
 
 template <typename Label>
-void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+[[clang::optnone]] void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               const std::string &outfbase,
                               size_t num_threads) {
+#pragma clang optimize off
     uint64_t num_rows = annotator.num_objects();
 
     ProgressBar progress_bar(num_rows, "Serialize rows",
@@ -887,7 +888,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
         outfbase,
         annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {
-
+#pragma clang optimize off
             #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
             for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
 
@@ -898,6 +899,10 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
 
                 assert(begin <= end);
                 assert(end <= num_rows);
+
+                if (begin == 350000) {
+                    std::cout << "yes\n";
+                }
 
                 // TODO: use RowsFromColumnsTransformer
                 for (const auto &label : annotator.get_all_labels()) {
@@ -978,18 +983,21 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+[[clang::optnone]] std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads) {
+#pragma clang optimize off
     uint64_t nnodes = graph.num_nodes();
-    std::vector<std::vector<uint64_t>> tdiffs(nnodes + 1);
-    sdsl::bit_vector terminal(nnodes + 1);
+    Vector<Vector<uint64_t>> tdiffs(nnodes);
+    sdsl::bit_vector terminal(nnodes, 0);
 
     uint64_t max_id = 0;
     graph.call_sequences(
-            [&](const std::string &, const std::vector<uint64_t> &path) {
-                std::vector<uint64_t> anno_ids;
 
+            [&](const std::string &, const std::vector<uint64_t> &path) {
+#pragma clang optimize off
+                assert(!path.empty());
+                std::vector<uint64_t> anno_ids;
                 for (const uint64_t node_id : path) {
                     assert(node_id <= nnodes);
                     anno_ids.push_back(
@@ -998,7 +1006,9 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 std::vector<Vector<uint64_t>> rows
                         = annotation.get_matrix().get_rows(anno_ids);
 
+                std::sort(rows[0].begin(), rows[0].end());
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                    std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
                     while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
@@ -1007,53 +1017,51 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                             idx2++;
                         } else {
                             if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                tdiffs[path[i]].push_back(rows[i][idx1]);
+                                tdiffs[anno_ids[i]].push_back(rows[i][idx1]);
                                 idx1++;
                             } else {
-                                tdiffs[path[i]].push_back(rows[i + 1][idx2]);
+                                tdiffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
                                 idx2++;
                             }
-                            if (max_id < tdiffs[path[i]].back()) {
-                                max_id = tdiffs[path[i]].back();
+                            if (max_id < tdiffs[anno_ids[i]].back()) {
+                                max_id = tdiffs[anno_ids[i]].back();
                             }
                         }
                     }
                     while (idx1 < rows[i].size()) {
-                        tdiffs[path[i]].push_back(rows[i][idx1]);
+                        tdiffs[anno_ids[i]].push_back(rows[i][idx1]);
                         idx1++;
                     }
                     while (idx2 < rows[i + 1].size()) {
-                        tdiffs[path[i]].push_back(rows[i + 1][idx2]);
+                        tdiffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
-                    terminal[path[i]] = 0;
                 }
-
-                for (const auto v : rows[rows.size() - 1]) {
-                    tdiffs[path.back()].push_back(v);
-                }
-                terminal[path.back()] = 1;
+                tdiffs[anno_ids.back()] = std::move(rows.back());
+                terminal[anno_ids.back()] = 1;
             },
             num_threads, false, true);
     logger->info("Traversal done. Constructing data structures...");
-    std::vector<uint64_t> diff;
+    Vector<uint64_t> diff;
     std::vector<bool> boundary;
     for (const auto &tdiff : tdiffs) {
         diff.insert(diff.end(), tdiff.begin(), tdiff.end());
         if (!tdiff.empty()) {
-            boundary.insert(boundary.end(), tdiff.size() - 1, false);
+            boundary.insert(boundary.end(), tdiff.size(), false);
         }
         boundary.push_back(true);
     }
 
     sdsl::bit_vector sboundary(boundary.size());
-    for (uint64_t i = 0; i < diff.size(); ++i) {
+    for (uint64_t i = 0; i < boundary.size(); ++i) {
         sboundary[i] = boundary[i];
     }
 
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
-                                                       diff, sboundary, terminal);
+                                                       sdsl::enc_vector<>(diff),
+                                                       std::move(sboundary),
+                                                       std::move(terminal));
 
     return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                               annotation.get_label_encoder());

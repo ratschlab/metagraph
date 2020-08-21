@@ -1,5 +1,7 @@
 #include "row_diff.hpp"
 
+#include "graph/annotated_dbg.hpp"
+
 namespace mtg {
 namespace annot {
 namespace binmat {
@@ -30,17 +32,22 @@ uint64_t RowDiff::num_relations() const {
     return result;
 }
 
-BinaryMatrix::SetBitPositions RowDiff::get_row(Row node_id) const {
-    Vector<uint64_t> result = get_diff(node_id);
-    while (!terminal()[node_id]) {
-        uint64_t boss_edge = graph->kmer_to_boss_index(node_id);
-        const graph::boss::BOSS &boss = graph->get_boss();
+BinaryMatrix::SetBitPositions RowDiff::get_row(Row row) const {
+    Vector<uint64_t> result = get_diff(row);
+
+    uint64_t boss_edge = graph_->kmer_to_boss_index(
+            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+    const graph::boss::BOSS &boss = graph_->get_boss();
+
+    while (!terminal()[row]) {
         graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
         assert(boss_edge > 1 && w != 0);
-        graph::boss::BOSS::edge_index next_id = boss.fwd(boss_edge, w % boss.alph_size);
 
-        node_id = graph->boss_to_kmer_index(next_id);
-        merge(&result, get_diff(node_id));
+        // fwd always selects the last outgoing edge for a given node
+        boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
+        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                graph_->boss_to_kmer_index(boss_edge));
+        merge(&result, get_diff(row));
     };
     return result;
 }
@@ -50,6 +57,7 @@ bool RowDiff::load(std::istream &f)  {
     diffs_.load(f);
     boundary_.load(f);
     terminal_.load(f);
+    sdsl::util::init_support(sboundary_, &boundary_);
     return true;
 }
 
@@ -75,9 +83,8 @@ bool RowDiff::load(const std::string &name) {
 
 Vector<uint64_t> RowDiff::get_diff(uint64_t node_id) const {
     assert(boundary_[boundary_.size() - 1] == 1);
-
     Vector<uint64_t> result;
-    uint64_t start_idx = node_id == 0 ? 0 : sboundary.select(node_id) + 1;
+    uint64_t start_idx = node_id == 0 ? 0 : sboundary_.select(node_id) + 1;
 
     while (boundary_[start_idx] == 0) {
         result.push_back(diffs_[start_idx - node_id]);

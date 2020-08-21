@@ -9,31 +9,45 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/vector.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp" // TODO: this dep is problematic
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 namespace mtg {
 namespace annot {
 namespace binmat {
+
 class RowDiff : public BinaryMatrix {
   public:
     RowDiff() {}
 
     RowDiff(const uint64_t num_columns,
             const graph::DBGSuccinct *graph,
+            sdsl::enc_vector<> &&diffs,
+            sdsl::bit_vector &&boundary,
+            sdsl::bit_vector &&terminal)
+        : num_columns_(num_columns),
+          graph_(graph),
+          diffs_(std::move(diffs)),
+          boundary_(std::move(boundary)),
+          terminal_(std::move(terminal)) {
+        sdsl::util::init_support(sboundary_, &boundary_);
+    }
+
+    RowDiff(const uint64_t num_columns,
+            const graph::DBGSuccinct *graph,
             const sdsl::enc_vector<> &diffs,
             const sdsl::bit_vector &boundary,
             const sdsl::bit_vector &terminal)
-        : num_columns_(num_columns),
-          graph(graph),
-          diffs_(diffs),
-          boundary_(boundary),
-          terminal_(terminal) {
-        sdsl::util::init_support(sboundary, &boundary);
+            : num_columns_(num_columns),
+              graph_(graph),
+              diffs_(diffs),
+              boundary_(boundary),
+              terminal_(terminal) {
+        sdsl::util::init_support(sboundary_, &boundary_);
     }
 
     uint64_t num_columns() const override { return num_columns_; }
 
-    uint64_t num_rows() const override { return terminal_.size(); };
+    uint64_t num_rows() const override { return terminal_.size(); }
 
     bool get(Row row, Column column) const override;
 
@@ -49,7 +63,7 @@ class RowDiff : public BinaryMatrix {
      */
     uint64_t num_relations() const override;
 
-    SetBitPositions get_row(Row node_id) const override;
+    SetBitPositions get_row(Row row) const override;
 
     bool load(std::istream &f) override;
     void serialize(std::ostream &f) const override;
@@ -63,17 +77,19 @@ class RowDiff : public BinaryMatrix {
 
     Vector<uint64_t> get_diff(uint64_t node_id) const;
 
+    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
+
   private:
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
 
     uint64_t num_columns_ = 0;
 
-    const graph::DBGSuccinct *graph;
+    const graph::DBGSuccinct *graph_;
 
     sdsl::enc_vector<> diffs_;
     sdsl::bit_vector boundary_;
     sdsl::bit_vector terminal_;
-    sdsl::select_support_mcl<> sboundary;
+    sdsl::select_support_mcl<> sboundary_;
 };
 } // namespace binmat
 } // namespace annot

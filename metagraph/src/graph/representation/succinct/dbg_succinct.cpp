@@ -477,7 +477,7 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
 void DBGSuccinct::call_sequences(const CallPath &callback,
                                  size_t num_threads,
                                  bool kmers_in_single_form,
-                                 bool select_first_edge) const {
+                                 bool select_last_edge) const {
     assert(boss_graph_.get());
     boss_graph_->call_sequences(
         [&](std::string&& seq, auto&& path) {
@@ -489,7 +489,7 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
         num_threads,
         kmers_in_single_form,
         nullptr, /* subgraph mask */
-        select_first_edge
+        select_last_edge
     );
 }
 
