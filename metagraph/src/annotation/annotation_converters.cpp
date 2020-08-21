@@ -875,10 +875,9 @@ void merge<MultiBRWTAnnotator, std::string>(
 }
 
 template <typename Label>
-[[clang::optnone]] void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
+void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               const std::string &outfbase,
                               size_t num_threads) {
-#pragma clang optimize off
     uint64_t num_rows = annotator.num_objects();
 
     ProgressBar progress_bar(num_rows, "Serialize rows",
@@ -888,7 +887,7 @@ template <typename Label>
         outfbase,
         annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {
-#pragma clang optimize off
+
             #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
             for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
 
@@ -899,10 +898,6 @@ template <typename Label>
 
                 assert(begin <= end);
                 assert(end <= num_rows);
-
-                if (begin == 350000) {
-                    std::cout << "yes\n";
-                }
 
                 // TODO: use RowsFromColumnsTransformer
                 for (const auto &label : annotator.get_all_labels()) {
@@ -983,10 +978,10 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-[[clang::optnone]] std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+static size_t kMaxPathLength = 50;
+std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads) {
-#pragma clang optimize off
     uint64_t nnodes = graph.num_nodes();
     Vector<Vector<uint64_t>> tdiffs(nnodes);
     sdsl::bit_vector terminal(nnodes, 0);
@@ -995,7 +990,6 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
-#pragma clang optimize off
                 assert(!path.empty());
                 std::vector<uint64_t> anno_ids;
                 for (const uint64_t node_id : path) {
@@ -1007,7 +1001,7 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                         = annotation.get_matrix().get_rows(anno_ids);
 
                 std::sort(rows[0].begin(), rows[0].end());
-                for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                for (uint32_t i = 0; i < std::min(rows.size(), kMaxPathLength) - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
