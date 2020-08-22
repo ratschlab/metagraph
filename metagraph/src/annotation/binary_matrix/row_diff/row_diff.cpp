@@ -70,8 +70,8 @@ bool RowDiff::load(std::istream &f)  {
 void RowDiff::serialize(std::ostream &f) const  {
     f << num_columns_;
     diffs_.serialize(f);
-    boundary_.serialize(f);
-    terminal_.serialize(f);
+    sdsl::rrr_vector<>(boundary_).serialize(f);
+    sdsl::rrr_vector<>(terminal_).serialize(f);
 }
 
 void RowDiff::serialize(const std::string &name) const {

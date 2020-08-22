@@ -1035,7 +1035,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 terminal[anno_ids.back()] = 1;
             },
             num_threads, false, true);
-    logger->info("Traversal done. Constructing data structures...");
+    logger->trace("Traversal done. Building succinct data structures...");
     Vector<uint64_t> diff;
     std::vector<bool> boundary;
     for (const auto &tdiff : tdiffs) {
@@ -1045,6 +1045,8 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
         }
         boundary.push_back(true);
     }
+    logger->trace("Total rows {}, total diff length is {}, avg diff length is {}",
+                  terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size());
 
     sdsl::bit_vector sboundary(boundary.size());
     for (uint64_t i = 0; i < boundary.size(); ++i) {
