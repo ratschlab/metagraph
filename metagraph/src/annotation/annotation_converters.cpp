@@ -1001,7 +1001,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                         = annotation.get_matrix().get_rows(anno_ids);
 
                 std::sort(rows[0].begin(), rows[0].end());
-                for (uint32_t i = 0; i < std::min(rows.size(), kMaxPathLength) - 1; ++i) {
+                for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
@@ -1030,6 +1030,11 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                         tdiffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
+                    // if we don't gain anything by diffing, mark the node as terminal
+                    if (tdiffs[anno_ids[i]].size() >= rows[i].size()) {
+                        tdiffs[anno_ids[i]] = std::move(rows[i]);
+                        terminal[anno_ids[i]] = 1;
+                    }
                 }
                 tdiffs[anno_ids.back()] = std::move(rows.back());
                 terminal[anno_ids.back()] = 1;
@@ -1045,13 +1050,15 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
         }
         boundary.push_back(true);
     }
-    logger->trace("Total rows {}, total diff length is {}, avg diff length is {}",
-                  terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size());
 
+    //TODO: convert to rrr directly?
     sdsl::bit_vector sboundary(boundary.size());
     for (uint64_t i = 0; i < boundary.size(); ++i) {
         sboundary[i] = boundary[i];
     }
+
+    logger->trace("Total rows {}, total diff length is {}, avg diff length is {}",
+                  terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size());
 
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
