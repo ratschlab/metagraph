@@ -987,6 +987,8 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     sdsl::bit_vector terminal(nnodes, 0);
 
     uint64_t max_id = 0;
+    uint64_t terminal_count = 0;
+    uint64_t forced_terminal_count = 0;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
@@ -1034,10 +1036,12 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                     if (tdiffs[anno_ids[i]].size() >= rows[i].size()) {
                         tdiffs[anno_ids[i]] = std::move(rows[i]);
                         terminal[anno_ids[i]] = 1;
+                        forced_terminal_count++;
                     }
                 }
                 tdiffs[anno_ids.back()] = std::move(rows.back());
                 terminal[anno_ids.back()] = 1;
+                terminal_count++;
             },
             num_threads, false, true);
     logger->trace("Traversal done. Building succinct data structures...");
@@ -1051,14 +1055,17 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
         boundary.push_back(true);
     }
 
-    //TODO: convert to rrr directly?
+    // TODO: convert to rrr directly?
     sdsl::bit_vector sboundary(boundary.size());
     for (uint64_t i = 0; i < boundary.size(); ++i) {
         sboundary[i] = boundary[i];
     }
 
-    logger->trace("Total rows {}, total diff length is {}, avg diff length is {}",
-                  terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size());
+    logger->trace(
+            "Total rows {}, total diff length is {}, avg diff length is {} terminal "
+            "count/forced {}/{} ",
+            terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size(),
+            terminal_count + forced_terminal_count, forced_terminal_count);
 
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
