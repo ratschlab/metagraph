@@ -986,11 +986,11 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     Vector<Vector<uint64_t>> node_diffs(nnodes);
     sdsl::bit_vector terminal(nnodes, 0);
 
-    //TODO: race cond
-    uint64_t max_id = 0;
-    uint64_t terminal_count = 0;
-    uint64_t forced_terminal_count = 0;
+    // TODO: race cond
+    std::atomic<uint64_t> terminal_count = 0;
+    std::atomic<uint64_t> forced_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
+    std::atomic<uint64_t> visited_nodes = 0;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
@@ -1003,44 +1003,42 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 }
                 std::vector<Vector<uint64_t>> rows
                         = annotation.get_matrix().get_rows(anno_ids);
-
+                visited_nodes += path.size();
                 std::sort(rows[0].begin(), rows[0].end());
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
+                    Vector<uint64_t> &diff = node_diffs[anno_ids[i]];
                     while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
                         if (rows[i][idx1] == rows[i + 1][idx2]) {
                             idx1++;
                             idx2++;
                         } else {
                             if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                node_diffs[anno_ids[i]].push_back(rows[i][idx1]);
+                                diff.push_back(rows[i][idx1]);
                                 idx1++;
                             } else {
-                                node_diffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
+                                diff.push_back(rows[i + 1][idx2]);
                                 idx2++;
-                            }
-                            if (max_id < node_diffs[anno_ids[i]].back()) {
-                                max_id = node_diffs[anno_ids[i]].back();
                             }
                         }
                     }
                     while (idx1 < rows[i].size()) {
-                        node_diffs[anno_ids[i]].push_back(rows[i][idx1]);
+                        diff.push_back(rows[i][idx1]);
                         idx1++;
                     }
                     while (idx2 < rows[i + 1].size()) {
-                        node_diffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
+                        diff.push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
                     // if we don't gain anything by diffing, mark the node as terminal
-                    if (node_diffs[anno_ids[i]].size() >= rows[i].size()) {
-                        node_diffs[anno_ids[i]] = std::move(rows[i]);
+                    if (diff.size() >= rows[i].size()) {
+                        diff = std::move(rows[i]);
                         terminal[anno_ids[i]] = 1;
                         forced_terminal_count++;
                     }
-                    boundary_size += (node_diffs[anno_ids[i]].size() + 1);
+                    boundary_size += (diff.size() + 1);
                 }
                 boundary_size += (rows.back().size() + 1);
                 node_diffs[anno_ids.back()] = std::move(rows.back());
@@ -1048,29 +1046,35 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 terminal_count++;
             },
             num_threads, false, true);
-
+    // add the number of nodes that were not visited (the dummy nodes)
+    boundary_size += (nnodes - visited_nodes);
     logger->trace("Traversal done. Building succinct data structures...");
-    Vector<uint64_t> diff;
+    Vector<uint64_t> diffs;
     sdsl::bit_vector boundary(boundary_size, false);
     int64_t boundary_idx = -1;
-    for (Vector<uint64_t> &node_diff : node_diffs) {
-        diff.insert(diff.end(), node_diff.begin(), node_diff.end());
-        boundary_idx += (node_diff.size() + 1);
+    std::cout << "Boundary size is: " << boundary_size << std::endl;
+    for (Vector<uint64_t> &diff : node_diffs) {
+        diffs.insert(diffs.end(), diff.begin(), diff.end());
+        boundary_idx += (diff.size() + 1);
+        if (static_cast<uint64_t>(boundary_idx) >= boundary.size()) {
+            std::cout << "Ooops " << boundary_idx << std::endl;
+        }
         boundary[boundary_idx] = true;
-        Vector<uint64_t>().swap(node_diff); // release RAM ASAP
+        Vector<uint64_t>().swap(diff); // release RAM ASAP
     }
     Vector<Vector<uint64_t>>().swap(node_diffs);
     assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
+    assert(boundary_size == diffs.size() + nnodes);
 
     logger->trace(
             "Total rows {}, total diff length is {}, avg diff length is {} terminal "
             "count/forced {}/{} ",
-            terminal.size(), diff.size(), 1.0 * diff.size() / terminal.size(),
+            terminal.size(), diffs.size(), 1.0 * diffs.size() / terminal.size(),
             terminal_count + forced_terminal_count, forced_terminal_count);
 
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
-                                                       diff, boundary, terminal);
+                                                       diffs, boundary, terminal);
 
     return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                               annotation.get_label_encoder());
