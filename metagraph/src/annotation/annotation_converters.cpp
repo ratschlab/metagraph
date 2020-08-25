@@ -986,10 +986,11 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     Vector<Vector<uint64_t>> node_diffs(nnodes);
     sdsl::bit_vector terminal(nnodes, 0);
 
+    //TODO: race cond
     uint64_t max_id = 0;
     uint64_t terminal_count = 0;
     uint64_t forced_terminal_count = 0;
-    uint64_t boundary_size = 0;
+    std::atomic<uint64_t> boundary_size = 0;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
