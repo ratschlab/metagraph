@@ -15,6 +15,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "binary_matrix/multi_brwt/clustering.hpp"
@@ -978,17 +979,17 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-static size_t kMaxPathLength = 50;
 std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads) {
     uint64_t nnodes = graph.num_nodes();
-    Vector<Vector<uint64_t>> tdiffs(nnodes);
+    Vector<Vector<uint64_t>> node_diffs(nnodes);
     sdsl::bit_vector terminal(nnodes, 0);
 
     uint64_t max_id = 0;
     uint64_t terminal_count = 0;
     uint64_t forced_terminal_count = 0;
+    uint64_t boundary_size = 0;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
@@ -1013,53 +1014,52 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                             idx2++;
                         } else {
                             if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                tdiffs[anno_ids[i]].push_back(rows[i][idx1]);
+                                node_diffs[anno_ids[i]].push_back(rows[i][idx1]);
                                 idx1++;
                             } else {
-                                tdiffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
+                                node_diffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
                                 idx2++;
                             }
-                            if (max_id < tdiffs[anno_ids[i]].back()) {
-                                max_id = tdiffs[anno_ids[i]].back();
+                            if (max_id < node_diffs[anno_ids[i]].back()) {
+                                max_id = node_diffs[anno_ids[i]].back();
                             }
                         }
                     }
                     while (idx1 < rows[i].size()) {
-                        tdiffs[anno_ids[i]].push_back(rows[i][idx1]);
+                        node_diffs[anno_ids[i]].push_back(rows[i][idx1]);
                         idx1++;
                     }
                     while (idx2 < rows[i + 1].size()) {
-                        tdiffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
+                        node_diffs[anno_ids[i]].push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
                     // if we don't gain anything by diffing, mark the node as terminal
-                    if (tdiffs[anno_ids[i]].size() >= rows[i].size()) {
-                        tdiffs[anno_ids[i]] = std::move(rows[i]);
+                    if (node_diffs[anno_ids[i]].size() >= rows[i].size()) {
+                        node_diffs[anno_ids[i]] = std::move(rows[i]);
                         terminal[anno_ids[i]] = 1;
                         forced_terminal_count++;
                     }
+                    boundary_size += (node_diffs[anno_ids[i]].size() + 1);
                 }
-                tdiffs[anno_ids.back()] = std::move(rows.back());
+                boundary_size += (rows.back().size() + 1);
+                node_diffs[anno_ids.back()] = std::move(rows.back());
                 terminal[anno_ids.back()] = 1;
                 terminal_count++;
             },
             num_threads, false, true);
+
     logger->trace("Traversal done. Building succinct data structures...");
     Vector<uint64_t> diff;
-    std::vector<bool> boundary;
-    for (const auto &tdiff : tdiffs) {
-        diff.insert(diff.end(), tdiff.begin(), tdiff.end());
-        if (!tdiff.empty()) {
-            boundary.insert(boundary.end(), tdiff.size(), false);
-        }
-        boundary.push_back(true);
+    sdsl::bit_vector boundary(boundary_size, false);
+    int64_t boundary_idx = -1;
+    for (Vector<uint64_t> &node_diff : node_diffs) {
+        diff.insert(diff.end(), node_diff.begin(), node_diff.end());
+        boundary_idx += (node_diff.size() + 1);
+        boundary[boundary_idx] = true;
+        Vector<uint64_t>().swap(node_diff); // release RAM ASAP
     }
-
-    // TODO: convert to rrr directly?
-    sdsl::bit_vector sboundary(boundary.size());
-    for (uint64_t i = 0; i < boundary.size(); ++i) {
-        sboundary[i] = boundary[i];
-    }
+    Vector<Vector<uint64_t>>().swap(node_diffs);
+    assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
 
     logger->trace(
             "Total rows {}, total diff length is {}, avg diff length is {} terminal "
@@ -1069,9 +1069,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
 
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
-                                                       sdsl::enc_vector<>(diff),
-                                                       std::move(sboundary),
-                                                       std::move(terminal));
+                                                       diff, boundary, terminal);
 
     return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                               annotation.get_label_encoder());

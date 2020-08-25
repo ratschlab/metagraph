@@ -24,14 +24,11 @@ std::vector<BinaryMatrix::Row> RowDiff::get_column(Column column) const {
     return result;
 }
 
-uint64_t  total_length = 0, total_count = 0;
-
 uint64_t RowDiff::num_relations() const {
     uint64_t result = 0;
     for (Row row = 0; row < num_rows(); ++row) {
         result += get_row(row).size();
     }
-    std::cout << "Total length: " << total_length << " count " << total_count << " avg " << total_length/total_count << std::endl;
     return result;
 }
 
@@ -52,9 +49,7 @@ BinaryMatrix::SetBitPositions RowDiff::get_row(Row row) const {
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
         merge(&result, get_diff(row));
-        total_length++;
     };
-    total_count++;
     return result;
 }
 
@@ -70,8 +65,8 @@ bool RowDiff::load(std::istream &f)  {
 void RowDiff::serialize(std::ostream &f) const  {
     f << num_columns_;
     diffs_.serialize(f);
-    sdsl::rrr_vector<>(boundary_).serialize(f);
-    sdsl::rrr_vector<>(terminal_).serialize(f);
+    boundary_.serialize(f);
+    terminal_.serialize(f);
 }
 
 void RowDiff::serialize(const std::string &name) const {

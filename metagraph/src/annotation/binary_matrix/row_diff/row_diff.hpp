@@ -5,7 +5,7 @@
 #include <sdsl/enc_vector.hpp>
 #include <sdsl/bit_vectors.hpp>
 #include <sdsl/util.hpp>
-#include <sdsl/select_support_mcl.hpp>
+#include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/vector.hpp"
@@ -21,14 +21,14 @@ class RowDiff : public BinaryMatrix {
 
     RowDiff(const uint64_t num_columns,
             const graph::DBGSuccinct *graph,
-            sdsl::enc_vector<> &&diffs,
-            sdsl::bit_vector &&boundary,
-            sdsl::bit_vector &&terminal)
+            const Vector<uint64_t> &diffs,
+            const sdsl::bit_vector &boundary,
+            const sdsl::bit_vector &terminal)
         : num_columns_(num_columns),
           graph_(graph),
-          diffs_(std::move(diffs)),
-          boundary_(std::move(boundary)),
-          terminal_(std::move(terminal)) {
+          diffs_(diffs),
+          boundary_(boundary),
+          terminal_(terminal) {
         sdsl::util::init_support(sboundary_, &boundary_);
     }
 
@@ -71,8 +71,8 @@ class RowDiff : public BinaryMatrix {
     void serialize(const std::string &name) const;
     bool load(const std::string &name);
 
-    const sdsl::bit_vector &terminal() const { return terminal_; }
-    const sdsl::bit_vector &boundary() const { return boundary_; }
+    const sdsl::rrr_vector<> &terminal() const { return terminal_; }
+    const sdsl::rrr_vector<> &boundary() const { return boundary_; }
     const sdsl::enc_vector<> &diffs() const { return diffs_; }
 
     Vector<uint64_t> get_diff(uint64_t node_id) const;
@@ -87,9 +87,9 @@ class RowDiff : public BinaryMatrix {
     const graph::DBGSuccinct *graph_;
 
     sdsl::enc_vector<> diffs_;
-    sdsl::bit_vector boundary_;
-    sdsl::bit_vector terminal_;
-    sdsl::select_support_mcl<> sboundary_;
+    sdsl::rrr_vector<> boundary_;
+    sdsl::rrr_vector<> terminal_;
+    sdsl::rrr_vector<>::select_1_type sboundary_;
 };
 } // namespace binmat
 } // namespace annot

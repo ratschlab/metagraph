@@ -28,7 +28,7 @@ TEST(RowDiff, Empty) {
 }
 
 TEST(RowDiff, Serialize) {
-    std::vector<uint64_t> diffs = { 1, 2, 3, 4 };
+    Vector<uint64_t> diffs = { 1, 2, 3, 4 };
     sdsl::bit_vector boundary = { 0, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 1 };
     sdsl::enc_vector<> ediffs(diffs);
@@ -57,10 +57,10 @@ TEST(RowDiff, Serialize) {
 }
 
 TEST(RowDiff, GetDiff) {
-    std::vector<uint64_t> diffs = { 1, 2, 3, 4 };
+    Vector<uint64_t> diffs = { 1, 2, 3, 4 };
     sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 1 };
-    annot::binmat::RowDiff annot(2, nullptr, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, nullptr, diffs, boundary, terminal);
 
     EXPECT_TRUE(annot.get_diff(0).empty());
     ASSERT_THAT(annot.get_diff(1), ElementsAre(1));
@@ -69,10 +69,10 @@ TEST(RowDiff, GetDiff) {
 }
 
 TEST(RowDiff, GetDiff2) {
-    std::vector<uint64_t> diffs = { 0, 1, 1, 1 };
+    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0 };
-    annot::binmat::RowDiff annot(2, nullptr, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, nullptr, diffs, boundary, terminal);
 
     std::vector<uint32_t> empty_annot = { 0, 1, 2, 4, 5, 6, 7, 9 };
     for (const uint32_t v : empty_annot) {
@@ -93,10 +93,10 @@ TEST(RowDiff, GetAnnotation) {
     graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAG");
 
-    std::vector<uint64_t> diffs = { 0, 1, 1, 1 };
+    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -134,10 +134,10 @@ TEST(RowDiff, GetAnnotationMasked) {
     graph.add_sequence("ACTCTAG");
     graph.mask_dummy_kmers(1, false);
 
-    std::vector<uint64_t> diffs = { 0, 1, 1, 1 };
+    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
@@ -174,11 +174,11 @@ TEST(RowDiff, GetAnnotationBifurcation) {
     graph.add_sequence("TACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAGCTAT");
 
-    std::vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
+    Vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
     sdsl::bit_vector boundary
             = { 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -217,11 +217,10 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     graph.add_sequence("ACTCTAGCTAT");
     graph.mask_dummy_kmers(1, false);
 
-    std::vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
-    sdsl::bit_vector boundary
-            = { 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
+    Vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
+    sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
