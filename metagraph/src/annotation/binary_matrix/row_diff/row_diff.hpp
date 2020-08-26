@@ -49,6 +49,8 @@ class RowDiff : public BinaryMatrix {
 
     uint64_t num_rows() const override { return terminal_.size(); }
 
+    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
+
     bool get(Row row, Column column) const override;
 
     /**
@@ -76,8 +78,6 @@ class RowDiff : public BinaryMatrix {
     const sdsl::enc_vector<> &diffs() const { return diffs_; }
 
     Vector<uint64_t> get_diff(uint64_t node_id) const;
-
-    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
   private:
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
