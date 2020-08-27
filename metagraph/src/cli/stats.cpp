@@ -235,7 +235,7 @@ int print_stats(Config *config) {
             exit(1);
         }
         std::shared_ptr<graph::DeBruijnGraph> graph;
-        if (utils::ends_with(file, annot::RowDiffAnnotator::kExtension)) {
+        if (parse_annotation_type(file) == Config::AnnotationType::RowDiff) {
             auto& row_diff
                     = dynamic_cast<const annot::binmat::RowDiff &>(annotation->get_matrix());
 
