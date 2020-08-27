@@ -979,7 +979,7 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-std::unique_ptr<RowDiffAnnotator>
+[[clang::optnone]] std::unique_ptr<RowDiffAnnotator>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
                     RowCompressed<std::string> &&annotation,
                     uint32_t num_threads) {
@@ -992,8 +992,6 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
     std::atomic<uint64_t> forced_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
-    std::mutex mutex;
-    std::shared_mutex shared_mutex;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
@@ -1008,68 +1006,59 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                         = annotation.get_matrix().get_rows(anno_ids);
                 visited_nodes += path.size();
                 std::sort(rows[0].begin(), rows[0].end());
-                Vector<Vector<uint64_t>> diffs(rows.size() - 1);
+                Vector<uint64_t> diffs;
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
-
+                    uint64_t start_idx = diffs.size();
                     while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
                         if (rows[i][idx1] == rows[i + 1][idx2]) {
                             idx1++;
                             idx2++;
                         } else {
                             if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                diffs[i].push_back(rows[i][idx1]);
+                                diffs.push_back(rows[i][idx1]);
                                 idx1++;
                             } else {
-                                diffs[i].push_back(rows[i + 1][idx2]);
+                                diffs.push_back(rows[i + 1][idx2]);
                                 idx2++;
                             }
                         }
                     }
                     while (idx1 < rows[i].size()) {
-                        diffs[i].push_back(rows[i][idx1]);
+                        diffs.push_back(rows[i][idx1]);
                         idx1++;
                     }
                     while (idx2 < rows[i + 1].size()) {
-                        diffs[i].push_back(rows[i + 1][idx2]);
+                        diffs.push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
-                    // if we don't gain anything by diffing, mark the node as terminal
-                    if (diffs[i].size() >= rows[i].size()) {
-                        diffs[i] = std::move(rows[i]);
+                    // if we don't gain anything by diffing, make the node terminal
+                    if (diffs.size() - start_idx >= rows[i].size()) {
+                        diffs.resize(start_idx);
+                        diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
                         terminal[anno_ids[i]] = 1;
                         forced_terminal_count++;
                     }
-                    boundary_size += diffs[i].size();
+                    pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
                 }
-                boundary_size += rows.back().size();
-                // acquire the mutex to restrict the number of threads that may reallocate
-                std::unique_lock<std::mutex> lock(mutex);
-                std::unique_lock<std::shared_mutex> resize_lock(shared_mutex);
-                size_t offset = node_diffs.size();
-                node_diffs.resize(node_diffs.size() + boundary_size);
+                pos[anno_ids.back()] = { diffs.size(), rows.back().size() };
+                diffs.insert(diffs.end(), rows.back().begin(), rows.back().end());
+                size_t offset;
+#pragma omp critical
                 {
-                    // atomically downgrade shared_mutex to a shared lock
-                    resize_lock.unlock();
-                    std::shared_lock<std::shared_mutex> copy_lock(shared_mutex);
-                    lock.unlock();
-
-
-                    for (uint32_t i = 0; i < rows.size() - 1; ++i) {
-                        pos[anno_ids[i]] = { offset, diffs[i].size() };
-                        node_diffs.insert(node_diffs.begin() + offset, diffs[i].begin(),
-                                          diffs[i].end());
-                        offset += diffs[i].size();
-                    }
-                    pos[anno_ids.back()] = { offset, rows.back().size() };
-                    node_diffs.insert(node_diffs.begin() + offset, rows.back().begin(),
-                                      rows.back().end());
+                    offset = node_diffs.size();
+                    node_diffs.insert(node_diffs.end(), diffs.begin(), diffs.end());
                 }
+                for (uint32_t i = 0; i < rows.size(); ++i) {
+                    pos[anno_ids[i]].first += offset;
+                }
+
                 terminal_count++;
                 terminal[anno_ids.back()] = 1;
-                boundary_size += rows.size(); // one termination bit for each node
+                // add the last row plus one termination bit for each row
+                boundary_size += (diffs.size() + rows.size());
             },
             num_threads, false, true);
     logger->trace("Traversal done. Building succinct data structures...");
@@ -1089,7 +1078,7 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
     Vector<uint64_t>().swap(node_diffs); // free these large vectors ASAP
     Vector<std::pair<uint64_t, uint32_t>>().swap(pos);
     assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
-    assert(boundary_size == diffs.size() + nnodes);
+    assert(boundary.size() == diffs.size() + nnodes);
 
     logger->trace(
             "Total rows {}, total diff length is {}, avg diff length is {} terminal "
