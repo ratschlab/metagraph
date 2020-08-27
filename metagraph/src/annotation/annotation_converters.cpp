@@ -985,13 +985,15 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                     uint32_t num_threads) {
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
-    Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, {0, 0});
+    Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
     sdsl::bit_vector terminal(nnodes, 0);
 
-    uint64_t terminal_count = 0;
+    std::atomic<uint64_t> terminal_count = 0;
     std::atomic<uint64_t> forced_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
+    std::mutex mutex;
+    std::shared_mutex shared_mutex;
     graph.call_sequences(
 
             [&](const std::string &, const std::vector<uint64_t> &path) {
@@ -1040,22 +1042,34 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                         terminal[anno_ids[i]] = 1;
                         forced_terminal_count++;
                     }
-                    boundary_size += (diffs[i].size() + 1);
+                    boundary_size += diffs[i].size();
                 }
-#pragma omp critical
+                boundary_size += rows.back().size();
+                // acquire the mutex to restrict the number of threads that may reallocate
+                std::unique_lock<std::mutex> lock(mutex);
+                std::unique_lock<std::shared_mutex> resize_lock(shared_mutex);
+                size_t offset = node_diffs.size();
+                node_diffs.resize(node_diffs.size() + boundary_size);
                 {
-                    for (uint32_t i = 0; i < rows.size()-1;++i) {
-                        pos[anno_ids[i]] = { node_diffs.size(), diffs[i].size() };
-                        node_diffs.insert(node_diffs.end(), diffs[i].begin(), diffs[i].end());
-                    }
-                    pos[anno_ids.back()] = { node_diffs.size(), rows.back().size() };
-                    node_diffs.insert(node_diffs.end(), rows.back().begin(),
-                                      rows.back().end());
-                    terminal_count++;
-                }
-                boundary_size += (rows.back().size() + 1);
-                terminal[anno_ids.back()] = 1;
+                    // atomically downgrade shared_mutex to a shared lock
+                    resize_lock.unlock();
+                    std::shared_lock<std::shared_mutex> copy_lock(shared_mutex);
+                    lock.unlock();
 
+
+                    for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                        pos[anno_ids[i]] = { offset, diffs[i].size() };
+                        node_diffs.insert(node_diffs.begin() + offset, diffs[i].begin(),
+                                          diffs[i].end());
+                        offset += diffs[i].size();
+                    }
+                    pos[anno_ids.back()] = { offset, rows.back().size() };
+                    node_diffs.insert(node_diffs.begin() + offset, rows.back().begin(),
+                                      rows.back().end());
+                }
+                terminal_count++;
+                terminal[anno_ids.back()] = 1;
+                boundary_size += rows.size(); // one termination bit for each node
             },
             num_threads, false, true);
     logger->trace("Traversal done. Building succinct data structures...");
