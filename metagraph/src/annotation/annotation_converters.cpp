@@ -979,16 +979,16 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-[[clang::optnone]] std::unique_ptr<RowDiffAnnotator>
+std::unique_ptr<RowDiffAnnotator>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
                     RowCompressed<std::string> &&annotation,
                     uint32_t num_threads) {
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
-    Vector<std::pair<uint64_t, uint32_t>> pos(nnodes);
+    Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, {0, 0});
     sdsl::bit_vector terminal(nnodes, 0);
 
-    std::atomic<uint64_t> terminal_count = 0;
+    uint64_t terminal_count = 0;
     std::atomic<uint64_t> forced_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
@@ -1006,48 +1006,56 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                         = annotation.get_matrix().get_rows(anno_ids);
                 visited_nodes += path.size();
                 std::sort(rows[0].begin(), rows[0].end());
+                Vector<Vector<uint64_t>> diffs(rows.size() - 1);
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
                     uint64_t idx1 = 0;
                     uint64_t idx2 = 0;
-                    uint64_t start = node_diffs.size();
+
                     while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
                         if (rows[i][idx1] == rows[i + 1][idx2]) {
                             idx1++;
                             idx2++;
                         } else {
                             if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                node_diffs.push_back(rows[i][idx1]);
+                                diffs[i].push_back(rows[i][idx1]);
                                 idx1++;
                             } else {
-                                node_diffs.push_back(rows[i + 1][idx2]);
+                                diffs[i].push_back(rows[i + 1][idx2]);
                                 idx2++;
                             }
                         }
                     }
                     while (idx1 < rows[i].size()) {
-                        node_diffs.push_back(rows[i][idx1]);
+                        diffs[i].push_back(rows[i][idx1]);
                         idx1++;
                     }
                     while (idx2 < rows[i + 1].size()) {
-                        node_diffs.push_back(rows[i + 1][idx2]);
+                        diffs[i].push_back(rows[i + 1][idx2]);
                         idx2++;
                     }
                     // if we don't gain anything by diffing, mark the node as terminal
-                    if (node_diffs.size() - start >= rows[i].size()) {
-                        node_diffs.resize(start);
-                        node_diffs.insert(node_diffs.end(), rows[i].begin(), rows[i].end());
+                    if (diffs[i].size() >= rows[i].size()) {
+                        diffs[i] = std::move(rows[i]);
                         terminal[anno_ids[i]] = 1;
                         forced_terminal_count++;
                     }
-                    pos[anno_ids[i]] = { start, node_diffs.size() - start };
-                    boundary_size += (pos[anno_ids[i]].second + 1);
+                    boundary_size += (diffs[i].size() + 1);
                 }
-                pos[anno_ids.back()] = { node_diffs.size(), rows.back().size() };
-                node_diffs.insert(node_diffs.end(), rows.back().begin(), rows.back().end());
+#pragma omp critical
+                {
+                    for (uint32_t i = 0; i < rows.size()-1;++i) {
+                        pos[anno_ids[i]] = { node_diffs.size(), diffs[i].size() };
+                        node_diffs.insert(node_diffs.end(), diffs[i].begin(), diffs[i].end());
+                    }
+                    pos[anno_ids.back()] = { node_diffs.size(), rows.back().size() };
+                    node_diffs.insert(node_diffs.end(), rows.back().begin(),
+                                      rows.back().end());
+                    terminal_count++;
+                }
                 boundary_size += (rows.back().size() + 1);
                 terminal[anno_ids.back()] = 1;
-                terminal_count++;
+
             },
             num_threads, false, true);
     logger->trace("Traversal done. Building succinct data structures...");
