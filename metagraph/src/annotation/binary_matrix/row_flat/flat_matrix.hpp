@@ -16,6 +16,7 @@ template <typename BitVector = bit_vector_sd>
 class RowConcatenated : public BinaryMatrix {
   public:
     RowConcatenated() : compressed_rows_(new BitVector()) {}
+    ~RowConcatenated() {std::cout << "Destructor called" << std::endl; }
     RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                     uint64_t num_columns,
                     uint64_t num_rows,

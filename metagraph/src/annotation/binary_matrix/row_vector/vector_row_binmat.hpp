@@ -20,6 +20,8 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
     VectorRowBinMat(std::vector<RowType>&& rows, uint64_t num_columns);
 
+    virtual ~VectorRowBinMat() {std::cout << "Destroyed!" << std::endl;}
+
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
 

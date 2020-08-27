@@ -979,10 +979,9 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
-[[clang::optnone]] std::unique_ptr<RowDiffAnnotator>
-convert_to_row_diff(const graph::DBGSuccinct &graph,
-                    RowCompressed<std::string> &&annotation,
-                    uint32_t num_threads) {
+std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+                                                      RowCompressed<std::string> &&annotation,
+                                                      uint32_t num_threads) {
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
     Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
@@ -993,7 +992,6 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
     graph.call_sequences(
-
             [&](const std::string &, const std::vector<uint64_t> &path) {
                 assert(!path.empty());
                 std::vector<uint64_t> anno_ids;
@@ -1061,8 +1059,17 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                 boundary_size += (diffs.size() + rows.size());
             },
             num_threads, false, true);
-    logger->trace("Traversal done. Building succinct data structures...");
+    logger->trace(
+            "Traversal done.. Total rows {}, total diff length is {}, "
+            "avg diff length is {} terminal count/forced {}/{} ",
+            terminal.size(), node_diffs.size(), 1.0 * node_diffs.size() / terminal.size(),
+            terminal_count + forced_terminal_count, forced_terminal_count);
 
+    uint64_t num_labels = annotation.num_labels();
+    const LabelEncoder<std::string> &label_encoder = annotation.get_label_encoder();
+
+    annotation = RowCompressed<std::string>(); // destroy gigantic annotation object
+    logger->trace(" Building succinct data structures...");
     // add the number of nodes that were not visited (the dummy nodes)
     boundary_size += (nnodes - visited_nodes);
     Vector<uint64_t> diffs;
@@ -1080,18 +1087,10 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
     assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
     assert(boundary.size() == diffs.size() + nnodes);
 
-    logger->trace(
-            "Total rows {}, total diff length is {}, avg diff length is {} terminal "
-            "count/forced {}/{} ",
-            terminal.size(), diffs.size(), 1.0 * diffs.size() / terminal.size(),
-            terminal_count + forced_terminal_count, forced_terminal_count);
+    auto diff_annotation = std::make_unique<annot::binmat::RowDiff>(num_labels, &graph, diffs,
+                                                                    boundary, terminal);
 
-    auto diff_annotation
-            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
-                                                       diffs, boundary, terminal);
-
-    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
-                                              annotation.get_label_encoder());
+    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation), label_encoder);
 }
 
 } // namespace annot
