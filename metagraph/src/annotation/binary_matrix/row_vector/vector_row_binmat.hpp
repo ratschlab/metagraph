@@ -18,9 +18,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
     explicit VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
-    VectorRowBinMat(std::vector<RowType>&& rows, uint64_t num_columns);
-
-    virtual ~VectorRowBinMat() {std::cout << "Destroyed!" << std::endl;}
+    VectorRowBinMat(Vector<RowType>&& rows, uint64_t num_columns);
 
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
@@ -49,7 +47,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
   private:
     uint64_t num_columns_ = 0;
-    std::vector<RowType> vector_;
+    Vector<RowType> vector_;
 };
 
 } // namespace binmat

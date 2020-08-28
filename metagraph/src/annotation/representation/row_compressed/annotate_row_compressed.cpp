@@ -28,7 +28,7 @@ RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
 
 template <typename Label>
 template <typename RowType>
-RowCompressed<Label>::RowCompressed(std::vector<RowType>&& annotation_rows,
+RowCompressed<Label>::RowCompressed(Vector<RowType>&& annotation_rows,
                                     const std::vector<Label> &labels)
       : matrix_(new binmat::VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
     for (const auto &label : labels) {
@@ -36,8 +36,8 @@ RowCompressed<Label>::RowCompressed(std::vector<RowType>&& annotation_rows,
     }
 }
 
-template RowCompressed<std::string>::RowCompressed(std::vector<SmallVector<uint32_t>>&&, const std::vector<std::string> &);
-template RowCompressed<std::string>::RowCompressed(std::vector<Vector<uint64_t>>&&, const std::vector<std::string> &);
+template RowCompressed<std::string>::RowCompressed(Vector<SmallVector<uint32_t>>&&, const std::vector<std::string> &);
+template RowCompressed<std::string>::RowCompressed(Vector<Vector<uint64_t>>&&, const std::vector<std::string> &);
 
 template <typename Label>
 void RowCompressed<Label>::reinitialize(uint64_t num_rows) {

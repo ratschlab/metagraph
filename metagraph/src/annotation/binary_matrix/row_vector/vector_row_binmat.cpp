@@ -14,7 +14,7 @@ namespace annot {
 namespace binmat {
 
 template <typename RowType>
-VectorRowBinMat<RowType>::VectorRowBinMat(std::vector<RowType>&& rows,
+VectorRowBinMat<RowType>::VectorRowBinMat(Vector<RowType>&& rows,
                                           uint64_t num_columns)
       : num_columns_(num_columns), vector_(std::move(rows)) {
     // make sure there are no columns with indexes greater than num_labels
