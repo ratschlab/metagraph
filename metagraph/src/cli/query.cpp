@@ -184,9 +184,17 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const std::string_view &contig,
                          size_t max_hull_forks,
                          size_t max_hull_depth,
+                         bool canonical,
                          const ContigCallback &callback,
                          const std::function<bool(node_index, size_t)> &continue_traversal) {
     assert(max_hull_forks);
+
+    if (canonical) {
+        std::string rev_seq(contig.begin(), contig.end());
+        reverse_complement(rev_seq.begin(), rev_seq.end());
+        call_hull_sequences(full_dbg, rev_seq, max_hull_forks, max_hull_depth,
+                            false, callback, continue_traversal);
+    }
 
     auto nodes = map_sequence_to_nodes(full_dbg, contig);
 
@@ -526,6 +534,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 );
             }
 
+            old_size = contigs.size();
+
             logger->trace("[Query graph construction] Adding {} suffix-matching k-mers "
                           "took {} sec", num_added, timer.elapsed());
         } else {
@@ -552,7 +562,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < old_size; ++i) {
             const std::string_view contig(contigs[i].first);
-            call_hull_sequences(full_dbg, contig, max_hull_forks, max_hull_depth,
+            call_hull_sequences(full_dbg, contig, max_hull_forks, max_hull_depth, canonical,
                 [&](auto&& seq, auto&& path) {
                     #pragma omp critical
                     {
