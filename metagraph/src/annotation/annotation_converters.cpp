@@ -967,9 +967,9 @@ void add_labels(const ColumnCompressed<Label> &source,
     // TODO: use RowsFromColumnsTransformer
     for (const auto &label : source.get_all_labels()) {
         size_t j = source.get_label_encoder().encode(label);
-        source.get_column(label).call_ones_in_range(begin, end,
-            [&](uint64_t idx) { matrix->set(idx, j); }
-        );
+        source.get_column(label).call_ones_in_range(begin, end, [&](uint64_t idx) {
+            matrix->set(idx, j);
+        });
     }
     if (progress_bar)
         *progress_bar += end - begin;
@@ -979,9 +979,39 @@ template void convert_to_row_annotator(const ColumnCompressed<std::string> &sour
                                        RowCompressed<std::string> *annotator,
                                        size_t num_threads);
 
+static void compute_diff(const Vector<uint64_t> &a,
+                         const Vector<uint64_t> &b,
+                         Vector<uint64_t> *result) {
+    uint64_t idx1 = 0;
+    uint64_t idx2 = 0;
+    while (idx1 < a.size() && idx2 < b.size()) {
+        if (a[idx1] == b[idx2]) {
+            idx1++;
+            idx2++;
+        } else {
+            if (a[idx1] < b[idx2]) {
+                result->push_back(a[idx1]);
+                idx1++;
+            } else {
+                result->push_back(b[idx2]);
+                idx2++;
+            }
+        }
+    }
+    while (idx1 < a.size()) {
+        result->push_back(a[idx1]);
+        idx1++;
+    }
+    while (idx2 < b.size()) {
+        result->push_back(b[idx2]);
+        idx2++;
+    }
+}
+
 std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
-                                                      uint32_t num_threads) {
+                                                      uint32_t num_threads,
+                                                      uint32_t max_depth) {
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
     Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
@@ -989,6 +1019,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
 
     std::atomic<uint64_t> terminal_count = 0;
     std::atomic<uint64_t> forced_terminal_count = 0;
+    std::atomic<uint64_t> depth_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
     graph.call_sequences(
@@ -1007,31 +1038,19 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 Vector<uint64_t> diffs;
                 for (uint32_t i = 0; i < rows.size() - 1; ++i) {
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
-                    uint64_t idx1 = 0;
-                    uint64_t idx2 = 0;
+
+                    // if we reached the max path depth, force a terminal node
+                    if (i % max_depth) {
+                        pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
+                        diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
+                        terminal[anno_ids[i]] = 1;
+                        depth_terminal_count++;
+                        continue;
+                    }
+
                     uint64_t start_idx = diffs.size();
-                    while (idx1 < rows[i].size() && idx2 < rows[i + 1].size()) {
-                        if (rows[i][idx1] == rows[i + 1][idx2]) {
-                            idx1++;
-                            idx2++;
-                        } else {
-                            if (rows[i][idx1] < rows[i + 1][idx2]) {
-                                diffs.push_back(rows[i][idx1]);
-                                idx1++;
-                            } else {
-                                diffs.push_back(rows[i + 1][idx2]);
-                                idx2++;
-                            }
-                        }
-                    }
-                    while (idx1 < rows[i].size()) {
-                        diffs.push_back(rows[i][idx1]);
-                        idx1++;
-                    }
-                    while (idx2 < rows[i + 1].size()) {
-                        diffs.push_back(rows[i + 1][idx2]);
-                        idx2++;
-                    }
+                    compute_diff(rows[i], rows[i + 1], &diffs);
+
                     // if we don't gain anything by diffing, make the node terminal
                     if (diffs.size() - start_idx >= rows[i].size()) {
                         diffs.resize(start_idx);
@@ -1061,14 +1080,11 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             num_threads, false, true);
     logger->trace(
             "Traversal done.. Total rows {}, total diff length is {}, "
-            "avg diff length is {} terminal count/forced {}/{} ",
+            "avg diff length is {} terminal nodes total/max-depth/forced {}/{} ",
             terminal.size(), node_diffs.size(), 1.0 * node_diffs.size() / terminal.size(),
-            terminal_count + forced_terminal_count, forced_terminal_count);
+            terminal_count + forced_terminal_count + depth_terminal_count,
+            depth_terminal_count, forced_terminal_count);
 
-    uint64_t num_labels = annotation.num_labels();
-    const LabelEncoder<std::string> &label_encoder = annotation.get_label_encoder();
-
-    annotation = RowCompressed<std::string>(); // destroy gigantic annotation object
     logger->trace(" Building succinct data structures...");
     // add the number of nodes that were not visited (the dummy nodes)
     boundary_size += (nnodes - visited_nodes);
@@ -1087,10 +1103,12 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
     assert(boundary.size() == diffs.size() + nnodes);
 
-    auto diff_annotation = std::make_unique<annot::binmat::RowDiff>(num_labels, &graph, diffs,
-                                                                    boundary, terminal);
+    auto diff_annotation
+            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
+                                                       diffs, boundary, terminal);
 
-    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation), label_encoder);
+    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
+                                              annotation.get_label_encoder());
 }
 
 } // namespace annot

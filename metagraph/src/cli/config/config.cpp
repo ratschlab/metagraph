@@ -142,6 +142,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-path-length")) {
+            max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
             parts_total = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--part-idx")) {
@@ -993,6 +995,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
+            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

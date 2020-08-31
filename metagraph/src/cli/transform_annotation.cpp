@@ -308,7 +308,7 @@ int transform_annotation(Config *config) {
                 timer.reset();
                 logger->trace("Converting to row-diff...");
                 target_annotator = convert_to_row_diff(graph, std::move(*annotator),
-                                              get_num_threads());
+                                              get_num_threads(), config->max_path_length);
                 break;
             }
             default:
@@ -448,7 +448,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Converting to row-diff...");
                 std::unique_ptr<annot::RowDiffAnnotator> anno
                         = convert_to_row_diff(graph, std::move(row_annotator),
-                                              get_num_threads());
+                                              get_num_threads(), config->max_path_length);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 logger->trace("Serializing to '{}'", config->outfbase);
                 anno->serialize(config->outfbase);

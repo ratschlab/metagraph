@@ -335,6 +335,14 @@ TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotation) {
     annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
 }
 
+TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationMaxLength) {
+    for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
+        annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
+                                         max_path_length)
+                             .release();
+    }
+}
+
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {
 //     RowCompressed<> empty_column_annotator(5);
 //     auto empty_annotation = convert_to_greedy_BRWT<MultiBRWTAnnotator>(
