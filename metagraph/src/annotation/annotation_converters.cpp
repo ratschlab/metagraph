@@ -1040,7 +1040,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                     std::sort(rows[i + 1].begin(), rows[i + 1].end());
 
                     // if we reached the max path depth, force a terminal node
-                    if (i % max_depth) {
+                    if (i % max_depth == 0) {
                         pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
                         diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
                         terminal[anno_ids[i]] = 1;
