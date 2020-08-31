@@ -967,18 +967,20 @@ void add_labels(const ColumnCompressed<Label> &source,
     // TODO: use RowsFromColumnsTransformer
     for (const auto &label : source.get_all_labels()) {
         size_t j = source.get_label_encoder().encode(label);
-        source.get_column(label).call_ones_in_range(begin, end, [&](uint64_t idx) {
-            matrix->set(idx, j);
-        });
+        source.get_column(label).call_ones_in_range(begin, end,
+            [&](uint64_t idx) { matrix->set(idx, j); }
+        );
     }
     if (progress_bar)
         *progress_bar += end - begin;
 }
 
-template void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
-                                       RowCompressed<std::string> *annotator,
-                                       size_t num_threads);
+template
+void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
+                              RowCompressed<std::string> *annotator,
+                              size_t num_threads);
 
+/** Computes diff between a and b and append it to result */
 static void compute_diff(const Vector<uint64_t> &a,
                          const Vector<uint64_t> &b,
                          Vector<uint64_t> *result) {
@@ -988,14 +990,12 @@ static void compute_diff(const Vector<uint64_t> &a,
         if (a[idx1] == b[idx2]) {
             idx1++;
             idx2++;
+        } else if (a[idx1] < b[idx2]) {
+            result->push_back(a[idx1]);
+            idx1++;
         } else {
-            if (a[idx1] < b[idx2]) {
-                result->push_back(a[idx1]);
-                idx1++;
-            } else {
-                result->push_back(b[idx2]);
-                idx2++;
-            }
+            result->push_back(b[idx2]);
+            idx2++;
         }
     }
     while (idx1 < a.size()) {
@@ -1080,7 +1080,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             num_threads, false, true);
     logger->trace(
             "Traversal done.. Total rows {}, total diff length is {}, "
-            "avg diff length is {} terminal nodes total/max-depth/forced {}/{} ",
+            "avg diff length is {} terminal nodes total/max-depth/forced {}/{}/{} ",
             terminal.size(), node_diffs.size(), 1.0 * node_diffs.size() / terminal.size(),
             terminal_count + forced_terminal_count + depth_terminal_count,
             depth_terminal_count, forced_terminal_count);

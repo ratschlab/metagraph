@@ -106,14 +106,12 @@ void RowDiff::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
         if (diff1[idx1] == diff2[idx2]) {
             idx1++;
             idx2++;
+        } else if (diff1[idx1] < diff2[idx2]) {
+            result->push_back(diff1[idx1]);
+            idx1++;
         } else {
-            if (diff1[idx1] < diff2[idx2]) {
-                result->push_back(diff1[idx1]);
-                idx1++;
-            } else {
-                result->push_back(diff2[idx2]);
-                idx2++;
-            }
+            result->push_back(diff2[idx2]);
+            idx2++;
         }
     }
     while (idx1 < diff1.size()) {

@@ -15,6 +15,20 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
+/**
+ * Row-major representation of annotations where rows are stored as differences vs a
+ * predecessor row. The predecessor of a row is determined by a path in an external graph
+ * structure, a #graph::DBGSuccinct, which has the property that rows on a path are likely
+ * very similar.
+ * The row-diff binary matrix is defined by three data structures:
+ *   1. #diffs_ stores the concatenated diffs row by row. Since each row-diff has variable
+ *      length, the boundary_ vector marks the end of each row-diff.
+ *   2. boundary_ marks the end of a row diff in #diffs_
+ *   3. terminal_ Rows marked as terminal are stored in full.
+ * Retrieving data from RowDiff requires the associated #graph_. In order to get the i-th
+ * row, we start traversing the node corresponding to i in #graph_ and accumulate the
+ * diffs until we hit a terminal node, which is stored in full.
+ */
 class RowDiff : public BinaryMatrix {
   public:
     RowDiff() {}

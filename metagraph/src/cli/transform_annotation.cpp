@@ -428,7 +428,7 @@ int transform_annotation(Config *config) {
             }
             case Config::RbBRWT: {
                 auto rb_brwt_annotator
-                        = convert_to_RbBRWT<RbBRWTAnnotator>(files, config->relax_arity_brwt);
+                    = convert_to_RbBRWT<RbBRWTAnnotator>(files, config->relax_arity_brwt);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 logger->trace("Serializing to '{}'", config->outfbase);
                 rb_brwt_annotator->serialize(config->outfbase);
