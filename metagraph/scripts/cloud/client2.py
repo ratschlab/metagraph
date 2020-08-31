@@ -32,7 +32,7 @@ waiting_builds = collections.OrderedDict()
 waiting_cleans = collections.OrderedDict()
 
 CORES = multiprocessing.cpu_count()
-MAX_DOWNLOAD_PROCESSES = CORES / 4
+MAX_DOWNLOAD_PROCESSES = CORES / 3 # TODO: SET BACK TO 4
 MAX_BUILD_PROCESSES = CORES / 4
 MAX_CLEAN_PROCESSES = CORES / 4
 
