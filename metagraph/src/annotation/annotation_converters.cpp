@@ -980,7 +980,7 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-/** Computes diff between a and b and append it to result */
+/** Computes diff between a and b and appends it to result */
 static void compute_diff(const Vector<uint64_t> &a,
                          const Vector<uint64_t> &b,
                          Vector<uint64_t> *result) {
