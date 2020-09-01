@@ -194,7 +194,8 @@ template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const std::string_view &contig,
                          size_t max_hull_forks,
-                         size_t max_hull_depth,
+                         size_t max_hull_depth_global,
+                         double max_hull_depth_per_seq_char,
                          bool canonical,
                          const ContigCallback &callback,
                          const std::function<bool(node_index, size_t)> &continue_traversal) {
@@ -203,8 +204,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     if (canonical) {
         std::string rev_seq(contig.begin(), contig.end());
         reverse_complement(rev_seq.begin(), rev_seq.end());
-        call_hull_sequences(full_dbg, rev_seq, max_hull_forks, max_hull_depth,
-                            false, callback, continue_traversal);
+        call_hull_sequences(full_dbg, rev_seq, max_hull_forks, max_hull_depth_global,
+                            max_hull_depth_per_seq_char, false, callback,
+                            continue_traversal);
     }
 
     auto nodes = map_sequence_to_nodes(full_dbg, contig);
@@ -217,6 +219,12 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                     && full_dbg.has_single_outgoing(nodes[j]))) {
             continue;
         }
+
+        size_t max_hull_depth = std::min(
+            max_hull_depth_global,
+            static_cast<size_t>((nodes.size() - j + full_dbg.get_k())
+                                    * max_hull_depth_per_seq_char)
+        );
 
         // DFS from branching points
         std::string init_unitig(contig, j + 1, full_dbg.get_k() - 1);
@@ -477,7 +485,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), false);
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
-    size_t max_sequence_length = 0;
     if (kPrefilterWithBloom && dbg_succ && sub_k >= full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
@@ -490,12 +497,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 sequence,
                 get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
             );
-            max_sequence_length = std::max(max_sequence_length, sequence.size());
         });
     } else {
         call_sequences([&](const std::string &sequence) {
             graph_init->add_sequence(sequence);
-            max_sequence_length = std::max(max_sequence_length, sequence.size());
         });
     }
 
@@ -555,11 +560,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     if (max_hull_forks) {
-        max_hull_depth = std::min(
-            max_hull_depth,
-            static_cast<size_t>(max_sequence_length * max_hull_depth_per_seq_char)
-        );
-
         logger->trace("[Query graph extension] Computing query graph hull");
         logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",
                       max_hull_depth,
@@ -573,7 +573,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < old_size; ++i) {
             const std::string_view contig(contigs[i].first);
-            call_hull_sequences(full_dbg, contig, max_hull_forks, max_hull_depth, canonical,
+            call_hull_sequences(full_dbg, contig, max_hull_forks, max_hull_depth,
+                                max_hull_depth_per_seq_char, canonical,
                 [&](auto&& seq, auto&& path) {
                     #pragma omp critical
                     {
@@ -618,7 +619,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             }
         }
 
-        logger->trace("[Query graph extension] Query graph extension took {} sec", timer.elapsed());
+        logger->trace("[Query graph extension] Query graph extension took {} sec",
+                      timer.elapsed());
     }
 
     // map contigs onto the full graph
@@ -909,7 +911,8 @@ void QueryExecutor::query_fasta(const string &file,
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
-            callback(query_sequence(id, name, seq, anno_graph_, config_, aligner_config_.get()));
+            callback(query_sequence(id, name, seq, anno_graph_,
+                                    config_, aligner_config_.get()));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -969,7 +972,8 @@ void QueryExecutor
             assert(begin != end);
 
             thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
-                callback(query_sequence(id, name, seq, *query_graph, config_, aligner_config_.get()));
+                callback(query_sequence(id, name, seq, *query_graph,
+                                        config_, aligner_config_.get()));
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
         }
 
