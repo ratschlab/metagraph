@@ -122,12 +122,14 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
     });
 
     for (auto &seed : seeds) {
+        logger->trace("Seed: {}", seed);
         score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query_end() == query.data() + query.size()) {
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(graph_, &config_));
+                logger->trace("Alignment: {}", seed);
                 callback(std::move(seed));
             }
 
@@ -143,6 +145,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
                     seed.extend_query_end(query.data() + query.size());
                     seed.trim_offset();
                     assert(seed.is_valid(graph_, &config_));
+                    logger->trace("Alignment: {}", seed);
                     callback(std::move(seed));
                 }
                 extended = true;
@@ -158,6 +161,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
                 extension.extend_query_begin(query.data());
                 extension.trim_offset();
                 assert(extension.is_valid(graph_, &config_));
+                logger->trace("Alignment: {}", extension);
                 callback(std::move(extension));
                 return;
             }
@@ -168,6 +172,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             next_path.trim_offset();
             assert(next_path.is_valid(graph_, &config_));
 
+            logger->trace("Alignment: {}", next_path);
             callback(std::move(next_path));
             extended = true;
         }, min_path_score);
@@ -216,6 +221,8 @@ inline auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
+        logger->trace("Aligning forwards");
+
         // First get forward alignments
         align(paths.get_query(),
             [&](const auto &forward_seed_callback) {
@@ -261,6 +268,8 @@ inline auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 return config_.min_cell_score;
             }
         );
+
+        logger->trace("Aligning backwards");
 
         // Then use the reverse complements of the forward alignments as seeds
         align(paths.get_query_reverse_complement(),
