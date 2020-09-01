@@ -365,8 +365,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
     assert(is_valid(graph));
 
     if (!offset_) {
-        ::reverse_complement(sequence_.begin(), sequence_.end());
-        nodes_ = map_sequence_to_nodes(graph, sequence_);
+        reverse_complement_seq_path(graph, sequence_, nodes_);
     } else {
         // extract target sequence prefix
         std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
@@ -380,12 +379,10 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         }
 
         assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
+        std::vector<NodeType> rev_nodes = nodes_;
+        reverse_complement_seq_path(graph, rev_seq, rev_nodes);
 
-        // get reverse complement path
-        ::reverse_complement(rev_seq.begin(), rev_seq.end());
-        auto rev_nodes = map_sequence_to_nodes(graph, rev_seq);
-        assert(std::find(rev_nodes.begin(),
-                         rev_nodes.end(),
+        assert(std::find(rev_nodes.begin(), rev_nodes.end(),
                          DeBruijnGraph::npos) == rev_nodes.end());
 
         // trim off ending from reverse complement (corresponding to the added prefix)

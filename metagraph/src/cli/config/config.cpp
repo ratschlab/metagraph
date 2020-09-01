@@ -801,7 +801,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, align its reverse complement as well [off]\n");
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-c --canonical \t\t\ttreat the input graph as a canonical graph [off]\n");
+            fprintf(stderr, "\t   --primary-kmers\t\tindicate that the input graph has only primary k-mers [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");

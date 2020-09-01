@@ -8,6 +8,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -473,6 +474,18 @@ map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
     );
 
     return nodes;
+}
+
+void reverse_complement_seq_path(const SequenceGraph &graph,
+                                 std::string &seq,
+                                 std::vector<SequenceGraph::node_index> &path) {
+    if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
+        canonical_dbg->reverse_complement(seq, path);
+        return;
+    }
+
+    reverse_complement(seq.begin(), seq.end());
+    path = map_sequence_to_nodes(graph, seq);
 }
 
 } // namespace graph
