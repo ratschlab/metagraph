@@ -147,6 +147,17 @@ call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
             continue;
         }
 
+        // if a node suffix match of length >= sub_k is found, skip the next
+        // last_k - sub_k k-mers, since that match is also a match of
+        // length >= sub_k for the current k-mer
+        // e.g.,
+        // k = 5
+        // Query: AAAGTGTCG
+        // Graph: $$$GTGACG
+        // then
+        // GTG -> $$GTG (offset 2)
+        //  TG -> $$GTG (offset 3)
+        //   G -> $$GTG (offset 4)
         if (last_k >= sub_k) {
             i += last_k - sub_k;
             last_k = 0;
