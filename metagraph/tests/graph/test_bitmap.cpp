@@ -13,7 +13,7 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";

@@ -43,23 +43,23 @@ class KmerCollector {
     using Kmer = KMER;
 
     /**
-     * @param  k                      The k-mer length
-     * @param  both_strands_mode      If true, both a sequence and its
-     * reverse complement will be added (only makes sense for DNA sequences)
-     * @param  filter_suffix_encoded  Keep only k-mers with the given
-     * suffix. Useful for sharding the collection process.
-     * @param  num_threads            The number of threads in the pool
-     * processing incoming sequences
-     * @param  memory_preallocated    The number of bytes to reserve in
-     * the container
+     * @param  k The k-mer length
+     * @param  both_strands_mode If true, both a sequence and its reverse complement will
+     * be added (only makes sense for DNA sequences)
+     * @param  filter_suffix_encoded  Keep only k-mers with the given suffix. Useful for
+     * sharding the collection process.
+     * @param  num_threads The number of threads in the pool processing incoming sequences
+     * @param  memory_preallocated The number of bytes to reserve in the container
+     * @param canonical_only keep only canonical k-mers when in #both_strands_mode
      */
     KmerCollector(size_t k,
                   bool both_strands_mode = false,
                   std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
-                  const std::filesystem::path &tmp_dir = "/tmp/",
-                  size_t max_disk_space = 1e9);
+                  const std::filesystem::path &swap_dir = "/tmp/",
+                  size_t max_disk_space = 1e9,
+                  bool canonical_only = false);
 
     ~KmerCollector();
 
@@ -83,6 +83,8 @@ class KmerCollector {
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
     void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
+    void add_sequences(std::vector<std::string>&& sequences);
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences);
 
     // FYI: This function should be used only in special cases.
     //      In general, use `add_sequences` if possible, to make use of multiple threads.
@@ -100,11 +102,6 @@ class KmerCollector {
     inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
     inline size_t max_disk_space() const { return max_disk_space_; }
 
-    /**
-     * Sends sequences accumulated in #batcher_ for processing
-     * on the thread pool. */
-    void add_batch(std::vector<std::pair<std::string, uint64_t>>&& sequences);
-
   private:
     void join();
 
@@ -120,6 +117,8 @@ class KmerCollector {
 
     bool both_strands_mode_;
 
+    bool canonical_only_;
+
     std::filesystem::path tmp_dir_;
 
     size_t buffer_size_;
@@ -134,7 +133,8 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                   bool canonical_only = false);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
@@ -142,7 +142,8 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix,
+                 bool canonical_only = false);
 
 } // namespace kmer
 } // namespace mtg

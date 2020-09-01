@@ -4,6 +4,7 @@
 
 #include "test_matrix_helpers.hpp"
 
+#include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
@@ -13,6 +14,7 @@
 namespace {
 
 using namespace mtg;
+using namespace mtg::annot::binmat;
 using namespace mtg::test;
 
 template <typename BinMat>
@@ -24,6 +26,7 @@ typedef ::testing::Types<BRWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
                          UniqueRowBinmat,
+                         Rainbow<BRWT>,
                          Rainbowfish> BinMatTypes;
 TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
 

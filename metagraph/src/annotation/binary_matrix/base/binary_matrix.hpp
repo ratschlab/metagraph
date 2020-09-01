@@ -9,6 +9,10 @@
 #include "common/vector.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class BinaryMatrix {
   public:
     typedef uint64_t Row;
@@ -39,6 +43,21 @@ class BinaryMatrix {
 };
 
 
+class RainbowMatrix : public BinaryMatrix {
+  public:
+    virtual ~RainbowMatrix() {}
+
+    using BinaryMatrix::get_rows;
+
+    // Return unique rows (in arbitrary order) and update the row indexes
+    // in |rows| to point to their respective rows in the vector returned.
+    virtual std::vector<SetBitPositions>
+    get_rows(std::vector<Row> *rows, size_t num_threads = 1) const = 0;
+
+    virtual uint64_t num_distinct_rows() const = 0;
+};
+
+
 class BinaryMatrixRowDynamic : public BinaryMatrix {
   public:
     virtual ~BinaryMatrixRowDynamic() {}
@@ -50,6 +69,7 @@ class BinaryMatrixRowDynamic : public BinaryMatrix {
     virtual void clear_row(Row row) = 0;
     virtual void insert_rows(const std::vector<Row> &rows) = 0;
 };
+
 
 // Row streamer -- read rows from a serialized row major binary matrix
 template <typename RowType = BinaryMatrix::SetBitPositions>
@@ -75,5 +95,9 @@ class StreamRows {
 void append_row_major(const std::string &filename,
                       const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                       uint64_t num_cols);
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __SPARSE_MATRIX_HPP__

@@ -49,7 +49,7 @@ static void BM_BRWTCompressSparse(benchmark::State& state) {
         std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
     );
 
-    std::unique_ptr<BinaryMatrix> matrix;
+    std::unique_ptr<annot::binmat::BinaryMatrix> matrix;
 
     size_t i = 0;
     for (auto _ : state) {
@@ -94,7 +94,7 @@ static void BM_BRWTQueryRows(benchmark::State& state) {
         std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
     );
 
-    std::unique_ptr<BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
+    std::unique_ptr<annot::binmat::BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
         std::move(generated_columns),
         arity_arg,
         greedy_arg,

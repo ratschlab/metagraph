@@ -4,8 +4,9 @@
 #include <functional>
 #include <string>
 
-typedef std::function<void(const std::string&)> CallString;
-typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
+
+namespace mtg {
+namespace graph {
 
 
 template <class GraphChunk>
@@ -14,8 +15,8 @@ class IGraphChunkConstructor {
     virtual ~IGraphChunkConstructor() {}
 
     virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
-    virtual void add_sequences(const std::function<void(CallString)> &generator) = 0;
-    virtual void add_sequences(const std::function<void(CallStringCount)> &generator) = 0;
+    virtual void add_sequences(std::vector<std::string>&& sequences) = 0;
+    virtual void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) = 0;
 
     virtual GraphChunk* build_chunk() = 0;
 };
@@ -27,10 +28,13 @@ class IGraphConstructor {
     virtual ~IGraphConstructor() {}
 
     virtual void add_sequence(std::string_view sequence, uint64_t count = 1) = 0;
-    virtual void add_sequences(const std::function<void(CallString)> &generator) = 0;
-    virtual void add_sequences(const std::function<void(CallStringCount)> &generator) = 0;
+    virtual void add_sequences(std::vector<std::string>&& sequences) = 0;
+    virtual void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) = 0;
 
     virtual void build_graph(Graph *graph) = 0;
 };
+
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_CONSTRUCT_HPP__

@@ -12,6 +12,10 @@
 namespace mtg {
 namespace test {
 
+using namespace mtg::graph;
+using namespace mtg::graph::align;
+
+
 template <typename NodeType>
 void check_json_dump_load(const DeBruijnGraph &graph,
                           const Alignment<NodeType> &alignment,

@@ -11,14 +11,14 @@
 namespace mtg {
 namespace cli {
 
-std::unique_ptr<AnnotatedDBG>
-initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+std::unique_ptr<graph::AnnotatedDBG>
+initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
                          const Config &config);
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config);
+std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
-std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph, Config *config);
+std::unique_ptr<graph::MaskedDeBruijnGraph>
+mask_graph(const graph::AnnotatedDBG &anno_graph, Config *config);
 
 } // namespace cli
 } // namespace mtg

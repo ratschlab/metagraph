@@ -46,10 +46,10 @@ int clean_graph(Config *config) {
 
     auto graph = load_critical_dbg(files.at(0));
     // try loading k-mer counts
-    auto node_weights = graph->load_extension<NodeWeights>(files.at(0));
+    auto node_weights = graph->load_extension<graph::NodeWeights>(files.at(0));
 
     if (node_weights) {
-        if (auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get()))
+        if (auto *dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get()))
             dbg_succ->reset_mask();
 
         if (!node_weights->is_compatible(*graph)) {
@@ -70,22 +70,34 @@ int clean_graph(Config *config) {
 
         if (config->min_unitig_median_kmer_abundance == 0) {
             // skip zero k-mer counts for dummy k-mers in DBGSuccinct
-            const auto _graph = dynamic_cast<DBGSuccinct*>(graph.get())
-                    ? std::make_shared<MaskedDeBruijnGraph>(graph,
+            const auto _graph = dynamic_cast<graph::DBGSuccinct*>(graph.get())
+                    ? std::make_shared<graph::MaskedDeBruijnGraph>(graph,
                         [&](auto i) { return (*node_weights)[i] > 0; }, true)
                     : graph;
 
-            config->min_unitig_median_kmer_abundance
+            uint64_t cutoff
                 = estimate_min_kmer_abundance(*_graph, *node_weights,
-                                              config->fallback_abundance_cutoff,
                                               config->num_singleton_kmers);
+
+            if (cutoff != static_cast<uint64_t>(-1)) {
+                config->min_unitig_median_kmer_abundance = cutoff;
+            } else {
+                if (config->fallback_abundance_cutoff == -1) {
+                    logger->error("Cannot estimate expected minimum k-mer abundance"
+                                  " and fallback is disabled (--fallback -1). Terminating.");
+                    std::exit(129);
+                }
+                logger->warn("Cannot estimate expected minimum k-mer abundance."
+                             " Using fallback value: {}", config->fallback_abundance_cutoff);
+                config->min_unitig_median_kmer_abundance = config->fallback_abundance_cutoff;
+            }
         }
 
         if (config->min_count > 1
                 || config->max_count < std::numeric_limits<unsigned int>::max()) {
-            const auto &weights = *graph->get_extension<NodeWeights>();
+            const auto &weights = *graph->get_extension<graph::NodeWeights>();
 
-            graph = std::make_shared<MaskedDeBruijnGraph>(graph,
+            graph = std::make_shared<graph::MaskedDeBruijnGraph>(graph,
                 [&](auto i) { return weights[i] >= config->min_count
                                     && weights[i] <= config->max_count; },
                 true,
@@ -99,7 +111,7 @@ int clean_graph(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    if (dynamic_cast<const MaskedDeBruijnGraph *>(graph.get())) {
+    if (dynamic_cast<const graph::MaskedDeBruijnGraph *>(graph.get())) {
         logger->trace("Extracting sequences from subgraph...");
     } else {
         logger->trace("Extracting sequences from graph...");
@@ -207,7 +219,7 @@ int clean_graph(Config *config) {
 
             call_ones(removed_nodes, [&weights](auto i) { weights[i] = 0; });
 
-        } else if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
+        } else if (auto dbg_succ = std::dynamic_pointer_cast<graph::DBGSuccinct>(graph)) {
             // use entire graph without dummy BOSS edges
             graph->call_nodes([&](auto i) {
                 if (uint64_t count = weights[i])
@@ -257,7 +269,7 @@ int clean_graph(Config *config) {
 
             assert(node_weights->is_compatible(*graph));
 
-            MaskedDeBruijnGraph graph_slice(graph,
+            graph::MaskedDeBruijnGraph graph_slice(graph,
                 [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; },
                 false,
                 graph->is_canonical_mode()

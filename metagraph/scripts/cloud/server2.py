@@ -325,6 +325,8 @@ class SimpleHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.handle_nack_build(post_vars)
         elif parsed_url.path == '/jobs/nack/clean':
             self.handle_nack_clean(post_vars)
+        elif parsed_url.path == '/jobs/nack/transfer':
+            self.handle_nack_transfer(post_vars)
         elif parsed_url.path == '/jobs/preempt':
             self.handle_preempt(post_vars)
         else:

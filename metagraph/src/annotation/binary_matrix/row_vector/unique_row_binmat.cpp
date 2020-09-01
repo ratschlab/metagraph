@@ -3,15 +3,19 @@
 #include <sdsl/int_vector.hpp>
 #include <tsl/ordered_set.h>
 
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 UniqueRowBinmat::UniqueRowBinmat(uint64_t num_rows)
       : unique_rows_(1), row_rank_(num_rows, 0) {}
 
-UniqueRowBinmat::UniqueRowBinmat(std::vector<row_type>&& unique_rows,
+UniqueRowBinmat::UniqueRowBinmat(std::vector<SetBitPositions>&& unique_rows,
                                  std::vector<uint32_t>&& row_rank,
                                  uint32_t num_columns)
       : num_columns_(num_columns),
@@ -34,23 +38,23 @@ UniqueRowBinmat
                   uint32_t num_columns) {
     num_columns_ = num_columns;
 
-    using RowSet = tsl::ordered_set<row_type,
+    using RowSet = tsl::ordered_set<SetBitPositions,
                                     utils::VectorHash,
-                                    std::equal_to<row_type>,
-                                    std::allocator<row_type>,
-                                    std::vector<row_type>,
+                                    std::equal_to<SetBitPositions>,
+                                    std::allocator<SetBitPositions>,
+                                    std::vector<SetBitPositions>,
                                     uint32_t>;
     RowSet unique_rows;
 
     call_rows([&](const SetBitPositions &row) {
         num_relations_ += row.size();
-        auto it = unique_rows.emplace(row.begin(), row.end()).first;
+        auto it = unique_rows.emplace(row).first;
         row_rank_.push_back(it - unique_rows.begin());
         if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
             throw std::runtime_error("There must be less than 2^32 unique rows");
     });
 
-    unique_rows_ = const_cast<std::vector<row_type>&&>(
+    unique_rows_ = const_cast<std::vector<SetBitPositions>&&>(
         unique_rows.values_container()
     );
 }
@@ -65,8 +69,7 @@ bool UniqueRowBinmat::get(Row i, Column j) const {
 UniqueRowBinmat::SetBitPositions UniqueRowBinmat::get_row(Row i) const {
     assert(i < row_rank_.size());
     assert(row_rank_[i] < unique_rows_.size());
-    const row_type &row = unique_rows_[row_rank_[i]];
-    return SetBitPositions(row.begin(), row.end());
+    return unique_rows_[row_rank_[i]];
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
@@ -79,7 +82,7 @@ UniqueRowBinmat::get_rows(const std::vector<Row> &row_ids) const {
         ranks.push_back(row_rank_[i]);
     }
     for (size_t r : ranks) {
-        rows.emplace_back(unique_rows_[r].begin(), unique_rows_[r].end());
+        rows.push_back(unique_rows_[r]);
     }
     return rows;
 }
@@ -161,3 +164,7 @@ void UniqueRowBinmat::serialize(std::ostream &outstream) const {
 double UniqueRowBinmat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

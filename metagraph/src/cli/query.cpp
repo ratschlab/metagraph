@@ -1,12 +1,11 @@
 #include "query.hpp"
 
 #include <ips4o.hpp>
-#include <fmt/format.h>
 #include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -27,6 +26,9 @@ namespace cli {
 const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
+
+using namespace mtg::annot::binmat;
+using namespace mtg::graph;
 
 using mtg::common::logger;
 
@@ -109,11 +111,53 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
  *
  * @return     Annotation submatrix in the UniqueRowAnnotator representation
  */
-std::unique_ptr<annotate::UniqueRowAnnotator>
+std::unique_ptr<annot::UniqueRowAnnotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  const std::vector<uint64_t> &index_in_full,
                  size_t num_threads) {
     const uint64_t npos = -1;
+
+    if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
+        // shortcut construction for Rainbow<> annotation
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(index_in_full.size());
+        for (uint64_t i : index_in_full) {
+            if (i != npos) {
+                row_indexes.push_back(i);
+            } else {
+                row_indexes.push_back(0);
+            }
+        }
+
+        // get unique rows and set pointers to them in |row_indexes|
+        auto unique_rows = rb->get_rows(&row_indexes, num_threads);
+
+        if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("There must be less than 2^32 unique rows."
+                                     " Reduce the query batch size.");
+        }
+
+        // if the 0-th row is not empty, we must insert an empty unique row
+        // and reassign those indexes pointing to npos in |index_in_full|.
+        if (rb->get_row(0).size()) {
+            logger->trace("Add empty row");
+            unique_rows.emplace_back();
+            for (uint64_t i = 0; i < index_in_full.size(); ++i) {
+                if (index_in_full[i] == npos) {
+                    row_indexes[i] = unique_rows.size() - 1;
+                }
+            }
+        }
+
+        // copy annotations from the full graph to the query graph
+        return std::make_unique<annot::UniqueRowAnnotator>(
+            std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
+                                              std::vector<uint32_t>(row_indexes.begin(),
+                                                                    row_indexes.end()),
+                                              full_annotation.num_labels()),
+            full_annotation.get_label_encoder()
+        );
+    }
 
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
@@ -125,13 +169,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     ips4o::parallel::sort(from_full_to_small.begin(), from_full_to_small.end(),
                           utils::LessFirst(), num_threads);
 
-    using RowSet = tsl::ordered_set<SmallVector<uint32_t>,
+    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
                                     utils::VectorHash,
-                                    std::equal_to<SmallVector<uint32_t>>,
-                                    std::allocator<SmallVector<uint32_t>>,
-                                    std::vector<SmallVector<uint32_t>>,
+                                    std::equal_to<BinaryMatrix::SetBitPositions>,
+                                    std::allocator<BinaryMatrix::SetBitPositions>,
+                                    std::vector<BinaryMatrix::SetBitPositions>,
                                     uint32_t>;
-    RowSet unique_rows { SmallVector<uint32_t>() };
+    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
     std::vector<uint32_t> row_rank(index_in_full.size(), 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -158,7 +202,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         {
             for (uint64_t i = batch_begin; i < batch_end; ++i) {
                 const auto &row = rows[i - batch_begin];
-                auto it = unique_rows.emplace(row.begin(), row.end()).first;
+                auto it = unique_rows.emplace(row).first;
                 row_rank[from_full_to_small[i].second] = it - unique_rows.begin();
                 if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
                     throw std::runtime_error("There must be less than 2^32 unique rows."
@@ -167,12 +211,12 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
     }
 
-    auto &annotation_rows = const_cast<std::vector<SmallVector<uint32_t>>&>(
+    auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
         unique_rows.values_container()
     );
 
     // copy annotations from the full graph to the query graph
-    return std::make_unique<annotate::UniqueRowAnnotator>(
+    return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
                                           std::move(row_rank),
                                           full_annotation.num_labels()),
@@ -210,9 +254,12 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
-                      size_t num_threads) {
+                      size_t num_threads,
+                      bool canonical) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
+
+    canonical |= full_dbg.is_canonical_mode();
 
     Timer timer;
 
@@ -252,7 +299,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                               contigs.emplace_back(std::move(contig_args)...);
                           },
                           get_num_threads(),
-                          full_dbg.is_canonical_mode());
+                          canonical);  // pull only primary contigs when building canonical query graph
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
@@ -260,17 +307,35 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map contigs onto the full graph
     std::vector<uint64_t> index_in_full_graph;
 
-    if (full_dbg.is_canonical_mode()) {
+    if (canonical) {
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
+            std::string &contig = contigs[i].first;
             auto &nodes_in_full = contigs[i].second;
 
-            size_t j = 0;
-            full_dbg.map_to_nodes(contig,
-                [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-            );
-            assert(j == nodes_in_full.size());
+            if (full_dbg.is_canonical_mode()) {
+                size_t j = 0;
+                full_dbg.map_to_nodes(contig,
+                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
+                );
+            } else {
+                size_t j = 0;
+                // TODO: if a k-mer is found, don't search its reverse-complement
+                // TODO: add `primary/canonical` mode to DBGSuccinct?
+                full_dbg.map_to_nodes_sequentially(contig,
+                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
+                );
+                reverse_complement(contig.begin(), contig.end());
+                full_dbg.map_to_nodes_sequentially(contig,
+                    [&](auto node_in_full) {
+                        --j;
+                        if (node_in_full)
+                            nodes_in_full[j] = node_in_full;
+                    }
+                );
+                reverse_complement(contig.begin(), contig.end());
+                assert(j == 0);
+            }
         }
 
         logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
@@ -410,7 +475,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
 std::string get_alignment_header_and_swap_query(const std::string &name,
                                                 std::string *query_seq,
-                                                QueryAlignment<> *matches) {
+                                                align::QueryAlignment<> *matches) {
     std::string header;
 
     if (matches->size()) {
@@ -446,12 +511,18 @@ int query_graph(Config *config) {
 
     Timer timer;
 
-    std::unique_ptr<IDBGAligner> aligner;
+    std::unique_ptr<align::IDBGAligner> aligner;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
         aligner = build_aligner(*graph, *config);
+
+        // the fwd_and_reverse argument in the aligner config returns the best of
+        // the forward and reverse complement alignments, rather than both.
+        // so, we want to prevent it from doing this
+        auto &aligner_config = const_cast<align::DBGAlignerConfig&>(aligner->get_config());
+        aligner_config.forward_and_reverse_complement = false;
     }
 
     QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);
@@ -594,7 +665,8 @@ void QueryExecutor
             anno_graph_,
             generate_batch,
             config_.count_labels ? 0 : config_.discovery_fraction,
-            get_num_threads()
+            get_num_threads(),
+            anno_graph_.get_graph().is_canonical_mode() || config_.canonical
         );
 
         logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",

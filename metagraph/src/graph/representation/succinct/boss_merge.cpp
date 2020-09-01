@@ -5,9 +5,13 @@
 
 #include "common/algorithms.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace boss {
+
 using TAlphabet = BOSS::TAlphabet;
 
-namespace merge {
 
 /**
  * Helper function to determine the bin boundaries, given
@@ -123,58 +127,6 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
                           const std::vector<uint64_t> &nv,
                           bool verbose);
 
-/**
- * Distribute the merging of a set of BOSS tables over
- * bins, such that n parallel threads are used.
- */
-void parallel_merge_wrapper(const std::vector<const BOSS*> &graphs,
-                            const std::vector<std::vector<uint64_t>> &bins,
-                            std::mutex *mu,
-                            std::vector<BOSS::Chunk*> *chunks,
-                            bool verbose) {
-    assert(mu);
-    assert(graphs.size() > 0);
-    assert(graphs.size() == bins.size());
-    assert(chunks);
-
-    while (true) {
-        size_t curr_idx;
-
-        {
-            std::unique_lock<std::mutex> lock(*mu);
-
-            if (chunks->size() == bins.front().size() - 1)
-                break;
-
-            curr_idx = chunks->size();
-            chunks->push_back(NULL);
-        }
-
-        std::vector<uint64_t> kv;
-        std::vector<uint64_t> nv;
-        for (size_t i = 0; i < graphs.size(); i++) {
-            kv.push_back(bins.at(i).at(curr_idx));
-            nv.push_back(bins.at(i).at(curr_idx + 1));
-        }
-        auto *merged = merge_blocks(graphs, kv, nv, verbose);
-
-        {
-            std::unique_lock<std::mutex> lock(*mu);
-            chunks->at(curr_idx) = merged;
-        }
-    }
-}
-
-
-void concatenate_boss_chunks(const std::vector<BOSS::Chunk*> &boss_chunks,
-                             BOSS::Chunk *merged) {
-    for (BOSS::Chunk *chunk : boss_chunks) {
-        assert(chunk);
-        merged->extend(*chunk);
-        delete chunk;
-    }
-}
-
 
 BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
                                    size_t chunk_idx,
@@ -227,38 +179,29 @@ BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
     if (verbose)
         print_bin_stats(bins);
 
-    // create threads and start the jobs
-    std::vector<std::thread> threads;
-    std::mutex mu;
-
-    std::vector<BOSS::Chunk*> blocks;
-
-    for (size_t tid = 0; tid < num_threads; tid++) {
-        threads.emplace_back(parallel_merge_wrapper, graphs,
-                                                     bins,
-                                                     &mu,
-                                                     &blocks,
-                                                     verbose);
-        if (verbose)
-            std::cout << "starting thread " << tid << std::endl;
-    }
-
-    // join threads
-    if (verbose)
-        std::cout << "Waiting for threads to join" << std::endl;
-
-    for (size_t tid = 0; tid < threads.size(); tid++) {
-        threads[tid].join();
-    }
-
-    // collect results
-    if (verbose)
-        std::cout << "Collecting results" << std::endl;
+    std::vector<BOSS::Chunk*> blocks(bins.front().size() - 1, NULL);
 
     BOSS::Chunk *result = new BOSS::Chunk(graphs.at(0)->alph_size,
                                           graphs.at(0)->get_k(),
                                           false);
-    concatenate_boss_chunks(blocks, result);
+
+    #pragma omp parallel for num_threads(num_threads) ordered
+    for (size_t curr_idx = 0; curr_idx < blocks.size(); ++curr_idx) {
+        std::vector<uint64_t> kv;
+        std::vector<uint64_t> nv;
+        for (size_t i = 0; i < graphs.size(); i++) {
+            kv.push_back(bins.at(i).at(curr_idx));
+            nv.push_back(bins.at(i).at(curr_idx + 1));
+        }
+        BOSS::Chunk *chunk = merge_blocks(graphs, kv, nv, verbose);
+        assert(chunk);
+        #pragma omp ordered
+        {
+            result->extend(*chunk);
+        }
+        delete chunk;
+    }
+
     return result;
 }
 
@@ -421,5 +364,6 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
     return chunk;
 }
 
-
-} // namespace merge
+} // namespace boss
+} // namespace graph
+} // namespace mtg

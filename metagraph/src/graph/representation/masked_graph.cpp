@@ -5,6 +5,9 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::unique_ptr<bitmap>&& kmers_in_graph,
@@ -274,3 +277,6 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
 
     return DeBruijnGraph::operator==(other);
 }
+
+} // namespace graph
+} // namespace mtg

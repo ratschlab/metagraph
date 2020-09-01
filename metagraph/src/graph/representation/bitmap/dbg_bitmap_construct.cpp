@@ -3,14 +3,15 @@
 #include <progress_bar.hpp>
 
 #include "common/logger.hpp"
-#include "common/sorted_set.hpp"
-#include "common/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 
+
 namespace mtg {
-namespace bitmap_graph {
+namespace graph {
 
 using mtg::common::logger;
 using mtg::kmer::KmerExtractor2Bit;
@@ -35,12 +36,12 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
         kmer_collector_.add_sequence(sequence, count);
     }
 
-    void add_sequences(const std::function<void(CallString)> &generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
+    void add_sequences(std::vector<std::string>&& sequences) {
+        kmer_collector_.add_sequences(std::move(sequences));
     }
 
-    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
+    void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) {
+        kmer_collector_.add_sequences(std::move(sequences));
     }
 
     size_t get_k() const { return kmer_collector_.get_k(); }
@@ -318,5 +319,5 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     }
 }
 
-} // namespace bitmap_graph
+} // namespace graph
 } // namespace mtg

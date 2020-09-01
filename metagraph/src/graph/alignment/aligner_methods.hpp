@@ -7,9 +7,13 @@
 
 #include "aligner_helper.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/aligned_vector.hpp"
+#include "common/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
 
+
+namespace mtg {
+namespace graph {
+namespace align {
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class Seeder {
@@ -26,6 +30,7 @@ class Seeder {
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
     virtual const std::string_view get_query() const = 0;
+    virtual bool get_orientation() const = 0;
 };
 
 
@@ -47,6 +52,7 @@ class SuffixSeeder : public Seeder<NodeType> {
     const DeBruijnGraph& get_graph() const { return base_seeder_->get_graph(); }
     virtual const std::string_view get_query() const { return base_seeder_->get_query(); }
     const DBGAlignerConfig& get_config() const { return base_seeder_->get_config(); }
+    bool get_orientation() const { return base_seeder_->get_orientation(); }
 
   private:
     std::unique_ptr<ExactMapSeeder<NodeType>> base_seeder_;
@@ -54,14 +60,16 @@ class SuffixSeeder : public Seeder<NodeType> {
 
     std::vector<NodeType>& get_query_nodes() { return base_seeder_->get_query_nodes(); }
     std::vector<uint8_t>& get_offsets() { return base_seeder_->get_offsets(); }
+    size_t get_num_matching_kmers() const { return base_seeder_->get_num_matching_kmers(); }
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactMapSeeder : public Seeder<NodeType> {
-  friend SuffixSeeder<NodeType>;
+    friend SuffixSeeder<NodeType>;
 
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     ExactMapSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) { assert(config_.check_config_scores()); }
@@ -75,13 +83,14 @@ class ExactMapSeeder : public Seeder<NodeType> {
     const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
     const std::vector<uint8_t>& get_offsets() const { return offsets_; }
     const std::vector<score_t>& get_partial_sums() const { return partial_sum_; }
-    bool get_orientation() const { return orientation_; }
+    bool get_orientation() const override { return orientation_; }
 
     virtual void initialize(std::string_view query, bool orientation) override;
 
   protected:
     std::vector<NodeType>& get_query_nodes() { return query_nodes_; }
     std::vector<uint8_t>& get_offsets() { return offsets_; }
+    size_t get_num_matching_kmers() const { return num_matching_kmers_; }
 
   private:
     const DeBruijnGraph &graph_;
@@ -91,12 +100,14 @@ class ExactMapSeeder : public Seeder<NodeType> {
     std::vector<score_t> partial_sum_;
     std::vector<NodeType> query_nodes_;
     std::vector<uint8_t> offsets_;
+    size_t num_matching_kmers_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactSeeder : public ExactMapSeeder<NodeType> {
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : ExactMapSeeder<NodeType>(graph, config) {}
@@ -110,6 +121,7 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
 
   public:
     typedef typename Seeder<NodeType>::Seed Seed;
+    typedef DBGAlignerConfig::score_t score_t;
 
     MEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : ExactMapSeeder<NodeType>(graph, config) {}
@@ -277,7 +289,11 @@ class DefaultColumnExtender : public Extender<NodeType> {
     size_t end;
     score_t xdrop_cutoff;
     bool overlapping_range_;
+    size_t max_num_nodes;
 };
 
+} // namespace align
+} // namespace graph
+} // namespace mtg
 
 #endif // __DBG_ALIGNER_METHODS_HPP__

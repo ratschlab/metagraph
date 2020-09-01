@@ -7,7 +7,11 @@
 #include "common/algorithms.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 using mtg::common::logger;
 
 typedef std::vector<std::vector<uint64_t>> Partition;
@@ -286,3 +290,7 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
 
     return linkage_matrix;
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

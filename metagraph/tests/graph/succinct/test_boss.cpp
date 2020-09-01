@@ -14,6 +14,7 @@ namespace {
 KSEQ_INIT(gzFile, gzread);
 
 using namespace mtg;
+using namespace mtg::graph::boss;
 
 const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
@@ -1319,7 +1320,7 @@ TEST(BOSS, CallUnitigs) {
 TEST(BOSS, CallUnitigs1) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         BOSSConstructor constructor(3);
-        constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+        constructor.add_sequences(std::vector<std::string> { "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT" });
         BOSS graph(&constructor);
 
@@ -2217,10 +2218,9 @@ TEST(BOSS, map_to_edges) {
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::vector<BOSS::node_index> expected_result {
-            SequenceGraph::npos, SequenceGraph::npos,
-            k + 2, k + 2, k + 2
-        };
+        std::vector<BOSS::node_index> expected_result
+            = { graph::SequenceGraph::npos, graph::SequenceGraph::npos, k + 2, k + 2, k + 2 };
+
         for (size_t i = 1; i <= k; ++i) {
             expected_result.push_back(k + 2 + i);
         }

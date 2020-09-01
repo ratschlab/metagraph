@@ -6,15 +6,20 @@
 #include <memory>
 #include <string>
 
-class AnnotatedDBG;
-class IDBGAligner;
 class ThreadPool;
 
 namespace mtg {
 
 namespace seq_io {
-class FastaParser;
-} // namespace seq_io
+    class FastaParser;
+}
+
+namespace graph {
+    class AnnotatedDBG;
+    namespace align {
+        class IDBGAligner;
+    }
+}
 
 
 namespace cli {
@@ -23,18 +28,19 @@ class Config;
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
-std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const AnnotatedDBG &anno_graph,
+std::unique_ptr<graph::AnnotatedDBG>
+construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       double discovery_fraction,
-                      size_t num_threads);
+                      size_t num_threads,
+                      bool canonical = false);
 
 
 class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
-                  const AnnotatedDBG &anno_graph,
-                  const IDBGAligner *aligner,
+                  const graph::AnnotatedDBG &anno_graph,
+                  const graph::align::IDBGAligner *aligner,
                   ThreadPool &thread_pool)
       : config_(config),
         anno_graph_(anno_graph),
@@ -52,12 +58,12 @@ class QueryExecutor {
                                      size_t num_top_labels,
                                      double discovery_fraction,
                                      std::string anno_labels_delimiter,
-                                     const AnnotatedDBG &anno_graph);
+                                     const graph::AnnotatedDBG &anno_graph);
 
   private:
     const Config &config_;
-    const AnnotatedDBG &anno_graph_;
-    const IDBGAligner *aligner_;
+    const graph::AnnotatedDBG &anno_graph_;
+    const graph::align::IDBGAligner *aligner_;
     ThreadPool &thread_pool_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,

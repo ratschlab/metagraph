@@ -10,18 +10,19 @@
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "annotation/binary_matrix/row_vector/eigen_spmat.hpp"
 
+
+namespace mtg {
+namespace annot {
+
 using utils::remove_suffix;
-
-
-namespace annotate {
 
 
 template <typename Label>
 RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
     if (sparse) {
-        matrix_.reset(new EigenSpMat(num_rows));
+        matrix_.reset(new binmat::EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat<>(num_rows));
+        matrix_.reset(new binmat::VectorRowBinMat<>(num_rows));
     }
 }
 
@@ -29,7 +30,7 @@ template <typename Label>
 template <typename RowType>
 RowCompressed<Label>::RowCompressed(std::vector<RowType>&& annotation_rows,
                                     const std::vector<Label> &labels)
-      : matrix_(new VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
+      : matrix_(new binmat::VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }
@@ -40,10 +41,10 @@ template RowCompressed<std::string>::RowCompressed(std::vector<Vector<uint64_t>>
 
 template <typename Label>
 void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
-    if (dynamic_cast<EigenSpMat*>(matrix_.get())) {
-        matrix_.reset(new EigenSpMat(num_rows));
+    if (dynamic_cast<binmat::EigenSpMat*>(matrix_.get())) {
+        matrix_.reset(new binmat::EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new VectorRowBinMat<>(num_rows));
+        matrix_.reset(new binmat::VectorRowBinMat<>(num_rows));
     }
 
     label_encoder_.clear();
@@ -153,14 +154,14 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
 
         assert(filenames.size() > 1);
 
-        if (!dynamic_cast<VectorRowBinMat<>*>(matrix_.get())) {
+        if (!dynamic_cast<binmat::VectorRowBinMat<>*>(matrix_.get())) {
             std::cerr << "Error: loading from multiple row annotators is supported"
                       << " only for the VectorRowBinMat representation" << std::endl;
             exit(1);
         }
 
-        auto &matrix = dynamic_cast<VectorRowBinMat<>&>(*matrix_);
-        auto next_block = std::make_unique<VectorRowBinMat<>>(matrix_->num_rows());
+        auto &matrix = dynamic_cast<binmat::VectorRowBinMat<>&>(*matrix_);
+        auto next_block = std::make_unique<binmat::VectorRowBinMat<>>(matrix_->num_rows());
 
         for (auto filename : filenames) {
             if (filename == filenames[0])
@@ -273,21 +274,21 @@ void RowCompressed<Label>::load_shape(const std::string &filename,
 }
 
 template <typename Label>
-StreamRows<BinaryMatrix::SetBitPositions>
+binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
 RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
     std::string filename = remove_suffix(filebase, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
     // rows
-    return StreamRows<BinaryMatrix::SetBitPositions>(filename, instream.tellg());
+    return binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>(filename, instream.tellg());
 }
 
 template <typename Label>
 void RowCompressed<Label>
 ::serialize(const std::string &filebase,
             const LabelEncoder<Label> &label_encoder,
-            const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
+            const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows) {
     auto filename = remove_suffix(filebase, kExtension) + kExtension;
 
     std::ofstream outstream(filename, std::ios::binary);
@@ -297,9 +298,10 @@ void RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    append_row_major(filename, call_rows, label_encoder.size());
+    binmat::append_row_major(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;
 
-} // namespace annotate
+} // namespace annot
+} // namespace mtg

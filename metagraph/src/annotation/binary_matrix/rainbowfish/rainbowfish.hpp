@@ -9,6 +9,10 @@
 #include "annotation/binary_matrix/row_flat/flat_matrix.hpp"
 
 
+namespace mtg {
+namespace annot {
+namespace binmat {
+
 class Rainbowfish : public BinaryMatrix {
   public:
     Rainbowfish() {}
@@ -26,6 +30,10 @@ class Rainbowfish : public BinaryMatrix {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    // Return unique rows (in arbitrary order) and update the row indexes
+    // in |rows| to point to their respective rows in the vector returned.
+    std::vector<SetBitPositions> get_rows(std::vector<Row> *rows,
+                                          size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -54,5 +62,9 @@ class Rainbowfish : public BinaryMatrix {
 
     uint64_t get_code(Row row) const;
 };
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg
 
 #endif // __RAINBOWFISH_HPP__

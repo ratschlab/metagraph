@@ -99,6 +99,29 @@ bsub -J "cluster" \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_1M.csv \
             --parallel 96 \
             2>&1";
+
+bsub -J "build_brwt_5M" \
+     -oo ~/metagenome/data/BIGSI/logs/build_brwt_5M.lsf \
+     -W 120:00 \
+     -n 48 -R "rusage[mem=42000] span[hosts=1]" \
+    "cat ~/metagenome/data/BIGSI/annotation/columns.txt \
+        | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+            --anno-type brwt \
+            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
+            -o ~/metagenome/data/BIGSI/annotation/annotation_5M \
+            -p 96 --parallel-nodes 48 \
+            2>&1"
+
+bsub -J "relax_brwt_5M" \
+     -oo ~/metagenome/data/BIGSI/logs/relax_brwt_5M.lsf \
+     -W 120:00 \
+     -n 36 -R "rusage[mem=17000] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph relax_brwt -v \
+        -p 36 \
+        --relax-arity 16 \
+        -o /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_5M.relaxed \
+        /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_5M.brwt.annodbg \
+        2>&1"
 ```
 
 ## Generate subsets
@@ -143,10 +166,105 @@ for i in {1..33}; do
                 ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.small.dbg \
                 2>&1"; \
 done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "to_primary_contigs_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/to_primary_contigs_${N}.lsf \
+         -W 12:00 \
+         -n 20 -R "rusage[mem=2500] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform -v \
+                --to-fasta --primary-kmers -p 20 \
+                -o ~/metagenome/data/BIGSI/subsets/contigs/graph_subset_${N}.primary_contigs \
+                ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.dbg \
+                2>&1"; \
+done
+
+
+for i in {1..33}; do
+    N=$((750 * i));
+    bsub -J "subset_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/graph_subset_${N}_primary.lsf \
+         -W 24:00 \
+         -n 15 -R "rusage[mem=12000] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA build -v \
+                -k 31 \
+                --parallel 30 \
+                --mem-cap-gb 150 \
+                --index-ranges 12 \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/contigs/graph_subset_${N}.primary_contigs.fasta.gz \
+                2>&1"; \
+done
+
+
+for i in {1..33}; do
+    N=$((750 * i));
+    OUTDIR=~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary
+    mkdir -p $OUTDIR
+    bsub -J "annotate_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/annotate_subset_${N}_primary.lsf \
+         -W 12:00 \
+         -n 15 -R "rusage[mem=3000] span[hosts=1]" \
+        "cat subsets/files_${N}.txt \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA annotate -v \
+                -i ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary.dbg \
+                --fwd-and-reverse \
+                --parallel 15 \
+                --anno-filename \
+                --separately \
+                -o $OUTDIR \
+                2>&1"; \
+done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "to_brwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_brwt_${N}_primary.lsf \
+         -W 24:00 \
+         -n 20 -R "rusage[mem=$((N + 1))] span[hosts=1]" \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+                --anno-type brwt --greedy \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                --parallel 20 \
+                2>&1"; \
+done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "relax_brwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/relax_brwt_${N}_primary.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA relax_brwt -v \
+                --relax-arity 20 \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.relaxed \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.brwt.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "to_rbbrwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rbbrwt_${N}_primary.lsf \
+         -W 96:00 \
+         -n 20 -R "rusage[mem=$((7 * N / 4 + 1000))] span[hosts=1]" \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+                --anno-type rb_brwt --relax-arity 20 \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                --parallel 20 \
+                2>&1"; \
+done
 ```
 
 
-## Annotate graphs for subsets
 ```bash
 for i in {33..1}; do
     N=$((750 * i));
@@ -186,10 +304,10 @@ tail -n +3 ~/metagenome/data/BIGSI/subsets/rename_columns.txt > ~/metagenome/dat
 for x in $(cat ~/metagenome/data/BIGSI/subsets/rename_columns_.txt); do echo "$x $(basename ${x%.unitigs.fasta.gz})"; done > ~/metagenome/data/BIGSI/subsets/rename_columns.txt
 rm ~/metagenome/data/BIGSI/subsets/rename_columns_.txt
 
-extension=".column.annodbg";
+extension="_primary.rb_brwt.annodbg";
 for i in {33..1}; do
     N=$((750 * i));
-    annotation="~/metagenome/data/BIGSI/subsets/annotation_subset_${N}${extension}";
+    annotation=~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}${extension};
     old="${annotation%$extension}.path_labels${extension}";
     mv $annotation $old;
     bsub -J "rename_columns_${N}" \
@@ -199,7 +317,7 @@ for i in {33..1}; do
         "~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno \
             --rename-cols ~/metagenome/data/BIGSI/subsets/rename_columns.txt \
             -o $annotation \
-            $old"; \
+            $old && rm $old"; \
 done
 ```
 
@@ -275,6 +393,21 @@ for i in {33..1}; do
                 --parallel 20 \
                 2>&1"; \
 done
+
+
+for i in {33..1}; do
+    N=$((750 * i));
+    bsub -J "to_rbbrwt_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rbbrwt_${N}.lsf \
+         -W 96:00 \
+         -n 10 -R "rusage[mem=$((14 * N / 9 + 1000))] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+                --anno-type rb_brwt --greedy \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.column.annodbg \
+                --parallel 20 \
+                2>&1"; \
+done
 ```
 
 ## Query graph
@@ -285,7 +418,7 @@ METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA
 for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta; do
-    NAME=metagraph.small_indexed.brwt_relax
+    NAME=metagraph.primary.rb_brwt
     # name of the output folder
     OUTDIR=~/metagenome/data/BIGSI/subsets/query_results/$(basename $QUERY)/${NAME}
     mkdir -p $OUTDIR
@@ -293,7 +426,8 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
     for num_columns in $(seq 750 3000 24750); do
         run="$METAGRAPH query -v --discovery-fraction 0.0 --count-labels --fast \
                 -i \${TMPDIR}/graph.dbg \
-                -a \${TMPDIR}/graph.brwt.annodbg \
+                -a \${TMPDIR}/graph.rb_brwt.annodbg \
+                --canonical \
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \
@@ -303,10 +437,10 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
             " \
                 TMPDIR=/dev/shm/$NAME_$num_columns_\${LSB_JOBID};
                 mkdir \${TMPDIR};
-                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}.dbg \
+                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}_primary.dbg \
                     \${TMPDIR}/graph.dbg; \
-                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}.relaxed.brwt.annodbg \
-                    \${TMPDIR}/graph.brwt.annodbg; \
+                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}_primary.rb_brwt.annodbg \
+                    \${TMPDIR}/graph.rb_brwt.annodbg; \
                 /usr/bin/time -v $run > /dev/null 2> /dev/null; \
                 for i in {1..10}; do \
                     /usr/bin/time -v $run > \${TMPDIR}/out 2>> \${TMPDIR}/err;
@@ -394,4 +528,17 @@ for i in {1..33}; do
                 /cluster/work/grlab/projects/metagenome/data/BIGSI/subsets/cobs/cobs_index_h${num_hashes}_fpr${fpr}_${N}.cobs_compact \
                 2>&1"; \
 done
+```
+
+#### Profile
+```bash
+#QUERY=~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta
+QUERY=~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta
+#QUERY=~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta
+./metagraph query -v --discovery-fraction 0.0 --count-labels --fast \
+    -i ~/metagenome/data/BIGSI/subsets/graph_subset_24750.dbg \
+    -a ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_24750.rb_brwt.annodbg \
+    $QUERY \
+    > ~/metagenome/scratch/out_test.txt \
+    2>&1
 ```

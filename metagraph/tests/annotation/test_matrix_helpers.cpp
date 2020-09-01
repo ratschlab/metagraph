@@ -11,10 +11,22 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
+#include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 
 namespace mtg {
+
+using namespace mtg::annot::binmat;
+
+namespace annot {
+using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
+std::unique_ptr<Rainbow<BRWT>>
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+                       size_t max_brwt_arity = 1);
+} // namespace annot
+
+
 namespace test {
 
 typedef std::function<void(const BinaryMatrix::SetBitPositions &)> RowCallback;
@@ -108,6 +120,14 @@ BRWTOptimized build_matrix_from_columns<BRWTOptimized>(const BitVectorPtrArray &
         columns_copy.push_back(col_ptr->copy());
     }
     return BRWTOptimized(BRWTBottomUpBuilder::build(std::move(columns_copy)));
+}
+template <>
+Rainbow<BRWT> build_matrix_from_columns<Rainbow<BRWT>>(const BitVectorPtrArray &columns, uint64_t) {
+    return std::move(*annot::convert_to_RainbowBRWT([&](const auto &callback) {
+        for (size_t j = 0; j < columns.size(); ++j) {
+            callback(columns[j]->copy());
+        }
+    }));
 }
 
 template <typename TypeParam>
@@ -276,6 +296,7 @@ template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
 template void test_matrix<RowConcatenated<>>(const RowConcatenated<>&, const BitVectorPtrArray &);
 template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);
+template void test_matrix<Rainbow<BRWT>>(const Rainbow<BRWT>&, const BitVectorPtrArray &);
 template void test_matrix<Rainbowfish>(const Rainbowfish&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<1>>(const RainbowfishBuffer<1>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<2>>(const RainbowfishBuffer<2>&, const BitVectorPtrArray &);

@@ -8,22 +8,17 @@
 
 #include <cstdlib>
 
-#include <tsl/ordered_map.h>
-
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
-#include "common/vectors/aligned_vector.hpp"
+#include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/vector_map.hpp"
 
 typedef std::pair<std::string, size_t> StringCountPair;
 
-template <typename Key, typename T>
-using VectorOrderedMap = tsl::ordered_map<Key, T,
-                                          std::hash<Key>, std::equal_to<Key>,
-                                          std::allocator<std::pair<Key, T>>,
-                                          std::vector<std::pair<Key, T>>,
-                                          uint64_t>;
 
+namespace mtg {
+namespace graph {
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
@@ -59,7 +54,7 @@ void AnnotatedSequenceGraph
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (force_fast_) {
-        auto row_major = dynamic_cast<annotate::RowCompressed<std::string>*>(annotator_.get());
+        auto row_major = dynamic_cast<annot::RowCompressed<std::string>*>(annotator_.get());
         if (row_major) {
             row_major->add_labels_fast(indices, labels);
             return;
@@ -78,7 +73,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    VectorOrderedMap<row_index, size_t> index_counts;
+    VectorMap<row_index, size_t> index_counts;
     index_counts.reserve(sequence.size() - dbg_.get_k() + 1);
 
     size_t num_present_kmers = 0;
@@ -146,7 +141,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    VectorOrderedMap<row_index, size_t> index_counts;
+    VectorMap<row_index, size_t> index_counts;
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     index_counts.reserve(num_kmers);
 
@@ -226,7 +221,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
 
     typedef uint64_t LabelCode;
     // map each label code to a k-mer presence mask and its popcount
-    VectorOrderedMap<LabelCode, SignatureCount> label_codes_to_presence;
+    VectorMap<LabelCode, SignatureCount> label_codes_to_presence;
 
     auto label_codes = annotator_->get_matrix().get_rows(row_indices);
 
@@ -553,3 +548,6 @@ int32_t AnnotatedDBG
 
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
 }
+
+} // namespace graph
+} // namespace mtg

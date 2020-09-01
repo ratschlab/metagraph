@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include <tsl/ordered_map.h>
+#include "common/vector_map.hpp"
 
 #include "../test_helpers.hpp"
 #include "test_annotation.hpp"
@@ -11,15 +11,10 @@ namespace {
 using namespace mtg;
 using namespace mtg::test;
 
-template <typename Key, typename T>
-using VectorOrderedMap = tsl::ordered_map<Key, T,
-                                          std::hash<Key>, std::equal_to<Key>,
-                                          std::allocator<std::pair<Key, T>>,
-                                          std::vector<std::pair<Key, T>>,
-                                          uint64_t>;
+using mtg::annot::MultiLabelEncoded;
 
 
-std::vector<std::string> get_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels(const MultiLabelEncoded<std::string> &annotator,
                                     const std::vector<uint64_t> &indices,
                                     double min_label_frequency = 0.0) {
     const auto& label_encoder = annotator.get_label_encoder();
@@ -108,10 +103,10 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
-std::vector<std::string> get_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels_by_label(const MultiLabelEncoded<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    VectorOrderedMap<uint64_t, size_t> index_counts;
+    VectorMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }
@@ -198,7 +193,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels_by_label) {
 
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels(const annotate::MultiLabelEncoded<std::string> &annotator,
+get_top_labels(const MultiLabelEncoded<std::string> &annotator,
                const std::vector<uint64_t> &indices,
                size_t num_top_labels = static_cast<size_t>(-1),
                double min_label_frequency = 0.0) {
@@ -282,14 +277,14 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
 }
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels_by_label(const annotate::MultiLabelEncoded<std::string> &annotator,
+get_top_labels_by_label(const MultiLabelEncoded<std::string> &annotator,
                         const std::vector<uint64_t> &indices,
                         size_t num_top_labels = static_cast<size_t>(-1),
                         double min_label_frequency = 0.0) {
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    VectorOrderedMap<uint64_t, size_t> index_counts;
+    VectorMap<uint64_t, size_t> index_counts;
     for (auto i : indices) {
         index_counts[i] = 1;
     }

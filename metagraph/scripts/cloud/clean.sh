@@ -11,9 +11,9 @@
 #  - the location where the cleaned file bill be placed
 
 # check the command-line arguments
-if [ "$#" -ne 5 ]; then
+if [ "$#" -ne 6 ]; then
       cmd=("$@")
-	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_file> <num_singletons> <fallback>, called with ${cmd[*]}"
+	    echo_err "Usage: clean.sh <sra_id> <input_file> <output_file> <num_singletons> <fallback> <cores>, called with ${cmd[*]}"
 	    exit 1
 fi
 
@@ -24,6 +24,7 @@ input_file=$2
 output_file=$3
 num_singletons=$4
 fallback=$5
-
-execute metagraph clean -v -p 2 --min-count 1 --num-singletons "${num_singletons}"  --prune-unitigs 0 --fallback "${fallback}" --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
+cores=$6
+# TODO, set back --fallback "${fallback}"
+execute metagraph clean -v -p "$cores" --min-count 1 --num-singletons "${num_singletons}"  --prune-unitigs 0 --fallback "${fallback}" --prune-tips 62 --to-fasta -o "${output_file}" "${input_file}"
 rm -rf $(dirname "${input_file}")

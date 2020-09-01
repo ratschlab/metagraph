@@ -5,7 +5,9 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 
 script_path = os.path.dirname(os.path.realpath(__file__))
-METAGRAPH = os.path.join(script_path,  '..', 'build', 'metagraph')
+
+METAGRAPH = './metagraph'
+
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 
 graph_file_extension = {'succinct': '.dbg',

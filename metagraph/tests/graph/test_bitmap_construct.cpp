@@ -17,14 +17,14 @@
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/sorted_set.hpp"
+#include "common/sorted_sets/sorted_set.hpp"
 #include "kmer/kmer_collector.hpp"
 
 
 namespace {
 
 using namespace mtg;
-using namespace mtg::bitmap_graph;
+using namespace mtg::graph;
 using mtg::kmer::KmerExtractor2Bit;
 
 const std::string test_data_dir = "../tests/data";

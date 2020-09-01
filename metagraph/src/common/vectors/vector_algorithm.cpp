@@ -464,15 +464,14 @@ void compute_subindex(const bit_vector &column,
         return;
 
     uint64_t i = begin;
-    uint64_t rank = offset;
 
     // check if all ones
     if (popcount == end - begin) {
-        for ( ; i + 64 <= end; i += 64, rank += 64) {
-            subindex->set_int(rank, 0xFFFF, 64);
+        for ( ; i + 64 <= end; i += 64, offset += 64) {
+            subindex->set_int(offset, 0xFFFF, 64);
         }
-        if (begin < end) {
-            subindex->set_int(rank, sdsl::bits::lo_set[end - begin], end - begin);
+        if (i < end) {
+            subindex->set_int(offset, sdsl::bits::lo_set[end - i], end - i);
         }
         return;
     }
@@ -486,11 +485,11 @@ void compute_subindex(const bit_vector &column,
             assert(j >= i);
             assert(reference[j]);
 
-            rank += count_ones(reference, i, j);
+            offset += count_ones(reference, i, j);
 
-            assert(rank < subindex->size());
+            assert(offset < subindex->size());
 
-            (*subindex)[rank++] = true;
+            (*subindex)[offset++] = true;
             i = j + 1;
         });
 #if __BMI2__
@@ -500,14 +499,14 @@ void compute_subindex(const bit_vector &column,
             uint64_t mask = reference.get_int(i, 64);
             int popcount = sdsl::bits::cnt(mask);
             if (uint64_t a = column.get_int(i, 64))
-                subindex->set_int(rank, _pext_u64(a, mask), popcount);
-            rank += popcount;
+                subindex->set_int(offset, _pext_u64(a, mask), popcount);
+            offset += popcount;
         }
         if (i < end) {
             uint64_t mask = reference.get_int(i, end - i);
             int popcount = sdsl::bits::cnt(mask);
             if (uint64_t a = column.get_int(i, end - i))
-                subindex->set_int(rank, _pext_u64(a, mask), popcount);
+                subindex->set_int(offset, _pext_u64(a, mask), popcount);
         }
     }
 #endif

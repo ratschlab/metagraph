@@ -9,10 +9,14 @@
 #include "common/vector.hpp"
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
-#include "common/hash/hash.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
+
+namespace mtg {
+namespace annot {
+namespace binmat {
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                          uint64_t num_columns,
@@ -184,8 +188,7 @@ Rainbowfish::get_rows(const std::vector<Row> &rows) const {
         row_codes[i] = { get_code(rows[i]), i };
     }
 
-    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
-                          utils::LessFirst(), get_num_threads());
+    std::sort(row_codes.begin(), row_codes.end(), utils::LessFirst());
 
     std::vector<SetBitPositions> result(rows.size());
 
@@ -203,6 +206,39 @@ Rainbowfish::get_rows(const std::vector<Row> &rows) const {
     }
 
     return result;
+}
+
+std::vector<Rainbowfish::SetBitPositions>
+Rainbowfish::get_rows(std::vector<Row> *rows, size_t num_threads) const {
+    assert(rows);
+
+    std::vector<std::pair<uint64_t, /* code */
+                          uint64_t /* row */>> row_codes(rows->size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_codes[i] = { get_code((*rows)[i]), i };
+    }
+
+    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
+                          utils::LessFirst(), num_threads);
+
+    std::vector<SetBitPositions> unique_rows;
+
+    uint64_t last_code = std::numeric_limits<uint64_t>::max();
+
+    // TODO: use multiple threads
+    for (const auto &[code, i] : row_codes) {
+        if (code != last_code) {
+            unique_rows.push_back(
+                reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_)
+            );
+            last_code = code;
+        }
+        (*rows)[i] = unique_rows.size() - 1;
+    }
+
+    return unique_rows;
 }
 
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
@@ -265,3 +301,7 @@ void Rainbowfish::serialize(std::ostream &out) const {
 uint64_t Rainbowfish::num_relations() const {
     return num_relations_;
 }
+
+} // namespace binmat
+} // namespace annot
+} // namespace mtg

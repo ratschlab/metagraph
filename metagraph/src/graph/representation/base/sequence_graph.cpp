@@ -8,8 +8,11 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
-using namespace mtg;
+
+namespace mtg {
+namespace graph {
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -347,14 +350,14 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
                                    bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
+    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t num_threads,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
-    ::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
+    ::mtg::graph::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
 }
 
 /**
@@ -471,3 +474,18 @@ map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
 
     return nodes;
 }
+
+void reverse_complement_seq_path(const SequenceGraph &graph,
+                                 std::string &seq,
+                                 std::vector<SequenceGraph::node_index> &path) {
+    if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
+        canonical_dbg->reverse_complement(seq, path);
+        return;
+    }
+
+    reverse_complement(seq.begin(), seq.end());
+    path = map_sequence_to_nodes(graph, seq);
+}
+
+} // namespace graph
+} // namespace mtg

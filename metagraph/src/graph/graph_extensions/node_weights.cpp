@@ -3,6 +3,9 @@
 #include "common/algorithms.hpp"
 
 
+namespace mtg {
+namespace graph {
+
 NodeWeights::NodeWeights(uint64_t max_index, size_t bits_per_count)
       : weights_(max_index, 0, bits_per_count),
         max_weight_(sdsl::bits::lo_set[weights_.width()]) {}
@@ -76,3 +79,6 @@ void NodeWeights::add_weight(node_index i, weight w) {
                     ? old_weight + w
                     : max_weight_;
 }
+
+} // namespace graph
+} // namespace mtg

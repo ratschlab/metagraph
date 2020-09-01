@@ -23,19 +23,19 @@ int merge_graph(Config *config) {
 
     const auto &files = config->fnames;
 
-    BOSS *graph = NULL;
+    graph::boss::BOSS *graph = NULL;
 
     Timer timer;
 
-    std::vector<std::shared_ptr<DBGSuccinct>> dbg_graphs;
-    std::vector<const BOSS*> graphs;
+    std::vector<std::shared_ptr<graph::DBGSuccinct>> dbg_graphs;
+    std::vector<const graph::boss::BOSS*> graphs;
 
     config->canonical = true;
 
     for (const auto &file : files) {
         logger->info("Opening file '{}'", file);
 
-        dbg_graphs.emplace_back(load_critical_graph_from_file<DBGSuccinct>(file));
+        dbg_graphs.emplace_back(load_critical_graph_from_file<graph::DBGSuccinct>(file));
 
         graphs.push_back(&dbg_graphs.back()->get_boss());
 
@@ -53,10 +53,10 @@ int merge_graph(Config *config) {
 
         graph = dbg_graphs.at(0)->release_boss();
 
-        if (graph->get_state() != BOSS::State::DYN) {
+        if (graph->get_state() != graph::boss::BOSS::State::DYN) {
             logger->trace("Switching state of succinct graph to dynamic...");
 
-            graph->switch_state(BOSS::State::DYN);
+            graph->switch_state(graph::boss::BOSS::State::DYN);
 
             logger->trace("Switching done in {} sec", timer.elapsed());
         }
@@ -72,7 +72,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging blocks");
         timer.reset();
 
-        auto *chunk = merge::merge_blocks_to_chunk(
+        auto *chunk = graph::boss::merge_blocks_to_chunk(
             graphs,
             config->part_idx,
             config->parts_total,
@@ -91,7 +91,7 @@ int merge_graph(Config *config) {
                               + "." + std::to_string(config->part_idx)
                               + "_" + std::to_string(config->parts_total));
         } else {
-            graph = new BOSS(graphs[0]->get_k());
+            graph = new graph::boss::BOSS(graphs[0]->get_k());
             chunk->initialize_boss(graph);
         }
         delete chunk;
@@ -99,7 +99,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging graphs");
         timer.reset();
 
-        graph = merge::merge(graphs, get_verbose());
+        graph = graph::boss::merge(graphs, get_verbose());
     }
     dbg_graphs.clear();
 
@@ -108,7 +108,7 @@ int merge_graph(Config *config) {
     logger->info("Graphs merged in {} sec", timer.elapsed());
 
     // graph output
-    DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
+    graph::DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
 
     return 0;
 }

@@ -141,6 +141,7 @@ kmc_input="${kmc_dir}/sra_file_list"
 find "${fastq_dir}" -type f > "$kmc_input"
 
 bin_count=$(( $(ulimit -n) - 10))
+bin_count=$(( bin_count > 2000 ? 2000 : bin_count))
 kmc_output="${output_dir}/stats"
 if ! (execute kmc -k31 -ci1 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"); then
   echo_err "[$sra_id] kmc command failed. Exiting with code 6"
@@ -179,7 +180,7 @@ fi
 
 echo singleton_kmers > "${kmc_dir}/${sra_id}.stats"
 rm -rf "${tmp_dir}" "${fastq_dir}"
-rm -rf /mnt/disks/ssd/fasterqtmp
+
 exit_with 0
 
 # Note: sra_dir is deleted later in the python client, because we want to measure its size

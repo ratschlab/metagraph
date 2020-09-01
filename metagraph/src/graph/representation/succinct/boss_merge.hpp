@@ -9,7 +9,9 @@
 #include "boss_chunk.hpp"
 
 
-namespace merge {
+namespace mtg {
+namespace graph {
+namespace boss {
 
     /**
      * Given a list of boss tables, this function
@@ -25,6 +27,8 @@ namespace merge {
                                        size_t num_bins_per_thread,
                                        bool verbose = false);
 
-} // namespace merge
+} // namespace boss
+} // namespace graph
+} // namespace mtg
 
 #endif // __BOSS_MERGE_HPP__
