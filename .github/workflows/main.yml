@@ -17,7 +17,6 @@ jobs:
     - name: install dependencies
       run: |
         sudo apt-get install g++-9
-        sudo apt-get install python3-venv
 
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
@@ -26,7 +25,9 @@ jobs:
         sudo make install
 
     - name: install dependencies for integration tests
-      run: pip3 install parameterized
+      run: |
+        pip3 install parameterized
+        sudo apt-get install python3-venv
 
     - name: install libmaus2-lite
       run: |
