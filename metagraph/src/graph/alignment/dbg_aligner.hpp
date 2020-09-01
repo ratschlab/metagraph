@@ -14,6 +14,9 @@
 
 
 namespace mtg {
+
+using mtg::common::logger;
+
 namespace graph {
 namespace align {
 
