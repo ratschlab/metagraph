@@ -1822,15 +1822,13 @@ inline bool masked_pick_single_incoming(const BOSS &boss,
     return false;
 }
 
-using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
-
 /*
  * Traverse graph from the specified (k+1)-mer/edge and call all paths reachable from it.
  * @param select_last_edge if true, at a bifurcation we always select the last edge (if
  * not visited), or we stop the sequence. Useful for diff-based annotations.
  */
 void call_paths(const BOSS &boss,
-                std::vector<Edge>&& edges,
+                std::vector<edge_index>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -1849,10 +1847,10 @@ void call_paths(const BOSS &boss,
 // Returns new edges visited while fetching the path (only returns
 // a non-empty set for primary mode |kmers_in_single_form| = true).
 // Since fwd will be called on all edges in the returned vector, the corresponding
-// node sequences have been precomputed in these Edges
+// node sequences have been precomputed in these edge_index's
 // e.g.,
 // edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
-std::vector<Edge>
+std::vector<edge_index>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -1912,7 +1910,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
-                    *this, { Edge(start, get_node_seq(start)) }, callback,
+                    *this, { start }, callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
@@ -2104,7 +2102,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 }
 
 void call_paths(const BOSS &boss,
-                std::vector<Edge>&& edges,
+                std::vector<edge_index>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -2122,14 +2120,14 @@ void call_paths(const BOSS &boss,
 
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
-    std::vector<TAlphabet> kmer;
     std::vector<edge_index> out_edges;
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
         std::vector<edge_index> path;
-        auto [edge, sequence] = std::move(edges.back());
+        edge_index edge = edges.back();
         edges.pop_back();
+        auto sequence = boss.get_node_seq(edge);
 
         path.reserve(100);
         sequence.reserve(100 + boss.get_k());
@@ -2196,7 +2194,6 @@ void call_paths(const BOSS &boss,
             if (out_edges.size() == 1 && !stop_even_if_single_outgoing)
                 continue;
 
-            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
             edge_index next_edge = 0;
 
             // masked_call_outgoing returns edges in reverse order, so the first returned
@@ -2216,7 +2213,7 @@ void call_paths(const BOSS &boss,
                         next_edge = edge;
                     } else {
                         // visit other edges
-                        edges.emplace_back(edge, kmer);
+                        edges.emplace_back(edge);
                     }
                 }
                 is_last_edge = false;
@@ -2232,14 +2229,14 @@ void call_paths(const BOSS &boss,
 
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
-                    [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<Edge> &edges) {
+                    [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<edge_index> &edges) {
                         ::mtg::graph::boss::call_paths(
                                 boss, std::move(edges), callback,
                                 split_to_unitigs, select_last_edge, kmers_in_single_form,
                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
-                    std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
+                    std::vector<edge_index>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                       edges.end())
                 );
 
@@ -2258,16 +2255,12 @@ void call_paths(const BOSS &boss,
 
         assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
 
-        for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
-            kmer = std::move(kmer_seq);
+        for (edge_index edge : rev_comp_breakpoints) {
             edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
-
-            // the sequence of next_edge was already computed in call_path
-            assert(boss.get_node_seq(next_edge) == kmer);
 
             masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async))
-                    edges.emplace_back(e, kmer);
+                    edges.emplace_back(e);
             });
         }
     }
@@ -2276,10 +2269,10 @@ void call_paths(const BOSS &boss,
 // Returns new edges visited while fetching the path (only returns
 // a non-empty set for primary mode |kmers_in_single_form| = true).
 // Since fwd will be called on all edges in the returned vector, the corresponding
-// node sequences have been precomputed in these Edges
+// node sequences have been precomputed in these edge_indexs
 // e.g.,
 // edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
-std::vector<Edge>
+std::vector<edge_index>
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -2335,7 +2328,7 @@ call_path(const BOSS &boss,
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
 
-    std::vector<Edge> dual_endpoints;
+    std::vector<edge_index> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
     // then lock all threads
@@ -2385,11 +2378,7 @@ call_path(const BOSS &boss,
                     // branched from this point.
                     // boss.fwd is not called on dual_path[i] to reduce the amount
                     // of time spend in the critical section
-                    dual_endpoints.emplace_back(Edge {
-                        dual_path[i],
-                        std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
-                                               rev_comp_seq.end() - i)
-                    });
+                    dual_endpoints.emplace_back(dual_path[i]);
                 }
                 continue;
             }
