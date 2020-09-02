@@ -46,13 +46,33 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
+void clean_label_set(const AnnotatedDBG &anno_graph,
+                     std::vector<std::string> &label_set) {
+    label_set.erase(std::remove_if(label_set.begin(), label_set.end(),
+        [&](const std::string &label) {
+            bool exists = anno_graph.label_exists(label);
+            if (!exists)
+                logger->trace("Removing label {}", label);
+
+            return !exists;
+        }
+    ), label_set.end());
+
+    std::sort(label_set.begin(), label_set.end());
+    auto end = std::unique(label_set.begin(), label_set.end());
+    for (auto it = end; it != label_set.end(); ++it) {
+        logger->trace("Removing duplicate label {}", *it);
+    }
+    label_set.erase(end, label_set.end());
+}
+
 
 std::unique_ptr<MaskedDeBruijnGraph>
 mask_graph_from_labels(const AnnotatedDBG &anno_graph,
-                       std::vector<std::string> &label_mask_in,
-                       std::vector<std::string> &label_mask_out,
-                       std::vector<std::string> &label_mask_in_post,
-                       std::vector<std::string> &label_mask_out_post,
+                       const std::vector<std::string> &label_mask_in,
+                       const std::vector<std::string> &label_mask_out,
+                       const std::vector<std::string> &label_mask_in_post,
+                       const std::vector<std::string> &label_mask_out_post,
                        const DifferentialAssemblyConfig &diff_config,
                        size_t num_threads,
                        const sdsl::int_vector<> *init_counts = nullptr) {
@@ -61,31 +81,13 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
-    std::vector<std::vector<std::string>*> label_sets {
+    std::vector<const std::vector<std::string>*> label_sets {
         &label_mask_in, &label_mask_out,
         &label_mask_in_post, &label_mask_out_post
     };
 
-    // Remove non-present labels
-    for (auto *label_set : label_sets) {
-        assert(label_set);
-        label_set->erase(
-            std::remove_if(label_set->begin(), label_set->end(),
-                           [&](const std::string &label) {
-                               bool exists = anno_graph.label_exists(label);
-                               if (!exists)
-                                   logger->trace("Removing label {}", label);
-
-                               return !exists;
-                           }),
-            label_set->end()
-        );
-
-        std::sort(label_set->begin(), label_set->end());
-    }
-
-    for (auto *label_set : label_sets) {
-        for (auto *other_label_set : label_sets) {
+    for (const auto *label_set : label_sets) {
+        for (const auto *other_label_set : label_sets) {
             if (label_set == other_label_set)
                 continue;
 
@@ -187,6 +189,9 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                 ","
             );
 
+            clean_label_set(anno_graph, shared_foreground_labels);
+            clean_label_set(anno_graph, shared_background_labels);
+
             continue;
         }
 
@@ -206,13 +211,16 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                 ","
             );
 
+            clean_label_set(anno_graph, foreground_labels);
+            clean_label_set(anno_graph, background_labels);
+
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels, background_labels,
                                              shared_foreground_labels,
                                              shared_background_labels,
                                              diff_config, num_threads_per_graph),
                      line_split[0]);
-        }, line);
+        }, std::string(line));
     }
 
     thread_pool.join();
