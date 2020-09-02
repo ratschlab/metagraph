@@ -84,7 +84,8 @@ std::pair<size_t, size_t> get_column_boundaries(const Vector &scores,
     if (begin == size)
         return std::make_pair(begin, begin);
 
-    size_t cur_end = best_pos;
+    // ensure that the next position is included in the range [begin, end)
+    size_t cur_end = best_pos + 2;
     while (cur_end < end && scores[cur_end] >= xdrop_cutoff) {
         ++cur_end;
     }
@@ -301,23 +302,30 @@ inline void compute_HE_avx2(size_t length,
             _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]),
             ones
         );
-        _mm256_storeu_si256((__m256i*)&update_gap_count[i], _mm256_blendv_epi8(
-            ones,
-            incoming_count,
-            _mm256_cmpeq_epi32(update_score, update_score_extend)
-        ));
-        _mm256_storeu_si256((__m256i*)&update_gap_prevs[i], prev_node);
-        _mm256_storeu_si256((__m256i*)&update_gap_prevs[i + 4], prev_node);
 
+        // store values
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
         H = _mm256_max_epi32(H, update_score);
 
         // apply x-drop
-        H = _mm256_blendv_epi8(H_orig, H, _mm256_cmpgt_epi32(H, xdrop_cutoff));
+        __m256i xdrop_cmp = _mm256_cmpgt_epi32(H, xdrop_cutoff);
+        xdrop_cmp = _mm256_and_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(length),
+                                     _mm256_add_epi32(_mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7),
+                                                      _mm256_set1_epi32(i))), xdrop_cmp);
+        H = _mm256_blendv_epi8(H_orig, H, xdrop_cmp);
 
         // update scores
-        _mm256_storeu_si256((__m256i*)&update_scores[i], H);
-        _mm256_storeu_si256((__m256i*)&update_gap_scores[i], update_score);
+        _mm256_maskstore_epi32(&update_gap_count[i], xdrop_cmp, _mm256_blendv_epi8(
+            ones,
+            incoming_count,
+            _mm256_cmpeq_epi32(update_score, update_score_extend)
+        ));
+        const __m128i *cmp = (__m128i*)&xdrop_cmp;
+        _mm256_maskstore_epi64(&update_gap_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
+        _mm256_maskstore_epi64(&update_gap_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
+
+        _mm256_maskstore_epi32(&update_scores[i], xdrop_cmp, H);
+        _mm256_maskstore_epi32(&update_gap_scores[i], xdrop_cmp, update_score);
 
         __m256i both_cmp = _mm256_cmpgt_epi32(H, H_orig);
         _mm256_maskstore_epi32(&update_ops[i], both_cmp,
@@ -328,7 +336,7 @@ inline void compute_HE_avx2(size_t length,
 
         _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
 
-        const __m128i *cmp = (__m128i*)&both_cmp;
+        cmp = (__m128i*)&both_cmp;
         _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
         _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
     }
@@ -363,18 +371,20 @@ inline void compute_updates(const DBGAlignerConfig &config,
         incoming_gap_scores[0] + config.gap_extension_penalty
     );
 
-    if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
-        update_scores[0] = update_score;
-        update_ops[0] = Cigar::INSERTION;
-        update_prevs[0] = prev_node;
-        updated_mask[0] = 0xFFFFFFFF;
-    }
+    if (update_score >= xdrop_cutoff) {
+        if (update_score > update_scores[0]) {
+            update_scores[0] = update_score;
+            update_ops[0] = Cigar::INSERTION;
+            update_prevs[0] = prev_node;
+            updated_mask[0] = 0xFFFFFFFF;
+        }
 
-    update_gap_scores[0] = update_score;
-    update_gap_prevs[0] = prev_node;
-    update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
-        ? incoming_gap_count[0] + 1
-        : 1;
+        update_gap_scores[0] = update_score;
+        update_gap_prevs[0] = prev_node;
+        update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
+            ? incoming_gap_count[0] + 1
+            : 1;
+    }
 
     size_t i = 1;
 
@@ -409,43 +419,35 @@ inline void compute_updates(const DBGAlignerConfig &config,
 #endif
 
     for (; i < length; ++i) {
-        // store score updates
-        score_t H = update_scores[i];
-        Cigar::Operator H_op;
-        NodeType H_prev = DeBruijnGraph::npos;
+        score_t H_orig = update_scores[i];
 
         // check match
-        score_t match_score = incoming_scores[i - 1] + profile_scores[i];
-        if (match_score >= xdrop_cutoff && match_score > H) {
-            H = match_score;
-            H_op = profile_ops[i];
-            H_prev = prev_node;
-        }
+        score_t match_score = incoming_scores[i - 1] + score_t(profile_scores[i]);
+
+        score_t H = std::max(H_orig, match_score);
 
         // check insert
-        score_t update_score = std::max(
-            incoming_scores[i] + config.gap_opening_penalty,
-            incoming_gap_scores[i] + config.gap_extension_penalty
-        );
+        score_t update_score_open = incoming_scores[i] + score_t(config.gap_opening_penalty);
+        score_t update_score_extend = incoming_gap_scores[i] + score_t(config.gap_extension_penalty);
+        score_t update_score = std::max(update_score_open, update_score_extend);
 
-        if (update_score >= xdrop_cutoff && update_score > H) {
-            H = update_score;
-            H_op = Cigar::INSERTION;
-            H_prev = prev_node;
-        }
+        // store values
+        bool update_cmp = update_score > H;
+        H = std::max(H, update_score);
 
-        update_gap_scores[i] = update_score;
-        update_gap_prevs[i] = prev_node;
-        update_gap_count[i] = update_score == incoming_gap_scores[i] + config.gap_extension_penalty
-            ? incoming_gap_count[i] + 1
-            : 1;
-
-        // update scores
-        if (H_prev != DeBruijnGraph::npos) {
+        // apply x-drop
+        if (H >= xdrop_cutoff) {
+            update_gap_count[i] = update_score == update_score_extend
+                ? incoming_gap_count[i] + 1
+                : 1;
+            update_gap_prevs[i] = prev_node;
             update_scores[i] = H;
-            update_ops[i] = H_op;
-            update_prevs[i] = H_prev;
-            updated_mask[i] = 0xFFFFFFFF;
+            update_gap_scores[i] = update_score;
+            if (H > H_orig) {
+                update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
+                updated_mask[i] = 0xFFFFFFFF;
+                update_prevs[i] = prev_node;
+            }
         }
     }
 
