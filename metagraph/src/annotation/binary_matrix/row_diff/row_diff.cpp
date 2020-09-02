@@ -9,10 +9,8 @@ namespace binmat {
 
 bool RowDiff::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
-    size_t i = 0;
-    for (; i < set_bits.size() && column < set_bits[i]; ++i)
-        ;
-    return i < set_bits.size() && column == set_bits[i];
+    SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
+    return v != set_bits.end() && *v == column;
 }
 
 std::vector<BinaryMatrix::Row> RowDiff::get_column(Column column) const {

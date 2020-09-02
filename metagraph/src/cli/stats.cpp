@@ -236,7 +236,7 @@ int print_stats(Config *config) {
         }
         std::shared_ptr<graph::DeBruijnGraph> graph;
         if (parse_annotation_type(file) == Config::AnnotationType::RowDiff) {
-            auto& row_diff
+            auto &row_diff
                     = dynamic_cast<const annot::binmat::RowDiff &>(annotation->get_matrix());
 
             graph = load_critical_dbg(files[0]);
@@ -245,7 +245,6 @@ int print_stats(Config *config) {
         }
 
         logger->info("Statistics for annotation '{}'", file);
-
         print_stats(*annotation);
     }
 

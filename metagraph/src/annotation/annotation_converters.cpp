@@ -980,38 +980,11 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-/** Computes diff between a and b and appends it to result */
-static void compute_diff(const Vector<uint64_t> &a,
-                         const Vector<uint64_t> &b,
-                         Vector<uint64_t> *result) {
-    uint64_t idx1 = 0;
-    uint64_t idx2 = 0;
-    while (idx1 < a.size() && idx2 < b.size()) {
-        if (a[idx1] == b[idx2]) {
-            idx1++;
-            idx2++;
-        } else if (a[idx1] < b[idx2]) {
-            result->push_back(a[idx1]);
-            idx1++;
-        } else {
-            result->push_back(b[idx2]);
-            idx2++;
-        }
-    }
-    while (idx1 < a.size()) {
-        result->push_back(a[idx1]);
-        idx1++;
-    }
-    while (idx2 < b.size()) {
-        result->push_back(b[idx2]);
-        idx2++;
-    }
-}
-
 std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads,
                                                       uint32_t max_depth) {
+    assert(graph.num_nodes() == annotation.num_objects());
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
     Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
@@ -1025,11 +998,11 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     graph.call_sequences(
             [&](const std::string &, const std::vector<uint64_t> &path) {
                 assert(!path.empty());
-                std::vector<uint64_t> anno_ids;
-                for (const uint64_t node_id : path) {
-                    assert(node_id <= nnodes);
-                    anno_ids.push_back(
-                            graph::AnnotatedSequenceGraph::graph_to_anno_index(node_id));
+                std::vector<uint64_t> anno_ids(path.size());
+                for (uint32_t i = 0; i < path.size(); ++i) {
+                    assert(path[i] <= nnodes);
+                    anno_ids[i]
+                            = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
                 }
                 std::vector<Vector<uint64_t>> rows
                         = annotation.get_matrix().get_rows(anno_ids);
@@ -1044,19 +1017,21 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                         pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
                         diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
                         terminal[anno_ids[i]] = 1;
-                        depth_terminal_count++;
+                        depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
                         continue;
                     }
 
                     uint64_t start_idx = diffs.size();
-                    compute_diff(rows[i], rows[i + 1], &diffs);
+                    std::set_symmetric_difference(rows[i].begin(), rows[i].end(),
+                                                  rows[i + 1].begin(), rows[i + 1].end(),
+                                                  std::back_inserter(diffs));
 
                     // if we don't gain anything by diffing, make the node terminal
                     if (diffs.size() - start_idx >= rows[i].size()) {
                         diffs.resize(start_idx);
                         diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
                         terminal[anno_ids[i]] = 1;
-                        forced_terminal_count++;
+                        forced_terminal_count.fetch_add(1, std::memory_order_relaxed);
                     }
                     pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
                 }
@@ -1072,10 +1047,10 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                     pos[anno_ids[i]].first += offset;
                 }
 
-                terminal_count++;
+                terminal_count.fetch_add(1, std::memory_order_relaxed);
                 terminal[anno_ids.back()] = 1;
                 // add the last row plus one termination bit for each row
-                boundary_size += (diffs.size() + rows.size());
+                boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
             },
             num_threads, false, true);
     logger->trace(

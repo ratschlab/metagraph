@@ -276,12 +276,13 @@ size_t CanonicalDBG::indegree(node_index node) const {
 
 void CanonicalDBG::call_sequences(const CallPath &callback,
                                   size_t num_threads,
-                                  bool kmers_in_single_form) const {
+                                  bool kmers_in_single_form,
+                                  bool select_last_edge) const {
     if (kmers_in_single_form) {
-        graph_.call_sequences(callback, num_threads, false);
+        graph_.call_sequences(callback, num_threads, false, select_last_edge);
     } else {
         // TODO: port over implementation from DBGSuccinct to DeBruijnGraph
-        DeBruijnGraph::call_sequences(callback, num_threads, false);
+        DeBruijnGraph::call_sequences(callback, num_threads, false, select_last_edge);
     }
 }
 

@@ -94,7 +94,8 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const override;
+                                bool kmers_in_single_form = false,
+                                bool select_last_edge = false) const override;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t num_threads = 1,
