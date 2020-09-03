@@ -830,9 +830,9 @@ int query_graph(Config *config) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
-        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(
-            *graph, *config
-        )));
+        aligner_config.reset(new align::DBGAlignerConfig(
+            initialize_aligner_config(*graph, *config)
+        ));
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
