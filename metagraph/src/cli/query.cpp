@@ -46,7 +46,8 @@ QueryExecutor::QueryExecutor(const Config &config,
       : config_(config),
         anno_graph_(anno_graph),
         aligner_config_(aligner_config
-            ? new graph::align::DBGAlignerConfig(*aligner_config): nullptr),
+                        ? new graph::align::DBGAlignerConfig(*aligner_config)
+                        : nullptr),
         thread_pool_(thread_pool) {
     if (aligner_config_)
         aligner_config_->forward_and_reverse_complement = false;
@@ -612,10 +613,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             logger->trace("[Query graph extension] Remapping contigs");
             #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
             for (size_t i = 0; i < contigs.size(); ++i) {
-                auto nodes = map_sequence_to_nodes(*graph, contigs[i].first);
-
-                #pragma omp critical
-                contigs[i].second = std::move(nodes);
+                contigs[i].second = map_sequence_to_nodes(*graph, contigs[i].first);
             }
         }
 
@@ -832,9 +830,9 @@ int query_graph(Config *config) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
-        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(
-            *graph, *config
-        )));
+        aligner_config.reset(new align::DBGAlignerConfig(
+            initialize_aligner_config(*graph, *config)
+        ));
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
@@ -971,7 +969,7 @@ void QueryExecutor
         for ( ; begin != it; ++begin) {
             assert(begin != end);
 
-            thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
+            thread_pool_.enqueue([&](size_t id, const std::string &name, const std::string &seq) {
                 callback(query_sequence(id, name, seq, *query_graph,
                                         config_, aligner_config_.get()));
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));

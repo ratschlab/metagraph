@@ -143,9 +143,9 @@ std::string process_search_request(const std::string &received_message,
 
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
-        aligner_config.reset(new graph::align::DBGAlignerConfig(initialize_aligner_config(
-            anno_graph.get_graph(), config
-        )));
+        aligner_config.reset(new graph::align::DBGAlignerConfig(
+            initialize_aligner_config(anno_graph.get_graph(), config)
+        ));
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
