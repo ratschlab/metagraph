@@ -4,6 +4,7 @@ import shlex
 import time
 from subprocess import Popen
 
+import socket
 import requests
 from metagraph.client import GraphClientJson, MultiGraphClient
 from parameterized import parameterized
@@ -22,10 +23,10 @@ class TestAPIBase(TestingBase):
         cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct')
         cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
 
-        cls.host = '127.0.0.1'
+        cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
         os.environ['NO_PROXY'] = cls.host
-        cls.server_process = cls._start_server(cls, graph_path, annotation_path, cls.port)
+        cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
         print("Waiting for the server to start up on " + str(cls.server_process.pid))
         time.sleep(1)
@@ -34,8 +35,8 @@ class TestAPIBase(TestingBase):
     def tearDownClass(cls):
         cls.server_process.kill()
 
-    def _start_server(self, graph, annotation, port):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address 127.0.0.1 -p {threads}'.format(
+    def _start_server(self, graph, annotation):
+        construct_command = '{exe} server_query -i {graph} -a {annot} --port {cls.port} --address {cls.host} -p {threads}'.format(
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
