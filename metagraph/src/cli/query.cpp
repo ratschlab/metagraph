@@ -46,7 +46,8 @@ QueryExecutor::QueryExecutor(const Config &config,
       : config_(config),
         anno_graph_(anno_graph),
         aligner_config_(aligner_config
-            ? new graph::align::DBGAlignerConfig(*aligner_config): nullptr),
+                        ? new graph::align::DBGAlignerConfig(*aligner_config)
+                        : nullptr),
         thread_pool_(thread_pool) {
     if (aligner_config_)
         aligner_config_->forward_and_reverse_complement = false;
