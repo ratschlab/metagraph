@@ -866,9 +866,10 @@ inline std::string query_sequence(size_t id,
             // sequence for querying -- the best alignment
             if (match.get_offset()) {
                 seq.reserve(match.get_sequence().size() + match.get_offset());
-                seq = anno_graph.get_graph().get_node_sequence(match[0]).substr(
-                    0, match.get_offset()
-                ) + const_cast<std::string&&>(match.get_sequence());
+                seq = anno_graph.get_graph()
+                                .get_node_sequence(match[0])
+                                .substr(0, match.get_offset())
+                        + match.get_sequence();
             } else {
                 seq = const_cast<std::string&&>(match.get_sequence());
             }
