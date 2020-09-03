@@ -103,7 +103,7 @@ class DBGAligner : public IDBGAligner {
                                  const AlignmentGenerator &alignment_generator) const;
 
     const DeBruijnGraph& graph_;
-    DBGAlignerConfig config_;
+    const DBGAlignerConfig& config_;
 };
 
 
