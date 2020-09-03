@@ -34,7 +34,7 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
  * @param anno_graph the input annotated de Bruijn graph
  * @param call_sequences generate sequences to be queried against anno_graph
  * @param discovery_fraction the minimum fraction at which a generated sequence
- *                           must be present in anno_graph to be considered
+ *                           must be present in anno_graph to be included into the query graph
  * @param num_threads number of threads to use
  * @param canonical if true, the returned query graph is a canonical graph
  * @param sub_k also include k-mers whose suffixes of length sub_k match sub_k-mers
