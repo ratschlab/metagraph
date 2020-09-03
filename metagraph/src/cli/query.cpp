@@ -613,10 +613,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             logger->trace("[Query graph extension] Remapping contigs");
             #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
             for (size_t i = 0; i < contigs.size(); ++i) {
-                auto nodes = map_sequence_to_nodes(*graph, contigs[i].first);
-
-                #pragma omp critical
-                contigs[i].second = std::move(nodes);
+                contigs[i].second = map_sequence_to_nodes(*graph, contigs[i].first);
             }
         }
 
