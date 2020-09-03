@@ -40,7 +40,7 @@ class TestAPIBase(TestingBase):
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
-            port=port,
+            port=self.port,
             threads=2
         )
 
