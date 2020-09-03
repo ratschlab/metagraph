@@ -854,11 +854,11 @@ int query_graph(Config *config) {
     return 0;
 }
 
-inline std::string query_sequence(size_t id,
-                                  std::string &name, std::string &seq,
-                                  const AnnotatedDBG &anno_graph,
-                                  const Config &config,
-                                  const align::DBGAlignerConfig *aligner_config = nullptr) {
+inline void query_sequence(size_t id, std::string name, std::string seq,
+                           const AnnotatedDBG &anno_graph,
+                           const Config &config,
+                           const align::DBGAlignerConfig *aligner_config,
+                           const std::function<void(const std::string&)> &callback) {
     if (aligner_config) {
         auto matches = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
         if (matches.size()) {
@@ -884,11 +884,11 @@ inline std::string query_sequence(size_t id,
         }
     }
 
-    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                                        config.count_labels, config.print_signature,
-                                        config.suppress_unlabeled, config.num_top_labels,
-                                        config.discovery_fraction, config.anno_labels_delimiter,
-                                        anno_graph);
+    callback(QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
+                                          config.count_labels, config.print_signature,
+                                          config.suppress_unlabeled, config.num_top_labels,
+                                          config.discovery_fraction, config.anno_labels_delimiter,
+                                          anno_graph));
 }
 
 void QueryExecutor::query_fasta(const string &file,
@@ -909,8 +909,8 @@ void QueryExecutor::query_fasta(const string &file,
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
-            callback(query_sequence(id, name, seq, anno_graph_,
-                                    config_, aligner_config_.get()));
+            query_sequence(id, name, seq, anno_graph_,
+                           config_, aligner_config_.get(), callback);
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -970,8 +970,8 @@ void QueryExecutor
             assert(begin != end);
 
             thread_pool_.enqueue([&](size_t id, const std::string &name, const std::string &seq) {
-                callback(query_sequence(id, name, seq, *query_graph,
-                                        config_, aligner_config_.get()));
+                query_sequence(id, name, seq, *query_graph,
+                               config_, aligner_config_.get(), callback);
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
         }
 
