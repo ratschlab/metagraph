@@ -969,7 +969,7 @@ void QueryExecutor
         for ( ; begin != it; ++begin) {
             assert(begin != end);
 
-            thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
+            thread_pool_.enqueue([&](size_t id, const std::string &name, const std::string &seq) {
                 callback(query_sequence(id, name, seq, *query_graph,
                                         config_, aligner_config_.get()));
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
