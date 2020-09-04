@@ -28,7 +28,7 @@ class TestAPIBase(TestingBase):
         os.environ['NO_PROXY'] = cls.host
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
-        wait_time_sec = 5
+        wait_time_sec = 1
         print("Waiting {} sec for the server (PID {}) to start up".format(wait_time_sec, cls.server_process.pid), flush=True)
         time.sleep(wait_time_sec)
 
@@ -37,7 +37,7 @@ class TestAPIBase(TestingBase):
         cls.server_process.kill()
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
+        construct_command = '{exe} server_query -v -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
@@ -46,7 +46,7 @@ class TestAPIBase(TestingBase):
             threads=2
         )
 
-        return Popen(construct_command, shell=True)
+        return Popen(shlex.split(construct_command))
 
 
 class TestAPIRaw(TestAPIBase):
