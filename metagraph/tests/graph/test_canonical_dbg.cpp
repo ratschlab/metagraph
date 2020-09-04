@@ -190,7 +190,7 @@ TYPED_TEST(CanonicalDBGTest, Traversals2) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k, {}, BuildMode::WRAPPER);
             std::vector<std::string> sequences;
@@ -209,7 +209,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsEmptyGraphCanonical) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             auto empty = build_graph<TypeParam>(k, {}, BuildMode::WRAPPER);
             std::vector<std::string> sequences;
@@ -228,7 +228,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsEmptyGraph) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
@@ -255,7 +255,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsOneSelfLoop) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences, BuildMode::WRAPPER);
@@ -282,7 +282,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsOneSelfLoop) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
@@ -311,7 +311,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsThreeSelfLoops) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 7; k < 14; ++k) {
             std::vector<std::string> sequences { "ATGCCGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
@@ -334,7 +334,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsExtractsLongestOneLoop) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmers) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::string sequence = "GCAAATAAC";
         auto graph = build_graph<TypeParam>(3, { sequence }, BuildMode::WRAPPER);
 
@@ -349,7 +349,7 @@ TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmers) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsUniqueKmersCycle) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
         auto graph = build_graph<TypeParam>(k, { sequence }, BuildMode::WRAPPER);
@@ -368,7 +368,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsUniqueKmersCycle) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmersCycle) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 5;
         std::string sequence = "AAACCCGGGTTTAAA";
         auto graph = build_graph<TypeParam>(k, { sequence }, BuildMode::WRAPPER);
@@ -387,7 +387,7 @@ TYPED_TEST(CanonicalDBGTest, CallContigsUniqueKmersCycle) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 20; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
@@ -416,7 +416,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsFourLoops) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallPaths) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -460,7 +460,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
 // TODO: A different combination of forward and reverse complement k-mers may be
 //       generated in the reconstruction.
 // TYPED_TEST(CanonicalDBGTest, CallPathsSingleKmerForm) {
-//     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+//     for (size_t num_threads : { 1, 4 }) {
 //         for (size_t k = 2; k <= 10; ++k) {
 //             for (const std::vector<std::string> &sequences
 //                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -496,7 +496,7 @@ TYPED_TEST(CanonicalDBGTest, CallPaths) {
 // }
 
 TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 15; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -531,7 +531,7 @@ TYPED_TEST(CanonicalDBGTest, CallPathsCheckHalfSingleKmerForm) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -573,7 +573,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -617,7 +617,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsRegularCanonical) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -665,7 +665,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsRegularCanonical) {
 // TODO: A different combination of forward and reverse complement k-mers may be
 //       generated in the reconstruction.
 // TYPED_TEST(CanonicalDBGTest, CallUnitigsSingleKmerForm) {
-//     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+//     for (size_t num_threads : { 1, 4 }) {
 //         for (size_t k = 2; k <= 10; ++k) {
 //             for (const std::vector<std::string> &sequences
 //                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -708,7 +708,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsRegularCanonical) {
 // }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 2; k <= 15; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -743,7 +743,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckHalfSingleKmerForm) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 3;
         std::mutex seq_mutex;
         std::set<std::string> unitigs;
@@ -1005,7 +1005,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsWithoutTips2) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 5;
         auto graph = build_graph<TypeParam>(k, { "ACTATAGCTAGTCTATGCGA",
                                                  "ACTATAGCTAGTCTAA",
@@ -1096,7 +1096,7 @@ TYPED_TEST(CanonicalDBGTest, CallKmersTwoLoops) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckDegree) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::vector<std::string> sequences {
             "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
             "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
@@ -1156,7 +1156,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCheckDegree) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsIndegreeFirstNodeIsZero) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::vector<std::string> sequences {
             "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
             "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
@@ -1187,7 +1187,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsIndegreeFirstNodeIsZero) {
 }
 
 TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         // AATTT - ATTTT           TTTAA - TTAAA
         //               > TTTTA <
         // GGTTT - GTTTT           TTTAG - TTAGG
