@@ -36,10 +36,11 @@ class TestAPIBase(TestingBase):
         cls.server_process.kill()
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {self.port} --address {self.host} -p {threads}'.format(
+        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
+            host=self.host,
             port=self.port,
             threads=2
         )
