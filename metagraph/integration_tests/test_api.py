@@ -24,7 +24,7 @@ class TestAPIBase(TestingBase):
         cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
-        cls.port = 3456
+        cls.port = 8000
         os.environ['NO_PROXY'] = cls.host
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
