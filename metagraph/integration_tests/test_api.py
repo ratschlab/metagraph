@@ -46,7 +46,7 @@ class TestAPIBase(TestingBase):
             threads=2
         )
 
-        return Popen(shlex.split(construct_command))
+        return Popen(construct_command, shell=True)
 
 
 class TestAPIRaw(TestAPIBase):
