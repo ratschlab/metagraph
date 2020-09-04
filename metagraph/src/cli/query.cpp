@@ -707,6 +707,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 assert(j == path.size());
             }
         } else {
+            // here we don't have the sequences precomputed, so need to pull them from the query graph...
             graph = convert_to_succinct(contigs, full_dbg.get_k(), false, num_threads);
             contigs = decltype(contigs)();
             index_in_full_graph.assign(graph->max_index() + 1, 0);
