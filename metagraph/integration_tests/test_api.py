@@ -24,11 +24,11 @@ class TestAPIBase(TestingBase):
         cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
-        cls.port = 8000
+        cls.port = 3456
         os.environ['NO_PROXY'] = cls.host
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
-        print("Waiting for the server to start up on " + str(cls.server_process.pid))
+        print("Waiting 1 sec for the server (PID {}) to start up".format(cls.server_process.pid), flush=True)
         time.sleep(1)
 
     @classmethod
@@ -45,7 +45,7 @@ class TestAPIBase(TestingBase):
             threads=2
         )
 
-        return Popen(shlex.split(construct_command))
+        return Popen(construct_command, shell=True)
 
 
 class TestAPIRaw(TestAPIBase):
