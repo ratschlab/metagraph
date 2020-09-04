@@ -91,7 +91,7 @@ void SortedSetDiskBase<T>::start_merging_async() {
     async_worker_.enqueue([file_names, this]() {
         std::function<void(const T &)> on_new_item
                 = [this](const T &v) { merge_queue_.push(v); };
-        merge_files(file_names, on_new_item);
+        merge_files(file_names, on_new_item, false);
         merge_queue_.shutdown();
     });
 }

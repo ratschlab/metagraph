@@ -11,6 +11,7 @@
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/build_checkpoint.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
@@ -105,6 +106,8 @@ int build_graph(Config *config) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
 
+            boss::BuildCheckpoint checkpoint(config->tmp_dir);
+
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,
@@ -115,10 +118,18 @@ int build_graph(Config *config) {
                 config->tmp_dir.empty() ? kmer::ContainerType::VECTOR
                                         : kmer::ContainerType::VECTOR_DISK,
                 config->tmp_dir,
-                config->disk_cap_bytes
+                config->disk_cap_bytes,
+                checkpoint
             );
 
-            push_sequences(files, *config, timer, constructor.get());
+            if (checkpoint.continuation_phase() == 0) {
+                push_sequences(files, *config, timer, constructor.get());
+                checkpoint.set_phase(1);
+                checkpoint.set_kmer_dir(constructor->tmp_dir());
+                checkpoint.store();
+            } else {
+                logger->info("Skipping parsing sequences from input file(s)");
+            }
 
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",

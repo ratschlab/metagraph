@@ -14,9 +14,10 @@
 namespace mtg {
 namespace common {
 
-void concat(const std::vector<std::string> &files, const std::string &result) {
+std::vector<std::string> concat(const std::vector<std::string> &files, const std::string &result) {
     if (files.empty())
-        return;
+        return {};
+    std::vector<std::string> original_files;
 
     std::vector<std::string> suffixes = { "", ".up" };
     if (std::filesystem::exists(files[0] + ".count"))
@@ -24,17 +25,16 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
 
     for (const std::string &suffix : suffixes) {
         std::string concat_command = "cat ";
-        for (uint32_t i = 1; i < files.size(); ++i) {
+        for (uint32_t i = 0; i < files.size(); ++i) {
             concat_command += files[i] + suffix + " ";
         }
-        concat_command += " >> " + files[0] + suffix;
-
+        concat_command += " > " + result + suffix;
+        logger->trace("Executing '{}'", concat_command);
         if (std::system(concat_command.c_str()))
             throw std::runtime_error("Error while cat-ing files: " + concat_command);
 
-        std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const std::string &f : files) {
-            std::filesystem::remove(f + suffix);
+            original_files.push_back(f + suffix);
         }
     }
 }

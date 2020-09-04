@@ -9,6 +9,7 @@
 #include "kmer/kmer_collector_config.hpp"
 #include "graph/representation/base/dbg_construct.hpp"
 #include "boss_chunk.hpp"
+#include "build_checkpoint.hpp"
 
 
 namespace mtg {
@@ -28,9 +29,12 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                double memory_preallocated = 0,
                mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
                const std::filesystem::path &swap_dir = "/tmp/",
-               size_t max_disk_space_bytes = 1e9);
+               size_t max_disk_space_bytes = 1e9,
+               const BuildCheckpoint& checkpoint = BuildCheckpoint("/tmp"));
 
     virtual uint64_t get_k() const = 0;
+
+    virtual std::filesystem::path tmp_dir() const = 0;
 };
 
 } // namespace boss
