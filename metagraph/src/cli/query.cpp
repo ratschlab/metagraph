@@ -423,17 +423,18 @@ std::shared_ptr<DBGSuccinct> convert_to_succinct(const Contigs &contigs,
                                                  size_t num_threads = 1) {
     BOSSConstructor constructor(k - 1, canonical, 0, "", num_threads);
     for (const auto &[contig, nodes_in_full] : contigs) {
-        auto it = nodes_in_full.begin();
-        auto end = nodes_in_full.end();
-        auto present_in_full = [&](node_index i) { return i != DeBruijnGraph::npos; };
-        while ((it = std::find_if(it, end, present_in_full)) < end) {
-            auto next = std::find(it, end, DeBruijnGraph::npos);
-            constructor.add_sequence(std::string_view(
-                contig.data() + (it - nodes_in_full.begin()),
-                next - it + k - 1
-            ));
-            it = next;
-        }
+        auto begin = nodes_in_full.begin();
+        std::vector<DeBruijnGraph::node_index>::const_iterator end;
+        do {
+            end = std::find(begin, nodes_in_full.end(), DeBruijnGraph::npos);
+            if (begin != end) {
+                constructor.add_sequence(std::string_view(
+                    contig.data() + (begin - nodes_in_full.begin()),
+                    end - begin + k - 1
+                ));
+            }
+            begin = end + 1;
+        } while (end < nodes_in_full.end());
     }
 
     return std::make_shared<DBGSuccinct>(new BOSS(&constructor), canonical);
