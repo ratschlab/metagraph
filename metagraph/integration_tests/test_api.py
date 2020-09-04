@@ -28,8 +28,9 @@ class TestAPIBase(TestingBase):
         os.environ['NO_PROXY'] = cls.host
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
-        print("Waiting 1 sec for the server (PID {}) to start up".format(cls.server_process.pid), flush=True)
-        time.sleep(1)
+        wait_time_sec = 5
+        print("Waiting {} sec for the server (PID {}) to start up".format(wait_time_sec, cls.server_process.pid), flush=True)
+        time.sleep(wait_time_sec)
 
     @classmethod
     def tearDownClass(cls):
