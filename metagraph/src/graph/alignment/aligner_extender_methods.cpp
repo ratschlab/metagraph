@@ -497,9 +497,13 @@ void DefaultColumnExtender<NodeType>
 
     start_score = dp_table.find(start_node)->second.best_score();
     score_cutoff = std::max(start_score, min_path_score);
+    xdrop_cutoff = score_cutoff - config_.xdrop;
+
+    if (xdrop_cutoff > start_score)
+        return;
+
     begin = 0;
     end = size;
-    xdrop_cutoff = score_cutoff - config_.xdrop;
 
     check_and_push(ColumnRef(start_node, start_score, false));
 
