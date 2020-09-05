@@ -122,11 +122,8 @@ int build_graph(Config *config) {
                 checkpoint
             );
 
-            if (checkpoint.continuation_phase() == 0) {
+            if (checkpoint.phase() == 0) {
                 push_sequences(files, *config, timer, constructor.get());
-                checkpoint.set_phase(1);
-                checkpoint.set_kmer_dir(constructor->tmp_dir());
-                checkpoint.store();
             } else {
                 logger->info("Skipping parsing sequences from input file(s)");
             }

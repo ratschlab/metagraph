@@ -37,6 +37,7 @@ std::vector<std::string> concat(const std::vector<std::string> &files, const std
             original_files.push_back(f + suffix);
         }
     }
+    return original_files;
 }
 
 template <class T, class Enable = void>
