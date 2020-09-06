@@ -29,7 +29,6 @@ std::vector<std::string> concat(const std::vector<std::string> &files, const std
             concat_command += files[i] + suffix + " ";
         }
         concat_command += " > " + result + suffix;
-        logger->trace("Executing '{}'", concat_command);
         if (std::system(concat_command.c_str()))
             throw std::runtime_error("Error while cat-ing files: " + concat_command);
 

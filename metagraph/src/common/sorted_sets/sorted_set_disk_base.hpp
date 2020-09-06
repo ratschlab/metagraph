@@ -74,7 +74,7 @@ class SortedSetDiskBase {
      * sorted set may be expensive when #data_ is large. In these cases, prefer calling
      * #clear and re-using the buffer.
      */
-    void clear(const std::filesystem::path &tmp_path = "/tmp/");
+    void clear(const std::filesystem::path &tmp_path = "/tmp/", bool remove_files = true);
 
   protected:
     /** Advances #it by step or points to #end, whichever comes first. */

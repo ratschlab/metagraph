@@ -64,13 +64,15 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
 }
 
 template <typename T>
-void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path) {
+void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path, bool remove_files) {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
-    // remove the files that have not been requested to merge
-    for (const auto &chunk_file : get_file_names()) {
-        std::filesystem::remove(chunk_file);
+    if (remove_files) {
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
     }
     chunk_count_ = 0;
     l1_chunk_count_ = 0;

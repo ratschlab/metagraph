@@ -360,12 +360,15 @@ std::vector<std::string> split(size_t k,
     std::vector<std::string> names(chunk_count);
     for (size_t i = 0; i < names.size(); ++i) {
         names[i] = dir/("real_F_W_" + std::to_string(i));
-        sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
     if (checkpoint->phase() > 2) {
         logger->info("Skipping splitting k-mers into chunks");
         return names;
+    }
+
+    for (size_t i = 0; i < names.size(); ++i) {
+        sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
     logger->info("Splitting k-mers into {} chunks...", chunk_count);
@@ -475,13 +478,16 @@ generate_dummy_1_kmers(size_t k,
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
         dummy_l1_names[i] = dir/("dummy_source_1_" + std::to_string(i));
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
-        dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
-        dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
     if (checkpoint->phase() > 3) {
         logger->info("Skipping generating dummy-1 source k-mers and dummy sink kmers");
         return { dummy_sink_names, real_F_W };
+    }
+
+    for (TAlphabet i = 0; i < alphabet_size; ++i) {
+        dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
+        dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
     logger->info("Generating dummy-1 source k-mers and dummy sink k-mers...");
@@ -576,6 +582,7 @@ void add_reverse_complements(size_t k,
     }
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
+    std::unique_ptr<common::SortedSetDisk<T_INT_REAL>> rc_set;
     std::vector<std::string> to_merge = { dir/"original" };
     if (checkpoint->phase() == 2) {
         logger->info(
@@ -607,7 +614,7 @@ void add_reverse_complements(size_t k,
     } else { //  checkpoint->phase() < 2
         std::string rc_dir = dir/"rc";
         std::filesystem::create_directory(rc_dir);
-        auto rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
+        rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
                 num_threads, buffer_size, rc_dir, std::numeric_limits<size_t>::max());
 
         common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
@@ -641,6 +648,7 @@ void add_reverse_complements(size_t k,
         rc_set->insert(buffer.begin(), buffer.end());
         std::vector<std::string> to_insert = rc_set->files_to_merge();
         to_merge.insert(to_merge.end(), to_insert.begin(), to_insert.end());
+        rc_set->clear(dir, false /* don't delete chunk files! */);
         original.finish();
         checkpoint->set_phase(2);
         checkpoint->store();
@@ -648,13 +656,11 @@ void add_reverse_complements(size_t k,
 
     // start merging #original with #reverse_complements into #kmers
     kmers->reset();
-    async_worker.enqueue([rc_files = std::move(to_merge), kmers]() {
-        common::MergeDecoder<T_INT_REAL> chunked_kmers(rc_files, false);
-
+    async_worker.enqueue([to_merge = std::move(to_merge), kmers]() {
+        common::MergeDecoder<T_INT_REAL> chunked_kmers(to_merge, false);
         auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT_REAL> &>(*kmers);
-        std::optional<T_INT_REAL> kmer;
-        while ((kmer = chunked_kmers.pop()).has_value()) {
-            kmers_int.push(kmer.value());
+        while (!chunked_kmers.empty()) {
+            kmers_int.push(chunked_kmers.pop());
         }
         kmers->shutdown();
     });
@@ -672,16 +678,16 @@ void add_reverse_complements(size_t k,
  * the dummy-k kmers, for k=2..k
  */
 template <class KmerCollector, typename T_REAL, typename T>
-void recover_dummy_nodes(const KmerCollector &kmer_collector,
+[[clang::optnone]] void recover_dummy_nodes(const KmerCollector &kmer_collector,
                          ChunkedWaitQueue<T_REAL> &kmers,
                          ChunkedWaitQueue<T> *kmers_out,
                          ThreadPool &async_worker,
                          BuildCheckpoint* checkpoint) {
-    using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS
-    using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
+    using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS on 2 bits
+    using T_INT_REAL = get_int_t<T_REAL>; // either KMER_REAL or <KMER_REAL, count>
 
-    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
-    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
+    using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
     uint32_t previous_phase = checkpoint->phase();
     if (checkpoint->phase() == 0) {
@@ -742,11 +748,10 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
 
     // file names for the dummy_sink and dummy_source_1..k_0..3 kmers
     std::vector<std::string> dummy_chunk_names;
-    const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
+    const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
         for (TAlphabet i = 0; i < alphabet_size; ++i) {
-            std::string suffix
-                    = std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i);
+            std::string suffix = std::to_string(dummy_pref_len) + "_" + std::to_string(i);
             dummy_chunk_names.push_back(dir/("dummy_source_" + suffix));
         }
     }
@@ -755,15 +760,16 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     if (checkpoint->phase() < 6) {
         // generate dummy k-mers of prefix length 1..k
         logger->trace("Starting generating dummy-1..{} source k-mers...", k);
-        for (size_t dummy_pref_len = 2; dummy_pref_len <= k; ++dummy_pref_len) {
+        for (size_t dummy_pref_len = 1; dummy_pref_len < k; ++dummy_pref_len) {
 
             std::vector<Encoder<KMER_INT>> next_chunks;
             for (TAlphabet i = 0; i < alphabet_size; ++i) {
-                next_chunks.emplace_back(dummy_chunk_names[dummy_pref_len * alphabet_size + i],
-                                          ENCODER_BUFFER_SIZE);
+                next_chunks.emplace_back(
+                        dummy_chunk_names[dummy_pref_len * alphabet_size + i],
+                        ENCODER_BUFFER_SIZE);
             }
 
-            // the chunks containing (dummy_pref_len-1) dummy k-mers
+            // chunks containing dummy k-mers of prefix length dummy_pref_len
             auto begin = dummy_chunk_names.begin() + (dummy_pref_len - 1) * alphabet_size;
             std::vector<std::string> current_names(begin, begin + alphabet_size);
 
@@ -772,9 +778,10 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
             const std::function<void(const KMER_INT &)> &write_dummy
                     = [&](const KMER_INT &v) {
                           KMER kmer(v);
+                          assert(kmer[0]);
                           kmer.to_prev(k + 1, BOSS::kSentinelCode);
                           if (prev_kmer != kmer) {
-                              next_chunks[kmer[0]].add(kmer.data());
+                              next_chunks[kmer[0] - 1].add(kmer.data());
                               prev_kmer = std::move(kmer);
                           }
                           num_kmers++;
@@ -784,7 +791,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
             std::for_each(next_chunks.begin(), next_chunks.end(),
                           [](auto &v) { v.finish(); });
             logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
-                          dummy_pref_len - 1, num_kmers);
+                          dummy_pref_len, num_kmers);
         }
 
         checkpoint->set_phase(6);
