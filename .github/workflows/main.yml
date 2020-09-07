@@ -14,11 +14,16 @@ jobs:
         compiler: [g++-9, g++-10, clang]
         include:
           - compiler: g++-9
-            compiler_exe: g++-9
+            cxx: g++-9
+            cc: gcc-9
+
           - compiler: g++-10
-            compiler_exe: g++-10
+            cxx: g++-10
+            cc: gcc-10
+
           - compiler: clang
-            compiler_exe: clang++
+            cxx: clang++
+            cc: clang
 
     steps:
     - uses: actions/checkout@v1
@@ -28,9 +33,7 @@ jobs:
 
     - name: install dependencies
       run: |
-        sudo apt-get install ${{ matrix.compiler }}
-        sudo apt-get install libomp5
-        sudo apt-get install libomp-dev
+        [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
 
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
@@ -45,7 +48,8 @@ jobs:
 
     - name: install libmaus2-lite
       run: |
-        export CXX=$(which ${{ matrix.compiler_exe }})
+        export CC=$(which ${{ matrix.cc }})
+        export CXX=$(which ${{ matrix.cxx }})
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
         make -j 2
@@ -53,13 +57,15 @@ jobs:
 
     - name: install sdsl-lite
       run: |
-        export CXX=$(which ${{ matrix.compiler_exe }})
+        export CC=$(which ${{ matrix.cc }})
+        export CXX=$(which ${{ matrix.cxx }})
         cd metagraph/external-libraries/sdsl-lite
         ./install.sh $(pwd)
 
     - name: configure
       run: |
-        export CXX=$(which ${{ matrix.compiler_exe }})
+        export CC=$(which ${{ matrix.cc }})
+        export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
