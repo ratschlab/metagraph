@@ -8,6 +8,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+
     steps:
     - uses: actions/checkout@v1
 
@@ -52,7 +56,7 @@ jobs:
         export CXX=$(which g++-9)
         mkdir metagraph/build
         cd metagraph/build
-        cmake ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
@@ -77,6 +81,10 @@ jobs:
   build-macos:
 
     runs-on: macos-latest
+
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
 
     steps:
     - uses: actions/checkout@v1
@@ -106,7 +114,7 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=Debug -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
