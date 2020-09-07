@@ -29,6 +29,7 @@ jobs:
     - name: install dependencies
       run: |
         sudo apt-get install ${{ matrix.compiler }}
+        sudo apt-get install libomp5
         sudo apt-get install libomp-dev
 
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
