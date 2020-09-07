@@ -24,7 +24,7 @@ TYPED_TEST_SUITE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
 
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -55,7 +55,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
 }
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -86,7 +86,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -119,7 +119,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -152,7 +152,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
 }
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -216,7 +216,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
 }
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -280,7 +280,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -344,7 +344,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -408,7 +408,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 10; ++k) {
             std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                                  "ATGCAGTACTGAG",
@@ -468,7 +468,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 4;
 
         /*
@@ -545,7 +545,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
 }
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 4; k <= 10; ++k) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
@@ -645,7 +645,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
 }
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 15; k += 2) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),

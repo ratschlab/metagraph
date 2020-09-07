@@ -6,6 +6,7 @@
 
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "seq_io/sequence_io.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -19,6 +20,8 @@ using namespace mtg::graph;
 using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
+
+const std::string test_data_dir = "../tests/data";
 
 typedef DBGAligner<>::score_t score_t;
 
@@ -1371,6 +1374,41 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
 
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
+}
+
+TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
+    size_t k = 6;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
+
+    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGA";
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.xdrop = 30;
+    config.exact_kmer_match_fraction = 0.0;
+    config.max_nodes_per_seq_char = 10.0;
+    config.queue_size = 20;
+    config.num_alternative_paths = 2;
+    config.min_path_score = 0;
+    config.min_cell_score = 0;
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    ASSERT_EQ(2ull, paths.size());
+    EXPECT_EQ(557llu, paths[0].get_score());
+    EXPECT_EQ(556llu, paths[1].get_score());
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
