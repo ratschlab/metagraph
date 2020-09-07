@@ -37,7 +37,7 @@ class TestAPIBase(TestingBase):
         cls.server_process.kill()
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -v -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
+        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
@@ -46,7 +46,7 @@ class TestAPIBase(TestingBase):
             threads=2
         )
 
-        return Popen(construct_command, shell=True)
+        return Popen(shlex.split(construct_command))
 
 
 class TestAPIRaw(TestAPIBase):
