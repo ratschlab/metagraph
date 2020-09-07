@@ -837,7 +837,7 @@ template <class KmerCollector, typename T_REAL, typename T>
                     return reinterpret_cast<const KMER &>(v);
                 }
             },
-                dummy_chunk_names, false /* remove sources */
+            dummy_chunk_names, false /* remove sources */
         );
 
         while (!decoder.empty() && !decoder_dummy.empty()) {
