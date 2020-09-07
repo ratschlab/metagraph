@@ -106,15 +106,7 @@ int build_graph(Config *config) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
 
-            boss::BuildCheckpoint checkpoint(config->tmp_dir);
-            if (checkpoint.phase() > 0 && suffixes.size() > 1) {
-                logger->error(
-                        "Checkpointing for multiple chunks not supported. "
-                        "Remove {} or continue building chunk by chunk",
-                        checkpoint.checkpoint_file());
-                std::exit(1);
-            }
-
+            boss::BuildCheckpoint checkpoint(config->checkpoint, config->tmp_dir);
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,

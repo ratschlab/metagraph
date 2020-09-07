@@ -142,6 +142,8 @@ class Config {
 
     size_t disk_cap_bytes = 20e9; // 20GB default
 
+    bool checkpoint = true;
+
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
