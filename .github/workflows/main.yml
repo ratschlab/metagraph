@@ -11,16 +11,14 @@ jobs:
     strategy:
       matrix:
         build_type: [Debug, Release]
-        compiler: [g++-9, g++-10, clang-11, clang-12]
+        compiler: [g++-9, g++-10, clang]
         include:
           - compiler: g++-9
             compiler_exe: g++-9
           - compiler: g++-10
             compiler_exe: g++-10
-          - compiler: clang-11
-            compiler_exe: clang++-11
-          - compiler: clang-12
-            compiler_exe: clang++-12
+          - compiler: clang
+            compiler_exe: clang++
 
     steps:
     - uses: actions/checkout@v1
