@@ -11,6 +11,16 @@ jobs:
     strategy:
       matrix:
         build_type: [Debug, Release]
+        compiler: [g++-9, g++-10, clang-11, clang-12]
+        include:
+          - compiler: g++-9
+            compiler_exe: g++-9
+          - compiler: g++-10
+            compiler_exe: g++-10
+          - compiler: clang-11
+            compiler_exe: clang++-11
+          - compiler: clang-12
+            compiler_exe: clang++-12
 
     steps:
     - uses: actions/checkout@v1
@@ -20,7 +30,7 @@ jobs:
 
     - name: install dependencies
       run: |
-        sudo apt-get install g++-9
+        sudo apt-get install ${{ matrix.compiler }}
 
         wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
         tar -vxjf htslib-1.9.tar.bz2
@@ -35,9 +45,7 @@ jobs:
 
     - name: install libmaus2-lite
       run: |
-        export CC=$(which gcc-9)
-        export CXX=$(which g++-9)
-        echo $CXX
+        export CXX=$(which ${{ matrix.compiler_exe }})
         cd metagraph/external-libraries/libmaus2
         cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
         make -j 2
@@ -45,15 +53,13 @@ jobs:
 
     - name: install sdsl-lite
       run: |
-        export CC=$(which gcc-9)
-        export CXX=$(which g++-9)
+        export CXX=$(which ${{ matrix.compiler_exe }})
         cd metagraph/external-libraries/sdsl-lite
         ./install.sh $(pwd)
 
     - name: configure
       run: |
-        export CC=$(which gcc-9)
-        export CXX=$(which g++-9)
+        export CXX=$(which ${{ matrix.compiler_exe }})
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
