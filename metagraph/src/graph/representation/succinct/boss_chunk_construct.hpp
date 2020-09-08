@@ -30,7 +30,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
                const std::filesystem::path &swap_dir = "/tmp/",
                size_t max_disk_space_bytes = 1e9,
-               const BuildCheckpoint& checkpoint = BuildCheckpoint(false, ""));
+               const BuildCheckpoint& checkpoint = BuildCheckpoint(false, "", 2));
 
     virtual uint64_t get_k() const = 0;
 

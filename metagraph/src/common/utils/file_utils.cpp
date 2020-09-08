@@ -38,7 +38,8 @@ void cleanup_tmp_dir_on_exit() {
 }
 
 std::filesystem::path create_temp_dir(std::filesystem::path path,
-                                      const std::string &name) {
+                                      const std::string &name,
+                                      bool clean_on_exit) {
     if (path.empty())
         path = "./";
 
@@ -46,6 +47,10 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
     if (!mkdtemp(tmp_dir_str.data())) {
         logger->error("Failed to create a temporary directory in {}", path);
         exit(1);
+    }
+
+    if (!clean_on_exit) {
+        return tmp_dir_str;
     }
 
     if (TMP_DIRS.empty()) {

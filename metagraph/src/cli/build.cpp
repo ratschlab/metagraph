@@ -106,7 +106,9 @@ int build_graph(Config *config) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
 
-            boss::BuildCheckpoint checkpoint(config->checkpoint, config->tmp_dir);
+            bool checkpoint_enabled = !config->tmp_dir.empty() && suffixes.size() == 1;
+            boss::BuildCheckpoint checkpoint(checkpoint_enabled, config->outfbase,
+                                             config->phase);
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,
@@ -121,16 +123,20 @@ int build_graph(Config *config) {
                 checkpoint
             );
 
-            if (checkpoint.phase() == 0) {
+            if (checkpoint.checkpoint() == 0) {
                 push_sequences(files, *config, timer, constructor.get());
             } else {
                 logger->info("Skipping parsing sequences from input file(s)");
             }
 
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
+
+            if (checkpoint.phase() < 2) { // phase 1 stops after generating dummy k-mers
+                assert(next_chunk == nullptr);
+                return 0;
+            }
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
-
             if (config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
                 timer.reset();

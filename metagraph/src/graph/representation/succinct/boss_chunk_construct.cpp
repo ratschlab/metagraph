@@ -362,7 +362,7 @@ std::vector<std::string> split(size_t k,
         names[i] = dir/("real_F_W_" + std::to_string(i));
     }
 
-    if (checkpoint->phase() > 2) {
+    if (checkpoint->checkpoint() > 2) {
         logger->info("Skipping splitting k-mers into chunks");
         return names;
     }
@@ -384,7 +384,7 @@ std::vector<std::string> split(size_t k,
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
     logger->trace("Total number of real k-mers: {}", num_kmers);
 
-    checkpoint->set_phase(3);
+    checkpoint->set_checkpoint(3);
     checkpoint->store();
 
     return names;
@@ -414,7 +414,7 @@ concatenate_chunks(const std::filesystem::path &dir,
         real_split_by_W[W] = dir/("real_split_by_W_" + std::to_string(W));
     }
 
-    if (checkpoint->phase() > 4) {
+    if (checkpoint->checkpoint() > 4) {
         return { real_split_by_W, dummy_sink_name };
     }
 
@@ -443,7 +443,7 @@ concatenate_chunks(const std::filesystem::path &dir,
         std::filesystem::remove(name);
     }
 
-    checkpoint->set_phase(5);
+    checkpoint->set_checkpoint(5);
     checkpoint->store();
     return { real_split_by_W, dummy_sink_name };
 }
@@ -480,7 +480,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
     }
 
-    if (checkpoint->phase() > 3) {
+    if (checkpoint->checkpoint() > 3) {
         logger->info("Skipping generating dummy-1 source k-mers and dummy sink kmers");
         return { dummy_sink_names, real_F_W };
     }
@@ -559,7 +559,7 @@ generate_dummy_1_kmers(size_t k,
 
     logger->trace("Generated {} dummy sink and {} dummy source k-mers", num_sink,
                   num_source);
-    checkpoint->set_phase(4);
+    checkpoint->set_checkpoint(4);
     checkpoint->store();
 
     return { dummy_sink_names, real_F_W };
@@ -576,7 +576,7 @@ void add_reverse_complements(size_t k,
                              ThreadPool& async_worker,
                              ChunkedWaitQueue<T_REAL> *kmers,
                              BuildCheckpoint *checkpoint) {
-    if (checkpoint->phase() > 2) {
+    if (checkpoint->checkpoint() > 2) {
         logger->info("Skipping generating reverse complements");
         return;
     }
@@ -584,7 +584,7 @@ void add_reverse_complements(size_t k,
 
     std::unique_ptr<common::SortedSetDisk<T_INT_REAL>> rc_set;
     std::vector<std::string> to_merge = { dir/"original" };
-    if (checkpoint->phase() == 2) {
+    if (checkpoint->checkpoint() == 2) {
         logger->info(
                 "Continuing from checkpoint phase 2. Looking for 'original' and "
                 "'rc/chunk_*' in {}",
@@ -611,7 +611,7 @@ void add_reverse_complements(size_t k,
                     checkpoint->kmer_dir());
             std::exit(1);
         }
-    } else { //  checkpoint->phase() < 2
+    } else { //  checkpoint->checkpoint() < 2
         std::string rc_dir = dir/"rc";
         std::filesystem::create_directory(rc_dir);
         rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
@@ -650,7 +650,7 @@ void add_reverse_complements(size_t k,
         to_merge.insert(to_merge.end(), to_insert.begin(), to_insert.end());
         rc_set->clear(dir, false /* don't delete chunk files! */);
         original.finish();
-        checkpoint->set_phase(2);
+        checkpoint->set_checkpoint(2);
         checkpoint->store();
     }
 
@@ -689,10 +689,10 @@ template <class KmerCollector, typename T_REAL, typename T>
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
     using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
-    uint32_t previous_phase = checkpoint->phase();
-    if (checkpoint->phase() == 0) {
+    uint32_t previous_phase = checkpoint->checkpoint();
+    if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
-        checkpoint->set_phase(1);
+        checkpoint->set_checkpoint(1);
         checkpoint->store();
     }
 
@@ -757,7 +757,7 @@ template <class KmerCollector, typename T_REAL, typename T>
     }
     dummy_chunk_names.push_back(dummy_sink_name);
 
-    if (checkpoint->phase() < 6) {
+    if (checkpoint->checkpoint() < 6) {
         // generate dummy k-mers of prefix length 1..k
         logger->trace("Starting generating dummy-1..{} source k-mers...", k);
         for (size_t dummy_pref_len = 1; dummy_pref_len < k; ++dummy_pref_len) {
@@ -794,7 +794,7 @@ template <class KmerCollector, typename T_REAL, typename T>
                           dummy_pref_len, num_kmers);
         }
 
-        checkpoint->set_phase(6);
+        checkpoint->set_checkpoint(6);
         checkpoint->store();
     } else {
         logger->info("Skipping generating dummy-1..{} source k-mers", k);
@@ -903,7 +903,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           tmp_dir,
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
-          bits_per_count_(bits_per_count), checkpoint_(checkpoint) {
+          bits_per_count_(bits_per_count), checkpoint_(checkpoint), tmp_dir_(tmp_dir) {
         if (filter_suffix.size()
                 && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
@@ -926,6 +926,25 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         return kmer_collector_.tmp_dir();
     }
 
+    template <typename KMER, typename T, typename Container>
+    BOSS::Chunk *build_chunk_2bit(Container &kmers) {
+        logger->trace("Reconstructing all required dummy source k-mers...");
+
+        Timer timer;
+        ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE);
+        recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
+        logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
+        if (checkpoint_.phase() == 1) {
+            logger->info("Finished building phase 1");
+            queue.reset();
+            return nullptr;
+        }
+        return new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
+                               kmer_collector_.get_k() - 1,
+                               kmer_collector_.is_both_strands_mode(), queue,
+                               bits_per_count_, tmp_dir_);
+    }
+
     BOSS::Chunk* build_chunk() override {
         BOSS::Chunk *result;
         typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
@@ -944,31 +963,17 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmers,
                                      bits_per_count_,
                                      kmer_collector_.tmp_dir());
-        } else {
+        } else {  // KmerExtractor2Bit
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
             assert(!kmer_collector_.suffix_length());
 
-            logger->trace("Reconstructing all required dummy source k-mers...");
-            Timer timer;
-
-#define INIT_CHUNK(KMER) \
-    ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
-    recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_); \
-    logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
-    result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
-                             kmer_collector_.get_k() - 1, \
-                             kmer_collector_.is_both_strands_mode(), \
-                             queue, \
-                             bits_per_count_,                                     \
-                             kmer_collector_.tmp_dir())
-
             if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer64);
+                result = build_chunk_2bit<KmerExtractorBOSS::Kmer64, T>(kmers);
             } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer128);
+                result = build_chunk_2bit<KmerExtractorBOSS::Kmer128, T>(kmers);
             } else {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer256);
+                result = build_chunk_2bit<KmerExtractorBOSS::Kmer256, T>(kmers);
             }
         }
 
@@ -985,6 +990,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     /** Async executor for merging chunks, generating reverse complements, etc. */
     ThreadPool async_worker_ = ThreadPool(1, 1);
     BuildCheckpoint checkpoint_;
+    std::filesystem::path tmp_dir_;
 };
 
 template <template <typename, class> class KmerContainer, typename... Args>
