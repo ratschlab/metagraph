@@ -337,6 +337,39 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('nodes (k): 802920', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
 
+    @parameterized.expand(['succinct_disk'])
+    def test_build_phase(self, build):
+        representation, tmp_dir = build_params[build]
+
+        construct_command = '{exe} build --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
+                            '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            repr=representation,
+            tmp_dir=tmp_dir,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
+
+        construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 ' \
+                            '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            repr=representation,
+            tmp_dir=tmp_dir,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 1159851', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
 
 if __name__ == '__main__':
     unittest.main()

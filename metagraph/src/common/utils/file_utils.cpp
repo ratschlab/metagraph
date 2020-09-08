@@ -49,6 +49,8 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         exit(1);
     }
 
+    logger->trace("Created temporary directory {}", tmp_dir_str);
+
     if (!clean_on_exit) {
         return tmp_dir_str;
     }
@@ -61,8 +63,6 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         if (std::atexit(cleanup_tmp_dir_on_exit))
             logger->error("Couldn't reset the atexit handler");
     }
-
-    logger->trace("Registered temporary directory {}", tmp_dir_str);
 
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);

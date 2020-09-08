@@ -23,7 +23,7 @@ class BuildCheckpoint {
 
     void set_checkpoint(uint32_t checkpoint) { checkpoint_ = checkpoint; }
 
-    void done() { std::filesystem::remove(checkpoint_file_); }
+    void done() const;
 
     void store() const;
 

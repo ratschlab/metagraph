@@ -373,5 +373,41 @@ class TestBuildWeighted(unittest.TestCase):
         self.assertEqual('avg weight: {}'.format(avg_count_expected), params_str[4])
 
 
+    def test_build_phase(self):
+        construct_command = '{exe} build --phase 1 --mask-dummy -k 20 --count-kmers --disk-swap {tmp_dir} ' \
+                            '--count-width 16 -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            tmp_dir=self.tempdir.name,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
+
+        construct_command = '{exe} build --mask-dummy -k 20 --count-kmers --disk-swap {tmp_dir} --count-width 16 ' \
+                            '-o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            tmp_dir=self.tempdir.name,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph.dbg',
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 591997', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('nnz weights: 591997', params_str[3])
+        self.assertEqual('avg weight: 2.48587', params_str[4])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -61,8 +61,6 @@ class KmerCollector {
                   size_t max_disk_space = 1e9,
                   bool canonical_only = false);
 
-    ~KmerCollector();
-
     inline size_t get_k() const { return k_; }
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }

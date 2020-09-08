@@ -162,13 +162,6 @@ KmerCollector<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-KmerCollector<KMER, KmerExtractor, Container>
-::~KmerCollector() {
-    if (!tmp_dir_.empty())
-        std::filesystem::remove_all(tmp_dir_);
-}
-
-template <typename KMER, class KmerExtractor, class Container>
 void KmerCollector<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     if constexpr(std::is_same_v<typename KMER::WordType, typename Container::value_type>) {

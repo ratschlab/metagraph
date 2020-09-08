@@ -524,19 +524,21 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity != BUILD && phase != 2) {
-        std::cerr << "Error: Phases are only supported for building. Remove --phase.";
+        std::cerr << "Error: Phases are only supported for building. Remove --phase"
+                  << std::endl;
         print_usage_and_exit = true;
     }
 
     if (phase != 2 && tmp_dir.empty()) {
         std::cerr << "Error: Phases are only supported for disk-based building. "
-                     "Please set --disk-swap.";
+                     "Please set --disk-swap." << std::endl;
         print_usage_and_exit = true;
     }
 
     if (phase != 2 && suffix_len > 0) {
-        std::cerr << "Error: Phases are not supported for multiple suffixes. "
-                     "Remove --phase or specify each suffix separately using --suffix";
+        std::cerr << "Error: Phases are not supported for multiple suffixes. Remove "
+                     "--phase or specify each suffix separately using --suffix"
+                  << std::endl;
         print_usage_and_exit = true;
     }
 
