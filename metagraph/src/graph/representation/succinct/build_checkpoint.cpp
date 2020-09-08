@@ -37,6 +37,11 @@ BuildCheckpoint::BuildCheckpoint(bool enabled,
     }
 }
 
+void BuildCheckpoint::set_checkpoint(uint32_t checkpoint) {
+    checkpoint_ = checkpoint;
+    store();
+}
+
 void BuildCheckpoint::done() const {
     std::filesystem::remove(checkpoint_file_);
     std::filesystem::remove_all(kmer_dir_);

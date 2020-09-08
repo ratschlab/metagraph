@@ -8,7 +8,8 @@ namespace graph {
 namespace boss {
 
 /**
- * Stores checkpointing information for resuming disk-based building of succinct graphs.
+ * Stores checkpointing and phase information for resuming disk-based building of succinct
+ * graphs.
  */
 class BuildCheckpoint {
   public:
@@ -21,13 +22,13 @@ class BuildCheckpoint {
 
     void set_kmer_dir(const std::filesystem::path &kmer_dir) { kmer_dir_ = kmer_dir; }
 
-    void set_checkpoint(uint32_t checkpoint) { checkpoint_ = checkpoint; }
+    void set_checkpoint(uint32_t checkpoint);
 
     void done() const;
 
+  private:
     void store() const;
 
-  private:
     bool enabled_;
     uint32_t phase_;
     uint32_t checkpoint_;

@@ -385,7 +385,6 @@ std::vector<std::string> split(size_t k,
     logger->trace("Total number of real k-mers: {}", num_kmers);
 
     checkpoint->set_checkpoint(3);
-    checkpoint->store();
 
     return names;
 }
@@ -444,7 +443,6 @@ concatenate_chunks(const std::filesystem::path &dir,
     }
 
     checkpoint->set_checkpoint(5);
-    checkpoint->store();
     return { real_split_by_W, dummy_sink_name };
 }
 
@@ -531,16 +529,15 @@ generate_dummy_1_kmers(size_t k,
                 if (KMER_REAL::compare_suffix(top, dummy_source, 1)) {
                     // The source dummy k-mer #dummy_source generated from #it is
                     // redundant iff it shares its suffix with another real k-mer (#top).
-                    // In this case, #top generates a dummy sink k-mer redundant with
-                    // #it. So if #dummy_source is redundant, the sink generated from
-                    // #top is also redundant - so it's being skipped
+                    // In this case, #top generates a dummy sink k-mer redundant with #it.
+                    // So if #dummy_source is redundant, the sink generated from #top is
+                    // also redundant - so it's being skipped
                     skip_same_suffix(top, sink_gen_it, 1);
                     continue;
                 }
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1)
-                                   + kmer_delta);
+            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
             num_source++;
         }
         // handle leftover sink_gen_it
@@ -560,7 +557,6 @@ generate_dummy_1_kmers(size_t k,
     logger->trace("Generated {} dummy sink and {} dummy source k-mers", num_sink,
                   num_source);
     checkpoint->set_checkpoint(4);
-    checkpoint->store();
 
     return { dummy_sink_names, real_F_W };
 }
@@ -651,7 +647,6 @@ void add_reverse_complements(size_t k,
         rc_set->clear(dir, false /* don't delete chunk files! */);
         original.finish();
         checkpoint->set_checkpoint(2);
-        checkpoint->store();
     }
 
     // start merging #original with #reverse_complements into #kmers
@@ -693,7 +688,6 @@ template <class KmerCollector, typename T_REAL, typename T>
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
         checkpoint->set_checkpoint(1);
-        checkpoint->store();
     }
 
     size_t k = kmer_collector.get_k() - 1;
@@ -795,7 +789,6 @@ template <class KmerCollector, typename T_REAL, typename T>
         }
 
         checkpoint->set_checkpoint(6);
-        checkpoint->store();
     } else {
         logger->info("Skipping generating dummy-1..{} source k-mers", k);
     }
@@ -920,10 +913,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) override {
         kmer_collector_.add_sequences(std::move(sequences));
-    }
-
-    std::filesystem::path tmp_dir() const override {
-        return kmer_collector_.tmp_dir();
     }
 
     template <typename KMER, typename T, typename Container>

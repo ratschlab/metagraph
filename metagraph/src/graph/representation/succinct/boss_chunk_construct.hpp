@@ -33,8 +33,6 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                const BuildCheckpoint& checkpoint = BuildCheckpoint(false, "", 2));
 
     virtual uint64_t get_k() const = 0;
-
-    virtual std::filesystem::path tmp_dir() const = 0;
 };
 
 } // namespace boss
