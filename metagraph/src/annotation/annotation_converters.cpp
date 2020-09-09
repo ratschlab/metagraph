@@ -995,7 +995,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     std::atomic<uint64_t> depth_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
-    graph.call_sequences(
+    graph.call_unitigs(
             [&](const std::string &, const std::vector<uint64_t> &path) {
                 assert(!path.empty());
                 std::vector<uint64_t> anno_ids(path.size());
@@ -1052,7 +1052,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 // add the last row plus one termination bit for each row
                 boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
             },
-            num_threads, false, true);
+            num_threads, false);
     logger->trace(
             "Traversal done.. Total rows {}, total diff length is {}, "
             "avg diff length is {} terminal nodes total/max-depth/forced {}/{}/{} ",
