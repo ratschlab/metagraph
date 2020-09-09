@@ -995,64 +995,64 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     std::atomic<uint64_t> depth_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
-    graph.call_unitigs(
-            [&](const std::string &, const std::vector<uint64_t> &path) {
-                assert(!path.empty());
-                std::vector<uint64_t> anno_ids(path.size());
-                for (uint32_t i = 0; i < path.size(); ++i) {
-                    assert(path[i] <= nnodes);
-                    anno_ids[i]
-                            = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
+    graph.call_sequences(
+        [&](const std::string &, const std::vector<uint64_t> &path) {
+            assert(!path.empty());
+            std::vector<uint64_t> anno_ids(path.size());
+            for (uint32_t i = 0; i < path.size(); ++i) {
+                assert(path[i] <= nnodes);
+                anno_ids[i]
+                        = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
+            }
+            std::vector<Vector<uint64_t>> rows
+                    = annotation.get_matrix().get_rows(anno_ids);
+            visited_nodes += path.size();
+            std::sort(rows[0].begin(), rows[0].end());
+            Vector<uint64_t> diffs;
+            for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                std::sort(rows[i + 1].begin(), rows[i + 1].end());
+
+                // if we reached the max path depth, force a terminal node
+                if (i % max_depth == 0) {
+                    pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
+                    diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
+                    terminal[anno_ids[i]] = 1;
+                    depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
+                    continue;
                 }
-                std::vector<Vector<uint64_t>> rows
-                        = annotation.get_matrix().get_rows(anno_ids);
-                visited_nodes += path.size();
-                std::sort(rows[0].begin(), rows[0].end());
-                Vector<uint64_t> diffs;
-                for (uint32_t i = 0; i < rows.size() - 1; ++i) {
-                    std::sort(rows[i + 1].begin(), rows[i + 1].end());
 
-                    // if we reached the max path depth, force a terminal node
-                    if (i % max_depth == 0) {
-                        pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
-                        diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
-                        terminal[anno_ids[i]] = 1;
-                        depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
-                        continue;
-                    }
+                uint64_t start_idx = diffs.size();
+                std::set_symmetric_difference(rows[i].begin(), rows[i].end(),
+                                              rows[i + 1].begin(), rows[i + 1].end(),
+                                              std::back_inserter(diffs));
 
-                    uint64_t start_idx = diffs.size();
-                    std::set_symmetric_difference(rows[i].begin(), rows[i].end(),
-                                                  rows[i + 1].begin(), rows[i + 1].end(),
-                                                  std::back_inserter(diffs));
-
-                    // if we don't gain anything by diffing, make the node terminal
-                    if (diffs.size() - start_idx >= rows[i].size()) {
-                        diffs.resize(start_idx);
-                        diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
-                        terminal[anno_ids[i]] = 1;
-                        forced_terminal_count.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
+                // if we don't gain anything by diffing, make the node terminal
+                if (diffs.size() - start_idx >= rows[i].size()) {
+                    diffs.resize(start_idx);
+                    diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
+                    terminal[anno_ids[i]] = 1;
+                    forced_terminal_count.fetch_add(1, std::memory_order_relaxed);
                 }
-                pos[anno_ids.back()] = { diffs.size(), rows.back().size() };
-                diffs.insert(diffs.end(), rows.back().begin(), rows.back().end());
-                size_t offset;
+                pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
+            }
+            pos[anno_ids.back()] = { diffs.size(), rows.back().size() };
+            diffs.insert(diffs.end(), rows.back().begin(), rows.back().end());
+            size_t offset;
 #pragma omp critical
-                {
-                    offset = node_diffs.size();
-                    node_diffs.insert(node_diffs.end(), diffs.begin(), diffs.end());
-                }
-                for (uint32_t i = 0; i < rows.size(); ++i) {
-                    pos[anno_ids[i]].first += offset;
-                }
+            {
+                offset = node_diffs.size();
+                node_diffs.insert(node_diffs.end(), diffs.begin(), diffs.end());
+            }
+            for (uint32_t i = 0; i < rows.size(); ++i) {
+                pos[anno_ids[i]].first += offset;
+            }
 
-                terminal_count.fetch_add(1, std::memory_order_relaxed);
-                terminal[anno_ids.back()] = 1;
-                // add the last row plus one termination bit for each row
-                boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
-            },
-            num_threads, false);
+            terminal_count.fetch_add(1, std::memory_order_relaxed);
+            terminal[anno_ids.back()] = 1;
+            // add the last row plus one termination bit for each row
+            boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
+        },
+        num_threads, false, true);
     logger->trace(
             "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
             "Avg diff length: {}\n\tTerminal nodes total/max-depth/forced {}/{}/{}\n\t"
