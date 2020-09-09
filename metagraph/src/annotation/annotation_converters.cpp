@@ -1054,11 +1054,12 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             },
             num_threads, false);
     logger->trace(
-            "Traversal done.. Total rows {}, total diff length is {}, "
-            "avg diff length is {} terminal nodes total/max-depth/forced {}/{}/{} ",
+            "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
+            "Avg diff length: {}\n\tTerminal nodes total/max-depth/forced {}/{}/{}\n\t"
+            "Avg path length: {}",
             terminal.size(), node_diffs.size(), 1.0 * node_diffs.size() / terminal.size(),
             terminal_count + forced_terminal_count + depth_terminal_count,
-            depth_terminal_count, forced_terminal_count);
+            depth_terminal_count, forced_terminal_count, (double)nnodes / terminal_count);
 
     logger->trace(" Building succinct data structures...");
     // add the number of nodes that were not visited (the dummy nodes)

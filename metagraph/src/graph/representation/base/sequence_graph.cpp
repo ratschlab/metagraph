@@ -113,7 +113,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          ProgressBar &progress_bar,
                          bool call_unitigs,
                          uint64_t min_tip_size,
-                         bool kmers_in_single_form) {
+                         bool kmers_in_single_form,
+                         bool select_first_edge) {
     assert(start >= 1 && start <= graph.max_index());
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
@@ -152,7 +153,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
             targets.clear();
             graph.call_outgoing_kmers(node,
-                [&](auto next, char c) { targets.emplace_back(next, c); }
+                [&](node_index next, char c) { targets.emplace_back(next, c); }
             );
 
             if (targets.empty())
@@ -175,13 +176,15 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 }
             }
 
+            bool is_last_edge = true;
             node_index next_node = DeBruijnGraph::npos;
             //  _____.___
             //      \.___
             for (const auto& [next, c] : targets) {
                 if (next_node == DeBruijnGraph::npos
                         && !call_unitigs
-                        && !(*visited)[next]) {
+                        && !(*visited)[next]
+                        && (is_last_edge || !select_first_edge)) {
                     (*discovered)[next] = true;
                     next_node = next;
                     sequence.push_back(c);
@@ -190,6 +193,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     (*discovered)[next] = true;
                     queue.push_back(next);
                 }
+                is_last_edge = false;
             }
 
             if (next_node == DeBruijnGraph::npos)
@@ -273,7 +277,8 @@ void call_sequences(const DeBruijnGraph &graph,
                     size_t num_threads,
                     bool call_unitigs,
                     uint64_t min_tip_size,
-                    bool kmers_in_single_form) {
+                    bool kmers_in_single_form,
+                    bool select_first_edge) {
     // TODO: port over the implementation from BOSS once it's finalized
     std::ignore = num_threads;
 
@@ -294,7 +299,8 @@ void call_sequences(const DeBruijnGraph &graph,
                             progress_bar,
                             call_unitigs,
                             min_tip_size,
-                            kmers_in_single_form);
+                            kmers_in_single_form,
+                            select_first_edge);
     };
 
     if (call_unitigs) {
@@ -350,15 +356,17 @@ void call_sequences(const DeBruijnGraph &graph,
 void DeBruijnGraph::call_sequences(const CallPath &callback,
                                    size_t num_threads,
                                    bool kmers_in_single_form,
-                                   bool /* select_last_edge */) const {
-    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0, kmers_in_single_form);
+                                   bool select_first_edge) const {
+    ::mtg::graph::call_sequences(*this, callback, num_threads, false, 0,
+                                 kmers_in_single_form, select_first_edge);
 }
 
 void DeBruijnGraph::call_unitigs(const CallPath &callback,
                                  size_t num_threads,
                                  size_t min_tip_size,
                                  bool kmers_in_single_form) const {
-    ::mtg::graph::call_sequences(*this, callback, num_threads, true, min_tip_size, kmers_in_single_form);
+    ::mtg::graph::call_sequences(*this, callback, num_threads, true, min_tip_size,
+                                 kmers_in_single_form, false);
 }
 
 /**
