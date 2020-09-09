@@ -34,24 +34,13 @@ class RowDiff : public BinaryMatrix {
     RowDiff() {}
 
     RowDiff(const uint64_t num_columns,
-            const graph::DBGSuccinct *graph,
-            const Vector<uint64_t> &diffs,
-            const sdsl::bit_vector &boundary,
-            const sdsl::bit_vector &terminal)
-        : num_columns_(num_columns),
-          graph_(graph),
-          diffs_(diffs),
-          boundary_(boundary),
-          terminal_(terminal) {
-        sdsl::util::init_support(sboundary_, &boundary_);
-    }
-
-    RowDiff(const uint64_t num_columns,
+            const uint64_t num_relations,
             const graph::DBGSuccinct *graph,
             const sdsl::enc_vector<> &diffs,
             const sdsl::bit_vector &boundary,
             const sdsl::bit_vector &terminal)
             : num_columns_(num_columns),
+              num_relations_(num_relations),
               graph_(graph),
               diffs_(diffs),
               boundary_(boundary),
@@ -60,6 +49,11 @@ class RowDiff : public BinaryMatrix {
     }
 
     uint64_t num_columns() const override { return num_columns_; }
+
+    /**
+     * Returns the number of set bits in the matrix.
+     */
+    uint64_t num_relations() const override { return num_relations_; }
 
     uint64_t num_rows() const override { return terminal_.size(); }
 
@@ -73,11 +67,6 @@ class RowDiff : public BinaryMatrix {
      */
     std::vector<Row> get_column(Column column) const override;
 
-    /**
-     * Returns the number of set bits in the matrix.
-     * TODO: this is very slow, consider storing/loading the value
-     */
-    uint64_t num_relations() const override;
 
     SetBitPositions get_row(Row row) const override;
 
@@ -97,6 +86,8 @@ class RowDiff : public BinaryMatrix {
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
 
     uint64_t num_columns_ = 0;
+
+    uint64_t num_relations_ = 0;
 
     const graph::DBGSuccinct *graph_;
 

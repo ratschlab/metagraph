@@ -1080,7 +1080,8 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     assert(boundary.size() == diffs.size() + nnodes);
 
     auto diff_annotation
-            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(), &graph,
+            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(),
+                                                       annotation.num_relations(), &graph,
                                                        diffs, boundary, terminal);
 
     return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),

@@ -25,6 +25,7 @@ TEST(RowDiff, Empty) {
     EXPECT_EQ(0, rowdiff.diffs().size());
     EXPECT_EQ(0, rowdiff.boundary().size());
     EXPECT_EQ(0, rowdiff.terminal().size());
+    EXPECT_EQ(0, rowdiff.num_relations());
 }
 
 TEST(RowDiff, Serialize) {
@@ -32,7 +33,7 @@ TEST(RowDiff, Serialize) {
     sdsl::bit_vector boundary = { 0, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 1 };
     sdsl::enc_vector<> ediffs(diffs);
-    annot::binmat::RowDiff annot(2, nullptr, ediffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 5, nullptr, ediffs, boundary, terminal);
 
     utils::TempFile tempfile;
     std::ofstream &out = tempfile.ofstream();
@@ -54,13 +55,16 @@ TEST(RowDiff, Serialize) {
     for (uint32_t i = 0; i < annot.terminal().size(); ++i) {
         EXPECT_EQ(annot.terminal()[i], loaded.terminal()[i]);
     }
+    EXPECT_EQ(2, loaded.num_columns());
+    EXPECT_EQ(5, loaded.num_relations());
 }
 
 TEST(RowDiff, GetDiff) {
     Vector<uint64_t> diffs = { 1, 2, 3, 4 };
     sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 1 };
-    annot::binmat::RowDiff annot(2, nullptr, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 5, nullptr, sdsl::enc_vector<>(diffs), boundary,
+                                 terminal);
 
     EXPECT_TRUE(annot.get_diff(0).empty());
     ASSERT_THAT(annot.get_diff(1), ElementsAre(1));
@@ -72,7 +76,7 @@ TEST(RowDiff, GetDiff2) {
     Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0 };
-    annot::binmat::RowDiff annot(2, nullptr, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 5, nullptr, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     std::vector<uint32_t> empty_annot = { 0, 1, 2, 4, 5, 6, 7, 9 };
     for (const uint32_t v : empty_annot) {
@@ -96,7 +100,7 @@ TEST(RowDiff, GetAnnotation) {
     Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 5, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -137,7 +141,7 @@ TEST(RowDiff, GetAnnotationMasked) {
     Vector<uint64_t> diffs = { 0, 1, 1, 1 };
     sdsl::bit_vector boundary = { 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
@@ -178,7 +182,7 @@ TEST(RowDiff, GetAnnotationBifurcation) {
     sdsl::bit_vector boundary
             = { 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -220,7 +224,7 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     Vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
     sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
     sdsl::bit_vector terminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, &graph, diffs, boundary, terminal);
+    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));

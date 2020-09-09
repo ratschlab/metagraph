@@ -22,15 +22,6 @@ std::vector<BinaryMatrix::Row> RowDiff::get_column(Column column) const {
     return result;
 }
 
-uint64_t RowDiff::num_relations() const {
-    uint64_t result = 0;
-    for (Row row = 0; row < num_rows(); ++row) {
-        result += get_row(row).size();
-    }
-    return result;
-}
-
-
 BinaryMatrix::SetBitPositions RowDiff::get_row(Row row) const {
     Vector<uint64_t> result = get_diff(row);
 
@@ -53,6 +44,7 @@ BinaryMatrix::SetBitPositions RowDiff::get_row(Row row) const {
 
 bool RowDiff::load(std::istream &f)  {
     f >> num_columns_;
+    f >> num_relations_;
     diffs_.load(f);
     boundary_.load(f);
     terminal_.load(f);
@@ -62,6 +54,7 @@ bool RowDiff::load(std::istream &f)  {
 
 void RowDiff::serialize(std::ostream &f) const  {
     f << num_columns_;
+    f << num_relations_;
     diffs_.serialize(f);
     boundary_.serialize(f);
     terminal_.serialize(f);
