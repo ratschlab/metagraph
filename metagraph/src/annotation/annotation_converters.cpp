@@ -1001,11 +1001,9 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             std::vector<uint64_t> anno_ids(path.size());
             for (uint32_t i = 0; i < path.size(); ++i) {
                 assert(path[i] <= nnodes);
-                anno_ids[i]
-                        = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
+                anno_ids[i] = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
             }
-            std::vector<Vector<uint64_t>> rows
-                    = annotation.get_matrix().get_rows(anno_ids);
+            std::vector<Vector<uint64_t>> rows = annotation.get_matrix().get_rows(anno_ids);
             visited_nodes += path.size();
             std::sort(rows[0].begin(), rows[0].end());
             Vector<uint64_t> diffs;
