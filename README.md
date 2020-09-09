@@ -42,18 +42,12 @@ popd
 4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
 5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
 6. run unit tests `./unit_tests`
-6. run integration tests `make check`
-
-#### Typical issues
-* Linking against dynamic libraries in Anaconda when compiling libmaus2
-  * Solution: make sure that packages like Anaconda are not listed in the exported environment variables
-
+6. run integration tests `./integration_tests`
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (`Release` by default)
 - `-DBUILD_STATIC=[ON|OFF]` -- link statically (`OFF` by default)
 - `-DLINK_OPT=[ON|OFF]` -- enable link time optimization (`OFF` by default)
-- `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
 - `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default, if available)
 - `-DWITH_MSSE42=[ON|OFF]` -- compile with support for the msse4.2 instructions (`ON` by default, if available)
@@ -77,11 +71,11 @@ DATA="../tests/data/transcripts_1000.fa"
 
 ./metagraph build -k 12 -o transcripts_1000 $DATA
 
-./metagraph annotate -i transcripts_1000 --anno-filename -o transcripts_1000 $DATA
+./metagraph annotate -i transcripts_1000.dbg --anno-filename -o transcripts_1000 $DATA
 
-./metagraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
+./metagraph query -i transcripts_1000.dbg -a transcripts_1000.column.annodbg $DATA
 
-./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000
+./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000.dbg
 ```
 
 ### Graph cleaning
@@ -91,7 +85,7 @@ K=12
 
 ./metagraph build -k $K --count-kmers -o transcripts_1000 $DATA
 
-./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 -o transcripts_1000_clean_contigs transcripts_1000.dbg
+./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 --to-fasta -o transcripts_1000_clean_contigs transcripts_1000.dbg
 
 zless transcripts_1000_clean_contigs.fasta.gz | tail
 ```
