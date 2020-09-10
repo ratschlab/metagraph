@@ -1051,6 +1051,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
         },
         num_threads, false, true);
+
     logger->trace(
             "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
             "Avg diff length: {}\n\tTerminal nodes total/max-depth/forced {}/{}/{}\n\t"
