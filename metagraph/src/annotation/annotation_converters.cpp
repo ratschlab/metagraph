@@ -362,6 +362,9 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
 
     auto linkage = parse_linkage_matrix(linkage_matrix_file);
 
+    if (!linkage.size())
+        logger->warn("Parsed empty linkage tree");
+
     auto matrix = std::make_unique<BRWT>(
         BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
                                    num_parallel_nodes, num_threads));
