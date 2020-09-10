@@ -140,8 +140,7 @@ bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
 void MaskedDeBruijnGraph
 ::call_sequences(const CallPath &callback,
                  size_t num_threads,
-                 bool kmers_in_single_form,
-                 bool select_last_edge) const {
+                 bool kmers_in_single_form) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
                                              only_valid_nodes_in_mask_);
@@ -155,7 +154,7 @@ void MaskedDeBruijnGraph
         }, num_threads, kmers_in_single_form, &mask);
 
     } else {
-        DeBruijnGraph::call_sequences(callback, num_threads, kmers_in_single_form, select_last_edge);
+        DeBruijnGraph::call_sequences(callback, num_threads, kmers_in_single_form);
     }
 }
 

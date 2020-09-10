@@ -175,13 +175,10 @@ class DeBruijnGraph : public SequenceGraph {
      * @param kmers_in_single_form if true, output each k-mer only in one of its forms
      * (canonical/non-canonical). That is, skip a k-mer if its reverse-complement has been
      * extracted.
-     * @param select_last_edge if true, when reaching a bifurcation during traversal,
-     * either traverse the first edge (if not visited), or stop the sequence.
      */
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false,
-                                bool select_first_edge = false) const;
+                                bool kmers_in_single_form = false) const;
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.

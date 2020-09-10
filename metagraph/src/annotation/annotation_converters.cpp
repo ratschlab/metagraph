@@ -995,13 +995,14 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     std::atomic<uint64_t> depth_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
-    graph.call_sequences(
+    graph.get_boss().call_sequences(
         [&](const std::string &, const std::vector<uint64_t> &path) {
             assert(!path.empty());
             std::vector<uint64_t> anno_ids(path.size());
             for (uint32_t i = 0; i < path.size(); ++i) {
-                assert(path[i] <= nnodes);
-                anno_ids[i] = graph::AnnotatedSequenceGraph::graph_to_anno_index(path[i]);
+                uint64_t kmer_index = graph.boss_to_kmer_index(path[i]);
+                assert(kmer_index <= nnodes);
+                anno_ids[i] = graph::AnnotatedSequenceGraph::graph_to_anno_index(kmer_index);
             }
             std::vector<Vector<uint64_t>> rows = annotation.get_matrix().get_rows(anno_ids);
             visited_nodes += path.size();
@@ -1050,7 +1051,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             // add the last row plus one termination bit for each row
             boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
         },
-        num_threads, false, true);
+        num_threads, false, nullptr, true);
 
     logger->trace(
             "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
@@ -1077,7 +1078,6 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     Vector<std::pair<uint64_t, uint32_t>>().swap(pos);
     assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
     assert(boundary.size() == diffs.size() + nnodes);
-
     auto diff_annotation
             = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(),
                                                        annotation.num_relations(), &graph,

@@ -43,8 +43,8 @@ BinaryMatrix::SetBitPositions RowDiff::get_row(Row row) const {
 }
 
 bool RowDiff::load(std::istream &f)  {
-    f >> num_columns_;
-    f >> num_relations_;
+    f.read(reinterpret_cast<char *>(&num_columns_), 8);
+    f.read(reinterpret_cast<char *>(&num_relations_), 8);
     diffs_.load(f);
     boundary_.load(f);
     terminal_.load(f);
@@ -53,8 +53,8 @@ bool RowDiff::load(std::istream &f)  {
 }
 
 void RowDiff::serialize(std::ostream &f) const  {
-    f << num_columns_;
-    f << num_relations_;
+    f.write(reinterpret_cast<const char *>(&num_columns_), 8);
+    f.write(reinterpret_cast<const char *>(&num_relations_), 8);
     diffs_.serialize(f);
     boundary_.serialize(f);
     terminal_.serialize(f);

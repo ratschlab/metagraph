@@ -57,6 +57,7 @@ TEST(RowDiff, Serialize) {
     }
     EXPECT_EQ(2, loaded.num_columns());
     EXPECT_EQ(5, loaded.num_relations());
+    EXPECT_EQ(4, loaded.num_rows());
 }
 
 TEST(RowDiff, GetDiff) {

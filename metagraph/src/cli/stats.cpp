@@ -234,15 +234,6 @@ int print_stats(Config *config) {
             logger->error("Cannot load annotations from file '{}'", file);
             exit(1);
         }
-        std::shared_ptr<graph::DeBruijnGraph> graph;
-        if (parse_annotation_type(file) == Config::AnnotationType::RowDiff) {
-            auto &row_diff
-                    = dynamic_cast<const annot::binmat::RowDiff &>(annotation->get_matrix());
-
-            graph = load_critical_dbg(files[0]);
-            auto dbg_graph = dynamic_cast<graph::DBGSuccinct *>(graph.get());
-            const_cast<annot::binmat::RowDiff &>(row_diff).set_graph(dbg_graph);
-        }
 
         logger->info("Statistics for annotation '{}'", file);
         print_stats(*annotation);
