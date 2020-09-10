@@ -684,7 +684,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
     using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
-    uint32_t previous_phase = checkpoint->checkpoint();
+    uint32_t previous_checkpoint = checkpoint->checkpoint();
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
         checkpoint->set_checkpoint(1);
@@ -694,9 +694,9 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     const std::filesystem::path dir = checkpoint->kmer_dir();
     size_t num_threads = kmer_collector.num_threads();
 
-    if (previous_phase == 1) {
+    if (previous_checkpoint == 1) {
         logger->info(
-                "Continuing from checkpoint phase 1. Looking for chunk_* files in {}",
+                "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
         std::vector<std::string> file_names;
         for (const auto &path : std::filesystem::directory_iterator(checkpoint->kmer_dir())) {
