@@ -1036,7 +1036,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             pos[anno_ids.back()] = { diffs.size(), rows.back().size() };
             diffs.insert(diffs.end(), rows.back().begin(), rows.back().end());
             size_t offset;
-#pragma omp critical
+            #pragma omp critical
             {
                 offset = node_diffs.size();
                 node_diffs.insert(node_diffs.end(), diffs.begin(), diffs.end());

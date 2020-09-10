@@ -33,7 +33,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         if (input_anno_type == Config::AnnotationType::RowDiff) {
             auto dbg_graph = dynamic_cast<DBGSuccinct *>(graph.get());
             if (!dbg_graph) {
-                logger->error("Only dbg graphs are supported for row_diff annotations");
+                logger->error(
+                        "Only succinct de Bruijn graph representations are "
+                        "supported for row-diff annotations");
                 std::exit(1);
             }
             // this is really ugly, but the alternative is to add a set_graph method to
