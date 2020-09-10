@@ -1,6 +1,6 @@
 #include "logger.hpp"
 
-#include <spdlog/sinks/stdout_sinks.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 namespace mtg {
 namespace common {
@@ -34,8 +34,8 @@ class split_sink : public spdlog::sinks::sink {
         err_.set_formatter(std::move(sink_formatter));
     }
 
-    spdlog::sinks::stdout_sink_mt out_;
-    spdlog::sinks::stderr_sink_mt err_;
+    spdlog::sinks::stdout_color_sink_mt out_;
+    spdlog::sinks::stderr_color_sink_mt err_;
 };
 
 std::shared_ptr<spdlog::logger> make_logger() {
