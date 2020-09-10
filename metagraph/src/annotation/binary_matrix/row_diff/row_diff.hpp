@@ -96,6 +96,7 @@ class RowDiff : public BinaryMatrix {
     sdsl::rrr_vector<> terminal_;
     sdsl::rrr_vector<>::select_1_type sboundary_;
 };
+
 } // namespace binmat
 } // namespace annot
 } // namespace mtg
