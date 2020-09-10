@@ -699,12 +699,19 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
         std::vector<std::string> file_names;
-        for (const auto &path : std::filesystem::directory_iterator(checkpoint->kmer_dir())) {
-            if (path.is_regular_file()
-                && path.path().filename().string().find("chunk_", 0) == 0
-                && path.path().filename().extension() == "") {
-                logger->trace("Found chunk: {}", path.path().string());
-                file_names.push_back(path.path().string());
+        namespace fs = std::filesystem;
+        for (const auto & entry : fs::directory_iterator(checkpoint->kmer_dir())) {
+            if (!entry.is_directory()
+                && fs::canonical(entry.path()).filename().string().rfind("temp_kmers") != 0) {
+                continue;
+            }
+            for (const auto &path : fs::directory_iterator(entry)) {
+                if (path.is_regular_file()
+                    && path.path().filename().string().find("chunk_", 0) == 0
+                    && path.path().filename().extension() == "") {
+                    logger->trace("Found chunk: {}", path.path().string());
+                    file_names.push_back(path.path().string());
+                }
             }
         }
         if (file_names.empty()) {

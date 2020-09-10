@@ -129,9 +129,13 @@ int build_graph(Config *config) {
                 logger->info("Skipping parsing sequences from input file(s)");
             }
 
+            if (checkpoint.phase() == 1) {
+                return 0; // phase 1 stops after collecting k-mers
+            }
+
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
 
-            if (checkpoint.phase() < 2) { // phase 1 stops after generating dummy k-mers
+            if (checkpoint.phase() == 2) { // phase 2 stops after generating dummy k-mers
                 assert(next_chunk == nullptr);
                 return 0;
             }
