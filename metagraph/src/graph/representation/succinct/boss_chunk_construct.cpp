@@ -673,7 +673,7 @@ void add_reverse_complements(size_t k,
  * the dummy-k kmers, for k=2..k
  */
 template <class KmerCollector, typename T_REAL, typename T>
-[[clang::optnone]] void recover_dummy_nodes(const KmerCollector &kmer_collector,
+void recover_dummy_nodes(const KmerCollector &kmer_collector,
                          ChunkedWaitQueue<T_REAL> &kmers,
                          ChunkedWaitQueue<T> *kmers_out,
                          ThreadPool &async_worker,
