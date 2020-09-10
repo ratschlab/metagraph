@@ -486,9 +486,7 @@ void DBGSuccinct::call_sequences(const CallPath &callback,
             callback(std::move(seq), std::move(path));
         },
         num_threads,
-        kmers_in_single_form,
-        nullptr, /* subgraph mask */
-        false /* select last edge */
+        kmers_in_single_form
     );
 }
 
