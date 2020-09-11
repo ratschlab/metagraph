@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+#include <cstdint>
 
 // work around clang-related bug in GMock
 namespace testing {
@@ -9,7 +9,9 @@ using Int32 = int32_t;
 } // namespace internal
 } // namespace testing
 
+#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+
 #include <graph/representation/succinct/dbg_succinct.hpp>
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
