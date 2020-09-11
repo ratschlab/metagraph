@@ -142,6 +142,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-path-length")) {
+            max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
             parts_total = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--part-idx")) {
@@ -617,6 +619,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "rbfish";
         case RbBRWT:
             return "rb_brwt";
+        case RowDiff:
+            return "row_diff";
         default:
             assert(false);
             return "Never happens";
@@ -640,6 +644,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RBFish;
     } else if (string == "rb_brwt") {
         return AnnotationType::RbBRWT;
+    } else if (string == "row_diff") {
+        return AnnotationType::RowDiff;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -672,7 +678,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt')";
+    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -991,6 +997,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
+            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

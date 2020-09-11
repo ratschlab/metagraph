@@ -195,8 +195,9 @@ int print_stats(Config *config) {
             std::cout << *graph;
     }
 
-    for (const auto &file : config->infbase_annotators) {
-        auto annotation = initialize_annotation(file, *config);
+    for (const std::string &file : config->infbase_annotators) {
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
             annot::LabelEncoder<std::string> label_encoder;
