@@ -2331,27 +2331,36 @@ call_path(const BOSS &boss,
     std::vector<edge_index> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
-    // then lock all threads
-    std::unique_lock<std::mutex> lock(fetched_mutex);
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
+                || dual_path[i] == path[i]) {
+            continue;
+        }
+        if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+            ++progress_bar;
 
-    if (is_cycle) {
-        // rotate the loop so we don't cut it if there is an edge visited
-        for (size_t i = 0; i < path.size(); ++i) {
-            if (dual_path[i]
-                    && fetch_bit(visited.data(), dual_path[i], concurrent)) {
-                std::rotate(path.begin(), path.begin() + i, path.end());
-                std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+            // Add this edge to a list to check if traversal should be
+            // branched from this point.
+            // boss.fwd is not called on dual_path[i] to reduce the amount
+            // of time spend in the critical section
+            dual_endpoints.emplace_back(dual_path[i]);
+        } else if (is_cycle) {
+            is_cycle = false;
+            // rotate the loop so we don't cut it if there is an edge visited
+            std::rotate(path.begin(), path.begin() + i, path.end());
+            std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
 
-                // for cycles seq[:k] = seq[-k:]
-                std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
-                std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
+            // for cycles seq[:k] = seq[-k:]
+            std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
+            std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
 
-                std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-                std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
-                break;
-            }
+            std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+            std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
         }
     }
+
+    // then lock all threads
+    std::unique_lock<std::mutex> lock(fetched_mutex);
 
     // traverse the path with its dual and fetch the nodes
     size_t begin = 0;
@@ -2371,15 +2380,6 @@ call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!fetched[dual_path[i]]) {
                 fetched[dual_path[i]] = true;
-                if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
-                    ++progress_bar;
-
-                    // Add this edge to a list to check if traversal should be
-                    // branched from this point.
-                    // boss.fwd is not called on dual_path[i] to reduce the amount
-                    // of time spend in the critical section
-                    dual_endpoints.emplace_back(dual_path[i]);
-                }
                 continue;
             }
         }
