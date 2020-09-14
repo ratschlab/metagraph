@@ -2332,10 +2332,16 @@ call_path(const BOSS &boss,
     dual_endpoints.reserve(path.size());
 
     for (size_t i = 0; i < path.size(); ++i) {
+        // If the reverse complement k-mer is not present in the (sub)graph
+        // or is equal to the forward k-mer, then no further action is needed
+        // and it can be discarded
         if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
                 || dual_path[i] == path[i]) {
+            dual_path[i] = 0;
             continue;
         }
+
+        // Check if the reverse-complement k-mer has not been traversed
         if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
 
@@ -2345,7 +2351,9 @@ call_path(const BOSS &boss,
             // of time spend in the critical section
             dual_endpoints.emplace_back(dual_path[i]);
         } else if (is_cycle) {
+            // reset is_cycle since a cycle should only be rotated once
             is_cycle = false;
+
             // rotate the loop so we don't cut it if there is an edge visited
             std::rotate(path.begin(), path.begin() + i, path.end());
             std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
@@ -2353,9 +2361,6 @@ call_path(const BOSS &boss,
             // for cycles seq[:k] = seq[-k:]
             std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
             std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
-
-            std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-            std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
         }
     }
 
@@ -2368,16 +2373,13 @@ call_path(const BOSS &boss,
         if (!fetched[path[i]]) {
             fetched[path[i]] = true;
 
-            // Extend the path if the reverse-complement k-mer does not belong
-            // to the graph (subgraph) or if it matches the current k-mer and
-            // hence the edge path[i] is going to be traversed first.
-            if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                    || dual_path[i] == path[i]) {
+            // Extend the path if the reverse-complement k-mer was discarded
+            // (if it is not present in the (sub)graph or if it is equal to the
+            // forward k-mer)
+            if (!dual_path[i])
                 continue;
-            }
 
-            // Check if the reverse-complement k-mer has not been traversed
-            // and thus, if the current edge path[i] is to be traversed first.
+            // Check if the reverse-complement k-mer has been fetched/called
             if (!fetched[dual_path[i]]) {
                 fetched[dual_path[i]] = true;
                 continue;
