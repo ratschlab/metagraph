@@ -2348,10 +2348,9 @@ call_path(const BOSS &boss,
     std::unique_lock<std::mutex> lock(fetched_mutex);
 
     if (is_cycle) {
-        // rotate the loop so we don't cut it if there is an edge visited
+        // rotate the loop so we don't cut it if there is an edge fetched
         for (size_t i = 0; i < path.size(); ++i) {
-            if (dual_path[i]
-                    && fetch_bit(visited.data(), dual_path[i], concurrent)) {
+            if (dual_path[i] && fetched[dual_path[i]]) {
                 std::rotate(path.begin(), path.begin() + i, path.end());
                 std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
 
