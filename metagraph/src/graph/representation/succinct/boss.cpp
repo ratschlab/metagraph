@@ -1838,9 +1838,7 @@ void call_paths(const BOSS &boss,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
                 sdsl::bit_vector *visited_ptr,
-                sdsl::bit_vector *fetched_ptr,
                 bool async,
-                std::mutex &fetched_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask);
 
@@ -1860,9 +1858,7 @@ call_path(const BOSS &boss,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
-          sdsl::bit_vector &fetched,
           bool concurrent,
-          std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
           const bitmap *subgraph_mask,
           bool is_cycle = false);
@@ -1897,9 +1893,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
     }
 
-    sdsl::bit_vector fetched = kmers_in_single_form ? visited : sdsl::bit_vector();
-    std::mutex fetched_mutex;
-
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
@@ -1913,8 +1906,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             ::mtg::graph::boss::call_paths(
                     *this, { start }, callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
-                    trim_sentinels, thread_pool, &visited, &fetched,
-                    async, fetched_mutex, progress_bar, subgraph_mask);
+                    trim_sentinels, thread_pool, &visited, async, progress_bar,
+                    subgraph_mask);
         });
     };
 
@@ -2034,8 +2027,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(edge);
         } while (edge != start);
 
-        // If |kmers_in_single_form| = true, the edge mask |fetched| is
-        // used in call_path to prevent calling k-mers multiple times.
+        // If |kmers_in_single_form| = true, extra checks are done to prevent
+        // calling k-mers multiple times.
         // Otherwise, that check has to be done here, so we check the cycle's
         // representative node to see if the cycle has been called already.
         if (!kmers_in_single_form) {
@@ -2051,10 +2044,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 ++progress_bar;
         }
 
-        call_path(*this, callback, path, sequence,
-                  kmers_in_single_form, trim_sentinels, visited, fetched,
-                  async, fetched_mutex, progress_bar, subgraph_mask,
-                  true); // process cycle
+        call_path(*this, callback, path, sequence, kmers_in_single_form, trim_sentinels,
+                  visited, async, progress_bar, subgraph_mask, true); // process cycle
     };
 
     if (!async) {
@@ -2112,12 +2103,10 @@ void call_paths(const BOSS &boss,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
                 sdsl::bit_vector *visited_ptr,
-                sdsl::bit_vector *fetched_ptr,
                 bool async,
-                std::mutex &fetched_mutex,
                 ProgressBar &progress_bar,
                 const bitmap *subgraph_mask) {
-    assert(visited_ptr && fetched_ptr);
+    assert(visited_ptr);
 
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
@@ -2234,12 +2223,12 @@ void call_paths(const BOSS &boss,
 
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
-                    [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<edge_index> &edges) {
+                    [=,&boss,&thread_pool,&progress_bar](std::vector<edge_index> &edges) {
                         ::mtg::graph::boss::call_paths(
                                 boss, std::move(edges), callback,
                                 split_to_unitigs, select_last_edge, kmers_in_single_form,
-                                trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
-                                async, fetched_mutex, progress_bar, subgraph_mask);
+                                trim_sentinels, thread_pool, visited_ptr, async,
+                                progress_bar, subgraph_mask);
                     },
                     std::vector<edge_index>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                       edges.end())
@@ -2254,8 +2243,8 @@ void call_paths(const BOSS &boss,
 
         auto rev_comp_breakpoints = call_path(
             boss, callback, path, sequence,
-            kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
-            async, fetched_mutex, progress_bar, subgraph_mask
+            kmers_in_single_form, trim_sentinels, visited,
+            async, progress_bar, subgraph_mask
         );
 
         assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
@@ -2286,9 +2275,7 @@ call_path(const BOSS &boss,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
-          sdsl::bit_vector &fetched,
           bool concurrent,
-          std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
           const bitmap *subgraph_mask,
           bool is_cycle) {
@@ -2376,48 +2363,39 @@ call_path(const BOSS &boss,
         }
     }
 
-    // fetch all k-mers
-    std::vector<std::pair<size_t, size_t>> ranges;
-    size_t begin = 0;
-
-    std::ignore = fetched;
-    std::ignore = fetched_mutex;
-
-    {
-        if (is_cycle) {
-            for (size_t i = 0; i < path.size(); ++i) {
-                if (dual_path[i] && !output[i]) {
-                    // rotate the loop so we don't cut it if there is an edge visited
-                    std::rotate(path.begin(), path.begin() + i, path.end());
-                    std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
-                    std::rotate(output.begin(), output.begin() + i, output.end());
-
-                    // for cycles seq[:k] = seq[-k:]
-                    std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
-                    std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
-
-                    break;
-                }
-            }
-        }
-
-        // traverse the path with its dual and fetch the nodes
+    if (is_cycle) {
         for (size_t i = 0; i < path.size(); ++i) {
-            if (output[i])
-                continue;
+            if (dual_path[i] && !output[i]) {
+                // rotate the loop so we don't cut it if there is an edge visited
+                std::rotate(path.begin(), path.begin() + i, path.end());
+                std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+                std::rotate(output.begin(), output.begin() + i, output.end());
 
-            // The k-mer or its reverse-complement k-mer had been fetched
-            // -> Skip this k-mer and call the traversed path segment.
-            if (begin < i)
-                ranges.emplace_back(begin, i);
+                // for cycles seq[:k] = seq[-k:]
+                std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
+                std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
 
-            begin = i + 1;
+                break;
+            }
         }
     }
 
-    for (const auto &[a, b] : ranges) {
-        callback({ path.begin() + a, path.begin() + b },
-                 { sequence.begin() + a, sequence.begin() + b + boss.get_k() });
+    std::vector<edge_index> breakpoints;
+
+    // traverse the path with its dual and fetch the nodes
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (!output[i])
+            breakpoints.push_back(i);
+    }
+
+    size_t begin = 0;
+    for (size_t i : breakpoints) {
+        if (begin < i) {
+            callback({ path.begin() + begin, path.begin() + i },
+                     { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
+        }
+
+        begin = i + 1;
     }
 
     // Call the path traversed
