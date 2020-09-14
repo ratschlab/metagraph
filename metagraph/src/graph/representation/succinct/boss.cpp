@@ -2328,6 +2328,7 @@ call_path(const BOSS &boss,
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
 
+    // visit all reverse complement k-mers
     std::vector<edge_index> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
@@ -2350,6 +2351,7 @@ call_path(const BOSS &boss,
             // boss.fwd is not called on dual_path[i] to reduce the amount
             // of time spend in the critical section
             dual_endpoints.emplace_back(dual_path[i]);
+
         } else if (is_cycle) {
             // reset is_cycle since a cycle should only be rotated once
             is_cycle = false;
@@ -2364,39 +2366,39 @@ call_path(const BOSS &boss,
         }
     }
 
+    // fetch all k-mers
     std::vector<std::pair<size_t, size_t>> ranges;
-
-    // then lock all threads
-    std::unique_lock<std::mutex> lock(fetched_mutex);
-
-    // traverse the path with its dual and fetch the nodes
     size_t begin = 0;
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (!fetched[path[i]]) {
-            fetched[path[i]] = true;
 
-            // Extend the path if the reverse-complement k-mer was discarded
-            // (if it is not present in the (sub)graph or if it is equal to the
-            // forward k-mer)
-            if (!dual_path[i])
-                continue;
+    {
+        std::unique_lock<std::mutex> lock(fetched_mutex);
 
-            // Check if the reverse-complement k-mer has been fetched/called
-            if (!fetched[dual_path[i]]) {
-                fetched[dual_path[i]] = true;
-                continue;
+        // traverse the path with its dual and fetch the nodes
+        for (size_t i = 0; i < path.size(); ++i) {
+            if (!fetched[path[i]]) {
+                fetched[path[i]] = true;
+
+                // Extend the path if the reverse-complement k-mer was discarded
+                // (if it is not present in the (sub)graph or if it is equal to the
+                // forward k-mer)
+                if (!dual_path[i])
+                    continue;
+
+                // Check if the reverse-complement k-mer has been fetched/called
+                if (!fetched[dual_path[i]]) {
+                    fetched[dual_path[i]] = true;
+                    continue;
+                }
             }
+
+            // The k-mer or its reverse-complement k-mer had been fetched
+            // -> Skip this k-mer and call the traversed path segment.
+            if (begin < i)
+                ranges.emplace_back(begin, i);
+
+            begin = i + 1;
         }
-
-        // The k-mer or its reverse-complement k-mer had been fetched
-        // -> Skip this k-mer and call the traversed path segment.
-        if (begin < i)
-            ranges.emplace_back(begin, i);
-
-        begin = i + 1;
     }
-
-    lock.unlock();
 
     for (const auto &[a, b] : ranges) {
         callback({ path.begin() + a, path.begin() + b },
