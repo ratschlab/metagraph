@@ -2355,18 +2355,6 @@ call_path(const BOSS &boss,
             // boss.fwd is not called on dual_path[i] to reduce the amount
             // of time spend in the critical section
             dual_endpoints.emplace_back(dual_path[i]);
-
-        } else if (is_cycle) {
-            // reset is_cycle since a cycle should only be rotated once
-            is_cycle = false;
-
-            // rotate the loop so we don't cut it if there is an edge visited
-            std::rotate(path.begin(), path.begin() + i, path.end());
-            std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
-
-            // for cycles seq[:k] = seq[-k:]
-            std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
-            std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
         }
     }
 
@@ -2376,6 +2364,22 @@ call_path(const BOSS &boss,
 
     {
         std::unique_lock<std::mutex> lock(fetched_mutex);
+
+        if (is_cycle) {
+            for (size_t i = 0; i < path.size(); ++i) {
+                if (dual_path[i] && fetched[dual_path[i]]) {
+                    // rotate the loop so we don't cut it if there is an edge visited
+                    std::rotate(path.begin(), path.begin() + i, path.end());
+                    std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+
+                    // for cycles seq[:k] = seq[-k:]
+                    std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
+                    std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
+
+                    break;
+                }
+            }
+        }
 
         // traverse the path with its dual and fetch the nodes
         for (size_t i = 0; i < path.size(); ++i) {
