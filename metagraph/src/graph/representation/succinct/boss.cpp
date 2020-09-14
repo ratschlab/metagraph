@@ -2387,20 +2387,12 @@ call_path(const BOSS &boss,
     size_t begin = 0;
     for (size_t i = 0; i < path.size(); ++i) {
         if (!fetched[path[i]]) {
+            assert(!dual_path[i] || !fetched[dual_path[i]]
+                    && "if a k-mer is fetched, its rev-compl must be too");
+            // mark both k-mers as fetched and move on to the next
             fetched[path[i]] = true;
-
-            // Extend the path if the reverse-complement k-mer does not belong
-            // to the graph (subgraph) or if it matches the current k-mer and
-            // hence the edge path[i] is going to be traversed first.
-            if (!dual_path[i] || dual_path[i] == path[i])
-                continue;
-
-            // Check if the reverse-complement k-mer has not been traversed
-            // and thus, if the current edge path[i] is to be traversed first.
-            if (!fetched[dual_path[i]]) {
-                fetched[dual_path[i]] = true;
-                continue;
-            }
+            fetched[dual_path[i]] = true;
+            continue;
         }
 
         // The k-mer or its reverse-complement k-mer had been fetched
