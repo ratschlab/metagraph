@@ -8,6 +8,8 @@
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 
+#include "graph/representation/succinct/dbg_succinct.hpp"
+
 
 namespace mtg {
 namespace graph {
@@ -547,15 +549,35 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
     overlapping_range_ = false;
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
 
-    graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
-        if (c != '$' && (dp_table.size() < max_num_nodes || dp_table.count(next_node))) {
-            if (next_node == node) {
-                out_columns.emplace_front(next_node, c);
-            } else {
-                out_columns.emplace_back(next_node, c);
+    if (dynamic_cast<const DBGSuccinct*>(graph_)) {
+        const auto &dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_);
+        const auto &boss = dbg_succ.get_boss();
+        graph_->adjacent_outgoing_nodes(node, [&](auto next_node) {
+            auto find = dp_table.find(next_node);
+            char c = find == dp_table.end()
+                ? boss.decode(
+                      boss.get_W(dbg_succ.kmer_to_boss_index(next_node)) % boss.alph_size
+                  )
+                : find->second.last_char;
+            if (c != '$' && (dp_table.size() < max_num_nodes || find != dp_table.end())) {
+                if (next_node == node) {
+                    out_columns.emplace_front(next_node, c);
+                } else {
+                    out_columns.emplace_back(next_node, c);
+                }
             }
-        }
-    });
+        });
+    } else {
+        graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
+            if (c != '$' && (dp_table.size() < max_num_nodes || dp_table.count(next_node))) {
+                if (next_node == node) {
+                    out_columns.emplace_front(next_node, c);
+                } else {
+                    out_columns.emplace_back(next_node, c);
+                }
+            }
+        });
+    }
 
     return out_columns;
 }
