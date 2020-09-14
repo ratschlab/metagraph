@@ -56,11 +56,14 @@ void print_boss_stats(const graph::boss::BOSS &boss_graph,
               << "}" << std::endl;
 
     if (count_dummy) {
-        std::cout << "dummy source edges: "
-                  << boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose)
-                  << std::endl;
-        std::cout << "dummy sink edges: "
-                  << boss_graph.mark_sink_dummy_edges()
+        uint64_t num_source_dummy_edges
+            = boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose);
+        uint64_t num_sink_dummy_edges = boss_graph.mark_sink_dummy_edges(NULL);
+
+        std::cout << "dummy source edges: " << num_source_dummy_edges << std::endl;
+        std::cout << "dummy sink edges: " << num_sink_dummy_edges << std::endl;
+        std::cout << "real edges: "
+                  << boss_graph.num_edges() - num_source_dummy_edges - num_sink_dummy_edges
                   << std::endl;
     }
     std::cout << "indexed suffix length: " << boss_graph.get_indexed_suffix_length() << std::endl;
