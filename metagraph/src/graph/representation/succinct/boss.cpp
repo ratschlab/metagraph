@@ -2344,6 +2344,24 @@ call_path(const BOSS &boss,
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
+    // first, we mark all reverse-complement k-mers as visited
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (dual_path[i]
+                && !fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+            ++progress_bar;
+
+            // Add this edge to a list to check if traversal should be
+            // branched from this point.
+            // boss.fwd is not called on dual_path[i] to reduce the amount
+            // of time spent in the critical section
+            dual_endpoints.emplace_back(Edge {
+                dual_path[i],
+                std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
+                                       rev_comp_seq.end() - i)
+            });
+        }
+    }
+
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
 
@@ -2381,19 +2399,6 @@ call_path(const BOSS &boss,
             // and thus, if the current edge path[i] is to be traversed first.
             if (!fetched[dual_path[i]]) {
                 fetched[dual_path[i]] = true;
-                if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
-                    ++progress_bar;
-
-                    // Add this edge to a list to check if traversal should be
-                    // branched from this point.
-                    // boss.fwd is not called on dual_path[i] to reduce the amount
-                    // of time spend in the critical section
-                    dual_endpoints.emplace_back(Edge {
-                        dual_path[i],
-                        std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
-                                               rev_comp_seq.end() - i)
-                    });
-                }
                 continue;
             }
         }
