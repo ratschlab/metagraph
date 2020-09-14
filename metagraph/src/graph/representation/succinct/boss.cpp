@@ -2333,7 +2333,6 @@ call_path(const BOSS &boss,
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
-    std::reverse(dual_path.begin(), dual_path.end());
     // restrict to the subgraph
     for (edge_index &e : dual_path) {
         if (subgraph_mask && !(*subgraph_mask)[e]) {
@@ -2344,23 +2343,26 @@ call_path(const BOSS &boss,
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
-    // first, we mark all reverse-complement k-mers as visited
+    // first, we mark all reverse-complement (dual) k-mers as visited
     for (size_t i = 0; i < path.size(); ++i) {
         if (dual_path[i]
                 && !fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
 
-            // Add this edge to a list to check if traversal should be
-            // branched from this point.
-            // boss.fwd is not called on dual_path[i] to reduce the amount
-            // of time spent in the critical section
-            dual_endpoints.emplace_back(Edge {
-                dual_path[i],
-                std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
-                                       rev_comp_seq.end() - i)
-            });
+            // schedule traversal branched off from all dual k-mers except those
+            // with a single outgoing k-mer that belongs to the same dual path
+            // and hence already processed
+            if (i + 1 == path.size() || !dual_path[i + 1] || !boss.is_single_outgoing(dual_path[i])) {
+                dual_endpoints.emplace_back(Edge {
+                    dual_path[i],
+                    std::vector<TAlphabet>(rev_comp_seq.begin() + i + 1,
+                                           rev_comp_seq.begin() + i + 1 + boss.get_k())
+                });
+            }
         }
     }
+
+    std::reverse(dual_path.begin(), dual_path.end());
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
