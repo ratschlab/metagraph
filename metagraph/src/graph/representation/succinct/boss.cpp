@@ -2364,6 +2364,8 @@ call_path(const BOSS &boss,
         }
     }
 
+    std::vector<std::pair<size_t, size_t>> ranges;
+
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
 
@@ -2388,17 +2390,18 @@ call_path(const BOSS &boss,
 
         // The k-mer or its reverse-complement k-mer had been fetched
         // -> Skip this k-mer and call the traversed path segment.
-        if (begin < i) {
-            lock.unlock();
-            callback({ path.begin() + begin, path.begin() + i },
-                     { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-            lock.lock();
-        }
+        if (begin < i)
+            ranges.emplace_back(begin, i);
 
         begin = i + 1;
     }
 
     lock.unlock();
+
+    for (const auto &[a, b] : ranges) {
+        callback({ path.begin() + a, path.begin() + b },
+                 { sequence.begin() + a, sequence.begin() + b + boss.get_k() });
+    }
 
     // Call the path traversed
     if (!begin) {
