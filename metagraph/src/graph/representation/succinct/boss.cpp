@@ -2334,6 +2334,12 @@ call_path(const BOSS &boss,
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
     std::reverse(dual_path.begin(), dual_path.end());
+    // restrict to the subgraph
+    for (edge_index &e : dual_path) {
+        if (subgraph_mask && !(*subgraph_mask)[e]) {
+            e = 0;
+        }
+    }
 
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
@@ -2369,10 +2375,8 @@ call_path(const BOSS &boss,
             // Extend the path if the reverse-complement k-mer does not belong
             // to the graph (subgraph) or if it matches the current k-mer and
             // hence the edge path[i] is going to be traversed first.
-            if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                    || dual_path[i] == path[i]) {
+            if (!dual_path[i] || dual_path[i] == path[i])
                 continue;
-            }
 
             // Check if the reverse-complement k-mer has not been traversed
             // and thus, if the current edge path[i] is to be traversed first.
