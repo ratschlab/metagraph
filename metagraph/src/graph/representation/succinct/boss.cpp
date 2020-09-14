@@ -2383,33 +2383,40 @@ call_path(const BOSS &boss,
         }
     }
 
-    // traverse the path with its dual and fetch the nodes
-    size_t begin = 0;
+    // find all the fetched points where the path must be cut
+    std::vector<size_t> breakpoints;
+    breakpoints.reserve(path.size());
+
     for (size_t i = 0; i < path.size(); ++i) {
-        if (!fetched[path[i]]) {
-            assert(!dual_path[i] || !fetched[dual_path[i]]
+        if (fetched[path[i]]) {
+            assert(fetched[dual_path[i]]
                     && "if a k-mer is fetched, its rev-compl must be too");
+            breakpoints.push_back(i);
+
+        } else {
+            assert(!dual_path[i] || !fetched[dual_path[i]]);
             // mark both k-mers as fetched and move on to the next
             fetched[path[i]] = true;
             fetched[dual_path[i]] = true;
-            continue;
         }
+    }
 
+    lock.unlock();
+
+    // fetch the segments cut off from the path if any
+    size_t begin = 0;
+    for (size_t i : breakpoints) {
         // The k-mer or its reverse-complement k-mer had been fetched
         // -> Skip this k-mer and call the traversed path segment.
         if (begin < i) {
-            lock.unlock();
             callback({ path.begin() + begin, path.begin() + i },
                      { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-            lock.lock();
         }
 
         begin = i + 1;
     }
 
-    lock.unlock();
-
-    // Call the path traversed
+    // Call the path (or its remaining segment)
     if (!begin) {
         callback(std::move(path), std::move(sequence));
 
