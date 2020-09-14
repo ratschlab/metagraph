@@ -2127,6 +2127,10 @@ void call_paths(const BOSS &boss,
         std::vector<edge_index> path;
         edge_index edge = edges.back();
         edges.pop_back();
+
+        if (fetch_bit(visited.data(), edge, async))
+            continue;
+
         auto sequence = boss.get_node_seq(edge);
 
         path.reserve(100);
