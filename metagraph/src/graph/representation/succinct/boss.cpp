@@ -2343,11 +2343,8 @@ call_path(const BOSS &boss,
         if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
                 || dual_path[i] == path[i]) {
             dual_path[i] = 0;
-            continue;
-        }
-
-        // Check if the reverse-complement k-mer has not been traversed
-        if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+        } else if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+            // Check if the reverse-complement k-mer has not been traversed
             ++progress_bar;
 
             // Add this edge to a list to check if traversal should be
