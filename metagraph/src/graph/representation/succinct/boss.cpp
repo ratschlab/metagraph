@@ -5,6 +5,7 @@
 #include <stack>
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <cstdio>
 #include <cmath>
 
@@ -2325,6 +2326,12 @@ call_path(const BOSS &boss,
         return {};
     }
 
+    std::unordered_map<edge_index, size_t> path_map;
+    for (size_t i = 0; i < path.size(); ++i) {
+        path_map[path[i]] = i;
+    }
+    std::vector<uint8_t> output(path.size(), 0xFF);
+
     // get dual path (mapping of the reverse complement sequence)
     auto rev_comp_seq = sequence;
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
@@ -2337,12 +2344,16 @@ call_path(const BOSS &boss,
     dual_endpoints.reserve(path.size());
 
     for (size_t i = 0; i < path.size(); ++i) {
+        if (!dual_path[i])
+            continue;
+
         // If the reverse complement k-mer is not present in the (sub)graph
         // or is equal to the forward k-mer, then no further action is needed
         // and it can be discarded
-        if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
+        if ((subgraph_mask && !(*subgraph_mask)[dual_path[i]])
                 || dual_path[i] == path[i]) {
             dual_path[i] = 0;
+
         } else if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             // Check if the reverse-complement k-mer has not been traversed
             ++progress_bar;
@@ -2352,6 +2363,16 @@ call_path(const BOSS &boss,
             // boss.fwd is not called on dual_path[i] to reduce the amount
             // of time spend in the critical section
             dual_endpoints.emplace_back(dual_path[i]);
+        } else {
+            // check if the dual k-mer is in the current path, or another
+            auto find = path_map.find(dual_path[i]);
+            if (find != path_map.end()) {
+                output[find->second] = 0x00;
+                dual_path[find->second] = 0;
+            } else if (dual_path[i] < path[i]) {
+                // the dual k-mer was in another path, keep this one if it's canonical
+                output[i] = 0x00;
+            }
         }
     }
 
@@ -2359,15 +2380,17 @@ call_path(const BOSS &boss,
     std::vector<std::pair<size_t, size_t>> ranges;
     size_t begin = 0;
 
-    {
-        std::unique_lock<std::mutex> lock(fetched_mutex);
+    std::ignore = fetched;
+    std::ignore = fetched_mutex;
 
+    {
         if (is_cycle) {
             for (size_t i = 0; i < path.size(); ++i) {
-                if (dual_path[i] && fetched[dual_path[i]]) {
+                if (dual_path[i] && !output[i]) {
                     // rotate the loop so we don't cut it if there is an edge visited
                     std::rotate(path.begin(), path.begin() + i, path.end());
                     std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+                    std::rotate(output.begin(), output.begin() + i, output.end());
 
                     // for cycles seq[:k] = seq[-k:]
                     std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
@@ -2380,21 +2403,8 @@ call_path(const BOSS &boss,
 
         // traverse the path with its dual and fetch the nodes
         for (size_t i = 0; i < path.size(); ++i) {
-            if (!fetched[path[i]]) {
-                fetched[path[i]] = true;
-
-                // Extend the path if the reverse-complement k-mer was discarded
-                // (if it is not present in the (sub)graph or if it is equal to the
-                // forward k-mer)
-                if (!dual_path[i])
-                    continue;
-
-                // Check if the reverse-complement k-mer has been fetched/called
-                if (!fetched[dual_path[i]]) {
-                    fetched[dual_path[i]] = true;
-                    continue;
-                }
-            }
+            if (output[i])
+                continue;
 
             // The k-mer or its reverse-complement k-mer had been fetched
             // -> Skip this k-mer and call the traversed path segment.
