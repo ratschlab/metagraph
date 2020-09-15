@@ -998,14 +998,17 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     std::atomic<uint64_t> depth_terminal_count = 0;
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
-    graph.get_boss().call_sequences(
-        [&](const std::string &, const std::vector<uint64_t> &path) {
+    graph.get_boss().call_sequences_row_diff(
+        [&](const std::string &, const std::vector<uint64_t> &path, std::optional<uint64_t> anchor) {
             assert(!path.empty());
             std::vector<uint64_t> anno_ids(path.size());
             for (uint32_t i = 0; i < path.size(); ++i) {
                 uint64_t kmer_index = graph.boss_to_kmer_index(path[i]);
                 assert(kmer_index <= nnodes);
                 anno_ids[i] = graph::AnnotatedSequenceGraph::graph_to_anno_index(kmer_index);
+            }
+            if (anchor.has_value()) {
+                anno_ids.push_back(graph::AnnotatedSequenceGraph::graph_to_anno_index(anchor.value()));
             }
             std::vector<Vector<uint64_t>> rows = annotation.get_matrix().get_rows(anno_ids);
             visited_nodes += path.size();
@@ -1018,7 +1021,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 if (i % max_depth == 0) {
                     pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
                     diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
-                    terminal[anno_ids[i]] = 1;
+                    assert(terminal[anno_ids[i]]);
                     depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
                     continue;
                 }
@@ -1032,7 +1035,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 if (diffs.size() - start_idx >= rows[i].size()) {
                     diffs.resize(start_idx);
                     diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
-                    terminal[anno_ids[i]] = 1;
+                    set_bit(terminal.data(), anno_ids[i], true);
                     forced_terminal_count.fetch_add(1, std::memory_order_relaxed);
                 }
                 pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
@@ -1049,12 +1052,16 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 pos[anno_ids[i]].first += offset;
             }
 
-            terminal_count.fetch_add(1, std::memory_order_relaxed);
-            terminal[anno_ids.back()] = 1;
-            // add the last row plus one termination bit for each row
-            boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
+            if(!anchor) {
+                terminal_count.fetch_add(1, std::memory_order_relaxed);
+                // add the last row plus one termination bit for each row
+                boundary_size.fetch_add(diffs.size() + rows.size(),
+                                        std::memory_order_relaxed);
+            }
         },
-        num_threads, false, nullptr, true);
+        num_threads, max_depth, &terminal);
+
+    //TODO: map terminal to annotation index
 
     logger->trace(
             "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
