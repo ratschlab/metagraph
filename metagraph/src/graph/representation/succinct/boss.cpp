@@ -2378,8 +2378,9 @@ call_path(const BOSS &boss,
                 std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
                 std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
 
-                std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-                std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
+                // `rev_comp_seq` is not used below
+                // std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+                // std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
                 break;
             }
         }
