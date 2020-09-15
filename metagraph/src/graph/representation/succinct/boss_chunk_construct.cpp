@@ -708,10 +708,10 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                 continue;
             }
             for (const auto &path : fs::directory_iterator(entry.path())) {
-                logger->trace("Checking {}", entry.path().string());
+                logger->trace("Checking {}", path.path().string());
                 if (path.is_regular_file()
-                    && path.path().filename().string().find("chunk_", 0) == 0
-                    && path.path().filename().extension() == "") {
+                    && fs::canonical(path.path()).filename().string().find("chunk_", 0) == 0
+                    && fs::canonical(path.path().filename()).extension() == "") {
                     logger->trace("Found chunk: {}", path.path().string());
                     file_names.push_back(path.path().string());
                 }
