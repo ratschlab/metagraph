@@ -181,7 +181,7 @@ class SortedSetDiskBase {
     uint32_t merged_all_count_ = 0;
 
     /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4;
+    static constexpr uint32_t MERGE_L1_COUNT = 10;
 
     static std::string merged_l1_name(const std::string &prefix, uint32_t count) {
         return prefix + "m" + std::to_string(count);
