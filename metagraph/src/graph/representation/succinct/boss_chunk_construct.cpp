@@ -701,8 +701,10 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         std::vector<std::string> file_names;
         namespace fs = std::filesystem;
         for (const auto & entry : fs::directory_iterator(checkpoint->kmer_dir())) {
+            logger->trace("Checking {}", fs::canonical(entry.path()).filename().string());
             if (!entry.is_directory()
-                && fs::canonical(entry.path()).filename().string().rfind("temp_kmers") != 0) {
+                || fs::canonical(entry.path()).filename().string().rfind("temp_kmers") != 0) {
+                logger->trace("Not ok!");
                 continue;
             }
             for (const auto &path : fs::directory_iterator(entry)) {
