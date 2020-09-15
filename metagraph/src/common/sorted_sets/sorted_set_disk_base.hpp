@@ -49,10 +49,8 @@ class SortedSetDiskBase {
                       size_t max_disk_space_bytes);
 
     virtual ~SortedSetDiskBase() {
-        // remove the files that have not been requested to merge
-        for (const auto &chunk_file : get_file_names()) {
-            std::filesystem::remove(chunk_file);
-        }
+        // not cleaning up unmerged chunk_*** files so that the computation can be resumed
+        // if building in phases or in case of a crash
         async_worker_.join(); // make sure the data was processed
     }
 
