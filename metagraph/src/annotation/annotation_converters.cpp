@@ -983,10 +983,11 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+[[clang::optnone]] std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads,
                                                       uint32_t max_depth) {
+#pragma clang optimize off
     assert(graph.num_nodes() == annotation.num_objects());
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
@@ -999,7 +1000,9 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     std::atomic<uint64_t> boundary_size = 0;
     std::atomic<uint64_t> visited_nodes = 0;
     graph.get_boss().call_sequences_row_diff(
-        [&](const std::string &, const std::vector<uint64_t> &path, std::optional<uint64_t> anchor) {
+        [&](const std::string &seq, const std::vector<uint64_t> &path, std::optional<uint64_t> anchor) {
+#pragma clang optimize off
+            std::cout << seq << std::endl;
             assert(!path.empty());
             std::vector<uint64_t> anno_ids(path.size());
             for (uint32_t i = 0; i < path.size(); ++i) {
@@ -1083,7 +1086,9 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
         }
     }
 
-    assert(visited_nodes == nnodes);
+    // add the number of nodes that were not visited (the dummy nodes, if not masked out)
+    assert(visited_nodes <= nnodes);
+    boundary_size += (nnodes - visited_nodes);
 
     Vector<uint64_t> diffs;
     diffs.reserve(node_diffs.size());
