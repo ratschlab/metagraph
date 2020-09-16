@@ -2333,11 +2333,15 @@ call_path(const BOSS &boss,
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
+    size_t num_dual_previously_visited = 0;
     // restrict to the subgraph
     for (edge_index &e : dual_path) {
         if (subgraph_mask && !(*subgraph_mask)[e]) {
             e = 0;
         }
+
+        if (e)
+            ++num_dual_previously_visited;
     }
 
     std::vector<Edge> dual_endpoints;
@@ -2348,6 +2352,7 @@ call_path(const BOSS &boss,
         if (dual_path[i]
                 && !fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
+            --num_dual_previously_visited;
 
             // schedule traversal branched off from all dual k-mers except those
             // with a single outgoing k-mer that belongs to the same dual path
@@ -2364,47 +2369,47 @@ call_path(const BOSS &boss,
 
     std::reverse(dual_path.begin(), dual_path.end());
 
-    // then lock all threads
-    std::unique_lock<std::mutex> lock(fetched_mutex);
+    // find all the fetched points where the path must be cut
+    std::vector<size_t> breakpoints;
 
-    if (is_cycle) {
-        // rotate the loop so we don't cut it if there is an edge fetched
+    if (num_dual_previously_visited) {
+        std::unique_lock<std::mutex> lock(fetched_mutex);
+
+        if (is_cycle) {
+            // rotate the loop so we don't cut it if there is an edge fetched
+            for (size_t i = 0; i < path.size(); ++i) {
+                if (dual_path[i] && fetched[dual_path[i]]) {
+                    std::rotate(path.begin(), path.begin() + i, path.end());
+                    std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+
+                    // for cycles seq[:k] = seq[-k:]
+                    std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
+                    std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
+
+                    // `rev_comp_seq` is not used below
+                    // std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+                    // std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
+                    break;
+                }
+            }
+        }
+
+        breakpoints.reserve(path.size());
+
         for (size_t i = 0; i < path.size(); ++i) {
-            if (dual_path[i] && fetched[dual_path[i]]) {
-                std::rotate(path.begin(), path.begin() + i, path.end());
-                std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
+            if (fetched[path[i]]) {
+                assert(fetched[dual_path[i]]
+                        && "if a k-mer is fetched, its rev-compl must be too");
+                breakpoints.push_back(i);
 
-                // for cycles seq[:k] = seq[-k:]
-                std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
-                std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
-
-                // `rev_comp_seq` is not used below
-                // std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-                // std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
-                break;
+            } else {
+                assert(!dual_path[i] || !fetched[dual_path[i]]);
+                // mark both k-mers as fetched and move on to the next
+                fetched[path[i]] = true;
+                fetched[dual_path[i]] = true;
             }
         }
     }
-
-    // find all the fetched points where the path must be cut
-    std::vector<size_t> breakpoints;
-    breakpoints.reserve(path.size());
-
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (fetched[path[i]]) {
-            assert(fetched[dual_path[i]]
-                    && "if a k-mer is fetched, its rev-compl must be too");
-            breakpoints.push_back(i);
-
-        } else {
-            assert(!dual_path[i] || !fetched[dual_path[i]]);
-            // mark both k-mers as fetched and move on to the next
-            fetched[path[i]] = true;
-            fetched[dual_path[i]] = true;
-        }
-    }
-
-    lock.unlock();
 
     // fetch the segments cut off from the path if any
     size_t begin = 0;
