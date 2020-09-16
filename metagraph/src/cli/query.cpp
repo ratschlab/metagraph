@@ -119,62 +119,27 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     return output;
 }
 
-void call_while_linear(const DeBruijnGraph &graph,
-                       node_index node,
-                       const std::function<void(node_index, char)> &callback,
-                       const std::function<bool()> &terminate = []() { return false; }) {
-    while (!terminate() && graph.has_single_outgoing(node)) {
-        graph.call_outgoing_kmers(node, [&](auto next, char c) {
-            callback(next, c);
-            node = next;
-        });
-    }
-}
-
 void
 call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                             const std::string_view &contig,
                             const std::function<void(std::string&&,
                                                      std::vector<node_index>&&)> &callback,
-                            size_t sub_k) {
+                            size_t sub_k,
+                            size_t max_num_nodes_per_suffix) {
     auto nodes_in_full = map_sequence_to_nodes(dbg_succ, contig);
     size_t k = dbg_succ.get_k();
     assert(sub_k < k);
 
-    size_t last_k = 0;
     for (size_t i = 0; i < nodes_in_full.size(); ++i) {
-        if (nodes_in_full[i] != DeBruijnGraph::npos) {
-            last_k = 0;
-            continue;
+        if (nodes_in_full[i] == DeBruijnGraph::npos) {
+            dbg_succ.call_nodes_with_suffix(
+                std::string_view(contig.data() + i, k),
+                [&](node_index node, size_t) {
+                    callback(dbg_succ.get_node_sequence(node), { node });
+                },
+                sub_k, max_num_nodes_per_suffix
+            );
         }
-
-        // if a node suffix match of length >= sub_k is found, skip the next
-        // last_k - sub_k k-mers, since that match is also a match of
-        // length >= sub_k for the current k-mer
-        // e.g.,
-        // k = 5
-        // Query: AAAGTGTCG
-        // Graph: $$$GTGACG
-        // then
-        // GTG -> $$GTG (offset 2)
-        //  TG -> $$GTG (offset 3)
-        //   G -> $$GTG (offset 4)
-        if (last_k >= sub_k) {
-            i += last_k - sub_k;
-            last_k = 0;
-            continue;
-        }
-
-        assert(!last_k);
-
-        dbg_succ.call_nodes_with_suffix(
-            std::string_view(contig.data() + i, k),
-            [&](node_index node, size_t seed_length) {
-                last_k = seed_length;
-                callback(dbg_succ.get_node_sequence(node), { node });
-            },
-            sub_k, 1 // max num nodes per suffix
-        );
     }
 }
 
@@ -183,8 +148,6 @@ struct HullUnitig {
     std::vector<node_index> path;
     size_t fork_count;
 };
-
-typedef tsl::hopscotch_map<node_index, size_t> NodeToDistanceMap;
 
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_hull_forks forks and traverse a linear path for
@@ -254,18 +217,17 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 continue;
 
             bool traverse = true;
-            call_while_linear(full_dbg, path.back(),
-                [&](auto next_node, char c) {
-                    path.push_back(next_node);
-                    if ((traverse = continue_traversal(next_node, unitig.size())))
-                        unitig += c;
-
-                }, [&]() {
-                    return !traverse || unitig.size() >= max_hull_depth;
-                }
-            );
-
             node_index node = path.back();
+            while (traverse && unitig.size() < max_hull_depth
+                    && full_dbg.has_single_outgoing(node)) {
+                full_dbg.call_outgoing_kmers(node, [&](auto next, char c) {
+                    path.push_back(next);
+                    if ((traverse = continue_traversal(next, unitig.size())))
+                        unitig += c;
+                    node = next;
+                });
+            }
+
             callback(std::string(unitig), std::move(path));
 
             if (node != DeBruijnGraph::npos
@@ -466,14 +428,24 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       bool canonical,
-                      size_t sub_k,
-                      size_t max_hull_forks,
-                      size_t max_hull_depth,
-                      double max_hull_depth_per_seq_char) {
+                      const Config *config) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
 
     canonical |= full_dbg.is_canonical_mode();
+
+    size_t sub_k = full_dbg.get_k();
+    size_t max_hull_forks = 0;
+    size_t max_hull_depth = 0;
+    size_t max_num_nodes_per_suffix = 1;
+    double max_hull_depth_per_seq_char = 0.0;
+    if (config) {
+        sub_k = config->alignment_min_seed_length;
+        max_hull_forks = config->max_hull_forks;
+        max_hull_depth = config->max_hull_depth;
+        max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
+        max_num_nodes_per_suffix = config->alignment_max_num_seeds_per_locus;
+    }
 
     Timer timer;
 
@@ -542,7 +514,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                                  std::move(path));
                         }
                     },
-                    sub_k
+                    sub_k,
+                    max_num_nodes_per_suffix
                 );
             }
 
@@ -562,7 +535,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       max_hull_forks);
         timer.reset();
 
-        NodeToDistanceMap distance_traversed_until_node;
+        tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
 
         size_t hull_contig_count = 0;
 
@@ -875,9 +848,6 @@ void QueryExecutor
     seq_io::FastaParser::iterator it;
 
     size_t seq_count = 0;
-    size_t sub_k = aligner_config_
-        ? aligner_config_->min_seed_length
-        : std::numeric_limits<size_t>::max();
 
     while (begin != end) {
         Timer batch_timer;
@@ -899,10 +869,7 @@ void QueryExecutor
             generate_batch,
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
-            sub_k,
-            aligner_config_ ? config_.max_hull_forks : 0,
-            config_.max_hull_depth,
-            config_.alignment_max_nodes_per_seq_char
+            aligner_config_ ? &config_ : nullptr
         );
 
         logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",

@@ -51,10 +51,7 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       bool canonical = false,
-                      size_t sub_k = std::numeric_limits<size_t>::max(),
-                      size_t max_hull_forks = 0,
-                      size_t max_hull_depth = 0,
-                      double max_hull_depth_per_seq_char = 0.0);
+                      const Config *config = nullptr);
 
 
 class QueryExecutor {
