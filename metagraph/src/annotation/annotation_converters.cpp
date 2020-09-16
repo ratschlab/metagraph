@@ -1074,9 +1074,10 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     logger->trace(" Building succinct data structures...");
 
     sdsl::bit_vector term(nnodes, 0);
-    for(uint64_t i = 1; i < terminal.size(); ++i) {
+    for (uint64_t i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {
-            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph.boss_to_kmer_index(i));
+            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph.boss_to_kmer_index(i));
             assert(anno_index < nnodes);
             term[anno_index] = 1;
         }

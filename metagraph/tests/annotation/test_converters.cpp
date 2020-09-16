@@ -380,7 +380,7 @@ TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationDisconnectedCircular) {
     graph = create_graph(3, { "ACAC", "CGCG", "TTT" });
     graph->get_boss().erase_redundant_dummy_edges();
     graph->mask_dummy_kmers(1, false);
-
+std::cout << *graph;
     for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
         annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
                                          max_path_length)
