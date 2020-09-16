@@ -2275,7 +2275,7 @@ void call_paths(const BOSS &boss,
     }
 }
 
-[[clang::optnone]] void call_paths_row_diff(const BOSS &boss,
+void call_paths_row_diff(const BOSS &boss,
                 std::vector<Edge>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&,
@@ -2286,7 +2286,6 @@ void call_paths(const BOSS &boss,
                 sdsl::bit_vector *terminal,
                 sdsl::bit_vector *near_terminal,
                 ProgressBar &progress_bar) {
-#pragma clang optimize off
     assert(visited && terminal && near_terminal);
 
     std::vector<TAlphabet> kmer;
@@ -2602,7 +2601,6 @@ void BOSS::call_sequences_row_diff(
         size_t num_threads,
         size_t max_length,
         sdsl::bit_vector *terminal) const {
-#pragma clang optimize off
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
