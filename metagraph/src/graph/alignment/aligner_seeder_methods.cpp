@@ -120,20 +120,9 @@ void SuffixSeeder<NodeType>
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
 
-    size_t last_k = 0;
-
     for (size_t i = 0; i < query_nodes.size(); ++i) {
-        if (query_nodes[i] != DeBruijnGraph::npos) {
-            last_k = 0;
+        if (query_nodes[i] != DeBruijnGraph::npos)
             continue;
-        }
-
-        if (last_k >= max_seed_length) {
-            assert(config.max_num_seeds_per_locus == 1);
-            i += last_k - max_seed_length;
-            last_k = 0;
-            continue;
-        }
 
         bool is_alt = false;
         graph.call_nodes_with_suffix(
@@ -145,9 +134,7 @@ void SuffixSeeder<NodeType>
                     || graph.traverse(alt_node, query[i + seed_length])
                         == DeBruijnGraph::npos);
 
-                if (config.max_num_seeds_per_locus == 1) {
-                    last_k = seed_length;
-                } else {
+                if (config.max_num_seeds_per_locus != 1) {
                     for (size_t j = 1; seed_length + j < k && i >= j; ++j) {
                         if (alt_node == query_nodes[i - j]
                                 && k - offsets[i - j] - j == seed_length) {
@@ -210,15 +197,7 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
     size_t k = graph.get_k();
     bool orientation = this->get_orientation();
 
-    size_t last_k = 0;
     for (size_t i = query.size() - k + 1; i + config.min_seed_length <= query.size(); ++i) {
-        if (last_k >= config.min_seed_length) {
-            --last_k;
-            continue;
-        } else {
-            last_k = 0;
-        }
-
         graph.call_nodes_with_suffix(
             std::string_view(query.data() + i, query.size() - i),
             [&](NodeType alt_node, size_t seed_length) {
@@ -233,8 +212,6 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
 
                 if (match_score <= config.min_cell_score)
                     return;
-
-                last_k = seed_length;
 
                 Seed seed(seed_seq, { alt_node }, match_score, i,
                           orientation, k - seed_length);
