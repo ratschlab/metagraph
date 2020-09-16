@@ -983,11 +983,10 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-[[clang::optnone]] std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads,
                                                       uint32_t max_depth) {
-#pragma clang optimize off
     assert(graph.num_nodes() == annotation.num_objects());
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
@@ -1001,7 +1000,6 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
     std::atomic<uint64_t> visited_nodes = 0;
     graph.get_boss().call_sequences_row_diff(
         [&](const std::string &seq, const std::vector<uint64_t> &path, std::optional<uint64_t> anchor) {
-#pragma clang optimize off
                 std::cout << seq << std::endl;
             assert(!path.empty());
             std::vector<uint64_t> anno_ids(path.size());
