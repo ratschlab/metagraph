@@ -2343,10 +2343,14 @@ call_path(const BOSS &boss,
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
+    bool dual_visited = false;
+
     // first, we mark all reverse-complement (dual) k-mers as visited
     for (size_t i = 0; i < path.size(); ++i) {
-        if (dual_path[i]
-                && !fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+        if (!dual_path[i])
+            continue;
+
+        if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
 
             // schedule traversal branched off from all dual k-mers except those
@@ -2359,8 +2363,17 @@ call_path(const BOSS &boss,
                                            rev_comp_seq.begin() + i + 1 + boss.get_k())
                 });
             }
+        } else {
+            // the dual node had already been visited
+            dual_visited = true;
         }
     }
+
+    if (!dual_visited && !is_cycle) {
+        callback(std::move(path), std::move(sequence));
+        return dual_endpoints;
+    }
+
 
     std::reverse(dual_path.begin(), dual_path.end());
 
