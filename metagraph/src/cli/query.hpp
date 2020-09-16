@@ -35,16 +35,7 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
  * @param call_sequences generate sequences to be queried against anno_graph
  * @param num_threads number of threads to use
  * @param canonical if true, the returned query graph is a canonical graph
- * @param sub_k also include k-mers whose suffixes of length sub_k match sub_k-mers
- *              in the generated sequences. This is only applicable for DBGSuccinct
- * @param max_hull_forks when adding a hull to the query graph from anno_graph,
- *                       restrict traversal to at most max_hull_forks forking nodes
- * @param max_hull_depth nodes added to the hull must be within the max_hull_depth
- *                       neighbourhood of k-mers in the generated sequences
- * @param max_hull_depth_per_seq_char restrict the traversal around a generated
- *                                    sequence's k-mers to its
- *                                    len(seq) * max_hull_depth_per_seq_char
- *                                    neighbourhood.
+ * @param config a pointer to a Config to determine construction parameters
  */
 std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
