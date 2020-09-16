@@ -36,6 +36,7 @@ using namespace mtg::graph;
 using mtg::common::logger;
 using mtg::graph::boss::BOSS;
 using mtg::graph::boss::BOSSConstructor;
+
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 
