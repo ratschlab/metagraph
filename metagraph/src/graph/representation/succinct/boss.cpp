@@ -1912,7 +1912,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
-                    *this, { Edge(start, get_node_seq(start)) }, callback,
+                    *this, { Edge(start, {}) }, callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
@@ -2131,6 +2131,12 @@ void call_paths(const BOSS &boss,
         auto [edge, sequence] = std::move(edges.back());
         edges.pop_back();
 
+        if (fetch_bit(visited.data(), edge, async))
+            continue;
+
+        if (sequence.empty())
+            sequence = boss.get_node_seq(edge);
+
         path.reserve(100);
         sequence.reserve(100 + boss.get_k());
 
@@ -2196,7 +2202,12 @@ void call_paths(const BOSS &boss,
             if (out_edges.size() == 1 && !stop_even_if_single_outgoing)
                 continue;
 
-            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
+            if (edges.size() > ENQUEUE_START_BATCH_SIZE) {
+                kmer.clear();
+            } else {
+                kmer.assign(sequence.end() - boss.get_k(), sequence.end());
+            }
+
             edge_index next_edge = 0;
 
             // masked_call_outgoing returns edges in reverse order, so the first returned
@@ -2259,11 +2270,16 @@ void call_paths(const BOSS &boss,
         assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
 
         for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
-            kmer = std::move(kmer_seq);
+            if (edges.size() > ENQUEUE_START_BATCH_SIZE) {
+                kmer.clear();
+            } else {
+                kmer = std::move(kmer_seq);
+            }
+
             edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
 
             // the sequence of next_edge was already computed in call_path
-            assert(boss.get_node_seq(next_edge) == kmer);
+            assert(kmer.empty() || boss.get_node_seq(next_edge) == kmer);
 
             masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async))
