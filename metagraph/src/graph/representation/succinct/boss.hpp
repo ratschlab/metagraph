@@ -127,7 +127,8 @@ class BOSS {
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
-                    bool trim_sentinels = false) const;
+                    bool trim_sentinels = false,
+                    bool select_last_edge = false) const;
 
     /**
      * Call contigs (dummy edges are skipped).
@@ -135,7 +136,8 @@ class BOSS {
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
-                        const bitmap *subgraph_mask = NULL) const;
+                        const bitmap *subgraph_mask = NULL,
+                        bool select_last_edge = false) const;
 
     /**
      * Call unitigs (dummy edges are skipped).

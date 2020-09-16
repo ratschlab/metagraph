@@ -276,18 +276,21 @@ inline void compute_HE_avx2(size_t length,
 
     __m256i insert_p = _mm256_set1_epi32(Cigar::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
+        // load previous values for cells to update
         __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
+        __m256i gap_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
 
-        // check match
+        // compute match score
         __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
         __m256i match_score = _mm256_add_epi32(
             incoming_p,
             _mm256_loadu_si256((__m256i*)&profile_scores[i])
         );
 
+        // compute score for cell update
         __m256i H = _mm256_max_epi32(H_orig, match_score);
 
-        // check insert
+        // compute insert score
         __m256i update_score_open = _mm256_add_epi32(
             rshiftpushback_epi32(incoming_p, incoming_scores[i + 7]),
             gap_opening_penalty
@@ -297,48 +300,65 @@ inline void compute_HE_avx2(size_t length,
             gap_extension_penalty
         );
         __m256i update_score = _mm256_max_epi32(update_score_open, update_score_extend);
+
+        // compute updated gap size count
         __m256i ones = _mm256_set1_epi32(1);
         __m256i incoming_count = _mm256_add_epi32(
             _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]),
             ones
         );
 
-        // store values
+        // compute score for cell update. check if inserting a gap improves the update
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
         H = _mm256_max_epi32(H, update_score);
 
-        // apply x-drop
+        // determine which indices satisfy the x-drop criteria
         __m256i xdrop_cmp = _mm256_cmpgt_epi32(H, xdrop_cutoff);
+
+        // mask indices which are out of bounds
         xdrop_cmp = _mm256_and_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(length),
                                      _mm256_add_epi32(_mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7),
                                                       _mm256_set1_epi32(i))), xdrop_cmp);
-        H = _mm256_blendv_epi8(H_orig, H, xdrop_cmp);
 
-        // update scores
-        _mm256_maskstore_epi32(&update_gap_count[i], xdrop_cmp, _mm256_blendv_epi8(
+        // revert values not satisfying the x-drop criteria
+        H = _mm256_blendv_epi8(H_orig, H, xdrop_cmp);
+        update_score = _mm256_blendv_epi8(gap_orig, update_score, xdrop_cmp);
+
+        // check which updates should be stores
+        __m256i both_cmp = _mm256_cmpgt_epi32(H, H_orig);
+        __m256i gap_cmp = _mm256_cmpgt_epi32(update_score, gap_orig);
+
+        // update scores in cells of DP table
+
+        // update gap count
+        _mm256_maskstore_epi32(&update_gap_count[i], gap_cmp, _mm256_blendv_epi8(
             ones,
             incoming_count,
             _mm256_cmpeq_epi32(update_score, update_score_extend)
         ));
-        const __m128i *cmp = (__m128i*)&xdrop_cmp;
-        _mm256_maskstore_epi64(&update_gap_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
-        _mm256_maskstore_epi64(&update_gap_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
 
-        _mm256_maskstore_epi32(&update_scores[i], xdrop_cmp, H);
-        _mm256_maskstore_epi32(&update_gap_scores[i], xdrop_cmp, update_score);
+        // update scores
+        _mm256_maskstore_epi32(&update_scores[i], both_cmp, H);
+        _mm256_maskstore_epi32(&update_gap_scores[i], gap_cmp, update_score);
 
-        __m256i both_cmp = _mm256_cmpgt_epi32(H, H_orig);
+        // update traceback operation
         _mm256_maskstore_epi32(&update_ops[i], both_cmp,
             _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)&profile_ops[i]),
                                insert_p,
                                update_cmp)
         );
 
-        _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
-
-        cmp = (__m128i*)&both_cmp;
+        // update traceback node
+        const __m128i *cmp = (__m128i*)&both_cmp;
         _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
         _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
+        cmp = (__m128i*)&gap_cmp;
+        _mm256_maskstore_epi64(&update_gap_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
+        _mm256_maskstore_epi64(&update_gap_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
+
+        // update mask
+        both_cmp = _mm256_or_si256(both_cmp, gap_cmp);
+        _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
     }
 }
 
@@ -372,18 +392,20 @@ inline void compute_updates(const DBGAlignerConfig &config,
     );
 
     if (update_score >= xdrop_cutoff) {
+        if (update_score > update_gap_scores[0]) {
+            update_gap_count[0] = update_score == incoming_scores[0] + config.gap_opening_penalty
+                ? 1 : incoming_gap_count[0] + 1;
+            update_gap_scores[0] = update_score;
+            update_gap_prevs[0] = prev_node;
+            updated_mask[0] = 0xFFFFFFFF;
+        }
+
         if (update_score > update_scores[0]) {
             update_scores[0] = update_score;
             update_ops[0] = Cigar::INSERTION;
             update_prevs[0] = prev_node;
             updated_mask[0] = 0xFFFFFFFF;
         }
-
-        update_gap_scores[0] = update_score;
-        update_gap_prevs[0] = prev_node;
-        update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
-            ? incoming_gap_count[0] + 1
-            : 1;
     }
 
     size_t i = 1;
@@ -421,32 +443,34 @@ inline void compute_updates(const DBGAlignerConfig &config,
     for (; i < length; ++i) {
         score_t H_orig = update_scores[i];
 
-        // check match
+        // check match score
         score_t match_score = incoming_scores[i - 1] + score_t(profile_scores[i]);
-
         score_t H = std::max(H_orig, match_score);
 
-        // check insert
+        // check insert score
         score_t update_score_open = incoming_scores[i] + score_t(config.gap_opening_penalty);
         score_t update_score_extend = incoming_gap_scores[i] + score_t(config.gap_extension_penalty);
         score_t update_score = std::max(update_score_open, update_score_extend);
 
-        // store values
+        // pick best one
         bool update_cmp = update_score > H;
         H = std::max(H, update_score);
 
-        // apply x-drop
+        // update if scores improve
         if (H >= xdrop_cutoff) {
-            update_gap_count[i] = update_score == update_score_extend
-                ? incoming_gap_count[i] + 1
-                : 1;
-            update_gap_prevs[i] = prev_node;
-            update_scores[i] = H;
-            update_gap_scores[i] = update_score;
-            if (H > H_orig) {
-                update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
+            if (update_score > update_gap_scores[i]) {
+                update_gap_scores[i] = update_score;
+                update_gap_count[i] = update_score == update_score_open
+                    ? 1 : incoming_gap_count[i] + 1;
+                update_gap_prevs[i] = prev_node;
                 updated_mask[i] = 0xFFFFFFFF;
+            }
+
+            if (H > H_orig) {
+                update_scores[i] = H;
+                update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
                 update_prevs[i] = prev_node;
+                updated_mask[i] = 0xFFFFFFFF;
             }
         }
     }
@@ -499,9 +523,13 @@ void DefaultColumnExtender<NodeType>
 
     start_score = dp_table.find(start_node)->second.best_score();
     score_cutoff = std::max(start_score, min_path_score);
+    xdrop_cutoff = score_cutoff - config_.xdrop;
+
+    if (xdrop_cutoff > start_score)
+        return;
+
     begin = 0;
     end = size;
-    xdrop_cutoff = score_cutoff - config_.xdrop;
 
     check_and_push(ColumnRef(start_node, start_score, false));
 

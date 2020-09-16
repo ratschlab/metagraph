@@ -25,15 +25,20 @@ const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basen
 class ConvertFromRowCompressed : public ::testing::Test {
   protected:
     static const uint64_t num_rows = 5;
-    static RowCompressed<> *initial_annotation;
-    static MultiLabelEncoded<std::string> *annotation;
+    RowCompressed<> *initial_annotation;
+    MultiLabelEncoded<std::string> *annotation;
+    graph::DBGSuccinct *graph = nullptr;
 
     virtual void SetUp() {
         initial_annotation = new RowCompressed<>(num_rows);
-        initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
-        initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
-        initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
-        initial_annotation->add_labels({ 4 }, {"Label2"});
+        initial_annotation->add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        initial_annotation->add_labels({ 2 }, { "Label1", "Label2" });
+        initial_annotation->add_labels({ 3 }, { "Label1", "Label2", "Label8" });
+        initial_annotation->add_labels({ 4 }, { "Label2" });
+
+        graph = new graph::DBGSuccinct(3);
+        graph->add_sequence("ACGTCAC");
+        graph->mask_dummy_kmers(1, false);
     }
 
     virtual void TearDown() {
@@ -55,12 +60,11 @@ class ConvertFromRowCompressed : public ::testing::Test {
 
         delete initial_annotation;
         delete annotation;
+        delete graph;
     }
 };
 
 const uint64_t ConvertFromRowCompressed::num_rows;
-RowCompressed<> *ConvertFromRowCompressed::initial_annotation = nullptr;
-MultiLabelEncoded<std::string> *ConvertFromRowCompressed::annotation = nullptr;
 
 class MergeAnnotators : public ::testing::Test {
   protected:
@@ -312,9 +316,31 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
 // }
 
 TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
-    annotation = convert<RainbowfishAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation)).release();
+}
+
+TEST(ConvertFromRowCompressedEmpty, to_RowDiffAnnotation) {
+    RowCompressed<> empty_row_annotator(5);
+    graph::DBGSuccinct graph(3);
+    graph.add_sequence("AGGTCAG");
+    graph.mask_dummy_kmers(1, false);
+    std::unique_ptr<RowDiffAnnotator> empty_annotation
+            = convert_to_row_diff(graph, std::move(empty_row_annotator));
+    EXPECT_EQ(0u, empty_annotation->num_labels());
+    EXPECT_EQ(5u, empty_annotation->num_objects());
+    EXPECT_EQ(0u, empty_annotation->num_relations());
+}
+
+TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotation) {
+    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
+}
+
+TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationMaxLength) {
+    for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
+        annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
+                                         max_path_length)
+                             .release();
+    }
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {

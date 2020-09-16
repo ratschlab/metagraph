@@ -156,5 +156,7 @@ template class StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string>;
 
 template class StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string>;
 
+template class StaticBinRelAnnotator<binmat::RowDiff, std::string>;
+
 } // namespace annot
 } // namespace mtg

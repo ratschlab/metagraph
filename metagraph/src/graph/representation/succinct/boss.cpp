@@ -1824,13 +1824,17 @@ inline bool masked_pick_single_incoming(const BOSS &boss,
 
 using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
 
-// traverse graph from the specified (k+1)-mer/edge and call
-// all paths reachable from it
+/*
+ * Traverse graph from the specified (k+1)-mer/edge and call all paths reachable from it.
+ * @param select_last_edge if true, at a bifurcation we always select the last edge (if
+ * not visited), or we stop the sequence. Useful for diff-based annotations.
+ */
 void call_paths(const BOSS &boss,
                 std::vector<Edge>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
+                bool select_last_edge,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
@@ -1874,7 +1878,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,
                       const bitmap *subgraph_mask,
-                      bool trim_sentinels) const {
+                      bool trim_sentinels,
+                      bool select_last_edge) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of the edges that have been reached
@@ -1908,7 +1913,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
                     *this, { Edge(start, get_node_seq(start)) }, callback,
-                    split_to_unitigs, kmers_in_single_form,
+                    split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
         });
@@ -2103,6 +2108,7 @@ void call_paths(const BOSS &boss,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
+                bool select_last_edge,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
@@ -2193,6 +2199,9 @@ void call_paths(const BOSS &boss,
             kmer.assign(sequence.end() - boss.get_k(), sequence.end());
             edge_index next_edge = 0;
 
+            // masked_call_outgoing returns edges in reverse order, so the first returned
+            // edge is the last outgoing (lexicographically)
+            bool is_last_edge = true;
             // loop over the outgoing edges
             for (edge_index edge : out_edges) {
                 assert((!subgraph_mask || (*subgraph_mask)[edge]
@@ -2200,7 +2209,9 @@ void call_paths(const BOSS &boss,
                         && "k-mers not from subgraph are marked as visited");
 
                 if (!fetch_bit(visited.data(), edge, async)) {
-                    if (!next_edge && !split_to_unitigs) {
+                    if (is_last_edge && select_last_edge) {
+                        next_edge = edge;
+                    } else if (!next_edge && !split_to_unitigs && !select_last_edge) {
                         // save the edge for visiting if we extract contigs
                         next_edge = edge;
                     } else {
@@ -2208,6 +2219,7 @@ void call_paths(const BOSS &boss,
                         edges.emplace_back(edge, kmer);
                     }
                 }
+                is_last_edge = false;
             }
 
             // stop traversing this sequence if the next edge was not selected
@@ -2223,7 +2235,7 @@ void call_paths(const BOSS &boss,
                     [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<Edge> &edges) {
                         ::mtg::graph::boss::call_paths(
                                 boss, std::move(edges), callback,
-                                split_to_unitigs, kmers_in_single_form,
+                                split_to_unitigs, select_last_edge, kmers_in_single_form,
                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
@@ -2321,19 +2333,44 @@ call_path(const BOSS &boss,
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
-    std::reverse(dual_path.begin(), dual_path.end());
+    // restrict to the subgraph
+    for (edge_index &e : dual_path) {
+        if (subgraph_mask && !(*subgraph_mask)[e]) {
+            e = 0;
+        }
+    }
 
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
+
+    // first, we mark all reverse-complement (dual) k-mers as visited
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (dual_path[i]
+                && !fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+            ++progress_bar;
+
+            // schedule traversal branched off from all dual k-mers except those
+            // with a single outgoing k-mer that belongs to the same dual path
+            // and hence already processed
+            if (i + 1 == path.size() || !dual_path[i + 1] || !boss.is_single_outgoing(dual_path[i])) {
+                dual_endpoints.emplace_back(Edge {
+                    dual_path[i],
+                    std::vector<TAlphabet>(rev_comp_seq.begin() + i + 1,
+                                           rev_comp_seq.begin() + i + 1 + boss.get_k())
+                });
+            }
+        }
+    }
+
+    std::reverse(dual_path.begin(), dual_path.end());
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
 
     if (is_cycle) {
-        // rotate the loop so we don't cut it if there is an edge visited
+        // rotate the loop so we don't cut it if there is an edge fetched
         for (size_t i = 0; i < path.size(); ++i) {
-            if (dual_path[i]
-                    && fetch_bit(visited.data(), dual_path[i], concurrent)) {
+            if (dual_path[i] && fetched[dual_path[i]]) {
                 std::rotate(path.begin(), path.begin() + i, path.end());
                 std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
 
@@ -2341,63 +2378,48 @@ call_path(const BOSS &boss,
                 std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
                 std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
 
-                std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-                std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
+                // `rev_comp_seq` is not used below
+                // std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+                // std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
                 break;
             }
         }
     }
 
-    // traverse the path with its dual and fetch the nodes
-    size_t begin = 0;
+    // find all the fetched points where the path must be cut
+    std::vector<size_t> breakpoints;
+    breakpoints.reserve(path.size());
+
     for (size_t i = 0; i < path.size(); ++i) {
-        if (!fetched[path[i]]) {
+        if (fetched[path[i]]) {
+            assert(fetched[dual_path[i]]
+                    && "if a k-mer is fetched, its rev-compl must be too");
+            breakpoints.push_back(i);
+
+        } else {
+            assert(!dual_path[i] || !fetched[dual_path[i]]);
+            // mark both k-mers as fetched and move on to the next
             fetched[path[i]] = true;
-
-            // Extend the path if the reverse-complement k-mer does not belong
-            // to the graph (subgraph) or if it matches the current k-mer and
-            // hence the edge path[i] is going to be traversed first.
-            if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                    || dual_path[i] == path[i]) {
-                continue;
-            }
-
-            // Check if the reverse-complement k-mer has not been traversed
-            // and thus, if the current edge path[i] is to be traversed first.
-            if (!fetched[dual_path[i]]) {
-                fetched[dual_path[i]] = true;
-                if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
-                    ++progress_bar;
-
-                    // Add this edge to a list to check if traversal should be
-                    // branched from this point.
-                    // boss.fwd is not called on dual_path[i] to reduce the amount
-                    // of time spend in the critical section
-                    dual_endpoints.emplace_back(Edge {
-                        dual_path[i],
-                        std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
-                                               rev_comp_seq.end() - i)
-                    });
-                }
-                continue;
-            }
+            fetched[dual_path[i]] = true;
         }
+    }
 
+    lock.unlock();
+
+    // fetch the segments cut off from the path if any
+    size_t begin = 0;
+    for (size_t i : breakpoints) {
         // The k-mer or its reverse-complement k-mer had been fetched
         // -> Skip this k-mer and call the traversed path segment.
         if (begin < i) {
-            lock.unlock();
             callback({ path.begin() + begin, path.begin() + i },
                      { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-            lock.lock();
         }
 
         begin = i + 1;
     }
 
-    lock.unlock();
-
-    // Call the path traversed
+    // Call the path (or its remaining segment)
     if (!begin) {
         callback(std::move(path), std::move(sequence));
 
@@ -2412,8 +2434,9 @@ call_path(const BOSS &boss,
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                           size_t num_threads,
                           bool kmers_in_single_form,
-                          const bitmap *subgraph_mask) const {
-    call_paths([&](auto&& edges, auto&& path) {
+                          const bitmap *subgraph_mask,
+                          bool select_last_edge) const {
+    call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
         assert(std::all_of(path.begin(), path.end(),
@@ -2421,11 +2444,11 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),
-                       [&](auto c) { return BOSS::decode(c); });
+                       [&](TAlphabet c) { return BOSS::decode(c); });
 
         callback(std::move(sequence), std::move(edges));
 
-    }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
+    }, num_threads, false, kmers_in_single_form, subgraph_mask, true, select_last_edge);
 }
 
 void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
@@ -2433,7 +2456,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t min_tip_size,
                         bool kmers_in_single_form,
                         const bitmap *subgraph_mask) const {
-    call_paths([&](auto&& edges, auto&& path) {
+    call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
         assert(std::all_of(path.begin(), path.end(),
@@ -2441,7 +2464,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),
-                       [&](auto c) { return BOSS::decode(c); });
+                       [&](TAlphabet c) { return BOSS::decode(c); });
 
         auto first_edge = edges.front();
         auto last_edge = edges.back();

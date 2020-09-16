@@ -15,9 +15,11 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "binary_matrix/multi_brwt/clustering.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "representation/annotation_matrix/static_annotators_def.hpp"
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
@@ -361,6 +363,9 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
     };
 
     auto linkage = parse_linkage_matrix(linkage_matrix_file);
+
+    if (!linkage.size())
+        logger->warn("Parsed empty linkage tree");
 
     auto matrix = std::make_unique<BRWT>(
         BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
@@ -977,6 +982,113 @@ template
 void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
+
+std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+                                                      RowCompressed<std::string> &&annotation,
+                                                      uint32_t num_threads,
+                                                      uint32_t max_depth) {
+    assert(graph.num_nodes() == annotation.num_objects());
+    uint64_t nnodes = graph.num_nodes();
+    Vector<uint64_t> node_diffs;
+    Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
+    sdsl::bit_vector terminal(nnodes, 0);
+
+    std::atomic<uint64_t> terminal_count = 0;
+    std::atomic<uint64_t> forced_terminal_count = 0;
+    std::atomic<uint64_t> depth_terminal_count = 0;
+    std::atomic<uint64_t> boundary_size = 0;
+    std::atomic<uint64_t> visited_nodes = 0;
+    graph.get_boss().call_sequences(
+        [&](const std::string &, const std::vector<uint64_t> &path) {
+            assert(!path.empty());
+            std::vector<uint64_t> anno_ids(path.size());
+            for (uint32_t i = 0; i < path.size(); ++i) {
+                uint64_t kmer_index = graph.boss_to_kmer_index(path[i]);
+                assert(kmer_index <= nnodes);
+                anno_ids[i] = graph::AnnotatedSequenceGraph::graph_to_anno_index(kmer_index);
+            }
+            std::vector<Vector<uint64_t>> rows = annotation.get_matrix().get_rows(anno_ids);
+            visited_nodes += path.size();
+            std::sort(rows[0].begin(), rows[0].end());
+            Vector<uint64_t> diffs;
+            for (uint32_t i = 0; i < rows.size() - 1; ++i) {
+                std::sort(rows[i + 1].begin(), rows[i + 1].end());
+
+                // if we reached the max path depth, force a terminal node
+                if (i % max_depth == 0) {
+                    pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
+                    diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
+                    terminal[anno_ids[i]] = 1;
+                    depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+
+                uint64_t start_idx = diffs.size();
+                std::set_symmetric_difference(rows[i].begin(), rows[i].end(),
+                                              rows[i + 1].begin(), rows[i + 1].end(),
+                                              std::back_inserter(diffs));
+
+                // if we don't gain anything by diffing, make the node terminal
+                if (diffs.size() - start_idx >= rows[i].size()) {
+                    diffs.resize(start_idx);
+                    diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
+                    terminal[anno_ids[i]] = 1;
+                    forced_terminal_count.fetch_add(1, std::memory_order_relaxed);
+                }
+                pos[anno_ids[i]] = { start_idx, diffs.size() - start_idx };
+            }
+            pos[anno_ids.back()] = { diffs.size(), rows.back().size() };
+            diffs.insert(diffs.end(), rows.back().begin(), rows.back().end());
+            size_t offset;
+            #pragma omp critical
+            {
+                offset = node_diffs.size();
+                node_diffs.insert(node_diffs.end(), diffs.begin(), diffs.end());
+            }
+            for (uint32_t i = 0; i < rows.size(); ++i) {
+                pos[anno_ids[i]].first += offset;
+            }
+
+            terminal_count.fetch_add(1, std::memory_order_relaxed);
+            terminal[anno_ids.back()] = 1;
+            // add the last row plus one termination bit for each row
+            boundary_size.fetch_add(diffs.size() + rows.size(), std::memory_order_relaxed);
+        },
+        num_threads, false, nullptr, true);
+
+    logger->trace(
+            "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
+            "Avg diff length: {}\n\tTerminal nodes total/max-depth/forced {}/{}/{}\n\t"
+            "Avg path length: {}",
+            terminal.size(), node_diffs.size(), 1.0 * node_diffs.size() / terminal.size(),
+            terminal_count + forced_terminal_count + depth_terminal_count,
+            depth_terminal_count, forced_terminal_count, (double)nnodes / terminal_count);
+
+    logger->trace(" Building succinct data structures...");
+    // add the number of nodes that were not visited (the dummy nodes)
+    boundary_size += (nnodes - visited_nodes);
+    Vector<uint64_t> diffs;
+    diffs.reserve(node_diffs.size());
+    sdsl::bit_vector boundary(boundary_size, false);
+    int64_t boundary_idx = -1;
+    for (uint64_t i = 0; i < nnodes; ++i) {
+        diffs.insert(diffs.end(), node_diffs.begin() + pos[i].first,
+                     node_diffs.begin() + pos[i].first + pos[i].second);
+        boundary_idx += (pos[i].second + 1);
+        boundary[boundary_idx] = true;
+    }
+    Vector<uint64_t>().swap(node_diffs); // free these large vectors ASAP
+    Vector<std::pair<uint64_t, uint32_t>>().swap(pos);
+    assert(static_cast<uint64_t>(boundary_idx) == boundary.size() - 1);
+    assert(boundary.size() == diffs.size() + nnodes);
+    auto diff_annotation
+            = std::make_unique<annot::binmat::RowDiff>(annotation.num_labels(),
+                                                       annotation.num_relations(), &graph,
+                                                       diffs, boundary, terminal);
+
+    return std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
+                                              annotation.get_label_encoder());
+}
 
 } // namespace annot
 } // namespace mtg

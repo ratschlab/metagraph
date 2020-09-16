@@ -56,11 +56,14 @@ void print_boss_stats(const graph::boss::BOSS &boss_graph,
               << "}" << std::endl;
 
     if (count_dummy) {
-        std::cout << "dummy source edges: "
-                  << boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose)
-                  << std::endl;
-        std::cout << "dummy sink edges: "
-                  << boss_graph.mark_sink_dummy_edges()
+        uint64_t num_source_dummy_edges
+            = boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose);
+        uint64_t num_sink_dummy_edges = boss_graph.mark_sink_dummy_edges(NULL);
+
+        std::cout << "dummy source edges: " << num_source_dummy_edges << std::endl;
+        std::cout << "dummy sink edges: " << num_sink_dummy_edges << std::endl;
+        std::cout << "real edges: "
+                  << boss_graph.num_edges() - num_source_dummy_edges - num_sink_dummy_edges
                   << std::endl;
     }
     std::cout << "indexed suffix length: " << boss_graph.get_indexed_suffix_length() << std::endl;
@@ -195,8 +198,9 @@ int print_stats(Config *config) {
             std::cout << *graph;
     }
 
-    for (const auto &file : config->infbase_annotators) {
-        auto annotation = initialize_annotation(file, *config);
+    for (const std::string &file : config->infbase_annotators) {
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                = initialize_annotation(file, *config);
 
         if (config->print_column_names) {
             annot::LabelEncoder<std::string> label_encoder;
