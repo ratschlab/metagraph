@@ -2369,7 +2369,7 @@ call_path(const BOSS &boss,
         }
     }
 
-    if (!dual_visited) {
+    if (!dual_visited && !is_cycle) {
         callback(std::move(path), std::move(sequence));
         return dual_endpoints;
     }
