@@ -2275,7 +2275,7 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void call_paths_row_diff(const BOSS &boss,
+[[clang::optnone]] void call_paths_row_diff(const BOSS &boss,
                 std::vector<Edge>&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&,
@@ -2286,6 +2286,7 @@ void call_paths_row_diff(const BOSS &boss,
                 sdsl::bit_vector *terminal,
                 sdsl::bit_vector *near_terminal,
                 ProgressBar &progress_bar) {
+#pragma clang optimize off
     assert(visited && terminal && near_terminal);
 
     std::vector<TAlphabet> kmer;
@@ -2389,37 +2390,42 @@ void call_paths_row_diff(const BOSS &boss,
         path.erase(path.begin(), path.begin() + (first_valid_it - sequence.begin()));
 
         // mark terminal and near terminal nodes
-        uint64_t i;
-        for (i = 0; i < path.size() - max_length; i += max_length) {
-            for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
-                set_bit(near_terminal->data(), path[j], async);
-            }
-            set_bit(terminal->data(), path[i + max_length - 1], async);
-        }
-        // mark the last node in the path as terminal if
-        // 1. there are no outgoing edges
-        // 2. we merge into a node that is neither terminal nor near terminal
-        bool merge_terminal = !out_edges.empty() && fetch_bit(terminal->data(), out_edges.front());
-        bool merge_near_terminal = !out_edges.empty()
-                && fetch_bit(near_terminal->data(), out_edges.front());
-        if (out_edges.empty() || !(merge_near_terminal || merge_terminal)) {
-            set_bit(terminal->data(), path.back(), 1);
-            for (uint64_t j = i; j < path.size()-1; ++j) {
-                set_bit(near_terminal->data(), path[j], async);
-            }
-        } else if (merge_terminal) {
-            // if we were lucky enough to merge into a terminal node, mark the last
-            // nodes as near terminal
-            for (uint64_t j = i; j < path.size()-1; ++j) {
-                set_bit(near_terminal->data(), path[j], async);
+        uint64_t i = 0;
+        if (path.size() >= max_length) {
+            for (i = 0; i <= path.size() - max_length; i += max_length) {
+                for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
+                    set_bit(near_terminal->data(), path[j], async);
+                }
+                set_bit(terminal->data(), path[i + max_length - 1], async);
             }
         }
-        std::optional<edge_index> last_edge;
-        if (merge_terminal || merge_near_terminal) {
-            last_edge = out_edges.front();
+        std::optional<edge_index> anchor_edge;
+        if ( path.size() % max_length != 0 ) { // last node is not terminal
+            // mark the last node in the path as terminal if
+            // 1. there are no outgoing edges, OR
+            // 2. we merge into a node that is neither terminal nor near terminal
+            bool merge_terminal = !out_edges.empty()
+                    && fetch_bit(terminal->data(), out_edges.front());
+            bool merge_near_terminal = merge_terminal
+                    || (!out_edges.empty()
+                        && fetch_bit(near_terminal->data(), out_edges.front()));
+            const bool set_terminal = (out_edges.empty() || !merge_near_terminal);
+            if (set_terminal) {
+                set_bit(terminal->data(), path.back(), 1);
+            }
+            // if we set a terminal node or were lucky enough to merge right into a
+            // terminal node, mark the last nodes as near terminal
+            if (set_terminal || merge_terminal) {
+                for (uint64_t j = i; j < path.size() - 1; ++j) {
+                    set_bit(near_terminal->data(), path[j], async);
+                }
+            }
+            if (merge_near_terminal) {
+                anchor_edge = out_edges.front();
+            }
         }
 
-        callback(std::move(path), std::move(sequence), last_edge);
+        callback(std::move(path), std::move(sequence), anchor_edge);
     }
 }
 
@@ -2596,6 +2602,7 @@ void BOSS::call_sequences_row_diff(
         size_t num_threads,
         size_t max_length,
         sdsl::bit_vector *terminal) const {
+#pragma clang optimize off
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
@@ -2724,15 +2731,17 @@ void BOSS::call_sequences_row_diff(
                 ++progress_bar;
         }
 
-      // set a terminal node every max_length nodes
-      for (uint64_t i = 0; i < path.size(); i += max_length) {
-          set_bit(terminal->data(), path[i], async);
-      }
-
-      std::optional<edge_index> to_diff;
-      if ((path.size() + 1) % max_length != 0)
-          to_diff = path[0];
-      path_callback(std::move(path), std::move(sequence), to_diff);
+        std::optional<edge_index> anchor;
+        if (path.size() >= max_length) { // set a terminal node every max_length nodes
+            for (uint64_t i = 0; i <= path.size() - max_length; i += max_length) {
+                set_bit(terminal->data(), path[i + max_length - 1], async);
+            }
+            if (path.size() > 1 && path.size() % max_length != 0)
+                anchor = path[0];
+        } else {
+            set_bit(terminal->data(), path.back(), async);
+        }
+        path_callback(std::move(path), std::move(sequence), anchor);
     };
 
     std::vector<edge_index> index_buffer;
