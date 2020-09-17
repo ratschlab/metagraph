@@ -2316,7 +2316,6 @@ void call_paths(const BOSS &boss,
             edge = next_edge;
 
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
-                EdgeQueue fork = edges.fork(TRAVERSAL_START_BATCH_SIZE / 2);
                 thread_pool.force_enqueue(
                     [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](EdgeQueue &edges) {
                         ::mtg::graph::boss::call_paths(
@@ -2325,7 +2324,7 @@ void call_paths(const BOSS &boss,
                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
-                    std::move(fork)
+                    edges.fork(TRAVERSAL_START_BATCH_SIZE / 2)
                 );
             }
         }
@@ -2343,14 +2342,17 @@ void call_paths(const BOSS &boss,
 
         while (!rev_comp_breakpoints.empty()) {
             auto [edge, kmer] = rev_comp_breakpoints.pop_back();
+            const TAlphabet *begin = kmer.get();
+            const TAlphabet *end = begin + (kmer ? boss.get_k() : 0);
+
             edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
 
-            assert(!kmer || std::vector<TAlphabet>(kmer.get(), kmer.get() + boss.get_k())
-                == boss.get_node_seq(next_edge));
+            assert(!kmer
+                || std::vector<TAlphabet>(begin, end) == boss.get_node_seq(next_edge));
 
             masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
                 if (!fetch_bit(visited.data(), e, async))
-                    edges.emplace_back(e, kmer.get(), kmer.get() + (kmer ? boss.get_k() : 0));
+                    edges.emplace_back(e, begin, end);
             });
         }
     }
