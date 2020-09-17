@@ -2351,7 +2351,7 @@ void update_terminal_bits(
  * A path ends when there are either no outgoing edges from the current node or if the
  * first node in a fork was alreddy visited.
  */
-void call_paths_row_diff(
+[[clang::optnone]] void call_paths_row_diff(
         const BOSS &boss,
         std::vector<edge_index>&& edges,
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
@@ -2361,6 +2361,7 @@ void call_paths_row_diff(
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal,
         ProgressBar &progress_bar) {
+#pragma clang optimize off
     assert(visited && terminal && near_terminal);
 
     std::vector<edge_index> out_edges; // stores all branch nodes along the path
@@ -2438,8 +2439,12 @@ void call_paths_row_diff(
             }
         }
 
+        if (path.empty())
+            continue;
+
         // make sure no dummy kmers are in the path
-        assert(sequence.back() != boss.kSentinelCode && sequence.front() != boss.kSentinelCode);
+        assert(sequence.back() != boss.kSentinelCode
+               && sequence.front() != boss.kSentinelCode);
 
         // mark terminal and near terminal nodes
         std::optional<edge_index> out_edge;
