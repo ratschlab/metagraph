@@ -1116,7 +1116,7 @@ int main(int argc, char *argv[]) {
             timer.reset();
 
             // initialize fast query annotation
-            std::vector<BinaryMatrix::SetBitPositions> annotation_rows(num_rows_arg.getValue());
+            Vector<BinaryMatrix::SetBitPositions> annotation_rows(num_rows_arg.getValue());
 
             #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
             for (uint64_t batch_begin = 0;

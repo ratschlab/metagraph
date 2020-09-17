@@ -40,6 +40,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
 
+    } else if (utils::ends_with(filename, annot::RowDiffAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiff;
+
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
@@ -86,6 +89,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RbBRWT: {
             annotation.reset(new annot::RbBRWTAnnotator());
+            break;
+        }
+        case Config::RowDiff: {
+            annotation.reset(new annot::RowDiffAnnotator());
             break;
         }
     }

@@ -25,25 +25,24 @@ class BRWT : public BinaryMatrix {
   public:
     BRWT() : nonzero_rows_(new bit_vector_smallrank()) {}
 
-    uint64_t num_columns() const { return assignments_.size(); }
-    uint64_t num_rows() const { return nonzero_rows_->size(); }
+    uint64_t num_columns() const override { return assignments_.size(); }
+    uint64_t num_rows() const override { return nonzero_rows_->size(); }
 
-    bool get(Row row, Column column) const;
-    SetBitPositions get_row(Row row) const;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
-    std::vector<Row> get_column(Column column) const;
-
+    bool get(Row row, Column column) const override;
+    SetBitPositions get_row(Row row) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
+    std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
 
     void slice_columns(const std::vector<Column> &columns,
-                       const ColumnCallback &callback) const;
+                       const ColumnCallback &callback) const override;
 
-    bool load(std::istream &in);
-    void serialize(std::ostream &out) const;
+    bool load(std::istream &in) override;
+    void serialize(std::ostream &out) const override;
 
     // number of ones in the matrix
-    uint64_t num_relations() const;
+    uint64_t num_relations() const override;
 
     // internal stats functions
     double avg_arity() const;

@@ -128,10 +128,10 @@ class Config {
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
-    std::string annotation_label = "";
     std::string header = "";
     std::string host_address;
     std::string label_mask_file;
+    uint32_t max_path_length = 50;
 
     std::filesystem::path tmp_dir;
 
@@ -170,6 +170,7 @@ class Config {
         BRWT,
         BinRelWT_sdsl,
         BinRelWT,
+        RowDiff,
         RowFlat,
         RBFish,
         RbBRWT,

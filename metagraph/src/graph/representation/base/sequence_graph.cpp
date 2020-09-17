@@ -152,7 +152,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
             targets.clear();
             graph.call_outgoing_kmers(node,
-                [&](auto next, char c) { targets.emplace_back(next, c); }
+                [&](node_index next, char c) { targets.emplace_back(next, c); }
             );
 
             if (targets.empty())
