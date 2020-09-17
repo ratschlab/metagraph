@@ -2516,19 +2516,57 @@ call_path(const BOSS &boss,
     kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
 
     auto dual_path = boss.map_to_edges(rev_comp_seq);
-    std::reverse(dual_path.begin(), dual_path.end());
+    // restrict to the subgraph
+    for (edge_index &e : dual_path) {
+        if (subgraph_mask && !(*subgraph_mask)[e]) {
+            e = 0;
+        }
+    }
 
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
+
+    bool dual_visited = false;
+
+    // first, we mark all reverse-complement (dual) k-mers as visited
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (!dual_path[i])
+            continue;
+
+        if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
+            ++progress_bar;
+
+            // schedule traversal branched off from all dual k-mers except those
+            // with a single outgoing k-mer that belongs to the same dual path
+            // and hence already processed
+            if (i + 1 == path.size() || !dual_path[i + 1] || !boss.is_single_outgoing(dual_path[i])) {
+                dual_endpoints.emplace_back(Edge {
+                    dual_path[i],
+                    std::vector<TAlphabet>(rev_comp_seq.begin() + i + 1,
+                                           rev_comp_seq.begin() + i + 1 + boss.get_k())
+                });
+            }
+        } else {
+            // the dual node had already been visited
+            dual_visited = true;
+        }
+    }
+
+    if (!dual_visited && !is_cycle) {
+        callback(std::move(path), std::move(sequence));
+        return dual_endpoints;
+    }
+
+
+    std::reverse(dual_path.begin(), dual_path.end());
 
     // then lock all threads
     std::unique_lock<std::mutex> lock(fetched_mutex);
 
     if (is_cycle) {
-        // rotate the loop so we don't cut it if there is an edge visited
+        // rotate the loop so we don't cut it if there is an edge fetched
         for (size_t i = 0; i < path.size(); ++i) {
-            if (dual_path[i]
-                    && fetch_bit(visited.data(), dual_path[i], concurrent)) {
+            if (dual_path[i] && fetched[dual_path[i]]) {
                 std::rotate(path.begin(), path.begin() + i, path.end());
                 std::rotate(dual_path.begin(), dual_path.begin() + i, dual_path.end());
 
@@ -2536,63 +2574,48 @@ call_path(const BOSS &boss,
                 std::rotate(sequence.begin(), sequence.begin() + i, sequence.end() - boss.get_k());
                 std::copy(sequence.begin(), sequence.begin() + boss.get_k(), sequence.end() - boss.get_k());
 
-                std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
-                std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
+                // `rev_comp_seq` is not used below
+                // std::rotate(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + i, rev_comp_seq.rend() - boss.get_k());
+                // std::copy(rev_comp_seq.rbegin(), rev_comp_seq.rbegin() + boss.get_k(), rev_comp_seq.rend() - boss.get_k());
                 break;
             }
         }
     }
 
-    // traverse the path with its dual and fetch the nodes
-    size_t begin = 0;
+    // find all the fetched points where the path must be cut
+    std::vector<size_t> breakpoints;
+    breakpoints.reserve(path.size());
+
     for (size_t i = 0; i < path.size(); ++i) {
-        if (!fetched[path[i]]) {
+        if (fetched[path[i]]) {
+            assert(fetched[dual_path[i]]
+                    && "if a k-mer is fetched, its rev-compl must be too");
+            breakpoints.push_back(i);
+
+        } else {
+            assert(!dual_path[i] || !fetched[dual_path[i]]);
+            // mark both k-mers as fetched and move on to the next
             fetched[path[i]] = true;
-
-            // Extend the path if the reverse-complement k-mer does not belong
-            // to the graph (subgraph) or if it matches the current k-mer and
-            // hence the edge path[i] is going to be traversed first.
-            if (!dual_path[i] || (subgraph_mask && !(*subgraph_mask)[dual_path[i]])
-                    || dual_path[i] == path[i]) {
-                continue;
-            }
-
-            // Check if the reverse-complement k-mer has not been traversed
-            // and thus, if the current edge path[i] is to be traversed first.
-            if (!fetched[dual_path[i]]) {
-                fetched[dual_path[i]] = true;
-                if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
-                    ++progress_bar;
-
-                    // Add this edge to a list to check if traversal should be
-                    // branched from this point.
-                    // boss.fwd is not called on dual_path[i] to reduce the amount
-                    // of time spend in the critical section
-                    dual_endpoints.emplace_back(Edge {
-                        dual_path[i],
-                        std::vector<TAlphabet>(rev_comp_seq.end() - boss.get_k() - i,
-                                               rev_comp_seq.end() - i)
-                    });
-                }
-                continue;
-            }
+            fetched[dual_path[i]] = true;
         }
+    }
 
+    lock.unlock();
+
+    // fetch the segments cut off from the path if any
+    size_t begin = 0;
+    for (size_t i : breakpoints) {
         // The k-mer or its reverse-complement k-mer had been fetched
         // -> Skip this k-mer and call the traversed path segment.
         if (begin < i) {
-            lock.unlock();
             callback({ path.begin() + begin, path.begin() + i },
                      { sequence.begin() + begin, sequence.begin() + i + boss.get_k() });
-            lock.lock();
         }
 
         begin = i + 1;
     }
 
-    lock.unlock();
-
-    // Call the path traversed
+    // Call the path (or its remaining segment)
     if (!begin) {
         callback(std::move(path), std::move(sequence));
 
