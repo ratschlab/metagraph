@@ -274,33 +274,49 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
 
         logger->trace("Reconstructing count vector");
         counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width * 2);
-        for (auto &[seq, seq_counts] : contigs) {
+
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (size_t l = 0; l < contigs.size(); ++l) {
+            auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                assert(!counts[i]);
-                counts[i] = seq_counts[j++];
+                #pragma omp critical
+                {
+                    assert(!counts[i]);
+                    counts[i] = seq_counts[j++];
+                }
             });
             assert(j == seq_counts.size());
+        }
 
-            if (masked_canonical) {
+        if (masked_canonical) {
+            // reshape to normal width
+            counts.width(width);
+
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t l = 0; l < contigs.size(); ++l) {
+                auto &[seq, seq_counts] = contigs[l];
+                seq_counts.width(width);
                 reverse_complement(seq.begin(), seq.end());
 
                 // counts stores counts for in labels and out labels interleaved,
                 // so to add values properly, it should be reshaped first
-                counts.width(width);
-                seq_counts.width(width);
-                j = seq_counts.size();
+                size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
                     j -= 2;
-                    counts[i * 2] += seq_counts[j];
-                    counts[(i * 2) + 1] += seq_counts[j + 1];
+
+                    #pragma omp critical
+                    {
+                        counts[i * 2] += seq_counts[j];
+                        counts[(i * 2) + 1] += seq_counts[j + 1];
+                    }
                 });
                 assert(!j);
-
-                // reshape back
-                counts.width(width * 2);
                 seq_counts.width(width * 2);
             }
+
+            // reshape back
+            counts.width(width * 2);
         }
 
         logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
