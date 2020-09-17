@@ -1075,6 +1075,7 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
 
     logger->trace(" Building succinct data structures...");
 
+    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(nnodes, 0);
     for (uint64_t i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {

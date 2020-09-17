@@ -6,9 +6,9 @@
 
 #include <algorithm>
 #include <optional>
-#include <vector>
 #include <stack>
 #include <string>
+#include <vector>
 
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
@@ -1870,6 +1870,7 @@ call_path(const BOSS &boss,
           const bitmap *subgraph_mask,
           bool is_cycle = false);
 
+#ifndef NDEBUG
 void assert_forks_and_merges_visited(const BOSS& boss, const sdsl::bit_vector& visited) {
     constexpr bool async = true;
     // make sure that all forks have been covered
@@ -1910,6 +1911,7 @@ void assert_no_leftovers(const BOSS& boss, const sdsl::bit_vector& visited) {
     std::cout << std::flush;
     assert(!leftover);
 }
+#endif
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -2289,8 +2291,8 @@ void call_paths(const BOSS &boss,
  * One terminal node is set every max_length nodes in the path, and all nodes before it
  * are marked as near_terminal.
  * The last node in the path is marked as terminal if:
- *  1. The path length is an exact multiple of max_length
- *  2. The last node in the path is a dead-end
+ *  1. The path length is an exact multiple of max_length, OR
+ *  2. The last node in the path is a dead-end, OR
  *  3. The last node into a path merges into a node that is neither terminal nor near
  *     terminal
  *  If the last node in the path is not terminal then #callback is invoked with the anchor
@@ -2299,20 +2301,17 @@ void call_paths(const BOSS &boss,
 void update_terminal_bits(
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
         uint64_t max_length,
-        const std::optional<edge_index> &out_edge,
+        edge_index *merge_edge,
         std::vector<edge_index> &&path,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal) {
-    // mark terminal and near terminal nodes
     uint64_t i = 0;
     constexpr bool async = true;
-    if (path.size() >= max_length) {
-        for (i = 0; i <= path.size() - max_length; i += max_length) {
-            for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
-                set_bit(near_terminal->data(), path[j], async);
-            }
-            set_bit(terminal->data(), path[i + max_length - 1], async);
+    for (i = 0; i + max_length <= path.size(); i += max_length) {
+        for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
+            set_bit(near_terminal->data(), path[j], async);
         }
+        set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
     if ( path.size() % max_length == 0 ) { // last node is terminal
@@ -2323,11 +2322,10 @@ void update_terminal_bits(
     // mark the last node in the path as terminal if
     // 1. there are no outgoing edges, OR
     // 2. we merge into a node that is neither terminal nor near terminal
-    bool merge_terminal
-            = out_edge.has_value() && fetch_bit(terminal->data(), out_edge.value());
+    bool merge_terminal = merge_edge && fetch_bit(terminal->data(), *merge_edge);
     bool merge_near_terminal = merge_terminal
-            || (out_edge.has_value() && fetch_bit(near_terminal->data(), out_edge.value()));
-    const bool set_terminal = !out_edge.has_value() || !merge_near_terminal;
+            || (merge_edge && fetch_bit(near_terminal->data(), *merge_edge));
+    const bool set_terminal = !merge_edge || !merge_near_terminal;
     if (set_terminal) {
         set_bit(terminal->data(), path.back(), 1);
     }
@@ -2340,7 +2338,7 @@ void update_terminal_bits(
     }
     std::optional<edge_index> anchor_edge;
     if (merge_near_terminal) {
-        anchor_edge = out_edge.value();
+        anchor_edge = *merge_edge;
     }
     callback(std::move(path), anchor_edge);
 }
@@ -2349,7 +2347,7 @@ void update_terminal_bits(
  * Traverses all paths that can be visited starting from #edges and invokes
  * #callback at the end of each path.
  * A path ends when there are either no outgoing edges from the current node or if the
- * first node in a fork was alreddy visited.
+ * first node in a fork was already visited.
  */
 [[clang::optnone]] void call_paths_row_diff(
         const BOSS &boss,
@@ -2376,14 +2374,17 @@ void update_terminal_bits(
         if (fetch_bit(visited->data(), edge, async))
             continue;
 
-        std::vector<TAlphabet> seq = boss.get_node_seq(edge);
-        std::deque<TAlphabet> sequence = std::deque(seq.begin(), seq.end());
+        std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
+        uint32_t skip_count = 0; // counts number of dummy k-mers to skip
+        while (skip_count < sequence.size() && sequence[skip_count] == boss.kSentinelCode) {
+            skip_count++;
+        }
 
         std::vector<edge_index> path;
         path.reserve(100);
 
-        // traverse simple path until we reach its tail or
-        // the first edge that has already been visited
+        // traverse simple path until we reach its tail or a fork where the first edge
+        // has already been visited
         while (!fetch_and_set_bit(visited->data(), edge, async)) {
             assert(edge > 0);
             ++progress_bar;
@@ -2396,12 +2397,11 @@ void update_terminal_bits(
                 break;
 
             // don't add dummy source k-mers to the path
-            if (sequence[0] == boss.kSentinelCode) {
-                sequence.pop_front();
-            } else {
+            if (skip_count == 0) {
                 path.push_back(edge);
+            } else {
+                skip_count--;
             }
-            sequence.push_back(w);
 
             // make one traversal step
             edge = boss.fwd(edge, w);
@@ -2443,15 +2443,12 @@ void update_terminal_bits(
             continue;
 
         // make sure no dummy kmers are in the path
-        assert(sequence.back() != boss.kSentinelCode
-               && sequence.front() != boss.kSentinelCode);
+        assert(boss.get_node_seq(path.front()).front() != boss.kSentinelCode
+               && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
 
         // mark terminal and near terminal nodes
-        std::optional<edge_index> out_edge;
-        if (!out_edges.empty()) {
-            out_edge = out_edges.front();
-        }
-        update_terminal_bits(callback, max_length, out_edge, std::move(path), terminal,
+        edge_index *first_edge = out_edges.empty() ? nullptr : &out_edges.front();
+        update_terminal_bits(callback, max_length, first_edge, std::move(path), terminal,
                         near_terminal);
     }
 }
@@ -2655,8 +2652,8 @@ void BOSS::call_sequences_row_diff(
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
-    terminal->resize(visited.size());
-    sdsl::util::set_to_value(*terminal, 0);
+    terminal->resize(W_->size());
+    sdsl::util::set_to_value(*terminal, false);
     visited[0] = true;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -2668,9 +2665,8 @@ void BOSS::call_sequences_row_diff(
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&, start]() {
-            call_paths_row_diff(*this, { start },
-                                callback, thread_pool, max_length, &visited,
-                                terminal, &near_terminal, progress_bar);
+            call_paths_row_diff(*this, { start }, callback, thread_pool, max_length,
+                                &visited, terminal, &near_terminal, progress_bar);
         });
     };
 
@@ -2739,14 +2735,14 @@ void BOSS::call_sequences_row_diff(
         }
 
         std::optional<edge_index> anchor;
-        if (path.size() >= max_length) { // set a terminal node every max_length nodes
-            for (uint64_t i = 0; i <= path.size() - max_length; i += max_length) {
-                set_bit(terminal->data(), path[i + max_length - 1], async);
-            }
-            if (path.size() > 1 && path.size() % max_length != 0)
-                anchor = path[0];
-        } else {
+        for (uint64_t i = 0; i + max_length <= path.size(); i += max_length) {
+            set_bit(terminal->data(), path[i + max_length - 1], async);
+        }
+
+        if (path.size() < max_length) { // set a terminal node every max_length nodes
             set_bit(terminal->data(), path.back(), async);
+        } else if (path.size() > 1 && path.size() % max_length != 0) {
+            anchor = path[0];
         }
         callback(std::move(path), anchor);
     };
