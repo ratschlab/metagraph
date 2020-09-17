@@ -684,6 +684,11 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
     using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
+    if (checkpoint->phase() == 1) {
+        kmers.reset();
+        return; // phase 1 stops after collecting k-mers
+    }
+
     uint32_t previous_checkpoint = checkpoint->checkpoint();
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
@@ -932,8 +937,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE);
         recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
-        if (checkpoint_.phase() == 1) {
-            logger->info("Finished building phase 1");
+        if (checkpoint_.phase() <= 2) {
+            logger->info("Finished building phase {}", checkpoint_.phase());
             queue.reset();
             return nullptr;
         }
