@@ -1238,31 +1238,34 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
     }
 }
 
-TEST(BOSS, CallSequenceRowDiff_ThreePaths) {
+TEST(BOSS, CallSequenceRowDiff_FourPaths) {
 #pragma clang optimize off
     constexpr size_t k = 5;
     BOSSConstructor constructor(k);
-    std::vector<std::string> sequences = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT" };
+    std::vector<std::string> sequences
+            = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
     constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
     BOSS graph(&constructor);
-
-    for (size_t num_threads : { 4 }) {
+    std::mutex mu;
+    for (size_t num_threads : { 1, 4 }) {
         sdsl::bit_vector terminal;
         std::atomic<size_t> num_sequences = 0;
-        std::vector<std::string> found_sequences(3);
+        std::vector<std::string> found_sequences(4);
         graph.call_sequences_row_diff(
                 [&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &) {
                   std::string sequence(path.size(), '\0');
                   std::transform(path.begin(), path.end(), sequence.begin(),
                                  [&](uint64_t edge) { return graph.decode(graph.get_W(edge)); });
-                    found_sequences[num_sequences] = graph.get_node_str(path[0]) + sequence;
-                    std::cout << "Sequence is " << found_sequences[num_sequences] << std::endl;
-                    num_sequences++;
+                  {
+                      std::unique_lock<std::mutex> lock(mu);
+                      found_sequences[num_sequences] = graph.get_node_str(path[0]) + sequence;
+                      num_sequences++;
+                  }
                 },
                 num_threads, 1, &terminal);
 
         ASSERT_EQ(graph.num_edges() + 1, terminal.size());
-        ASSERT_EQ(3, num_sequences);
+        ASSERT_EQ(4, num_sequences);
         ASSERT_THAT(found_sequences, ::testing::UnorderedElementsAreArray(sequences));
     }
 }
