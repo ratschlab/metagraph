@@ -931,14 +931,18 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     template <typename KMER, typename T, typename Container>
     BOSS::Chunk *build_chunk_2bit(Container &kmers) {
+        if (checkpoint_.phase() == 1) {
+            logger->info("Finished building phase 1");
+            return nullptr;
+        }
         logger->trace("Reconstructing all required dummy source k-mers...");
 
         Timer timer;
         ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE);
         recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
-        if (checkpoint_.phase() <= 2) {
-            logger->info("Finished building phase {}", checkpoint_.phase());
+        if (checkpoint_.phase() == 2) {
+            logger->info("Finished building phase 2");
             queue.reset();
             return nullptr;
         }
