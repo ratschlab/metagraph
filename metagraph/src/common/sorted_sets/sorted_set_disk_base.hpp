@@ -51,6 +51,7 @@ class SortedSetDiskBase {
     virtual ~SortedSetDiskBase() {
         // not cleaning up unmerged chunk_*** files so that the computation can be resumed
         // if building in phases or in case of a crash
+        async_merge_l1_.join(); // don't leave half-merged chunks behind
         async_worker_.join(); // make sure the data was processed
     }
 
