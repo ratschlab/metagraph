@@ -80,7 +80,7 @@ bsub -J "cluster" \
      -oo ~/metagenome/data/BIGSI/logs/cluster_columns.lsf \
      -W 120:00 \
      -n 48 -R "rusage[mem=42500] span[hosts=1]" \
-    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" \
+    "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
             --linkage \
             --subsample 5000000 \
@@ -92,7 +92,7 @@ bsub -J "cluster" \
      -oo ~/metagenome/data/BIGSI/logs/cluster_columns_1M.lsf \
      -W 120:00 \
      -n 48 -R "rusage[mem=37500] span[hosts=1]" \
-    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" \
+    "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
             --linkage \
             --subsample 1000000 \
@@ -326,13 +326,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_row_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rowy_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_row_${N}_primary.lsf \
          -W 24:00 \
          -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
-        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type row \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.column.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
                 2>&1"; \
 done
@@ -341,13 +341,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_flat_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_flat_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_flat_${N}_primary.lsf \
          -W 24:00 \
          -n 1 -R "rusage[mem=$((N * 10 + 15000))] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type flat \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.row.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
                 2>&1"; \
 done
 
@@ -355,13 +355,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_rbfish_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_rbfish_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_rbfish_${N}_primary.lsf \
          -W 20:00 \
          -n 1 -R "rusage[mem=$((N * 17))] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type rbfish \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.row.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
                 2>&1"; \
 done
 
