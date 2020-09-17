@@ -144,12 +144,12 @@ class BOSS {
      * limit - in the worst case contigs can be 2*max_length long.
      * @param callback invoke this for each generated contig
      * @param num_threads parallelize the graph traversal on this many threads
-     * @param max_length the maximum desired contig length
+     * @param anchor the maximum desired contig length
      */
     void call_sequences_row_diff(
-            Call<const std::string &, const std::vector<edge_index> &, std::optional<edge_index>> callback,
+            Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
             size_t num_threads,
-            size_t max_length,
+            size_t anchor,
             sdsl::bit_vector *terminal) const;
 
     /**

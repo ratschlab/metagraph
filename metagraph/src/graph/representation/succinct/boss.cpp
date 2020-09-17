@@ -1870,6 +1870,47 @@ call_path(const BOSS &boss,
           const bitmap *subgraph_mask,
           bool is_cycle = false);
 
+void assert_forks_and_merges_visited(const BOSS& boss, const sdsl::bit_vector& visited) {
+    constexpr bool async = true;
+    // make sure that all forks have been covered
+    call_zeros(visited, [&](edge_index edge) {
+      edge_index t = boss.succ_last(edge);
+      bool check = masked_pick_single_outgoing(boss, &t, nullptr);
+      assert(t);
+      assert(check);
+
+      // make sure the next neighbouring edge has also not been visited
+      t = boss.fwd(t, boss.get_W(t) % boss.alph_size);
+      check = masked_pick_single_outgoing(boss, &t, nullptr);
+      assert(t);
+      assert(check);
+      assert(!fetch_bit(visited.data(), t, async));
+    }, async);
+
+    // make sure that all merges have been covered
+    call_zeros(visited, [&](edge_index edge) {
+      edge_index t = boss.bwd(edge);
+      bool check = masked_pick_single_incoming(boss, &t, boss.get_W(t), nullptr);
+      assert(t);
+      assert(check);
+      assert(!fetch_bit(visited.data(), t, async));
+    }, async);
+}
+
+void assert_no_leftovers(const BOSS& boss, const sdsl::bit_vector& visited) {
+    bool leftover = false;
+    call_zeros(visited, [&](edge_index edge) {
+      leftover = true;
+      TAlphabet d = boss.get_W(edge) % boss.alph_size;
+      std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\t";
+      edge = boss.fwd(edge, d);
+      d = boss.get_W(edge) % boss.alph_size;
+      std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\n";
+    }, true);
+    std::cout << std::flush;
+    assert(!leftover);
+}
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1990,29 +2031,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     thread_pool.join();
 
 #ifndef NDEBUG
-    // make sure that all forks have been covered
-    call_zeros(visited, [&](edge_index edge) {
-        edge_index t = succ_last(edge);
-        bool check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
-        assert(t);
-        assert(check);
-
-        // make sure the next neighbouring edge has also not been visited
-        t = fwd(t, get_W(t) % alph_size);
-        check = masked_pick_single_outgoing(*this, &t, subgraph_mask);
-        assert(t);
-        assert(check);
-        assert(!fetch_bit(visited.data(), t, async));
-    }, async);
-
-    // make sure that all merges have been covered
-    call_zeros(visited, [&](edge_index edge) {
-        edge_index t = bwd(edge);
-        bool check = masked_pick_single_incoming(*this, &t, get_W(t), subgraph_mask);
-        assert(t);
-        assert(check);
-        assert(!fetch_bit(visited.data(), t, async));
-    }, async);
+    assert_forks_and_merges_visited(*this, visited);
 #endif
 
     // Now we only have to traverse loops that have not been traversed or
@@ -2091,17 +2110,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     }
 
 #ifndef NDEBUG
-    bool leftover = false;
-    call_zeros(visited, [&](edge_index edge) {
-        leftover = true;
-        TAlphabet d = get_W(edge) % alph_size;
-        std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\t";
-        edge = fwd(edge, d);
-        d = get_W(edge) % alph_size;
-        std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\n";
-    }, async);
-    std::cout << std::flush;
-    assert(!leftover);
+    assert_no_leftovers(*this, visited);
 #endif
 }
 
@@ -2275,32 +2284,102 @@ void call_paths(const BOSS &boss,
     }
 }
 
-void call_paths_row_diff(const BOSS &boss,
-                std::vector<Edge>&& edges,
-                const BOSS::Call<std::vector<edge_index>&&,
-                                 std::vector<TAlphabet>&&,
-                                 std::optional<edge_index>> &callback,
-                ThreadPool &thread_pool,
-                uint32_t max_length,
-                sdsl::bit_vector *visited,
-                sdsl::bit_vector *terminal,
-                sdsl::bit_vector *near_terminal,
-                ProgressBar &progress_bar) {
+/**
+ * Updates #terminal and #near_terminal based on the given path.
+ * One terminal node is set every max_length nodes in the path, and all nodes before it
+ * are marked as near_terminal.
+ * The last node in the path is marked as terminal if:
+ *  1. The path length is an exact multiple of max_length
+ *  2. The last node in the path is a dead-end
+ *  3. The last node into a path merges into a node that is neither terminal nor near
+ *     terminal
+ *  If the last node in the path is not terminal then #callback is invoked with the anchor
+ *  node against which the last node should be diffed.
+ */
+void update_terminal_bits(
+        const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
+        uint64_t max_length,
+        const std::optional<edge_index> &out_edge,
+        std::vector<edge_index> &&path,
+        sdsl::bit_vector *terminal,
+        sdsl::bit_vector *near_terminal) {
+    // mark terminal and near terminal nodes
+    uint64_t i = 0;
+    constexpr bool async = true;
+    if (path.size() >= max_length) {
+        for (i = 0; i <= path.size() - max_length; i += max_length) {
+            for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
+                set_bit(near_terminal->data(), path[j], async);
+            }
+            set_bit(terminal->data(), path[i + max_length - 1], async);
+        }
+    }
+
+    if ( path.size() % max_length == 0 ) { // last node is terminal
+        callback(std::move(path), nullopt);
+        return;
+    }
+
+    // mark the last node in the path as terminal if
+    // 1. there are no outgoing edges, OR
+    // 2. we merge into a node that is neither terminal nor near terminal
+    bool merge_terminal
+            = out_edge.has_value() && fetch_bit(terminal->data(), out_edge.value());
+    bool merge_near_terminal = merge_terminal
+            || (out_edge.has_value() && fetch_bit(near_terminal->data(), out_edge.value()));
+    const bool set_terminal = !out_edge.has_value() || !merge_near_terminal;
+    if (set_terminal) {
+        set_bit(terminal->data(), path.back(), 1);
+    }
+    // if we set a terminal node or were lucky enough to merge right into a
+    // terminal node, mark the last nodes as near terminal
+    if (set_terminal || merge_terminal) {
+        for (uint64_t j = i; j < path.size() - 1; ++j) {
+            set_bit(near_terminal->data(), path[j], async);
+        }
+    }
+    std::optional<edge_index> anchor_edge;
+    if (merge_near_terminal) {
+        anchor_edge = out_edge.value();
+    }
+    callback(std::move(path), anchor_edge);
+}
+
+/**
+ * Traverses all paths that can be visited starting from #edges and invokes
+ * #callback at the end of each path.
+ * A path ends when there are either no outgoing edges from the current node or if the
+ * first node in a fork was alreddy visited.
+ */
+void call_paths_row_diff(
+        const BOSS &boss,
+        std::vector<edge_index>&& edges,
+        const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
+        ThreadPool &thread_pool,
+        uint32_t max_length,
+        sdsl::bit_vector *visited,
+        sdsl::bit_vector *terminal,
+        sdsl::bit_vector *near_terminal,
+        ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
-    std::vector<TAlphabet> kmer;
     std::vector<edge_index> out_edges; // stores all branch nodes along the path
 
     constexpr bool async = true;
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
-        std::vector<edge_index> path;
-        auto [edge, sequence] = std::move(edges.back());
+        edge_index edge = edges.back();
         edges.pop_back();
 
+        if (fetch_bit(visited->data(), edge, async))
+            continue;
+
+        std::vector<TAlphabet> seq = boss.get_node_seq(edge);
+        std::deque<TAlphabet> sequence = std::deque(seq.begin(), seq.end());
+
+        std::vector<edge_index> path;
         path.reserve(100);
-        sequence.reserve(100 + boss.get_k());
 
         // traverse simple path until we reach its tail or
         // the first edge that has already been visited
@@ -2310,12 +2389,18 @@ void call_paths_row_diff(const BOSS &boss,
 
             // visit the edge
             TAlphabet w = boss.get_W(edge) % boss.alph_size;
-            sequence.push_back(w);
-            path.push_back(edge);
 
-            // stop the traversal if the next node is a dummy sink
-            if (!w)
+            // stop the traversal on dummy sink nodes
+            if (w == boss.kSentinelCode)
                 break;
+
+            // don't add dummy source k-mers to the path
+            if (sequence[0] == boss.kSentinelCode) {
+                sequence.pop_front();
+            } else {
+                path.push_back(edge);
+            }
+            sequence.push_back(w);
 
             // make one traversal step
             edge = boss.fwd(edge, w);
@@ -2323,51 +2408,29 @@ void call_paths_row_diff(const BOSS &boss,
             out_edges.resize(0);
             masked_call_outgoing(boss, edge, nullptr,
                                  [&](edge_index e) { out_edges.push_back(e); });
-            // stop the traversal if there are no edges outgoing from the target
-            if (out_edges.empty())
+
+            // loop over the outgoing edges (except the first)
+            for (uint32_t i = 1; i < out_edges.size(); ++i) {
+                if (!fetch_bit(visited->data(), out_edges[i], async)) {
+                    edges.push_back(out_edges[i]); // save the edge for visiting later
+                }
+            }
+
+            // stop the traversal if there are no edges outgoing from the target or if
+            // the first outgoing edge was already visited
+            if (out_edges.empty() || fetch_bit(visited->data(), out_edges.front(), async))
                 break;
 
             edge = out_edges.front();
 
-            // continue the non-branching traversal further if there is only one edge
-            // outgoing from the target
-            if (out_edges.size() == 1)
-                continue;
-
-            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
-
-            edge_index next_edge = 0;
-            // loop over the outgoing edges
-            bool is_first_edge = true;
-            for (edge_index out_edge : out_edges) {
-                if (!fetch_bit(visited->data(), out_edge, async)) {
-                    if (is_first_edge) {
-                        next_edge = out_edge; // save the edge for visiting right now
-                    } else {
-                        edges.emplace_back(out_edge, kmer); // save for visiting later
-                    }
-                }
-                is_first_edge = false;
-            }
-
-            // stop traversing this sequence if all outgoing edges were visited
-            if (!next_edge)
-                break;
-
-            // pick the last outgoing but not yet visited
-            // edge and continue traversing the graph
-            edge = next_edge;
-
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
-                        [=,&boss,&thread_pool,&progress_bar](std::vector<Edge> &edges) {
-                          ::mtg::graph::boss::call_paths_row_diff(
-                                  boss, std::move(edges), callback,
-                                  thread_pool, max_length,
-                                    visited, terminal, near_terminal,
-                                  progress_bar);
+                        [=,&boss,&thread_pool,&progress_bar](std::vector<edge_index> &edges) {
+                            call_paths_row_diff(boss, std::move(edges), callback,
+                                                thread_pool, max_length, visited,
+                                                terminal, near_terminal, progress_bar);
                         },
-                        std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
+                        std::vector<edge_index>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                           edges.end())
                 );
 
@@ -2375,56 +2438,16 @@ void call_paths_row_diff(const BOSS &boss,
             }
         }
 
-        if (path.empty())
-            continue;
-
-        // trim the sentinels at the beginning of path
-        assert(sequence.back() != boss.kSentinelCode);
-        auto first_valid_it
-                = std::find_if(sequence.begin(), sequence.end(),
-                               [&boss](auto c) { return c != boss.kSentinelCode; });
-        if (first_valid_it + boss.get_k() >= sequence.end())
-            continue;
-        sequence.erase(sequence.begin(), first_valid_it);
-        path.erase(path.begin(), path.begin() + (first_valid_it - sequence.begin()));
+        // make sure no dummy kmers are in the path
+        assert(sequence.back() != boss.kSentinelCode && sequence.front() != boss.kSentinelCode);
 
         // mark terminal and near terminal nodes
-        uint64_t i = 0;
-        if (path.size() >= max_length) {
-            for (i = 0; i <= path.size() - max_length; i += max_length) {
-                for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
-                    set_bit(near_terminal->data(), path[j], async);
-                }
-                set_bit(terminal->data(), path[i + max_length - 1], async);
-            }
+        std::optional<edge_index> out_edge;
+        if (!out_edges.empty()) {
+            out_edge = out_edges.front();
         }
-        std::optional<edge_index> anchor_edge;
-        if ( path.size() % max_length != 0 ) { // last node is not terminal
-            // mark the last node in the path as terminal if
-            // 1. there are no outgoing edges, OR
-            // 2. we merge into a node that is neither terminal nor near terminal
-            bool merge_terminal = !out_edges.empty()
-                    && fetch_bit(terminal->data(), out_edges.front());
-            bool merge_near_terminal = merge_terminal
-                    || (!out_edges.empty()
-                        && fetch_bit(near_terminal->data(), out_edges.front()));
-            const bool set_terminal = (out_edges.empty() || !merge_near_terminal);
-            if (set_terminal) {
-                set_bit(terminal->data(), path.back(), 1);
-            }
-            // if we set a terminal node or were lucky enough to merge right into a
-            // terminal node, mark the last nodes as near terminal
-            if (set_terminal || merge_terminal) {
-                for (uint64_t j = i; j < path.size() - 1; ++j) {
-                    set_bit(near_terminal->data(), path[j], async);
-                }
-            }
-            if (merge_near_terminal) {
-                anchor_edge = out_edges.front();
-            }
-        }
-
-        callback(std::move(path), std::move(sequence), anchor_edge);
+        update_terminal_bits(callback, max_length, out_edge, std::move(path), terminal,
+                        near_terminal);
     }
 }
 
@@ -2597,7 +2620,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 }
 
 void BOSS::call_sequences_row_diff(
-        Call<const std::string &, const std::vector<edge_index> &, std::optional<edge_index>> callback,
+        Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
         size_t num_threads,
         size_t max_length,
         sdsl::bit_vector *terminal) const {
@@ -2607,38 +2630,17 @@ void BOSS::call_sequences_row_diff(
     assert(terminal->size() == visited.size());
     visited[0] = true;
 
-    // trim dummy sink k-mers
-    #pragma omp parallel for num_threads(num_threads) schedule(static, kBlockSize)
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (get_W(i) == kSentinelCode)
-            visited[i] = true;
-    }
-
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
     ThreadPool thread_pool(std::max(num_threads, 1UL), ENQUEUE_START_BATCH_SIZE);
-    bool async = true;
-
-    auto path_callback = [&](std::vector<edge_index> &&edges, std::vector<TAlphabet> &&path,
-                             std::optional<edge_index> last) {
-        assert(path.size() >= k_ + 1);
-        assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
-
-        std::string sequence(path.size(), '\0');
-        std::transform(path.begin(), path.end(), sequence.begin(),
-                       [&](TAlphabet c) { return BOSS::decode(c); });
-
-        callback(std::move(sequence), std::move(edges), last);
-    };
+    constexpr bool async = true;
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&, start]() {
-            call_paths_row_diff(*this, { Edge(start, get_node_seq(start)) },
-                                path_callback, thread_pool, max_length, &visited,
+            call_paths_row_diff(*this, { start },
+                                callback, thread_pool, max_length, &visited,
                                 terminal, &near_terminal, progress_bar);
         });
     };
@@ -2656,7 +2658,7 @@ void BOSS::call_sequences_row_diff(
     uint64_t last_processed = 0;
     auto process_fork = [&](edge_index i) {
         if (i <= last_processed)
-            return;
+            return; // this fork was already processed
 
         last_processed = succ_last(i);
         if (last_processed < 2 || get_last(last_processed - 1)) {
@@ -2672,32 +2674,10 @@ void BOSS::call_sequences_row_diff(
     thread_pool.join();
 
 #ifndef NDEBUG
-    // make sure that all forks have been covered
-    call_zeros(visited, [&](edge_index edge) {
-      edge_index t = succ_last(edge);
-      bool check = masked_pick_single_outgoing(*this, &t, nullptr);
-      assert(t);
-      assert(check);
-
-      // make sure the next neighbouring edge has also not been visited
-      t = fwd(t, get_W(t) % alph_size);
-      check = masked_pick_single_outgoing(*this, &t, nullptr);
-      assert(t);
-      assert(check);
-      assert(!fetch_bit(visited.data(), t, async));
-    }, async);
-
-    // make sure that all merges have been covered
-    call_zeros(visited, [&](edge_index edge) {
-      edge_index t = bwd(edge);
-      bool check = masked_pick_single_incoming(*this, &t, get_W(t), nullptr);
-      assert(t);
-      assert(check);
-      assert(!fetch_bit(visited.data(), t, async));
-    }, async);
+    assert_forks_and_merges_visited(*this, visited);
 #endif
 
-    // Now we only have to traverse simple loops that have no forks
+    // Now we only have to traverse simple cycles that have no forks
     auto process_cycle = [&](edge_index edge) {
         if (fetch_bit(visited.data(), edge, async))
             return;
@@ -2739,7 +2719,7 @@ void BOSS::call_sequences_row_diff(
         } else {
             set_bit(terminal->data(), path.back(), async);
         }
-        path_callback(std::move(path), std::move(sequence), anchor);
+        callback(std::move(path), anchor);
     };
 
     std::vector<edge_index> index_buffer;
@@ -2751,8 +2731,7 @@ void BOSS::call_sequences_row_diff(
 
       if (index_buffer.size() == TRAVERSAL_START_BATCH_SIZE) {
           thread_pool.enqueue([&,index_buffer]() {
-            std::for_each(index_buffer.begin(), index_buffer.end(),
-                          process_cycle);
+              std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
           });
 
           index_buffer.clear();
@@ -2761,24 +2740,13 @@ void BOSS::call_sequences_row_diff(
     }, async);
 
     thread_pool.enqueue([&,index_buffer]() {
-      std::for_each(index_buffer.begin(), index_buffer.end(),
-                    process_cycle);
+        std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
     });
 
     thread_pool.join();
 
 #ifndef NDEBUG
-    bool leftover = false;
-    call_zeros(visited, [&](edge_index edge) {
-      leftover = true;
-      TAlphabet d = get_W(edge) % alph_size;
-      std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\t";
-      edge = fwd(edge, d);
-      d = get_W(edge) % alph_size;
-      std::cout << edge << "\t" << get_node_str(edge) << " " << decode(d) << "\n";
-    }, async);
-    std::cout << std::flush;
-    assert(!leftover);
+    assert_no_leftovers(*this, visited);
 #endif
 }
 
