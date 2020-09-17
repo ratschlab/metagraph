@@ -149,7 +149,7 @@ class BOSS {
     void call_sequences_row_diff(
             Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
             size_t num_threads,
-            size_t anchor,
+            size_t max_length,
             sdsl::bit_vector *terminal) const;
 
     /**

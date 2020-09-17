@@ -991,7 +991,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
     Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
-    sdsl::bit_vector terminal(graph.get_boss().num_edges() + 1, 0);
+    sdsl::bit_vector terminal;
 
     std::atomic<uint64_t> terminal_count = 0;
     std::atomic<uint64_t> forced_terminal_count = 0;

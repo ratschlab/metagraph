@@ -945,6 +945,19 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
     }
 }
 
+TEST(BOSS, CallSequencesRowDiffEmptyGraph) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 30; ++k) {
+            BOSS empty(k);
+
+            sdsl::bit_vector terminal;
+            empty.call_sequences_row_diff([&](const auto &, const std::optional<uint64_t> &) {
+                FAIL() << "Empty graph should not have any sequences!";
+            }, num_threads, 1, &terminal);
+        }
+    }
+}
+
 TEST(BOSS, CallPathsOneLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {

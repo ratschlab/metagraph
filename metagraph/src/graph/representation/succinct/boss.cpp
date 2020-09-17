@@ -2627,7 +2627,8 @@ void BOSS::call_sequences_row_diff(
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
-    assert(terminal->size() == visited.size());
+    terminal->resize(visited.size());
+    sdsl::util::set_to_value(*terminal, 0);
     visited[0] = true;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
