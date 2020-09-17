@@ -983,10 +983,11 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
+[[clang::optnone]] std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads,
                                                       uint32_t max_depth) {
+#pragma clang optimize off
     assert(graph.num_nodes() == annotation.num_objects());
     uint64_t nnodes = graph.num_nodes();
     Vector<uint64_t> node_diffs;
@@ -1019,13 +1020,14 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
                 std::sort(rows[i + 1].begin(), rows[i + 1].end());
 
                 // if we reached the max path depth, force a terminal node
-                if (i > 0 && (i + 1) % max_depth == 0) {
+                if ((i + 1) % max_depth == 0) {
                     pos[anno_ids[i]] = { diffs.size(), rows[i].size() };
                     diffs.insert(diffs.end(), rows[i].begin(), rows[i].end());
                     assert(terminal[path[i]]);
                     depth_terminal_count.fetch_add(1, std::memory_order_relaxed);
                     continue;
                 }
+                assert(!terminal[path[i]]);
 
                 uint64_t start_idx = diffs.size();
                 std::set_symmetric_difference(rows[i].begin(), rows[i].end(),

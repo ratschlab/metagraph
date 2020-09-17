@@ -344,8 +344,7 @@ TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotation) {
 
 TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationCircular) {
     // create a graph that only contains a cycle
-    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(2, {"ACGTCAG"});
-
+    graph = create_graph(2, {"ACGTAG"});
     annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
 }
 
