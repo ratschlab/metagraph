@@ -4,7 +4,6 @@
 #include <functional>
 
 #include <ips4o.hpp>
-#include <tsl/hopscotch_map.h>
 
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
@@ -137,26 +136,18 @@ void
 Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns,
                                    const ColumnCallback &callback) const {
     uint64_t nrows = num_rows();
-    tsl::hopscotch_map<Column, std::vector<Row>> column_map;
-    reduced_matrix_.slice_columns(columns, [&](Column j, auto&& rows) {
-        column_map[j] = std::move(rows);
-    });
-
     sdsl::bit_vector code_column(reduced_matrix_.num_rows());
-    for (const auto &[column, reduced_rows] : column_map) {
+    reduced_matrix_.slice_columns(columns, [&](Column j, bitmap&& rows) {
         sdsl::util::set_to_value(code_column, false);
-        for (Row i : reduced_rows) {
-            code_column[i] = true;
-        }
+        rows.add_to(&code_column);
 
-        std::vector<Row> rows;
-        for (uint64_t i = 0; i < nrows; ++i) {
-            if (code_column[get_code(i)])
-                rows.push_back(i);
-        }
-
-        callback(column, std::move(rows));
-    }
+        callback(j, bitmap_generator([&](const auto &index_callback) {
+            for (uint64_t i = 0; i < nrows; ++i) {
+                if (code_column[get_code(i)])
+                    index_callback(i);
+            }
+        }, nrows));
+    });
 }
 
 template <class MatrixType>

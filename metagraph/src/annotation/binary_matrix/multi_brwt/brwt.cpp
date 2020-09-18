@@ -197,11 +197,6 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
     if (column_ids.empty())
         return;
 
-    if (column_ids.size() == 1) {
-        callback(column_ids[0], get_column(column_ids[0]));
-        return;
-    }
-
     auto num_nonzero_rows = nonzero_rows_->num_set_bits();
 
     // check if the column is empty
@@ -211,15 +206,9 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        std::vector<Row> slice;
-        slice.reserve(num_nonzero_rows);
-        nonzero_rows_->call_ones([&](Row i) { slice.push_back(i); });
-
-        for (size_t k = 0; k + 1 < column_ids.size(); ++k) {
-            callback(column_ids[k], std::vector<Row>(slice));
+        for (size_t k = 0; k < column_ids.size(); ++k) {
+            callback(column_ids[k], std::move(*nonzero_rows_->copy()));
         }
-
-        callback(column_ids.back(), std::move(slice));
 
         return;
     }
@@ -242,7 +231,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         {
             if (num_nonzero_rows == nonzero_rows_->size()) {
                 child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                    [&](Column j, std::vector<Row>&& rows) {
+                    [&](Column j, bitmap&& rows) {
                         callback(assignments_.get(child_node, j), std::move(rows));
                     }
                 );
@@ -258,15 +247,14 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                     const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
                     size_t num_nonzero_rows = nonzero_rows->num_set_bits();
                     if (num_nonzero_rows) {
-                        std::vector<Row> slice;
-                        slice.reserve(num_nonzero_rows);
-                        nonzero_rows->call_ones([&](auto i) {
-                            slice.push_back(nonzero_rows->select1(i + 1));
-                        });
-
+                        bit_vector_small slice([&](const auto &callback) {
+                            nonzero_rows->call_ones([&](auto i) {
+                                callback(nonzero_rows->select1(i + 1));
+                            });
+                        }, num_rows(), num_nonzero_rows);
                         for (size_t k = 0; k + 1 < child_columns_ptr->size(); ++k) {
                             callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
-                                     std::vector<Row>(slice));
+                                     bit_vector_small(slice));
                         }
 
                         callback(assignments_.get(child_node, child_columns_ptr->back()),
@@ -274,11 +262,13 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                     }
                 } else {
                     child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                        [&](Column j, std::vector<Row>&& rows) {
-                            for (Row &i : rows) {
-                                i = nonzero_rows_->select1(i + 1);
-                            }
-                            callback(assignments_.get(child_node, j), std::move(rows));
+                        [&](Column j, bitmap&& rows) {
+                            callback(assignments_.get(child_node, j),
+                                     bit_vector_small([&](const auto &callback) {
+                                         rows.call_ones([&](uint64_t i) {
+                                             callback(nonzero_rows_->select1(i + 1));
+                                         });
+                                     }, num_rows(), rows.num_set_bits()));
                         }
                     );
                 }

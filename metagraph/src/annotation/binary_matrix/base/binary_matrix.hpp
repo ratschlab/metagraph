@@ -9,6 +9,8 @@
 #include "common/vector.hpp"
 
 
+class bitmap;
+
 namespace mtg {
 namespace annot {
 namespace binmat {
@@ -21,7 +23,7 @@ class BinaryMatrix {
     typedef Vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
-    typedef std::function<void(Column, std::vector<Row>&&)> ColumnCallback;
+    typedef std::function<void(Column, bitmap&&)> ColumnCallback;
 
     virtual ~BinaryMatrix() {}
 

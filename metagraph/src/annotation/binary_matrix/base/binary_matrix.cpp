@@ -1,5 +1,7 @@
 #include "binary_matrix.hpp"
 
+#include "common/vectors/bitmap.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/serialization.hpp"
 
 
@@ -34,10 +36,18 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
 
 void BinaryMatrix::slice_columns(const std::vector<Column> &column_ids,
                                  const ColumnCallback &callback) const {
+    size_t nrows = num_rows();
+
     #pragma omp taskloop
     for (size_t k = 0; k < column_ids.size(); ++k) {
         Column j = column_ids[k];
-        callback(j, get_column(j));
+        auto column = get_column(j);
+        size_t nsetbits = column.size();
+        callback(j, bit_vector_smart([s=std::move(column)](const auto &index_callback) {
+            for (uint64_t i : s) {
+                index_callback(i);
+            }
+        }, nrows, nsetbits));
     }
 
     #pragma omp taskwait
