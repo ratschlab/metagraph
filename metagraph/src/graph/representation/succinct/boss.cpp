@@ -1871,18 +1871,20 @@ call_path(const BOSS &boss,
           bool is_cycle = false);
 
 #ifndef NDEBUG
-void assert_forks_and_merges_visited(const BOSS& boss, const sdsl::bit_vector& visited) {
+void assert_forks_and_merges_visited(const BOSS &boss,
+                                     const sdsl::bit_vector &visited,
+                                     const bitmap *subgraph_mask) {
     constexpr bool async = true;
     // make sure that all forks have been covered
     call_zeros(visited, [&](edge_index edge) {
       edge_index t = boss.succ_last(edge);
-      bool check = masked_pick_single_outgoing(boss, &t, nullptr);
+      bool check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
       assert(t);
       assert(check);
 
       // make sure the next neighbouring edge has also not been visited
       t = boss.fwd(t, boss.get_W(t) % boss.alph_size);
-      check = masked_pick_single_outgoing(boss, &t, nullptr);
+      check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
       assert(t);
       assert(check);
       assert(!fetch_bit(visited.data(), t, async));
@@ -1891,7 +1893,7 @@ void assert_forks_and_merges_visited(const BOSS& boss, const sdsl::bit_vector& v
     // make sure that all merges have been covered
     call_zeros(visited, [&](edge_index edge) {
       edge_index t = boss.bwd(edge);
-      bool check = masked_pick_single_incoming(boss, &t, boss.get_W(t), nullptr);
+      bool check = masked_pick_single_incoming(boss, &t, boss.get_W(t), subgraph_mask);
       assert(t);
       assert(check);
       assert(!fetch_bit(visited.data(), t, async));
@@ -2033,7 +2035,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     thread_pool.join();
 
 #ifndef NDEBUG
-    assert_forks_and_merges_visited(*this, visited);
+    assert_forks_and_merges_visited(*this, visited, subgraph_mask);
 #endif
 
     // Now we only have to traverse loops that have not been traversed or
@@ -2698,7 +2700,7 @@ void BOSS::call_sequences_row_diff(
     thread_pool.join();
 
 #ifndef NDEBUG
-    assert_forks_and_merges_visited(*this, visited);
+    assert_forks_and_merges_visited(*this, visited, nullptr);
 #endif
 
     // Now we only have to traverse simple cycles that have no forks
