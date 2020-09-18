@@ -2375,7 +2375,7 @@ call_path(const BOSS &boss,
     std::vector<size_t> breakpoints;
     breakpoints.reserve(dual_visited.size());
 
-    // then lock all threads and resolve all compeeting nodes from dual_visited
+    // then lock all threads and resolve all competing nodes from dual_visited
     {
         std::unique_lock<std::mutex> lock(fetched_mutex);
 
