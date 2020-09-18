@@ -2047,9 +2047,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 set_bit(visited.data(), *it, async);
             }
 
-            call_path(*this, callback, path, sequence,
-                      kmers_in_single_form, trim_sentinels, visited, fetched,
-                      async, fetched_mutex, progress_bar, subgraph_mask);
+            callback(std::move(path), std::move(sequence));
 
         } else {
             // check the reverse complement
@@ -2084,9 +2082,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                     set_bit(visited.data(), *it, async);
                 }
 
-                call_path(*this, callback, path, sequence,
-                          false /* kmers_in_single_form */, trim_sentinels, visited,
-                          fetched, async, fetched_mutex, progress_bar, subgraph_mask);
+                callback(std::move(path), std::move(sequence));
 
             } else if (dual_found_count == path.size()) {
                 // the full path is present in the graph, so discard the other one
@@ -2100,9 +2096,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                     set_bit(visited.data(), dual_path[i], async);
                 }
 
-                call_path(*this, callback, path, sequence,
-                          false /* kmers_in_single_form */, trim_sentinels, visited,
-                          fetched, async, fetched_mutex, progress_bar, subgraph_mask);
+                callback(std::move(path), std::move(sequence));
 
             } else {
                 std::vector<edge_index> canonical;
@@ -2151,12 +2145,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                     // The k-mer or its reverse-complement k-mer had been fetched
                     // -> Skip this k-mer and call the traversed path segment.
                     if (begin < i) {
-                        std::vector<edge_index> path_segment { path.begin() + begin, path.begin() + i };
-                        std::vector<TAlphabet> seq_segment { sequence.begin() + begin, sequence.begin() + i + get_k() };
-                        call_path(*this, callback, path_segment, seq_segment,
-                                  false /* kmers_in_single_form */, trim_sentinels,
-                                  visited, fetched, async, fetched_mutex, progress_bar,
-                                  subgraph_mask);
+                        callback(std::vector<edge_index> { path.begin() + begin, path.begin() + i },
+                                 std::vector<TAlphabet> { sequence.begin() + begin, sequence.begin() + i + get_k() });
                     }
 
                     begin = i + 1;
