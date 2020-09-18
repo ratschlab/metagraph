@@ -1239,7 +1239,6 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
 }
 
 TEST(BOSS, CallSequenceRowDiff_FourPaths) {
-#pragma clang optimize off
     constexpr size_t k = 5;
     BOSSConstructor constructor(k);
     std::vector<std::string> sequences
