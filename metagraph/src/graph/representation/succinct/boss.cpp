@@ -2373,7 +2373,7 @@ call_path(const BOSS &boss,
 
     // find all the fetched points where the path must be cut
     std::vector<size_t> breakpoints;
-    breakpoints.reserve(path.size());
+    breakpoints.reserve(dual_visited.size());
 
     // then lock all threads and resolve all compeeting nodes from dual_visited
     {
@@ -2398,6 +2398,8 @@ call_path(const BOSS &boss,
         }
     }
 
+    // sort breakpoints (the initial order was derived from the dual path, hence reversed)
+    std::reverse(breakpoints.begin(), breakpoints.end());
     // include the last segment
     breakpoints.push_back(path.size());
 
