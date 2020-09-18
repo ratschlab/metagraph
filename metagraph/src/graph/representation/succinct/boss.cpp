@@ -2349,7 +2349,7 @@ void update_terminal_bits(
  * A path ends when there are either no outgoing edges from the current node or if the
  * first node in a fork was already visited.
  */
-[[clang::optnone]] void call_paths_row_diff(
+void call_paths_row_diff(
         const BOSS &boss,
         std::vector<edge_index>&& edges,
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
@@ -2359,7 +2359,6 @@ void update_terminal_bits(
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal,
         ProgressBar &progress_bar) {
-#pragma clang optimize off
     assert(visited && terminal && near_terminal);
 
     std::vector<edge_index> out_edges; // stores all branch nodes along the path
