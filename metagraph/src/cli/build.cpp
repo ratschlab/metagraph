@@ -130,6 +130,8 @@ int build_graph(Config *config) {
             }
 
             if (checkpoint.phase() == 1) {
+                checkpoint.set_kmer_dir(config->tmp_dir);
+                checkpoint.set_checkpoint(1);
                 logger->info("Finished building phase 1");
                 return 0;
             }
