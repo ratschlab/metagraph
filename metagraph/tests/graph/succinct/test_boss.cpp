@@ -1063,7 +1063,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
             num_kmers += path.size();
         }, num_threads);
 
-        EXPECT_EQ(2, num_sequences);
+        ASSERT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1,
                   num_kmers);
 

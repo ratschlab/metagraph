@@ -2037,54 +2037,131 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
         // check the minimizer to make sure this path is called just once
         auto rep = std::min_element(path.begin(), path.end());
-        if (fetch_and_set_bit(visited.data(), *rep, async))
-            return;
 
-        // now we visit all the other unvisited nodes and call them
-        // first, we rotate it to start at the marked minimizer
-        std::rotate(path.begin(), rep, path.end());
-        // for cycles seq[:k] = seq[-k:]
-        std::rotate(sequence.begin(), sequence.begin() + (rep - path.begin()), sequence.end() - get_k());
-        std::copy(sequence.begin(), sequence.begin() + get_k(), sequence.end() - get_k());
+        if (!kmers_in_single_form) {
+            if (fetch_and_set_bit(visited.data(), *rep, async))
+                return;
 
-        size_t begin = 0;
-        for (size_t i = 1; i <= path.size(); ++i) {
-            if (i < path.size() && !fetch_and_set_bit(visited.data(), path[i], async))
-                continue;
+            for (auto it = path.begin(); it != path.end(); ++it) {
+                assert(it == rep || !fetch_bit(visited.data(), *it, async));
+                set_bit(visited.data(), *it, async);
+            }
 
-            if (begin < i) {
-                std::vector<edge_index> path_segment { path.begin() + begin, path.begin() + i };
-                std::vector<TAlphabet> seq_segment { sequence.begin() + begin, sequence.begin() + i + get_k() };
-                auto rev_comp_breakpoints = call_path(
-                    *this, callback, path_segment, seq_segment,
-                    kmers_in_single_form, trim_sentinels, visited, fetched,
-                    async, fetched_mutex, progress_bar, subgraph_mask
-                );
+            call_path(*this, callback, path, sequence,
+                      kmers_in_single_form, trim_sentinels, visited, fetched,
+                      async, fetched_mutex, progress_bar, subgraph_mask);
 
-                assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
+        } else {
+            // check the reverse complement
+            auto rev_comp_seq = sequence;
+            kmer::KmerExtractorBOSS::reverse_complement(&rev_comp_seq);
+            auto dual_path = map_to_edges(rev_comp_seq);
+            std::reverse(dual_path.begin(), dual_path.end());
+            size_t dual_found_count = dual_path.size();
 
-                for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
-                    edge_index next_edge = fwd(edge, get_W(edge) % alph_size);
+            size_t rep_rev_comp_i = 0;
 
-                    // the sequence of next_edge was already computed in call_path
-                    std::vector<TAlphabet> kmer = std::move(kmer_seq);
-                    assert(get_node_seq(next_edge) == kmer);
-
-                    masked_call_outgoing(*this, next_edge, subgraph_mask, [&](edge_index e) {
-                        if (!fetch_bit(visited.data(), e, async)) {
-                            // Can't call process_cycle because the minimizer of the overlapping cycle
-                            // may be already marked as visited, so we call the generic traversal here.
-                            ::mtg::graph::boss::call_paths(
-                                    *this, { Edge(e, kmer) }, callback,
-                                    split_to_unitigs, select_last_edge, kmers_in_single_form,
-                                    trim_sentinels, thread_pool, &visited, &fetched,
-                                    async, fetched_mutex, progress_bar, subgraph_mask);
-                        }
-                    });
+            // restrict to the subgraph
+            for (size_t i = 0; i < dual_path.size(); ++i) {
+                if (!dual_path[i]) {
+                    --dual_found_count;
+                } else if (subgraph_mask && !(*subgraph_mask)[dual_path[i]]) {
+                    dual_path[i] = 0;
+                    --dual_found_count;
+                } else {
+                    if (dual_path[i] < dual_path[rep_rev_comp_i])
+                        rep_rev_comp_i = i;
                 }
             }
 
-            begin = i + 1;
+            if (!dual_found_count) {
+                // reverse complement not present, so no contention is possible
+                if (fetch_and_set_bit(visited.data(), *rep, async))
+                    return;
+
+                for (auto it = path.begin(); it != path.end(); ++it) {
+                    assert(it == rep || !fetch_bit(visited.data(), *it, async));
+                    set_bit(visited.data(), *it, async);
+                }
+
+                call_path(*this, callback, path, sequence,
+                          false /* kmers_in_single_form */, trim_sentinels, visited,
+                          fetched, async, fetched_mutex, progress_bar, subgraph_mask);
+
+            } else if (dual_found_count == path.size()) {
+                // the full path is present in the graph, so discard the other one
+                if (fetch_and_set_bit(visited.data(),
+                                      std::min(*rep, dual_path[rep_rev_comp_i]),
+                                      async))
+                    return;
+
+                for (size_t i = 0; i < path.size(); ++i) {
+                    set_bit(visited.data(), path[i], async);
+                    set_bit(visited.data(), dual_path[i], async);
+                }
+
+                call_path(*this, callback, path, sequence,
+                          false /* kmers_in_single_form */, trim_sentinels, visited,
+                          fetched, async, fetched_mutex, progress_bar, subgraph_mask);
+
+            } else {
+                std::vector<edge_index> canonical;
+                canonical.reserve(path.size());
+                for (size_t i = 0; i < path.size(); ++i) {
+                    canonical.push_back(dual_path[i]
+                        ? std::min(path[i], dual_path[i])
+                        : path[i]);
+                }
+
+                // there is a different cycle (or possibly the same cycle whose dual path partially overlaps
+                std::unique_lock<std::mutex> lock(fetched_mutex);
+                for (size_t offset = 0; offset < path.size(); ++offset) {
+                    if (fetch_bit(visited.data(), canonical[offset], async)) {
+                        // now we visit all the other unvisited nodes and call them
+                        // first, we rotate it to start at the marked minimizer
+                        std::rotate(path.begin(), path.begin() + offset, path.end());
+                        std::rotate(canonical.begin(), canonical.begin() + offset, canonical.end());
+
+                        // for cycles seq[:k] = seq[-k:]
+                        std::rotate(sequence.begin(), sequence.begin() + offset, sequence.end() - get_k());
+                        std::copy(sequence.begin(), sequence.begin() + get_k(), sequence.end() - get_k());
+
+                        break;
+                    }
+                }
+
+                std::vector<size_t> breakpoints;
+                breakpoints.reserve(dual_found_count);
+
+                for (size_t i = 0; i < path.size(); ++i) {
+                    if (fetch_and_set_bit(visited.data(), canonical[i], async)) {
+                        breakpoints.push_back(i);
+                        set_bit(visited.data(),
+                                canonical[i] == dual_path[i] ? path[i] : dual_path[i],
+                                async);
+                    }
+                }
+
+                lock.unlock();
+
+                breakpoints.push_back(path.size());
+
+                size_t begin = 0;
+                for (size_t i : breakpoints) {
+                    // The k-mer or its reverse-complement k-mer had been fetched
+                    // -> Skip this k-mer and call the traversed path segment.
+                    if (begin < i) {
+                        std::vector<edge_index> path_segment { path.begin() + begin, path.begin() + i };
+                        std::vector<TAlphabet> seq_segment { sequence.begin() + begin, sequence.begin() + i + get_k() };
+                        call_path(*this, callback, path_segment, seq_segment,
+                                  false /* kmers_in_single_form */, trim_sentinels,
+                                  visited, fetched, async, fetched_mutex, progress_bar,
+                                  subgraph_mask);
+                    }
+
+                    begin = i + 1;
+                }
+            }
         }
     };
 
