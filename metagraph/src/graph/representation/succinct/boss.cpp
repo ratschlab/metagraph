@@ -2398,7 +2398,10 @@ call_path(const BOSS &boss,
         }
     }
 
-    // fetch the segments cut off from the path if any
+    // include the last segment
+    breakpoints.push_back(path.size());
+
+    // fetch the segments cut off from the path
     size_t begin = 0;
     for (size_t i : breakpoints) {
         // The k-mer or its reverse-complement k-mer had been fetched
@@ -2409,15 +2412,6 @@ call_path(const BOSS &boss,
         }
 
         begin = i + 1;
-    }
-
-    // Call the path (or its remaining segment)
-    if (!begin) {
-        callback(std::move(path), std::move(sequence));
-
-    } else if (begin < path.size()) {
-        callback({ path.begin() + begin, path.end() },
-                 { sequence.begin() + begin, sequence.end() });
     }
 
     return dual_endpoints;
