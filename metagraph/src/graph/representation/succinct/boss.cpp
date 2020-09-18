@@ -10,6 +10,7 @@
 
 #include <progress_bar.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
+#include <tsl/hopscotch_set.h>
 
 #include "common/threads/threading.hpp"
 #include "common/serialization.hpp"
@@ -1839,7 +1840,7 @@ void call_paths(const BOSS &boss,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
                 sdsl::bit_vector *visited_ptr,
-                sdsl::bit_vector *fetched_ptr,
+                tsl::hopscotch_set<edge_index> *fetched,
                 bool async,
                 std::mutex &fetched_mutex,
                 ProgressBar &progress_bar,
@@ -1861,7 +1862,7 @@ call_path(const BOSS &boss,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
-          sdsl::bit_vector &fetched,
+          tsl::hopscotch_set<edge_index> &fetched,
           bool concurrent,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
@@ -1897,7 +1898,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         }
     }
 
-    sdsl::bit_vector fetched = kmers_in_single_form ? visited : sdsl::bit_vector();
+    tsl::hopscotch_set<edge_index> fetched;
     std::mutex fetched_mutex;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -2101,7 +2102,7 @@ void call_paths(const BOSS &boss,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
                 sdsl::bit_vector *visited_ptr,
-                sdsl::bit_vector *fetched_ptr,
+                tsl::hopscotch_set<edge_index> *fetched_ptr,
                 bool async,
                 std::mutex &fetched_mutex,
                 ProgressBar &progress_bar,
@@ -2276,7 +2277,7 @@ call_path(const BOSS &boss,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
-          sdsl::bit_vector &fetched,
+          tsl::hopscotch_set<edge_index> &fetched,
           bool concurrent,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
@@ -2330,7 +2331,12 @@ call_path(const BOSS &boss,
     std::vector<Edge> dual_endpoints;
     dual_endpoints.reserve(path.size());
 
-    bool dual_visited = false;
+    // stores the dual nodes that had been visited by other threads, and hence
+    // the following contention must be resolved:
+    // this thread: primary vs dual,
+    // other thread: dual vs primary.
+    std::vector<edge_index> dual_visited;
+    dual_visited.reserve(path.size());
 
     // first, we mark all reverse-complement (dual) k-mers as visited
     for (size_t i = 0; i < dual_path.size(); ++i) {
@@ -2351,40 +2357,46 @@ call_path(const BOSS &boss,
                 });
             }
         } else {
-            // the dual node had already been visited
-            dual_visited = true;
+            // The dual node had already been visited, so we insert its index
+            // to the buffer. The index is inverted because dual_path will be
+            // reversed.
+            dual_visited.push_back(dual_path.size() - 1 - i);
         }
     }
 
-    if (!dual_visited) {
+    if (!dual_visited.size()) {
         callback(std::move(path), std::move(sequence));
         return dual_endpoints;
     }
 
     std::reverse(dual_path.begin(), dual_path.end());
 
-    // then lock all threads
-    std::unique_lock<std::mutex> lock(fetched_mutex);
-
     // find all the fetched points where the path must be cut
     std::vector<size_t> breakpoints;
     breakpoints.reserve(path.size());
 
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (fetched[path[i]]) {
-            assert(fetched[dual_path[i]]
-                    && "if a k-mer is fetched, its rev-compl must be too");
-            breakpoints.push_back(i);
+    // then lock all threads and resolve all compeeting nodes from dual_visited
+    {
+        std::unique_lock<std::mutex> lock(fetched_mutex);
 
-        } else {
-            assert(!dual_path[i] || !fetched[dual_path[i]]);
-            // mark both k-mers as fetched and move on to the next
-            fetched[path[i]] = true;
-            fetched[dual_path[i]] = true;
+        for (size_t i : dual_visited) {
+            if (!fetched.count(dual_path[i])) {
+                assert(!fetched.count(path[i]));
+                // the dual node had not been fetched by the other thread, so
+                // we'll fetch path[i] in this thread and mark it as visited,
+                // so the other thread will find it in the hash set and erase
+                // it from there
+                fetched.insert(path[i]);
+
+            } else {
+                // the dual node had been fetched first by the other thread, so
+                // we'll skip path[i] in this thread
+                breakpoints.push_back(i);
+                // erase the node from the hash set
+                fetched.erase(dual_path[i]);
+            }
         }
     }
-
-    lock.unlock();
 
     // fetch the segments cut off from the path if any
     size_t begin = 0;
