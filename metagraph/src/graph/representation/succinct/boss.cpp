@@ -2068,9 +2068,8 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 } else if (subgraph_mask && !(*subgraph_mask)[dual_path[i]]) {
                     dual_path[i] = 0;
                     --dual_found_count;
-                } else {
-                    if (dual_path[i] < dual_path[rep_rev_comp_i])
-                        rep_rev_comp_i = i;
+                } else if (dual_path[i] < dual_path[rep_rev_comp_i]) {
+                    rep_rev_comp_i = i;
                 }
             }
 
