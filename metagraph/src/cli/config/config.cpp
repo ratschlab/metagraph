@@ -529,6 +529,11 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    if (identity != BUILD && phase > 3) {
+        std::cerr << "Error: Invalid phase value. Can be either 1, 2 or 3." << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (phase != 3 && tmp_dir.empty()) {
         std::cerr << "Error: Phases are only supported for disk-based building. "
                      "Please set --disk-swap." << std::endl;

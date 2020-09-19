@@ -13,18 +13,19 @@ namespace boss {
  */
 class BuildCheckpoint {
   public:
-    BuildCheckpoint(bool enabled, const std::filesystem::path &output_prefix, uint32_t phase);
+    BuildCheckpoint(const std::filesystem::path &output_prefix, uint32_t phase);
 
     uint32_t phase() const { return phase_; }
+
     uint32_t checkpoint() const { return checkpoint_; }
-    std::filesystem::path tmp_dir() const { return checkpoint_file_; }
-    std::filesystem::path kmer_dir() const { return kmer_dir_; }
-
-    void set_kmer_dir(const std::filesystem::path &kmer_dir) { kmer_dir_ = kmer_dir; }
-
     void set_checkpoint(uint32_t checkpoint);
 
-    void done() const;
+    const std::filesystem::path& tmp_dir() const { return checkpoint_file_; }
+
+    const std::filesystem::path& kmer_dir() const { return kmer_dir_; }
+    void set_kmer_dir(const std::filesystem::path &kmer_dir) { kmer_dir_ = kmer_dir; }
+
+    void remove_checkpoint() const;
 
   private:
     void store() const;

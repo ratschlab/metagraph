@@ -370,6 +370,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 1159851', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertFalse(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
 
     # tests that we can build and resume 2 separate graphs on the same machine
     @parameterized.expand(['succinct_disk'])
@@ -407,6 +408,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual('k: 20', params_str[0])
             self.assertEqual('nodes (k): ' + ('1159851' if name == 'graph1' else '91584'), params_str[1])
             self.assertEqual('canonical mode: yes', params_str[2])
+            self.assertFalse(os.path.isfile(self.tempdir.name + '/' + name + '.checkpoint'))
 
 if __name__ == '__main__':
     unittest.main()

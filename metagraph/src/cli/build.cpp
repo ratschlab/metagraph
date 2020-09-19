@@ -107,7 +107,7 @@ int build_graph(Config *config) {
             }
 
             bool checkpoint_enabled = !config->tmp_dir.empty() && suffixes.size() == 1;
-            boss::BuildCheckpoint checkpoint(checkpoint_enabled, config->outfbase,
+            boss::BuildCheckpoint checkpoint(checkpoint_enabled ? config->outfbase : "",
                                              config->phase);
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
@@ -143,6 +143,7 @@ int build_graph(Config *config) {
                 assert(next_chunk == nullptr);
                 return 0;
             }
+
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
             if (config->suffix.size()) {
@@ -161,7 +162,7 @@ int build_graph(Config *config) {
             } else {
                 graph_data.reset(next_chunk);
             }
-            checkpoint.done();
+            checkpoint.remove_checkpoint();
         }
 
         assert(graph_data);
