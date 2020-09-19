@@ -2135,13 +2135,12 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 for (size_t i = 0; i < path.size(); ++i) {
                     if (fetch_and_set_bit(visited.data(), canonical[i], async)) {
                         breakpoints.push_back(i);
-                        progress_bar += !fetch_and_set_bit(
+                    } else {
+                        progress_bar += 1 + !fetch_and_set_bit(
                             visited.data(),
                             canonical[i] == dual_path[i] ? path[i] : dual_path[i],
                             async
                         );
-                    } else {
-                        ++progress_bar;
                     }
                 }
 
