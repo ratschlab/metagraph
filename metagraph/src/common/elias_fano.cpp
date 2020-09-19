@@ -17,6 +17,7 @@ namespace common {
 std::vector<std::string> concat(const std::vector<std::string> &files, const std::string &result) {
     if (files.empty())
         return {};
+
     std::vector<std::string> original_files;
 
     std::vector<std::string> suffixes = { "", ".up" };

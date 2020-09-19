@@ -349,7 +349,7 @@ template <typename T_REAL>
 std::vector<std::string> split(size_t k,
                                const std::filesystem::path &dir,
                                const ChunkedWaitQueue<T_REAL> &kmers,
-                               BuildCheckpoint* checkpoint) {
+                               BuildCheckpoint *checkpoint) {
     using T_INT_REAL = get_int_t<T_REAL>;
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
@@ -362,6 +362,7 @@ std::vector<std::string> split(size_t k,
         names[i] = dir/("real_F_W_" + std::to_string(i));
     }
 
+    assert(checkpoint->checkpoint() >= 2);
     if (checkpoint->checkpoint() > 2) {
         logger->info("Skipping splitting k-mers into chunks");
         return names;
@@ -413,6 +414,7 @@ concatenate_chunks(const std::filesystem::path &dir,
         real_split_by_W[W] = dir/("real_split_by_W_" + std::to_string(W));
     }
 
+    assert(checkpoint->checkpoint() >= 4);
     if (checkpoint->checkpoint() > 4) {
         return { real_split_by_W, dummy_sink_name };
     }
@@ -478,6 +480,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
     }
 
+    assert(checkpoint->checkpoint() >= 3);
     if (checkpoint->checkpoint() > 3) {
         logger->info("Skipping generating dummy-1 source k-mers and dummy sink kmers");
         return { dummy_sink_names, real_F_W };
@@ -572,6 +575,7 @@ void add_reverse_complements(size_t k,
                              ThreadPool& async_worker,
                              ChunkedWaitQueue<T_REAL> *kmers,
                              BuildCheckpoint *checkpoint) {
+    assert(checkpoint->checkpoint() >= 1);
     if (checkpoint->checkpoint() > 2) {
         logger->info("Skipping generating reverse complements");
         return;
@@ -607,7 +611,7 @@ void add_reverse_complements(size_t k,
                     checkpoint->kmer_dir());
             std::exit(1);
         }
-    } else { //  checkpoint->checkpoint() < 2
+    } else { //  checkpoint->checkpoint() == 1
         std::string rc_dir = dir/"rc";
         std::filesystem::create_directory(rc_dir);
         rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(

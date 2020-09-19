@@ -6,17 +6,15 @@ namespace mtg {
 namespace graph {
 namespace boss {
 
-BuildCheckpoint::BuildCheckpoint(bool enabled,
-                                 const std::filesystem::path &output_prefix,
+BuildCheckpoint::BuildCheckpoint(const std::filesystem::path &output_prefix,
                                  uint32_t phase)
-    : enabled_(enabled),
+    : enabled_(!output_prefix.empty()),
       phase_(phase),
       checkpoint_(0),
       checkpoint_file_(output_prefix.string() + ".checkpoint") {
-    if (!enabled_) {
+    if (output_prefix.empty()) {
         return;
     }
-    assert(!output_prefix.empty());
     if (std::filesystem::exists(checkpoint_file_)) {
         std::ifstream f(checkpoint_file_);
         f >> checkpoint_;
@@ -39,24 +37,20 @@ BuildCheckpoint::BuildCheckpoint(bool enabled,
 
 void BuildCheckpoint::set_checkpoint(uint32_t checkpoint) {
     checkpoint_ = checkpoint;
-    store();
-}
-
-void BuildCheckpoint::done() const {
-    std::filesystem::remove(checkpoint_file_);
-    std::filesystem::remove_all(kmer_dir_);
-}
-
-void BuildCheckpoint::store() const {
-    if (!enabled_) {
+    if (!enabled_)
         return;
-    }
+
     std::ofstream f(checkpoint_file_);
     f << checkpoint_ << std::endl;
     if (checkpoint_ > 0) {
         f << kmer_dir_;
     }
     f.close();
+}
+
+void BuildCheckpoint::remove_checkpoint() const {
+    std::filesystem::remove(checkpoint_file_);
+    std::filesystem::remove_all(kmer_dir_);
 }
 
 } // namespace boss
