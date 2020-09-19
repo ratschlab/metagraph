@@ -681,14 +681,14 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                          ChunkedWaitQueue<T_REAL> &kmers,
                          ChunkedWaitQueue<T> *kmers_out,
                          ThreadPool &async_worker,
-                         BuildCheckpoint* checkpoint) {
+                         BuildCheckpoint *checkpoint) {
     using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS on 2 bits
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_REAL or <KMER_REAL, count>
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
     using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
-    uint32_t previous_checkpoint = checkpoint->checkpoint();
+    uint32_t last_checkpoint = checkpoint->checkpoint();
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
         checkpoint->set_checkpoint(1);
@@ -698,7 +698,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     const std::filesystem::path dir = checkpoint->kmer_dir();
     size_t num_threads = kmer_collector.num_threads();
 
-    if (previous_checkpoint == 1) {
+    if (last_checkpoint == 1) {
         logger->info(
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
@@ -891,7 +891,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          double memory_preallocated,
                          const std::filesystem::path &tmp_dir,
                          size_t max_disk_space,
-                         const BuildCheckpoint& checkpoint)
+                         const BuildCheckpoint &checkpoint)
         : kmer_collector_(k + 1,
                           both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
@@ -928,7 +928,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
         if (checkpoint_.phase() == 1) {
-            logger->info("Finished building phase 1");
+            logger->info("Phase 1 finished");
             queue.reset();
             return nullptr;
         }
