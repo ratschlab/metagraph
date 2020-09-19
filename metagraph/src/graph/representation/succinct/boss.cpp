@@ -2059,8 +2059,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             std::reverse(dual_path.begin(), dual_path.end());
             size_t dual_found_count = dual_path.size();
 
-            size_t rep_rev_comp_i = 0;
-
             // restrict to the subgraph
             for (size_t i = 0; i < dual_path.size(); ++i) {
                 if (!dual_path[i]) {
@@ -2068,8 +2066,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 } else if (subgraph_mask && !(*subgraph_mask)[dual_path[i]]) {
                     dual_path[i] = 0;
                     --dual_found_count;
-                } else if (dual_path[i] < dual_path[rep_rev_comp_i]) {
-                    rep_rev_comp_i = i;
                 }
             }
 
@@ -2083,22 +2079,6 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 for (auto it = path.begin(); it != path.end(); ++it) {
                     assert(it == rep || !fetch_bit(visited.data(), *it, async));
                     progress_bar += !fetch_and_set_bit(visited.data(), *it, async);
-                }
-
-                callback(std::move(path), std::move(sequence));
-
-            } else if (dual_found_count == path.size()) {
-                // the full path is present in the graph, so discard the other one
-                if (fetch_and_set_bit(visited.data(),
-                                      std::min(*rep, dual_path[rep_rev_comp_i]),
-                                      async))
-                    return;
-
-                ++progress_bar;
-
-                for (size_t i = 0; i < path.size(); ++i) {
-                    progress_bar += !fetch_and_set_bit(visited.data(), path[i], async);
-                    progress_bar += !fetch_and_set_bit(visited.data(), dual_path[i], async);
                 }
 
                 callback(std::move(path), std::move(sequence));
