@@ -2042,9 +2042,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             if (fetch_and_set_bit(visited.data(), *rep, async))
                 return;
 
+            ++progress_bar;
+
             for (auto it = path.begin(); it != path.end(); ++it) {
                 assert(it == rep || !fetch_bit(visited.data(), *it, async));
-                set_bit(visited.data(), *it, async);
+                progress_bar += !fetch_and_set_bit(visited.data(), *it, async);
             }
 
             callback(std::move(path), std::move(sequence));
@@ -2077,9 +2079,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 if (fetch_and_set_bit(visited.data(), *rep, async))
                     return;
 
+                ++progress_bar;
+
                 for (auto it = path.begin(); it != path.end(); ++it) {
                     assert(it == rep || !fetch_bit(visited.data(), *it, async));
-                    set_bit(visited.data(), *it, async);
+                    progress_bar += !fetch_and_set_bit(visited.data(), *it, async);
                 }
 
                 callback(std::move(path), std::move(sequence));
@@ -2091,9 +2095,11 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                                       async))
                     return;
 
+                ++progress_bar;
+
                 for (size_t i = 0; i < path.size(); ++i) {
-                    set_bit(visited.data(), path[i], async);
-                    set_bit(visited.data(), dual_path[i], async);
+                    progress_bar += !fetch_and_set_bit(visited.data(), path[i], async);
+                    progress_bar += !fetch_and_set_bit(visited.data(), dual_path[i], async);
                 }
 
                 callback(std::move(path), std::move(sequence));
@@ -2130,9 +2136,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                 for (size_t i = 0; i < path.size(); ++i) {
                     if (fetch_and_set_bit(visited.data(), canonical[i], async)) {
                         breakpoints.push_back(i);
-                        set_bit(visited.data(),
-                                canonical[i] == dual_path[i] ? path[i] : dual_path[i],
-                                async);
+                        progress_bar += !fetch_and_set_bit(
+                            visited.data(),
+                            canonical[i] == dual_path[i] ? path[i] : dual_path[i],
+                            async
+                        );
+                    } else {
+                        ++progress_bar;
                     }
                 }
 
