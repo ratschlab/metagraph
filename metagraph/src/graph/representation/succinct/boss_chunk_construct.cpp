@@ -440,11 +440,12 @@ concatenate_chunks(const std::filesystem::path &dir,
         to_delete.insert(to_delete.end(), original.begin(), original.end());
     }
 
+    checkpoint->set_checkpoint(5);
+
     for (const auto &name : to_delete) {
         std::filesystem::remove(name);
     }
 
-    checkpoint->set_checkpoint(5);
     return { real_split_by_W, dummy_sink_name };
 }
 
