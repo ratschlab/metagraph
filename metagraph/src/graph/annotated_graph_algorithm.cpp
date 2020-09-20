@@ -273,21 +273,19 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         );
 
         logger->trace("Reconstructing count vector");
-        counts = sdsl::int_vector<>(graph_ptr->max_index() + 1, 0, width * 2);
+        counts = aligned_int_vector(graph_ptr->max_index() + 1, 0, width * 2, 16);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l = 0; l < contigs.size(); ++l) {
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                #pragma omp critical
-                {
-                    assert(!counts[i]);
-                    counts[i] = seq_counts[j++];
-                }
+                atomic_set(counts, i, seq_counts[j++]);
             });
             assert(j == seq_counts.size());
         }
+
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
         if (masked_canonical) {
             // reshape to normal width
@@ -304,16 +302,14 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
                     j -= 2;
-
-                    #pragma omp critical
-                    {
-                        counts[i * 2] += seq_counts[j];
-                        counts[(i * 2) + 1] += seq_counts[j + 1];
-                    }
+                    atomic_set(counts, i * 2, seq_counts[j]);
+                    atomic_set(counts, i* 2 + 1, seq_counts[j + 1]);
                 });
                 assert(!j);
                 seq_counts.width(width * 2);
             }
+
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
             // reshape back
             counts.width(width * 2);
@@ -341,8 +337,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         anno_graph.get_graph_ptr()
     );
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::int_vector<> counts(graph->max_index() + 1, 0, width * 2);
-    sdsl::bit_vector indicator(counts.size(), false);
+    sdsl::bit_vector indicator(graph->max_index() + 1, false);
+    sdsl::int_vector<> counts = aligned_int_vector(graph->max_index() + 1, 0, width * 2, 16);
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
@@ -366,18 +362,17 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
     #pragma omp parallel num_threads(num_threads)
     #pragma omp single
     {
+        bool async = num_threads > 1;
         binmat.slice_columns(label_in_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                #pragma omp critical
-                {
-                    indicator[i] = true;
-                    ++counts[i];
-                }
+                set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
+                atomic_increment(counts, i);
             });
         });
 
         #pragma omp taskwait
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
         // correct the width of counts, making it single-width
         counts.width(width);
@@ -385,15 +380,13 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         binmat.slice_columns(label_out_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                #pragma omp critical
-                {
-                    indicator[i] = true;
-                    ++counts[i * 2 + 1];
-                }
+                set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
+                atomic_increment(counts, i * 2 + 1);
             });
         });
 
         #pragma omp taskwait
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
     }
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(

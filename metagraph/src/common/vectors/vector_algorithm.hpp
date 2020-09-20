@@ -109,6 +109,41 @@ inline void unset_bit(uint64_t *v,
     }
 }
 
+inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
+                                 uint64_t count = 1,
+                                 int memorder = __ATOMIC_SEQ_CST) {
+    size_t width = vector.width();
+    uint64_t bit_pos = i * width;
+    __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
+    __uint128_t new_val;
+    __uint128_t inc = __uint128_t(count) << (bit_pos & 0x7F);
+    __uint128_t exp_val = *limb;
+    do {
+        new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
+    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
+                                        memorder /* order for exchange */,
+                                        __ATOMIC_RELAXED /* order for compare */));
+    return (exp_val & mask) >> (bit_pos & 0x7F);
+}
+
+inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val = 1,
+                           int memorder = __ATOMIC_SEQ_CST) {
+    size_t width = vector.width();
+    uint64_t bit_pos = i * width;
+    __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
+    __uint128_t new_val;
+    __uint128_t val_shift = __uint128_t(val) << (bit_pos & 0x7F);
+    __uint128_t exp_val = *limb;
+    do {
+        new_val = val_shift | (exp_val & (~mask));
+    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
+                                        memorder /* order for exchange */,
+                                        __ATOMIC_RELAXED /* order for compare */));
+    return (exp_val & mask) >> (bit_pos & 0x7F);
+}
+
 
 template <class Bitmap, class Callback>
 void call_ones(const Bitmap &vector,
@@ -486,6 +521,48 @@ prev_bit(const t_int_vec &v,
             return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
     }
     return v.bit_size();
+}
+
+
+// Return an int_vector whose limbs are aligned to alignment bytes.
+// This is useful for algorithms requiring access to larger words in the underlying
+// vector (atomic increment, SIMD, etc.)
+template <int width = 0>
+sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
+                                           uint8_t var_width = 0,
+                                           size_t alignment = 8) {
+    // This is a dirty hack to allow for reallocating an int_vector<width>'s
+    // underlying storage
+    struct int_vector_access {
+        typename sdsl::int_vector<width>::size_type m_size;
+        uint64_t *m_data;
+        typename sdsl::int_vector<width>::int_width_type m_width;
+    };
+    static_assert(sizeof(sdsl::int_vector<width>) == sizeof(int_vector_access));
+    assert(!width || width == var_width);
+
+    sdsl::int_vector<width> v;
+    auto &v_cast = reinterpret_cast<int_vector_access&>(v);
+    v_cast.m_size = size * var_width;
+    v_cast.m_width = var_width;
+    free(v_cast.m_data);
+
+    size_t capacity_bytes = (((((v_cast.m_size + 63) >> 6) << 3) + alignment - 1) / alignment) * alignment;
+    v_cast.m_data = (uint64_t*)std::aligned_alloc(alignment, capacity_bytes);
+    if (!v_cast.m_data)
+        throw std::bad_alloc();
+
+    memset(v_cast.m_data, 0, capacity_bytes);
+
+    if (val)
+        sdsl::util::set_to_value(v, val);
+
+    return v;
+}
+
+sdsl::bit_vector aligned_bit_vector(size_t size = 0, bool val = false,
+                                    size_t alignment = 8) {
+    return aligned_int_vector<1>(size, val, 1, alignment);
 }
 
 
