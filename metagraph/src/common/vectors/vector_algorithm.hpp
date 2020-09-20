@@ -528,9 +528,9 @@ prev_bit(const t_int_vec &v,
 // This is useful for algorithms requiring access to larger words in the underlying
 // vector (atomic increment, SIMD, etc.)
 template <int width = 0>
-sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
-                                           uint8_t var_width = 0,
-                                           size_t alignment = 8) {
+inline sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
+                                                  uint8_t var_width = 0,
+                                                  size_t alignment = 8) {
     // This is a dirty hack to allow for reallocating an int_vector<width>'s
     // underlying storage
     struct int_vector_access {
@@ -560,8 +560,8 @@ sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
     return v;
 }
 
-sdsl::bit_vector aligned_bit_vector(size_t size = 0, bool val = false,
-                                    size_t alignment = 8) {
+inline sdsl::bit_vector aligned_bit_vector(size_t size = 0, bool val = false,
+                                           size_t alignment = 8) {
     return aligned_int_vector<1>(size, val, 1, alignment);
 }
 
