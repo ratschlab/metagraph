@@ -441,7 +441,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     size_t max_num_nodes_per_suffix = 1;
     double max_hull_depth_per_seq_char = 0.0;
     if (config) {
-        sub_k = config->alignment_min_seed_length;
+        if (config->alignment_min_seed_length)
+            sub_k = config->alignment_min_seed_length;
+
         max_hull_forks = config->max_hull_forks;
         max_hull_depth = config->max_hull_depth;
         max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
