@@ -612,9 +612,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
 
         size_t hull_contig_count = 0;
+        size_t old_size = contigs.size();
 
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
-        for (size_t i = 0; i < original_size; ++i) {
+        for (size_t i = 0; i < old_size; ++i) {
             std::string_view contig, rev_contig;
             node_index *path = nullptr;
             node_index *rev_path = nullptr;
@@ -815,15 +816,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                   graph->num_nodes());
 
     // convert to annotation indexes: remove 0 and shift
+    size_t num_objects = 0;
     for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
         if (index_in_full_graph[i]) {
             index_in_full_graph[i - 1]
                 = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
+            ++num_objects;
         } else {
             index_in_full_graph[i - 1] = -1;  // npos
         }
     }
     index_in_full_graph.pop_back();
+
+    logger->trace("[Query graph construction] Slicing {} rows out of full annotation",
+                  num_objects);
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
