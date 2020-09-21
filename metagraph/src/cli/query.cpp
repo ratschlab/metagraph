@@ -120,21 +120,21 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     return output;
 }
 
-void
-call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
-                            const std::pair<std::string,
-                                            std::vector<node_index>> &mapped_contig,
-                            const std::pair<std::string,
-                                            std::vector<node_index>> &mapped_rev_contig,
-                            const std::function<void(std::string&&, node_index)> &callback,
-                            size_t sub_k,
-                            size_t max_num_nodes_per_suffix,
-                            bool check_reverse_complement) {
+void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
+                                 const std::string_view contig,
+                                 const node_index *nodes_in_full,
+                                 const std::string_view rev_contig,
+                                 const node_index *rev_nodes_in_full,
+                                 const std::function<void(std::string&&,
+                                                          node_index)> &callback,
+                                 size_t sub_k,
+                                 size_t max_num_nodes_per_suffix,
+                                 bool check_reverse_complement) {
     size_t k = dbg_succ.get_k();
     assert(sub_k < k);
+    size_t num_nodes = contig.size() - dbg_succ.get_k() + 1;
 
-    const auto &[contig, nodes_in_full] = mapped_contig;
-    for (size_t i = 0; i < nodes_in_full.size(); ++i) {
+    for (size_t i = 0; i < num_nodes; ++i) {
         if (nodes_in_full[i] == DeBruijnGraph::npos) {
             dbg_succ.call_nodes_with_suffix(
                 std::string_view(contig.data() + i, k),
@@ -147,8 +147,9 @@ call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     }
 
     if (check_reverse_complement) {
-        call_suffix_match_sequences(dbg_succ, mapped_rev_contig, mapped_contig,
-                                    callback, sub_k, max_num_nodes_per_suffix, false);
+        call_suffix_match_sequences(dbg_succ, rev_contig, rev_nodes_in_full,
+                                    contig, nodes_in_full, callback, sub_k,
+                                    max_num_nodes_per_suffix, false);
     }
 }
 
@@ -164,37 +165,40 @@ struct HullUnitig {
 // continue_traversal is given a node and the distrance traversed so far and
 // returns whether traversal should continue.
 template <class ContigCallback>
-void
-call_hull_sequences(const DeBruijnGraph &full_dbg,
-                    const std::pair<std::string, std::vector<node_index>> &mapped_contig,
-                    const std::pair<std::string, std::vector<node_index>> &mapped_rev_contig,
-                    size_t max_hull_forks,
-                    size_t max_hull_depth_global,
-                    double max_hull_depth_per_seq_char,
-                    bool canonical,
-                    const ContigCallback &callback,
-                    const std::function<bool(const std::string&, node_index)> &continue_traversal) {
+void call_hull_sequences(const DeBruijnGraph &full_dbg,
+                         const std::string_view contig,
+                         const node_index *nodes,
+                         const std::string_view rev_contig,
+                         const node_index *rev_nodes,
+                         size_t max_hull_forks,
+                         size_t max_hull_depth_global,
+                         double max_hull_depth_per_seq_char,
+                         bool canonical,
+                         const ContigCallback &callback,
+                         const std::function<bool(const std::string&,
+                                                  node_index)> &continue_traversal) {
     assert(max_hull_forks);
-    const auto &[contig, nodes] = mapped_contig;
 
     if (canonical) {
-        call_hull_sequences(full_dbg, mapped_rev_contig, mapped_contig,
+        call_hull_sequences(full_dbg, rev_contig, rev_nodes, contig, nodes,
                             max_hull_forks, max_hull_depth_global,
                             max_hull_depth_per_seq_char, false, // canonical
                             callback, continue_traversal);
     }
 
-    for (size_t j = 0; j < nodes.size(); ++j) {
+    size_t num_nodes = contig.size() - full_dbg.get_k() + 1;
+
+    for (size_t j = 0; j < num_nodes; ++j) {
         // if the next starting node is not in the graph, or if it has a single
         // outgoing node which is also in this contig, skip
-        if (!nodes[j] || (j + 1 < nodes.size() && nodes[j + 1] != DeBruijnGraph::npos
+        if (!nodes[j] || (j + 1 < num_nodes && nodes[j + 1] != DeBruijnGraph::npos
                 && full_dbg.has_single_outgoing(nodes[j]))) {
             continue;
         }
 
         size_t max_hull_depth = std::min(
             max_hull_depth_global,
-            static_cast<size_t>((nodes.size() - j + full_dbg.get_k())
+            static_cast<size_t>((num_nodes - j + full_dbg.get_k())
                                     * max_hull_depth_per_seq_char)
         );
 
@@ -539,9 +543,24 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < original_size; ++i) {
+            std::string_view contig, rev_contig;
+            node_index *path = nullptr;
+            node_index *rev_path = nullptr;
+            #pragma omp critical
+            {
+                // keep views of the contig just in case another thread reallocates
+                // the vector
+                contig = contigs[i].first;
+                path = contigs[i].second.data();
+
+                if (i < rev_comp_contigs.size()) {
+                    rev_contig = rev_comp_contigs[i].first;
+                    rev_path = rev_comp_contigs[i].second.data();
+                }
+            }
             std::vector<std::pair<std::string, node_index>> added_nodes;
             std::vector<std::pair<std::string, node_index>> added_nodes_rc;
-            call_suffix_match_sequences(*dbg_succ, contigs[i], rev_comp_contigs[i],
+            call_suffix_match_sequences(*dbg_succ, contig, path, rev_contig, rev_path,
                 [&](std::string&& seq, node_index node) {
                     assert(node == full_dbg.kmer_to_node(seq));
                     added_nodes.emplace_back(std::move(seq), node);
@@ -588,8 +607,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     if (max_hull_forks) {
         logger->trace("[Query graph extension] Computing query graph hull");
         logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",
-                      max_hull_depth,
-                      max_hull_forks);
+                      max_hull_depth, max_hull_forks);
         timer.reset();
 
         tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
@@ -598,9 +616,24 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < original_size; ++i) {
+            std::string_view contig, rev_contig;
+            node_index *path = nullptr;
+            node_index *rev_path = nullptr;
+            #pragma omp critical
+            {
+                // keep views of the contig just in case another thread reallocates
+                // the vector
+                contig = contigs[i].first;
+                path = contigs[i].second.data();
+
+                if (i < rev_comp_contigs.size()) {
+                    rev_contig = rev_comp_contigs[i].first;
+                    rev_path = rev_comp_contigs[i].second.data();
+                }
+            }
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
-            call_hull_sequences(full_dbg, contigs[i], rev_comp_contigs[i],
+            call_hull_sequences(full_dbg, contig, path, rev_contig, rev_path,
                                 max_hull_forks, max_hull_depth,
                                 max_hull_depth_per_seq_char, canonical,
                 [&](auto&& sequence, auto&& path) {
@@ -753,6 +786,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             assert(j == nodes_in_full.size());
         }
     }
+
+    if (original_size != contigs.size())
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
                   timer.elapsed());
