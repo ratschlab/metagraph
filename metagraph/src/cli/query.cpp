@@ -188,6 +188,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
     size_t num_nodes = contig.size() - full_dbg.get_k() + 1;
 
+    assert(map_sequence_to_nodes(full_dbg, contig)
+            == std::vector<node_index>(nodes, nodes + num_nodes));
+
     for (size_t j = 0; j < num_nodes; ++j) {
         // if the next starting node is not in the graph, or if it has a single
         // outgoing node which is also in this contig, skip
@@ -210,6 +213,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         std::vector<HullUnitig> unitig_traversal;
         full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
             init_unitig.back() = c;
+            assert(full_dbg.kmer_to_node(init_unitig) == next_node);
             if (continue_traversal(init_unitig, next_node)) {
                 unitig_traversal.emplace_back(HullUnitig{
                     .unitig = init_unitig,
@@ -245,6 +249,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 });
             }
 
+            assert(path.size() == unitig.size() - full_dbg.get_k() + 1);
+            assert(path == map_sequence_to_nodes(full_dbg, unitig));
             callback(std::string(unitig), std::move(path));
 
             if (node != DeBruijnGraph::npos && continue_traversal
@@ -258,6 +264,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                 // start new traversals
                 full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
                     unitig.back() = c;
+                    assert(full_dbg.kmer_to_node(unitig) == next_node);
                     if (continue_traversal(unitig, next_node)) {
                         unitig_traversal.emplace_back(HullUnitig{
                             .unitig = unitig,
@@ -583,7 +590,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             {
                 for (size_t j = 0; j < added_nodes.size(); ++j) {
                     contigs.emplace_back(std::move(added_nodes[j].first),
-                                         std::vector<node_index>{ added_nodes_rc[j].second });
+                                         std::vector<node_index>{ added_nodes[j].second });
                     graph_init->add_sequence(contigs.back().first,
                                              [&](node_index) { ++num_added; });
                 }
@@ -637,7 +644,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                 max_hull_forks, max_hull_depth,
                                 max_hull_depth_per_seq_char, canonical,
                 [&](auto&& sequence, auto&& path) {
-                    assert(path == map_sequence_to_nodes(full_dbg, sequence));
                     added_paths.emplace_back(std::move(sequence), std::move(path));
                     if (canonical) {
                         added_paths_rc.emplace_back(added_paths.back().first,
