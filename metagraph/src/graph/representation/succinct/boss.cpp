@@ -2319,22 +2319,22 @@ call_path(const BOSS &boss,
         if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
 
-            // schedule traversal branched off from all dual k-mers except those
-            // with a single outgoing k-mer that belongs to the same dual path
-            // and hence already processed
+            // schedule traversal branched off from each terminal dual k-mer
             if (i + 1 == dual_path.size() || !dual_path[i + 1]) {
-                std::vector<TAlphabet> kmer(rev_comp_seq.begin() + i + 1,
-                                            rev_comp_seq.begin() + i + 1 + boss.get_k());
-
                 edge_index next_edge = boss.fwd(dual_path[i],
                                                 boss.get_W(dual_path[i]) % boss.alph_size);
 
-                assert(boss.get_node_seq(next_edge) == kmer);
+                // schedule only it has a single outgoing k-mer,
+                // otherwise it's a fork which will be covered in the forward pass.
+                if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
+                    std::vector<TAlphabet> kmer(rev_comp_seq.begin() + i + 1,
+                                                rev_comp_seq.begin() + i + 1 + boss.get_k());
 
-                masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
-                    if (!fetch_bit(visited.data(), e, concurrent))
-                        edge_queue->emplace_back(e, kmer);
-                });
+                    assert(boss.get_node_seq(next_edge) == kmer);
+
+                    if (!fetch_bit(visited.data(), next_edge, concurrent))
+                        edge_queue->emplace_back(next_edge, std::move(kmer));
+                }
             }
         } else {
             // The dual node had already been visited, so we insert its index
