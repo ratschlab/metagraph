@@ -650,9 +650,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                                     std::vector<node_index>{});
                         reverse_complement(added_paths_rc.back().first.begin(),
                                            added_paths_rc.back().first.end());
-                        added_paths_rc.back().second = map_sequence_to_nodes(
-                            full_dbg, added_paths_rc.back().first
-                        );
+                        if (!full_dbg.is_canonical_mode()) {
+                            // no need to map here because these will be remapped
+                            // below
+                            added_paths_rc.back().second = map_sequence_to_nodes(
+                                full_dbg, added_paths_rc.back().first
+                            );
+                        }
                     }
                 },
                 [&](const std::string &sequence, node_index last_node) {
@@ -692,7 +696,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     contigs.emplace_back(std::move(pair));
                 }
                 for (auto&& pair : added_paths_rc) {
-                    assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
+                    assert(full_dbg.is_canonical_mode()
+                        || pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
                     rev_comp_contigs.emplace_back(std::move(pair));
                 }
             }
@@ -712,13 +717,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     if (full_dbg.is_canonical_mode()) {
-        assert(contigs.size() == rev_comp_contigs.size());
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             size_t j = 0;
             full_dbg.map_to_nodes(contigs[i].first, [&](node_index n) {
                 contigs[i].second[j++] = n;
             });
+            rev_comp_contigs[i].second.resize(contigs[i].second.size());
             std::copy(contigs[i].second.begin(), contigs[i].second.end(),
                       rev_comp_contigs[i].second.rbegin());
         }
