@@ -2035,56 +2035,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
             assert(edge);
         } while (edge != start);
 
-        // check the minimizer to make sure this path is called just once
-        auto rep = std::min_element(path.begin(), path.end());
-        if (fetch_and_set_bit(visited.data(), *rep, async))
-            return;
-
-        // now we visit all the other unvisited nodes and call them
-        // first, we rotate it to start at the marked minimizer
-        std::rotate(path.begin(), rep, path.end());
-        // for cycles seq[:k] = seq[-k:]
-        std::rotate(sequence.begin(), sequence.begin() + (rep - path.begin()), sequence.end() - get_k());
-        std::copy(sequence.begin(), sequence.begin() + get_k(), sequence.end() - get_k());
-
-        size_t begin = 0;
-        for (size_t i = 1; i <= path.size(); ++i) {
-            if (i < path.size() && !fetch_and_set_bit(visited.data(), path[i], async))
-                continue;
-
-            if (begin < i) {
-                std::vector<edge_index> path_segment { path.begin() + begin, path.begin() + i };
-                std::vector<TAlphabet> seq_segment { sequence.begin() + begin, sequence.begin() + i + get_k() };
-                auto rev_comp_breakpoints = call_path(
-                    *this, callback, path_segment, seq_segment,
-                    kmers_in_single_form, trim_sentinels, visited, fetched,
-                    async, fetched_mutex, progress_bar, subgraph_mask
-                );
-
-                assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
-
-                for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
-                    edge_index next_edge = fwd(edge, get_W(edge) % alph_size);
-
-                    // the sequence of next_edge was already computed in call_path
-                    std::vector<TAlphabet> kmer = std::move(kmer_seq);
-                    assert(get_node_seq(next_edge) == kmer);
-
-                    masked_call_outgoing(*this, next_edge, subgraph_mask, [&](edge_index e) {
-                        if (!fetch_bit(visited.data(), e, async)) {
-                            // Can't call process_cycle because the minimizer of the overlapping cycle
-                            // may be already marked as visited, so we call the generic traversal here.
-                            ::mtg::graph::boss::call_paths(
-                                    *this, { Edge(e, kmer) }, callback,
-                                    split_to_unitigs, select_last_edge, kmers_in_single_form,
-                                    trim_sentinels, thread_pool, &visited, &fetched,
-                                    async, fetched_mutex, progress_bar, subgraph_mask);
-                        }
-                    });
-                }
-            }
-
-            begin = i + 1;
+        // Ensures that call_path is called only once for each cycle
+        edge_index rep = *std::min_element(path.begin(), path.end());
+        if (!fetch_bit(visited.data(), rep, async)) {
+            // TODO: avoid get_node_seq(rep), and maybe pass the whole path
+            ::mtg::graph::boss::call_paths(
+                    *this, { Edge(rep, get_node_seq(rep)) }, callback,
+                    split_to_unitigs, select_last_edge, kmers_in_single_form,
+                    trim_sentinels, thread_pool, &visited, &fetched,
+                    async, fetched_mutex, progress_bar, subgraph_mask);
         }
     };
 
