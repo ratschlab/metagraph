@@ -2349,7 +2349,7 @@ call_path(const BOSS &boss,
             // schedule traversal branched off from all dual k-mers except those
             // with a single outgoing k-mer that belongs to the same dual path
             // and hence already processed
-            if (i + 1 == dual_path.size() || !dual_path[i + 1] || !boss.is_single_outgoing(dual_path[i])) {
+            if (i + 1 == dual_path.size() || !dual_path[i + 1]) {
                 dual_endpoints.emplace_back(Edge {
                     dual_path[i],
                     std::vector<TAlphabet>(rev_comp_seq.begin() + i + 1,
