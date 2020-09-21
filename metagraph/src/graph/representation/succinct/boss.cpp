@@ -2124,11 +2124,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         } while (edge != start);
 
         // Ensures that call_path is called only once for each cycle
-        edge_index rep = *std::min_element(path.begin(), path.end());
-        if (!fetch_bit(visited.data(), rep, async)) {
-            // TODO: avoid get_node_seq(rep), and maybe pass the whole path
+        auto rep = std::min_element(path.begin(), path.end());
+        if (!fetch_bit(visited.data(), *rep, async)) {
+            EdgeQueue queue;
+            queue.emplace_back(*rep,
+                               sequence.begin() + (rep - path.begin()),
+                               sequence.begin() + (rep - path.begin()) + get_k());
             ::mtg::graph::boss::call_paths(
-                    *this, EdgeQueue(rep), callback,
+                    *this, std::move(queue), callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
@@ -2420,7 +2423,7 @@ call_path(const BOSS &boss,
                 edge_index next_edge = boss.fwd(dual_path[i],
                                                 boss.get_W(dual_path[i]) % boss.alph_size);
 
-                // schedule only it has a single outgoing k-mer,
+                // schedule only if it has a single outgoing k-mer,
                 // otherwise it's a fork which will be covered in the forward pass.
                 if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
                     if (!fetch_bit(visited.data(), next_edge, concurrent)) {
