@@ -744,7 +744,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         graph = std::move(graph_intersection);
     }
 
-    logger->trace("[Query graph construction] Intersected in {} secs", timer.elapsed());
+    logger->trace("[Query graph construction] Intersected in {} sec", timer.elapsed());
 
     logger->trace("[Query graph construction] Remapping nodes to full graph");
     timer.reset();
@@ -817,8 +817,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                        index_in_full_graph,
                                        num_threads);
 
-    logger->trace("[Query graph construction] Query annotation constructed in {} sec",
-                  timer.elapsed());
+    logger->trace("[Query graph construction] Query annotation with {} labels"
+                  " and {} set bits constructed in {} sec",
+                  annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
 
     // build annotated graph from the query graph and copied annotations
