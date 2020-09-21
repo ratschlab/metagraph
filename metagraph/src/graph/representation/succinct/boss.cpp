@@ -1880,19 +1880,22 @@ class EdgeQueue {
     }
 
     // split off a half of the queue
+    // tries to keep in the current queue as many decoded edges as possible
     EdgeQueue split_half() {
         EdgeQueue split_queue;
 
-        size_t h = decoded_edges_.size() / 2;
+        // prefer moving edges without k-mers decoded
+        size_t h = std::min(size() / 2, indexes_.size());
+        split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
+        split_queue.indexes_.shrink_to_fit();
+        indexes_.resize(indexes_.size() - h);
+
+        // if moved less than size()/2 indexes, move decoded k-mers as well
+        h = size() / 2 - h;
         split_queue.decoded_edges_.assign(std::make_move_iterator(decoded_edges_.end() - h),
                                           std::make_move_iterator(decoded_edges_.end()));
         split_queue.decoded_edges_.shrink_to_fit();
         decoded_edges_.resize(decoded_edges_.size() - h);
-
-        h = indexes_.size() / 2;
-        split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
-        split_queue.indexes_.shrink_to_fit();
-        indexes_.resize(indexes_.size() - h);
 
         return split_queue;
     }
