@@ -513,29 +513,38 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         contigs.emplace_back(std::move(contig_args)...);
     }, get_num_threads(), canonical);  // pull only primary contigs when building canonical query graph
 
-    if (canonical)
+    if (canonical) {
         rev_comp_contigs.resize(contigs.size());
+        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        for (size_t i = 0; i < contigs.size(); ++i) {
+            rev_comp_contigs[i].first = contigs[i].first;
+            reverse_complement(rev_comp_contigs[i].first.begin(),
+                               rev_comp_contigs[i].first.end());
+        }
+    }
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    // map from nodes in query graph to full graph
-    logger->trace("[Query graph construction] Mapping k-mers back to full graph");
-
-    #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
-    for (size_t i = 0; i < contigs.size(); ++i) {
-        contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
-        if (canonical) {
-            rev_comp_contigs[i].first = contigs[i].first;
-            reverse_complement(rev_comp_contigs[i].first.begin(),
-                               rev_comp_contigs[i].first.end());
-            rev_comp_contigs[i].second = map_sequence_to_nodes(
-                full_dbg, rev_comp_contigs[i].first
-            );
+    if (!full_dbg.is_canonical_mode() || sub_k < full_dbg.get_k() || max_hull_forks) {
+        // map from nodes in query graph to full graph
+        logger->trace("[Query graph construction] Mapping k-mers back to full graph");
+        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        for (size_t i = 0; i < contigs.size(); ++i) {
+            contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
+            if (canonical) {
+                // the reverse complement mapping only needs to be mapping if the
+                // full graph is not canonical, or if this will be used for hull
+                // computation
+                rev_comp_contigs[i].second = map_sequence_to_nodes(
+                    full_dbg, rev_comp_contigs[i].first
+                );
+            }
         }
+        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
+                      timer.elapsed());
+        timer.reset();
     }
-    logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
-    timer.reset();
 
     size_t original_size = contigs.size();
 
