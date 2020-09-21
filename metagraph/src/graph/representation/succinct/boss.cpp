@@ -1967,12 +1967,15 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
     //       \___
     //
     std::vector<edge_index> edges;
+    edge_index last_i = 0;
     call_zeros(visited, [&](edge_index i) {
-        // map to succ_last(i) since this edge may not be in subgraph_mask
-        i = succ_last(i);
+        if (i <= last_i)
+            return;
+
+        last_i = succ_last(i);
 
         edges.resize(0);
-        masked_call_outgoing(*this, i, subgraph_mask,
+        masked_call_outgoing(*this, last_i, subgraph_mask,
                              [&](edge_index e) { edges.push_back(e); });
 
         // no outgoing edges or a unique outgoing edge
