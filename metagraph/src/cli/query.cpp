@@ -124,17 +124,10 @@ void
 call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                             const std::pair<std::string,
                                             std::vector<node_index>> &mapped_contig,
-                            const std::vector<node_index> &index_in_full_graph,
                             const std::function<void(std::string&&, node_index)> &callback,
                             size_t sub_k,
                             size_t max_num_nodes_per_suffix) {
-    const auto &[contig, path] = mapped_contig;
-
-    std::vector<node_index> nodes_in_full;
-    nodes_in_full.reserve(path.size());
-    for (node_index i : path) {
-        nodes_in_full.push_back(index_in_full_graph[i]);
-    }
+    const auto &[contig, nodes_in_full] = mapped_contig;
     size_t k = dbg_succ.get_k();
     assert(sub_k < k);
 
@@ -166,7 +159,6 @@ template <class ContigCallback>
 void
 call_hull_sequences(const DeBruijnGraph &full_dbg,
                     const std::pair<std::string, std::vector<node_index>> &mapped_contig,
-                    const std::vector<node_index> &index_in_full_graph,
                     size_t max_hull_forks,
                     size_t max_hull_depth_global,
                     double max_hull_depth_per_seq_char,
@@ -174,7 +166,7 @@ call_hull_sequences(const DeBruijnGraph &full_dbg,
                     const ContigCallback &callback,
                     const std::function<bool(const std::string&, node_index)> &continue_traversal) {
     assert(max_hull_forks);
-    const auto &[contig, path] = mapped_contig;
+    const auto &[contig, nodes] = mapped_contig;
 
     if (canonical) {
         auto rev_seq = std::make_pair(contig, {});
@@ -183,12 +175,6 @@ call_hull_sequences(const DeBruijnGraph &full_dbg,
         call_hull_sequences(full_dbg, rev_seq, index_in_full_graph, max_hull_forks,
                             max_hull_depth_global, max_hull_depth_per_seq_char,
                             false, callback, continue_traversal);
-    }
-
-    std::vector<node_index> nodes;
-    nodes.reserve(path.size());
-    for (node_index i : path) {
-        nodes.push_back(index_in_full_graph[i]);
     }
 
     for (size_t j = 0; j < nodes.size(); ++j) {
@@ -515,15 +501,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // map from nodes in query graph to full graph
     logger->trace("[Query graph construction] Mapping k-mers back to full graph");
-    std::vector<node_index> index_in_full_graph(graph_init->max_index() + 1);
+
     #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
-        auto &path = contigs[i].second;
-        size_t j = 0;
-        full_dbg.map_to_nodes_sequentially(contigs[i].first, [&](node_index i) {
-            path[j++] = i;
-        })
-        assert(j == path.size());
+        contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
     }
     logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
     timer.reset();
@@ -541,7 +522,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < old_size; ++i) {
             std::vector<std::pair<std::string, node_index>> added_nodes;
-            call_suffix_match_sequences(*dbg_succ, contigs[i], index_in_full_graph,
+            call_suffix_match_sequences(*dbg_succ, contigs[i],
                 [&](std::string&& seq, node_index node) {
                     assert(seq.size() == graph_init->get_k());
                     added_nodes.emplace_back(std::move(seq), node);
@@ -554,10 +535,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             {
                 for (const auto &[seq, node] : added_nodes) {
                     graph_init->add_sequence(seq, [&](node_index new_node) {
-                        assert(new_node == index_in_full_graph.size());
                         ++num_added;
                         contigs.emplace_back(seq, { new_node });
-                        index_in_full_graph.push_back(node);
                     });
                 }
             }
@@ -581,13 +560,11 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
 
         size_t hull_contig_count = 0;
-        size_t hull_node_count = 0;
 
         #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
         for (size_t i = 0; i < old_size; ++i) {
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
-            call_hull_sequences(full_dbg, contigs[i], index_in_full_graph,
-                                max_hull_forks, max_hull_depth,
+            call_hull_sequences(full_dbg, contigs[i], max_hull_forks, max_hull_depth,
                                 max_hull_depth_per_seq_char, canonical,
                 [&](auto&& sequence, auto&& path) {
                     added_paths.emplace_back(std::move(sequence), std::move(path));
@@ -622,57 +599,45 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
             #pragma omp critical
             {
-                for (auto&& [sequence, path] : added_paths) {
-                    size_t j = 0;
-                    bool added = false;
-                    graph_init->add_sequence(sequence, [&](node_index new_node) {
-                        added = true;
-                        std::ignore = new_node;
-                        assert(new_node == index_in_full_graph.size());
-                        assert(j && j <= path.size());
-                        index_in_full_graph.push_back(path[j - 1]);
-                        ++hull_node_count;
-                    }, [&]() { ++j; return false; });
-
-                    assert(j == path.size());
-
-                    if (added) {
-                        ++hull_contig_count;
-                        contigs.emplace_back(std::move(sequence), {});
-                        contigs.back().second = map_sequence_to_nodes(
-                            *graph_init,
-                            contigs.back().first
-                        );
-                    }
+                hull_contig_count += added_paths.size();
+                for (auto&& pair : added_paths) {
+                    contigs.emplace_back(std::move(pair));
                 }
             }
         }
 
-        assert(index_in_full_graph.size() == graph_init->max_index() + 1);
-
-        logger->trace("[Query graph extension] Added {} contigs with {} nodes in {} sec",
-                      hull_contig_count, hull_node_count, timer.elapsed());
+        logger->trace("[Query graph extension] Added {} contigs in {} sec",
+                      hull_contig_count, timer.elapsed());
     }
 
     std::shared_ptr<DeBruijnGraph> graph;
 
     // restrict nodes to those in the full graph
     if (sub_k < full_dbg.get_k()) {
+        graph = convert_to_succinct(contigs, full_dbg.get_k(), canonical, num_threads);
 
     } else {
         auto graph_intersection = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), canonical);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            auto &[contig, path] = contigs[i];
+        for (const auto &[contig, path_in_full] : contigs) {
             size_t j = 0;
-            graph_intersection->add_sequence(contig,
-                [&]() { return !index_in_full_graph[path[j++]]; }
-            );
-            assert(j == path.size());
+            graph_intersection->add_sequence(contig, [&]() { return !path_in_full[j++]; });
+            assert(j == path_in_full.size());
         }
 
         graph = std::move(graph_intersection);
+    }
+
+    std::vector<node_index> index_in_full_graph(graph->max_index() + 1);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        const auto &[contig, nodes_in_full] = contigs[i];
+        size_t j = 0;
+        graph->map_to_nodes(contig, [&](node_index node) {
+            __atomic_store_n(&index_in_full_graph[node], nodes_in_full[j++], __ATOMIC_RELAXED);
+        });
+        assert(j == nodes_in_full.size());
     }
 
     // std::shared_ptr<DeBruijnGraph> graph = std::move(graph_init);
