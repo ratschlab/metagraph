@@ -715,14 +715,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert(contigs.size() == rev_comp_contigs.size());
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
-            auto &[contig, nodes_in_full] = contigs[i];
-            auto &[contig_rc, nodes_in_full_rc] = rev_comp_contigs[i];
-            assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
-            assert(contig_rc.size() == nodes_in_full_rc.size() + full_dbg.get_k() - 1);
-            std::transform(nodes_in_full.begin(), nodes_in_full.end(),
-                           nodes_in_full_rc.rbegin(), nodes_in_full.begin(),
-                           [](const auto &a, const auto &b) { return std::min(a, b); });
-            std::copy(nodes_in_full.begin(), nodes_in_full.end(), nodes_in_full_rc.rbegin());
+            size_t j = 0;
+            full_dbg.map_to_nodes(contigs[i].first, [&](node_index n) {
+                contigs[i].second[j++] = n;
+            });
+            std::copy(contigs[i].second.begin(), contigs[i].second.end(),
+                      rev_comp_contigs[i].second.rbegin());
         }
     }
 
