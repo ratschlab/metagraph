@@ -1832,7 +1832,7 @@ class EdgeQueue {
   public:
     EdgeQueue(std::vector<Edge>&& initial_edges = {})
           : decoded_edges_(std::move(initial_edges)) {
-        num_decoded_ += decoded_edges_.size();
+        total_decoded_ += decoded_edges_.size();
     }
 
     explicit EdgeQueue(edge_index edge)
@@ -1844,7 +1844,7 @@ class EdgeQueue {
     EdgeQueue(EdgeQueue&&) = default;
 
     ~EdgeQueue() {
-        num_decoded_ -= decoded_edges_.size();
+        total_decoded_ -= decoded_edges_.size();
     }
 
     template <typename Iterator>
@@ -1856,11 +1856,11 @@ class EdgeQueue {
             return;
         }
 
-        if (++num_decoded_ < MAX_DECODED_EDGES_IN_QUEUE) {
+        if (++total_decoded_ <= MAX_DECODED_EDGES_IN_QUEUE) {
             decoded_edges_.emplace_back(edge, new TAlphabet[end - begin]);
             std::copy(begin, end, decoded_edges_.back().second.get());
         } else {
-            --num_decoded_;
+            --total_decoded_;
             indexes_.push_back(edge);
         }
     }
@@ -1870,7 +1870,7 @@ class EdgeQueue {
         if (decoded_edges_.size()) {
             Edge edge = std::move(decoded_edges_.back());
             decoded_edges_.pop_back();
-            --num_decoded_;
+            --total_decoded_;
             return edge;
         } else {
             Edge edge(indexes_.back(), nullptr);
@@ -1886,10 +1886,12 @@ class EdgeQueue {
         size_t h = decoded_edges_.size() / 2;
         split_queue.decoded_edges_.assign(std::make_move_iterator(decoded_edges_.end() - h),
                                           std::make_move_iterator(decoded_edges_.end()));
+        split_queue.decoded_edges_.shrink_to_fit();
         decoded_edges_.resize(decoded_edges_.size() - h);
 
         h = indexes_.size() / 2;
         split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
+        split_queue.indexes_.shrink_to_fit();
         indexes_.resize(indexes_.size() - h);
 
         return split_queue;
@@ -1905,7 +1907,7 @@ class EdgeQueue {
     bool empty() const { return decoded_edges_.empty() && indexes_.empty(); }
 
   private:
-    inline static std::atomic<uint64_t> num_decoded_ = 0;
+    inline static std::atomic<uint64_t> total_decoded_ = 0;
     std::vector<Edge> decoded_edges_;
     std::vector<edge_index> indexes_;
 };
