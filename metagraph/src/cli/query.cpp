@@ -581,24 +581,23 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
             #pragma omp critical
             {
-                for (const auto &[seq, node] : added_nodes) {
-                    assert(seq.size() == full_dbg.get_k());
-                    graph_init->add_sequence(seq, [&](node_index new_node) {
-                        ++num_added;
-                        contigs.emplace_back(seq, std::vector<node_index>{ new_node });
-                    });
+                for (size_t j = 0; j < added_nodes.size(); ++j) {
+                    contigs.emplace_back(std::move(added_nodes[j].first),
+                                         std::vector<node_index>{ added_nodes_rc[j].second });
+                    graph_init->add_sequence(contigs.back().first,
+                                             [&](node_index) { ++num_added; });
                 }
-                for (const auto &[seq, node] : added_nodes_rc) {
-                    assert(seq.size() == full_dbg.get_k());
-                    graph_init->add_sequence(seq, [&](node_index new_node) {
-                        ++num_added;
-                        rev_comp_contigs.emplace_back(
-                            seq, std::vector<node_index>{ new_node }
-                        );
-                    });
+                for (size_t j = 0; j < added_nodes_rc.size(); ++j) {
+                    rev_comp_contigs.emplace_back(std::move(added_nodes_rc[j].first),
+                                                  std::vector<node_index>{ added_nodes_rc[j].second });
+                    graph_init->add_sequence(rev_comp_contigs.back().first,
+                                             [&](node_index) { ++num_added; });
                 }
             }
         }
+
+        assert((canonical && contigs.size() == rev_comp_contigs.size())
+                || (!canonical && rev_comp_contigs.empty()));
 
         logger->trace("[Query graph construction] Adding {} suffix-matching k-mers "
                       "took {} sec", num_added, timer.elapsed());
@@ -682,29 +681,41 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             {
                 hull_contig_count += added_paths.size() + added_paths_rc.size();
                 for (auto&& pair : added_paths) {
+                    assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
                     contigs.emplace_back(std::move(pair));
                 }
                 for (auto&& pair : added_paths_rc) {
+                    assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
                     rev_comp_contigs.emplace_back(std::move(pair));
                 }
             }
         }
+
+        for (size_t i = original_size; i < contigs.size(); ++i) {
+            graph_init->add_sequence(contigs[i].first);
+            if (i < rev_comp_contigs.size())
+                graph_init->add_sequence(rev_comp_contigs[i].first);
+        }
+
+        assert((canonical && contigs.size() == rev_comp_contigs.size())
+                || (!canonical && rev_comp_contigs.empty()));
 
         logger->trace("[Query graph extension] Added {} contigs in {} sec",
                       hull_contig_count, timer.elapsed());
     }
 
     if (full_dbg.is_canonical_mode()) {
+        assert(contigs.size() == rev_comp_contigs.size());
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             auto &[contig, nodes_in_full] = contigs[i];
             auto &[contig_rc, nodes_in_full_rc] = rev_comp_contigs[i];
+            assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
+            assert(contig_rc.size() == nodes_in_full_rc.size() + full_dbg.get_k() - 1);
             std::transform(nodes_in_full.begin(), nodes_in_full.end(),
                            nodes_in_full_rc.rbegin(), nodes_in_full.begin(),
                            [](const auto &a, const auto &b) { return std::min(a, b); });
-            std::transform(nodes_in_full_rc.begin(), nodes_in_full_rc.end(),
-                           nodes_in_full.rbegin(), nodes_in_full_rc.begin(),
-                           [](const auto &a, const auto &b) { return std::min(a, b); });
+            std::copy(nodes_in_full.begin(), nodes_in_full.end(), nodes_in_full_rc.rbegin());
         }
     }
 
@@ -727,17 +738,19 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             full_dbg.get_k(), canonical
         );
 
-        for (const auto &[contig, path_in_full] : contigs) {
+        for (const auto &[contig, nodes_in_full] : contigs) {
+            assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
             size_t j = 0;
-            graph_intersection->add_sequence(contig, [&]() { return !path_in_full[j++]; });
-            assert(j == path_in_full.size());
+            graph_intersection->add_sequence(contig, [&]() { return !nodes_in_full[j++]; });
+            assert(j == nodes_in_full.size());
         }
 
         if (canonical && !full_dbg.is_canonical_mode()) {
-            for (const auto &[contig, path_in_full] : rev_comp_contigs) {
+            for (const auto &[contig, nodes_in_full] : rev_comp_contigs) {
+                assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
                 size_t j = 0;
-                graph_intersection->add_sequence(contig, [&]() { return !path_in_full[j++]; });
-                assert(j == path_in_full.size());
+                graph_intersection->add_sequence(contig, [&]() { return !nodes_in_full[j++]; });
+                assert(j == nodes_in_full.size());
             }
         }
 
@@ -754,6 +767,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
         auto &[contig, nodes_in_full] = contigs[i];
+        assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
         size_t j = 0;
         if (original_size == contigs.size()) {
             graph->map_to_nodes_sequentially(contig, [&](node_index node) {
