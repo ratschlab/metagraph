@@ -49,7 +49,9 @@ static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
 
 const size_t TRAVERSAL_START_BATCH_SIZE = 100;
-const size_t ENQUEUE_START_BATCH_SIZE = 10'000;
+const size_t MAX_EDGE_QUEUE_SIZE = 10'000;
+const size_t TASK_POOL_SIZE = 10'000;
+const size_t MAX_DECODED_EDGES_IN_QUEUE = 20'000'000; // ~1 GB max
 
 
 BOSS::BOSS(size_t k)
@@ -1823,7 +1825,96 @@ inline bool masked_pick_single_incoming(const BOSS &boss,
     return false;
 }
 
-using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
+using Edge = std::pair<edge_index, std::unique_ptr<TAlphabet[]>>;
+
+// Stores edges during graph traversal, first with decoded k-mers, but
+// then switches and only stores edge indices if too many are queued.
+class EdgeQueue {
+  public:
+    EdgeQueue(std::vector<Edge>&& initial_edges = {})
+          : decoded_edges_(std::move(initial_edges)) {
+        total_decoded_ += decoded_edges_.size();
+    }
+
+    explicit EdgeQueue(edge_index edge)
+          : indexes_({ edge }) {}
+
+    // don't allow copying
+    explicit EdgeQueue(const EdgeQueue &) = delete;
+    // allow moving
+    EdgeQueue(EdgeQueue&&) = default;
+
+    ~EdgeQueue() {
+        total_decoded_ -= decoded_edges_.size();
+    }
+
+    template <typename Iterator>
+    void emplace_back(edge_index edge, Iterator begin, Iterator end) {
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>);
+
+        if (begin == end) {
+            indexes_.push_back(edge);
+            return;
+        }
+
+        if (++total_decoded_ <= MAX_DECODED_EDGES_IN_QUEUE) {
+            decoded_edges_.emplace_back(edge, new TAlphabet[end - begin]);
+            std::copy(begin, end, decoded_edges_.back().second.get());
+        } else {
+            --total_decoded_;
+            indexes_.push_back(edge);
+        }
+    }
+
+    Edge pop_back() {
+        assert(size());
+        if (decoded_edges_.size()) {
+            Edge edge = std::move(decoded_edges_.back());
+            decoded_edges_.pop_back();
+            --total_decoded_;
+            return edge;
+        } else {
+            Edge edge(indexes_.back(), nullptr);
+            indexes_.pop_back();
+            return edge;
+        }
+    }
+
+    // split off a half of the queue
+    // tries to keep in the current queue as many decoded edges as possible
+    EdgeQueue split_half() {
+        EdgeQueue split_queue;
+
+        // prefer moving edges without k-mers decoded
+        size_t h = std::min(size() / 2, indexes_.size());
+        split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
+        split_queue.indexes_.shrink_to_fit();
+        indexes_.resize(indexes_.size() - h);
+
+        // if moved less than size()/2 indexes, move decoded k-mers as well
+        h = size() / 2 - h;
+        split_queue.decoded_edges_.assign(std::make_move_iterator(decoded_edges_.end() - h),
+                                          std::make_move_iterator(decoded_edges_.end()));
+        split_queue.decoded_edges_.shrink_to_fit();
+        decoded_edges_.resize(decoded_edges_.size() - h);
+
+        return split_queue;
+    }
+
+    void reserve(size_t capacity) {
+        decoded_edges_.reserve(capacity);
+        indexes_.reserve(capacity);
+    }
+
+    size_t size() const { return decoded_edges_.size() + indexes_.size(); }
+
+    bool empty() const { return decoded_edges_.empty() && indexes_.empty(); }
+
+  private:
+    inline static std::atomic<uint64_t> total_decoded_ = 0;
+    std::vector<Edge> decoded_edges_;
+    std::vector<edge_index> indexes_;
+};
 
 /*
  * Traverse graph from the specified (k+1)-mer/edge and call all paths reachable from it.
@@ -1831,7 +1922,7 @@ using Edge = std::pair<edge_index, std::vector<TAlphabet>>;
  * not visited), or we stop the sequence. Useful for diff-based annotations.
  */
 void call_paths(const BOSS &boss,
-                std::vector<Edge>&& edges,
+                EdgeQueue&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -1861,7 +1952,7 @@ call_path(const BOSS &boss,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
           const bitmap *subgraph_mask,
-          std::vector<Edge> *edges);
+          EdgeQueue *edges);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -1900,14 +1991,13 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
-    ThreadPool thread_pool(num_threads ? num_threads : 1,
-                           ENQUEUE_START_BATCH_SIZE);
+    ThreadPool thread_pool(num_threads ? num_threads : 1, TASK_POOL_SIZE);
     bool async = true;
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
-                    *this, { Edge(start, get_node_seq(start)) }, callback,
+                    *this, EdgeQueue(start), callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
@@ -2034,11 +2124,14 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         } while (edge != start);
 
         // Ensures that call_path is called only once for each cycle
-        edge_index rep = *std::min_element(path.begin(), path.end());
-        if (!fetch_bit(visited.data(), rep, async)) {
-            // TODO: avoid get_node_seq(rep), and maybe pass the whole path
+        auto rep = std::min_element(path.begin(), path.end());
+        if (!fetch_bit(visited.data(), *rep, async)) {
+            EdgeQueue queue;
+            queue.emplace_back(*rep,
+                               sequence.begin() + (rep - path.begin()),
+                               sequence.begin() + (rep - path.begin()) + get_k());
             ::mtg::graph::boss::call_paths(
-                    *this, { Edge(rep, get_node_seq(rep)) }, callback,
+                    *this, std::move(queue), callback,
                     split_to_unitigs, select_last_edge, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
@@ -2091,7 +2184,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 }
 
 void call_paths(const BOSS &boss,
-                std::vector<Edge>&& edges,
+                EdgeQueue&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
@@ -2109,17 +2202,27 @@ void call_paths(const BOSS &boss,
 
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
-    std::vector<TAlphabet> kmer;
     std::vector<edge_index> out_edges;
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
-        std::vector<edge_index> path;
-        auto [edge, sequence] = std::move(edges.back());
-        edges.pop_back();
+        auto [edge, kmer] = edges.pop_back();
 
+        if (fetch_bit(visited.data(), edge, async))
+            continue;
+
+        std::vector<edge_index> path;
         path.reserve(100);
-        sequence.reserve(100 + boss.get_k());
+
+        std::vector<TAlphabet> sequence;
+        if (kmer) {
+            sequence.reserve(100 + boss.get_k());
+            sequence.assign(kmer.get(), kmer.get() + boss.get_k());
+            kmer.reset();
+        } else {
+            sequence = boss.get_node_seq(edge);
+            sequence.reserve(100 + boss.get_k());
+        }
 
         // traverse simple path until we reach its tail or
         // the first edge that has already been visited
@@ -2183,7 +2286,6 @@ void call_paths(const BOSS &boss,
             if (out_edges.size() == 1 && !stop_even_if_single_outgoing)
                 continue;
 
-            kmer.assign(sequence.end() - boss.get_k(), sequence.end());
             edge_index next_edge = 0;
 
             // masked_call_outgoing returns edges in reverse order, so the first returned
@@ -2203,7 +2305,7 @@ void call_paths(const BOSS &boss,
                         next_edge = edge;
                     } else {
                         // visit other edges
-                        edges.emplace_back(edge, kmer);
+                        edges.emplace_back(edge, sequence.end() - boss.get_k(), sequence.end());
                     }
                 }
                 is_last_edge = false;
@@ -2217,20 +2319,17 @@ void call_paths(const BOSS &boss,
             // edge and continue traversing the graph
             edge = next_edge;
 
-            if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
+            if (edges.size() >= MAX_EDGE_QUEUE_SIZE) {
                 thread_pool.force_enqueue(
-                    [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](std::vector<Edge> &edges) {
+                    [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](EdgeQueue &edges) {
                         ::mtg::graph::boss::call_paths(
                                 boss, std::move(edges), callback,
                                 split_to_unitigs, select_last_edge, kmers_in_single_form,
                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
-                    std::vector<Edge>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
-                                      edges.end())
+                    edges.split_half()
                 );
-
-                edges.resize(TRAVERSAL_START_BATCH_SIZE / 2);
             }
         }
 
@@ -2257,7 +2356,7 @@ call_path(const BOSS &boss,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
           const bitmap *subgraph_mask,
-          std::vector<Edge> *edge_queue) {
+          EdgeQueue *edge_queue) {
 #ifndef NDEBUG
     for (edge_index e : path) {
         assert(e);
@@ -2324,16 +2423,14 @@ call_path(const BOSS &boss,
                 edge_index next_edge = boss.fwd(dual_path[i],
                                                 boss.get_W(dual_path[i]) % boss.alph_size);
 
-                // schedule only it has a single outgoing k-mer,
+                // schedule only if it has a single outgoing k-mer,
                 // otherwise it's a fork which will be covered in the forward pass.
                 if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
-                    std::vector<TAlphabet> kmer(rev_comp_seq.begin() + i + 1,
-                                                rev_comp_seq.begin() + i + 1 + boss.get_k());
-
-                    assert(boss.get_node_seq(next_edge) == kmer);
-
-                    if (!fetch_bit(visited.data(), next_edge, concurrent))
-                        edge_queue->emplace_back(next_edge, std::move(kmer));
+                    if (!fetch_bit(visited.data(), next_edge, concurrent)) {
+                        edge_queue->emplace_back(next_edge,
+                                                 rev_comp_seq.begin() + i + 1,
+                                                 rev_comp_seq.begin() + i + 1 + boss.get_k());
+                    }
                 }
             }
         } else {
