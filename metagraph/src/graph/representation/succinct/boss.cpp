@@ -1847,13 +1847,7 @@ void call_paths(const BOSS &boss,
                 const bitmap *subgraph_mask);
 
 
-// Returns new edges visited while fetching the path (only returns
-// a non-empty set for primary mode |kmers_in_single_form| = true).
-// Since fwd will be called on all edges in the returned vector, the corresponding
-// node sequences have been precomputed in these Edges
-// e.g.,
-// edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
-std::vector<Edge>
+void
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -1866,7 +1860,8 @@ call_path(const BOSS &boss,
           bool concurrent,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
-          const bitmap *subgraph_mask);
+          const bitmap *subgraph_mask,
+          std::vector<Edge> *edges);
 
 /**
  * Traverse graph and extract directed paths covering the graph
@@ -2242,36 +2237,13 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        auto rev_comp_breakpoints = call_path(
-            boss, callback, path, sequence,
-            kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
-            async, fetched_mutex, progress_bar, subgraph_mask
-        );
-
-        assert(rev_comp_breakpoints.empty() || kmers_in_single_form);
-
-        for (auto &[edge, kmer_seq] : rev_comp_breakpoints) {
-            kmer = std::move(kmer_seq);
-            edge_index next_edge = boss.fwd(edge, boss.get_W(edge) % boss.alph_size);
-
-            // the sequence of next_edge was already computed in call_path
-            assert(boss.get_node_seq(next_edge) == kmer);
-
-            masked_call_outgoing(boss, next_edge, subgraph_mask, [&](edge_index e) {
-                if (!fetch_bit(visited.data(), e, async))
-                    edges.emplace_back(e, kmer);
-            });
-        }
+        call_path(boss, callback, path, sequence,
+                  kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
+                  async, fetched_mutex, progress_bar, subgraph_mask, &edges);
     }
 }
 
-// Returns new edges visited while fetching the path (only returns
-// a non-empty set for primary mode |kmers_in_single_form| = true).
-// Since fwd will be called on all edges in the returned vector, the corresponding
-// node sequences have been precomputed in these Edges
-// e.g.,
-// edge.first: ATGGGT G -> edge.second = {T,G,G,G,T,G}
-std::vector<Edge>
+void
 call_path(const BOSS &boss,
           const BOSS::Call<std::vector<edge_index>&&,
                            std::vector<TAlphabet>&&> &callback,
@@ -2284,7 +2256,8 @@ call_path(const BOSS &boss,
           bool concurrent,
           std::mutex &fetched_mutex,
           ProgressBar &progress_bar,
-          const bitmap *subgraph_mask) {
+          const bitmap *subgraph_mask,
+          std::vector<Edge> *edge_queue) {
 #ifndef NDEBUG
     for (edge_index e : path) {
         assert(e);
@@ -2294,7 +2267,7 @@ call_path(const BOSS &boss,
 
     if (!trim_sentinels && !kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return {};
+        return;
     }
 
     // trim trailing sentinels '$'
@@ -2308,7 +2281,7 @@ call_path(const BOSS &boss,
                        [&boss](auto c) { return c != boss.kSentinelCode; });
 
     if (first_valid_it + boss.get_k() >= sequence.end())
-        return {};
+        return;
 
     sequence.erase(sequence.begin(), first_valid_it);
     path.erase(path.begin(),
@@ -2316,7 +2289,7 @@ call_path(const BOSS &boss,
 
     if (!kmers_in_single_form) {
         callback(std::move(path), std::move(sequence));
-        return {};
+        return;
     }
 
     // get dual path (mapping of the reverse complement sequence)
@@ -2330,9 +2303,6 @@ call_path(const BOSS &boss,
             e = 0;
         }
     }
-
-    std::vector<Edge> dual_endpoints;
-    dual_endpoints.reserve(path.size());
 
     // stores the dual nodes that had been visited by other threads, and hence
     // the following contention must be resolved:
@@ -2349,15 +2319,22 @@ call_path(const BOSS &boss,
         if (!fetch_and_set_bit(visited.data(), dual_path[i], concurrent)) {
             ++progress_bar;
 
-            // schedule traversal branched off from all dual k-mers except those
-            // with a single outgoing k-mer that belongs to the same dual path
-            // and hence already processed
+            // schedule traversal branched off from each terminal dual k-mer
             if (i + 1 == dual_path.size() || !dual_path[i + 1]) {
-                dual_endpoints.emplace_back(Edge {
-                    dual_path[i],
-                    std::vector<TAlphabet>(rev_comp_seq.begin() + i + 1,
-                                           rev_comp_seq.begin() + i + 1 + boss.get_k())
-                });
+                edge_index next_edge = boss.fwd(dual_path[i],
+                                                boss.get_W(dual_path[i]) % boss.alph_size);
+
+                // schedule only it has a single outgoing k-mer,
+                // otherwise it's a fork which will be covered in the forward pass.
+                if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
+                    std::vector<TAlphabet> kmer(rev_comp_seq.begin() + i + 1,
+                                                rev_comp_seq.begin() + i + 1 + boss.get_k());
+
+                    assert(boss.get_node_seq(next_edge) == kmer);
+
+                    if (!fetch_bit(visited.data(), next_edge, concurrent))
+                        edge_queue->emplace_back(next_edge, std::move(kmer));
+                }
             }
         } else {
             // The dual node had already been visited, so we insert its index
@@ -2369,7 +2346,7 @@ call_path(const BOSS &boss,
 
     if (!dual_visited.size()) {
         callback(std::move(path), std::move(sequence));
-        return dual_endpoints;
+        return;
     }
 
     std::reverse(dual_path.begin(), dual_path.end());
@@ -2418,8 +2395,6 @@ call_path(const BOSS &boss,
 
         begin = i + 1;
     }
-
-    return dual_endpoints;
 }
 
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
