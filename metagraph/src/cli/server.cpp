@@ -283,9 +283,15 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
-void respond_on_loading(shared_ptr<HttpServer::Response> response) {
-    response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
-                    "Server is currently initializing, please come back later.");
+template<typename T>
+bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
+    if (data.wait_for(0s) != std::future_status::ready) {
+        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
+                        "Server is currently initializing, please come back later.");
+        return false;
+    }
+
+    return true;
 }
 
 int run_server(Config *config) {
@@ -304,8 +310,8 @@ int run_server(Config *config) {
     }).share();
 
     auto anno_graph = graph_loader.enqueue([&]() {
-        logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
         auto anno_graph = initialize_annotated_dbg(graph.get(), *config);
+        logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
         return anno_graph;
     }).share();
 
@@ -317,51 +323,39 @@ int run_server(Config *config) {
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
-        if (anno_graph.wait_for(0s) != std::future_status::ready) {
-            respond_on_loading(response);
-            return;
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &content) {
+                return process_search_request(content, *anno_graph.get(), *config);
+            });
         }
-
-        process_request(response, request, [&](const std::string &content) {
-            return process_search_request(content, *anno_graph.get(), *config);
-        });
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
-        if (graph.wait_for(0s) != std::future_status::ready) {
-            respond_on_loading(response);
-            return;
+        if (check_data_ready(graph, response)) {
+            process_request(response, request, [&](const std::string &content) {
+                return process_align_request(content, *graph.get(), *config);
+            });
         }
-
-        process_request(response, request, [&](const std::string &content) {
-            return process_align_request(content, *graph.get(), *config);
-        });
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        if (anno_graph.wait_for(0s) != std::future_status::ready) {
-            respond_on_loading(response);
-            return;
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &) {
+                return process_column_label_request(*anno_graph.get());
+            });
         }
-
-        process_request(response, request, [&](const std::string &) {
-            return process_column_label_request(*anno_graph.get());
-        });
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        if (anno_graph.wait_for(0s) != std::future_status::ready) {
-            respond_on_loading(response);
-            return;
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &) {
+                return process_stats_request(*graph.get(), *anno_graph.get(), config->infbase,
+                                             config->infbase_annotators.front());
+            });
         }
-
-        process_request(response, request, [&](const std::string &) {
-            return process_stats_request(*graph.get(), *anno_graph.get(), config->infbase,
-                                         config->infbase_annotators.front());
-        });
     };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
