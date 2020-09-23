@@ -515,7 +515,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     if (canonical) {
         rev_comp_contigs.resize(contigs.size());
-        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < contigs.size(); ++i) {
             rev_comp_contigs[i].first = contigs[i].first;
             reverse_complement(rev_comp_contigs[i].first.begin(),
@@ -529,7 +529,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     if (!full_dbg.is_canonical_mode() || sub_k < full_dbg.get_k() || max_hull_forks) {
         // map from nodes in query graph to full graph
         logger->trace("[Query graph construction] Mapping k-mers back to full graph");
-        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < contigs.size(); ++i) {
             contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
             if (canonical) {
@@ -557,7 +557,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         size_t num_added = 0;
 
-        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < original_size; ++i) {
             std::string_view contig, rev_contig;
             node_index *path = nullptr;
@@ -630,7 +630,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         size_t hull_contig_count = 0;
         size_t old_size = contigs.size();
 
-        #pragma omp parallel for schedule(dynamic) num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < old_size; ++i) {
             std::string_view contig, rev_contig;
             node_index *path = nullptr;
@@ -757,7 +757,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             full_dbg.get_k(), canonical
         );
 
-        for (const auto &[contig, nodes_in_full] : contigs) {
+        for (const auto &pair : contigs) {
+            const std::string &contig = pair.first;
+            const std::vector<node_index> &nodes_in_full = pair.second;
             assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
             size_t j = 0;
             graph_intersection->add_sequence(contig, [&]() { return !nodes_in_full[j++]; });
@@ -765,7 +767,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         }
 
         if (canonical && !full_dbg.is_canonical_mode()) {
-            for (const auto &[contig, nodes_in_full] : rev_comp_contigs) {
+            for (const auto &pair : rev_comp_contigs) {
+                const std::string &contig = pair.first;
+                const std::vector<node_index> &nodes_in_full = pair.second;
                 assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
                 size_t j = 0;
                 graph_intersection->add_sequence(contig, [&]() { return !nodes_in_full[j++]; });
@@ -785,7 +789,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
     for (size_t i = 0; i < contigs.size(); ++i) {
-        auto &[contig, nodes_in_full] = contigs[i];
+        std::string &contig = contigs[i].first;
+        std::vector<node_index> &nodes_in_full = contigs[i].second;
         assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
         size_t j = 0;
         if (original_size == contigs.size()) {
@@ -803,7 +808,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert(j == nodes_in_full.size());
 
         if (rev_comp_contigs.size()) {
-            auto &[contig, nodes_in_full] = rev_comp_contigs[i];
+            std::string &contig = rev_comp_contigs[i].first;
+            std::vector<node_index> &nodes_in_full = rev_comp_contigs[i].second;
             size_t j = 0;
             if (original_size == contigs.size()) {
                 graph->map_to_nodes_sequentially(contig, [&](node_index node) {
