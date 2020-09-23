@@ -195,6 +195,8 @@ void DefaultColumnExtender<NodeType>::check_and_push(ColumnRef&& next_column) {
         return;
     }
 
+    assert(!columns_to_update.empty());
+
     const ColumnRef &bottom = columns_to_update.minimum();
 
     if (!utils::LessSecond()(bottom, next_column))

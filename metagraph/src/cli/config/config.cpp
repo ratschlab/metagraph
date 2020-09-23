@@ -469,6 +469,12 @@ Config::Config(int argc, char *argv[]) {
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
         print_usage_and_exit = true;
 
+    if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
+            && alignment_num_alternative_paths == 0) {
+        std::cerr << "Error: align-alternative-alignments must be > 0" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 

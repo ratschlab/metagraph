@@ -23,6 +23,8 @@ using mtg::common::logger;
 
 
 DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Config &config) {
+    assert(config.alignment_num_alternative_paths);
+
     DBGAlignerConfig aligner_config;
 
     aligner_config.queue_size = config.alignment_queue_size;

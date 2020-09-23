@@ -327,6 +327,7 @@ template <class Seeder, class Extender, class AlignmentCompare>
 inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_aggregate(DBGQueryAlignment &paths,
                   const AlignmentGenerator &alignment_generator) const {
+    assert(config_.num_alternative_paths);
     boost::container::priority_deque<DBGAlignment,
                                      std::vector<DBGAlignment>,
                                      AlignmentCompare> path_queue;
