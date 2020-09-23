@@ -1,6 +1,8 @@
+#include <filesystem>
 #include <random>
 
-#include "gtest/gtest.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include "../test_helpers.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -118,8 +120,10 @@ MultiLabelEncoded<std::string> *MergeAnnotators::merged_annotation = nullptr;
 
 class ConvertFromColumnCompressed : public ::testing::Test {
   protected:
-    static ColumnCompressed<> *initial_annotation;
-    static MultiLabelEncoded<std::string> *annotation;
+    ColumnCompressed<> *initial_annotation = nullptr;
+    MultiLabelEncoded<std::string> *annotation = nullptr;
+    std::unique_ptr<graph::DBGSuccinct> graph;
+
 
     virtual void SetUp() {
         initial_annotation = new ColumnCompressed<>(5);
@@ -127,6 +131,10 @@ class ConvertFromColumnCompressed : public ::testing::Test {
         initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
         initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
         initial_annotation->add_labels({ 4 }, {"Label2"});
+
+        graph.reset(new graph::DBGSuccinct(3));
+        graph->add_sequence("ACGTCAC");
+        graph->mask_dummy_kmers(1, false);
     }
 
     virtual void TearDown() {
@@ -152,9 +160,75 @@ class ConvertFromColumnCompressed : public ::testing::Test {
 
 };
 
-ColumnCompressed<> *ConvertFromColumnCompressed::initial_annotation = nullptr;
-MultiLabelEncoded<std::string> *ConvertFromColumnCompressed::annotation = nullptr;
+std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string> sequences) {
+    auto graph = std::make_unique<graph::DBGSuccinct>(k);
+    for(const auto& s: sequences) {
+        graph->add_sequence(s);
+    }
+    graph->mask_dummy_kmers(1, false);
+    return graph;
+}
 
+void clean_column_diff_files(const std::string& suffix) {
+    std::string outfbase = test_dump_basename + suffix;
+    std::filesystem::remove(outfbase + ".succ");
+    std::filesystem::remove(outfbase + ".diff.column.annodbg");
+}
+
+TEST(ConvertFromColumnCompressedEmpty, to_ColumnDiff) {
+    ColumnCompressed<> empty_column_annotator(5);
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+
+
+    clean_column_diff_files("column.diff.empty");
+    std::string outfbase = test_dump_basename + "column.diff.empty";
+    std::unique_ptr<ColumnDiffAnnotator> result
+            = convert_to_column_diff(*graph, empty_column_annotator, outfbase, 1);
+
+    EXPECT_EQ(0u, result->num_labels());
+    EXPECT_EQ(0u, result->num_objects());
+    EXPECT_EQ(0u, result->num_relations());
+
+    clean_column_diff_files("column.diff.empty");
+}
+
+TEST(ColumnDiff, succ) {
+    ColumnCompressed<> empty_column_annotator(5);
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+
+    const std::string outfbase = test_dump_basename + "column.diff.succ";
+    const std::string succ_file = outfbase + ".succ";
+    const std::vector<std::vector<uint64_t>> expected
+            = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
+    for (uint32_t max_depth : { 1, 3, 5 }) {
+        clean_column_diff_files("column.diff.succ");
+
+        convert_to_column_diff(*graph, empty_column_annotator, outfbase, max_depth);
+
+        ASSERT_TRUE(std::filesystem::exists(succ_file));
+
+        sdsl::int_vector_buffer succ(succ_file, std::ios::in);
+
+        ASSERT_EQ(5, succ.size());
+        for (uint32_t i = 0; i < succ.size(); ++i) {
+            EXPECT_EQ(expected[max_depth / 2][i], succ[i]) << max_depth << " " << i;
+        }
+    }
+
+    clean_column_diff_files("column.diff.succ");
+}
+
+TEST_F(ConvertFromColumnCompressed, to_ColumnDiff) {
+#pragma clang optimize off
+    const std::string outfbase = test_dump_basename + "column.diff.convert";
+    const std::string succ_file = outfbase + ".succ";
+    clean_column_diff_files("column.diff.convert");
+
+    constexpr uint32_t max_depth = 5;
+    annotation = convert_to_column_diff(*graph, *initial_annotation, outfbase, max_depth).release();
+
+    clean_column_diff_files("column.diff.convert");
+}
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {
 //     ColumnCompressed<> empty_column_annotator(5);
@@ -316,15 +390,6 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
 
 TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
     annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation)).release();
-}
-
-std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string> sequences) {
-    auto graph = std::make_unique<graph::DBGSuccinct>(k);
-    for(const auto& s: sequences) {
-        graph->add_sequence(s);
-    }
-    graph->mask_dummy_kmers(1, false);
-    return graph;
 }
 
 TEST(ConvertFromRowCompressedEmpty, to_RowDiffAnnotation) {

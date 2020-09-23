@@ -78,6 +78,13 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
+template <typename Label>
+std::unique_ptr<ColumnDiffAnnotator>
+convert_to_column_diff(const graph::DBGSuccinct &graph,
+                       const ColumnCompressed<Label> &annotation,
+                       const std::string &outfbase,
+                       uint32_t max_depth);
+
 /**
  * Converts a row-compressed representation to a row-diff representation based on the given graph
  * @param graph the graph used for selecting rows to diff

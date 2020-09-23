@@ -356,6 +356,29 @@ int transform_annotation(Config *config) {
                 assert(false);
                 break;
             }
+            case Config::ColumnDiff: {
+                logger->trace("Loading graph...");
+                graph::DBGSuccinct graph(2);
+                bool result = graph.load(config->infbase);
+                if (!result) {
+                    logger->error("Cannot load graph from {}", config->infbase);
+                    std::exit(1);
+                }
+                ColumnCompressed<> column_diff(annotator->num_objects());
+
+                timer.reset();
+                logger->trace("Converting to column-diff...");
+                convert_to_column_diff(graph, *annotator, config->outfbase,
+                                       config->max_path_length, &column_diff);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                logger->trace("Serializing to '{}'...", config->outfbase);
+
+                column_diff.serialize(config->outfbase + ".diff");
+
+                logger->trace("Serialization done in {} sec", timer.elapsed());
+
+                break;
+            }
             case Config::RowCompressed: {
                 if (config->fast) {
                     RowCompressed<> row_annotator(annotator->num_objects());

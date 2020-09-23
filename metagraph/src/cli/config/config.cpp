@@ -607,6 +607,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "column";
         case RowCompressed:
             return "row";
+        case ColumnDiff:
+            return "column_diff";
         case BRWT:
             return "brwt";
         case BinRelWT_sdsl:
@@ -632,6 +634,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::ColumnCompressed;
     } else if (string == "row") {
         return AnnotationType::RowCompressed;
+    } else if (string == "column_diff") {
+        return AnnotationType::ColumnDiff;
     } else if (string == "brwt") {
         return AnnotationType::BRWT;
     } else if (string == "bin_rel_wt_sdsl") {
@@ -678,7 +682,7 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
+    const char annotation_list[] = "('column', 'row', 'column_diff', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -997,7 +1001,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
-            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
+            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in column_diff annotation [50]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

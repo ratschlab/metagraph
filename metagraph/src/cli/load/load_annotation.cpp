@@ -57,7 +57,8 @@ initialize_annotation(Config::AnnotationType anno_type,
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
-        case Config::ColumnCompressed: {
+        case Config::ColumnCompressed:
+        case Config::ColumnDiff: {
             annotation.reset(
                 new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached)
             );

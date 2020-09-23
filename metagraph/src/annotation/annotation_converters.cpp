@@ -983,6 +983,108 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
+[[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
+                     const std::string &filename,
+                     uint32_t max_length,
+                     uint32_t num_threads) {
+    const graph::boss::BOSS &boss = graph.get_boss();
+    sdsl::bit_vector terminal;
+    boss.call_sequences_row_diff(
+            [&](const vector<uint64_t> &path, std::optional<uint64_t>) {
+                for (const auto &v : path) {
+                    std::cout << v << " ";
+                }
+                std::cout << std::endl;
+            },
+            num_threads, max_length, &terminal);
+
+    ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
+                             !common::get_verbose());
+
+    // create the succ file, indexed using annotation indices
+    uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
+    sdsl::int_vector_buffer f(filename, std::ios::out, 1024 * 1024, width);
+
+    for(uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+        uint64_t boss_idx = graph.kmer_to_boss_index(i);
+        if ((bool)terminal[boss_idx]) {
+            f.push_back(0);
+        } else {
+            uint64_t succ = graph.boss_to_kmer_index(
+                    boss.fwd(boss_idx, boss.get_W(boss_idx) % boss.alph_size));
+            f.push_back(succ);
+        }
+        ++progress_bar;
+    }
+    f.close();
+}
+
+template <typename Label>
+[[clang::optnone]] std::unique_ptr<ColumnDiffAnnotator>
+convert_to_column_diff(const graph::DBGSuccinct &graph,
+                       const ColumnCompressed<Label> &source,
+                       const std::string &outfbase,
+                       uint32_t max_depth) {
+#pragma clang optimize off
+    ColumnCompressed<> target(source.num_objects());
+    std::string successor_file = outfbase + ".succ";
+    std::string terminal_file = outfbase + ".terminal";
+    if (!std::filesystem::exists(successor_file) || !std::filesystem::exists(terminal_file)) {
+        logger->trace("Building and writing  successor and terminal files to {}, {}",
+                      successor_file, terminal_file);
+        build_successor(graph, successor_file, max_depth, get_num_threads());
+    }
+
+    const_cast<LabelEncoder<Label> &>(target.get_label_encoder())
+            = source.get_label_encoder();
+
+    uint64_t num_rows = source.num_objects();
+    if(num_rows != graph.num_nodes()) {
+        logger->error(
+                "Graph and annotation are incompatible. Graph has {} nodes, annotation "
+                "has {} entries",
+                graph.num_nodes(), num_rows);
+        std::exit(1);
+    }
+    //size_t num_threads = get_num_threads();
+    sdsl::int_vector_buffer succ(successor_file, std::ios::in);
+    assert(succ.size() == num_rows);
+//    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0; i < source.get_all_labels().size(); ++i) {
+        const Label& label = source.get_all_labels()[i];
+        const bitmap&  source_col = source.get_column(label);
+
+        std::vector<uint64_t> indices;
+        for (uint64_t idx = 0; idx < num_rows; ++idx) {
+            bool v;
+            if (succ[idx]) {
+                uint64_t anno_idx = graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
+                v = source_col[idx] ^ source_col[anno_idx];
+            } else {
+                v = source_col[idx];
+            }
+            if (v)
+                indices.push_back(idx);
+        }
+        target.add_labels(indices, {label});
+    }
+
+    auto diff_annotation
+            = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, target.release_matrix(),
+                                                        terminal_file);
+
+    return std::make_unique<ColumnDiffAnnotator>(std::move(diff_annotation),
+                                              source.get_label_encoder());
+    return nullptr;
+}
+
+
+template std::unique_ptr<ColumnDiffAnnotator>
+convert_to_column_diff(const graph::DBGSuccinct &graph,
+                       const ColumnCompressed<std::string> &source,
+                       const std::string &outfbase,
+                       uint32_t max_depth);
+
 std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,
                                                       uint32_t num_threads,
@@ -1064,7 +1166,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             boundary_size.fetch_add(diffs.size() + path.size(), std::memory_order_relaxed);
         }, num_threads, max_depth, &terminal);
     std::atomic_thread_fence(std::memory_order_acquire);
-    
+
     logger->trace(
             "Traversal done. \n\tTotal rows: {}\n\tTotal diff length: {}\n\t"
             "Avg diff length: {}\n\tTerminal nodes total/max-depth/forced {}/{}/{}\n\t"

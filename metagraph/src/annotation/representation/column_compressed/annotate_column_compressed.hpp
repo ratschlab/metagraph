@@ -79,6 +79,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     const binmat::ColumnMajor& get_matrix() const override;
 
+    binmat::ColumnMajor&& release_matrix();
+
     std::string file_extension() const override { return kExtension; }
 
     static constexpr auto kExtension = ".column.annodbg";

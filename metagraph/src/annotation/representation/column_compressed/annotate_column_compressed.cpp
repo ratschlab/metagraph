@@ -546,6 +546,12 @@ const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
 }
 
 template <typename Label>
+binmat::ColumnMajor&& ColumnCompressed<Label>::release_matrix() {
+    flush();
+    return std::move(annotation_matrix_view_);
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>
 ::dump_columns(const std::string &prefix, size_t num_threads) const {
     bool success = true;
