@@ -42,16 +42,13 @@ typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 QueryExecutor::QueryExecutor(const Config &config,
                              const graph::AnnotatedDBG &anno_graph,
-                             const graph::align::DBGAlignerConfig *aligner_config,
+                             std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
                              ThreadPool &thread_pool)
       : config_(config),
         anno_graph_(anno_graph),
-        aligner_config_(aligner_config
-                        ? new graph::align::DBGAlignerConfig(*aligner_config)
-                        : nullptr),
+        aligner_config_(std::move(aligner_config)),
         thread_pool_(thread_pool) {
-    if (aligner_config_)
-        aligner_config_->forward_and_reverse_complement = false;
+    assert(!aligner_config_ || !aligner_config_->forward_and_reverse_complement);
 }
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
@@ -161,7 +158,7 @@ struct HullUnitig {
 
 // Expand the query graph by traversing around its nodes which are forks in the
 // full graph. Take at most max_hull_forks forks and traverse a linear path for
-// at most max_hull_depth steps.
+// at most |max_hull_depth| steps.
 // continue_traversal is given a node and the distrance traversed so far and
 // returns whether traversal should continue.
 template <class ContigCallback>
@@ -171,7 +168,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          const std::string_view rev_contig,
                          const node_index *rev_nodes,
                          size_t max_hull_forks,
-                         size_t max_hull_depth_global,
+                         size_t max_hull_depth,
                          double max_hull_depth_per_seq_char,
                          bool canonical,
                          const ContigCallback &callback,
@@ -181,7 +178,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
     if (canonical) {
         call_hull_sequences(full_dbg, rev_contig, rev_nodes, contig, nodes,
-                            max_hull_forks, max_hull_depth_global,
+                            max_hull_forks, max_hull_depth,
                             max_hull_depth_per_seq_char, false, // canonical
                             callback, continue_traversal);
     }
@@ -199,8 +196,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             continue;
         }
 
-        size_t max_hull_depth = std::min(
-            max_hull_depth_global,
+        max_hull_depth = std::min(
+            max_hull_depth,
             static_cast<size_t>((num_nodes - j + full_dbg.get_k())
                                     * max_hull_depth_per_seq_char)
         );
@@ -893,14 +890,9 @@ int query_graph(Config *config) {
         aligner_config.reset(new align::DBGAlignerConfig(
             initialize_aligner_config(*graph, *config)
         ));
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        aligner_config->forward_and_reverse_complement = false;
     }
 
-    QueryExecutor executor(*config, *anno_graph, aligner_config.get(), thread_pool);
+    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
 
     // iterate over input files
     for (const auto &file : files) {

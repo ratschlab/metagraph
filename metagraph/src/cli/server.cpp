@@ -166,7 +166,7 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, aligner_config.get(), dummy_pool);
+    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
 
     engine.query_fasta(tf.name(),
         [&](const std::string &res) {

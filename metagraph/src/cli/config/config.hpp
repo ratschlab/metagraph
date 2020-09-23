@@ -88,8 +88,7 @@ class Config {
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
     unsigned long long int num_singleton_kmers = 0;
-    unsigned long long int max_hull_depth
-        = std::numeric_limits<unsigned long long int>::max();
+    unsigned long long int max_hull_depth = -1;  // the default is a function of input
 
     uint8_t count_width = 8;
 
