@@ -146,11 +146,6 @@ std::string process_search_request(const std::string &received_message,
         aligner_config.reset(new graph::align::DBGAlignerConfig(
             initialize_aligner_config(anno_graph.get_graph(), config)
         ));
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        aligner_config->forward_and_reverse_complement = false;
     }
 
     std::ostringstream oss;
