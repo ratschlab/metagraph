@@ -283,29 +283,37 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
+template<typename T>
+bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
+    if (data.wait_for(0s) != std::future_status::ready) {
+        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
+                        "Server is currently initializing, please come back later.");
+        return false;
+    }
+
+    return true;
+}
+
 int run_server(Config *config) {
     assert(config);
 
     assert(config->infbase_annotators.size() == 1);
 
-    HttpServer initial_server;
-    initial_server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
-                                                shared_ptr<HttpServer::Request> /* request */) {
-        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
-                        "Server is currently initializing, please come back later.");
-    };
-    initial_server.default_resource["POST"] = initial_server.default_resource["GET"];
-
-    // creating an initial server which informs the requester, that the server is initializing
-    // i.e. graphs are loaded from disk, which may take a while
-    std::thread initial_server_thread = start_server(initial_server, *config);
+    ThreadPool graph_loader(1, 1);
 
     logger->info("[Server] Loading graph...");
 
-    auto graph = load_critical_dbg(config->infbase);
-    auto anno_graph = initialize_annotated_dbg(graph, *config);
+    auto graph = graph_loader.enqueue([&]() {
+        auto graph = load_critical_dbg(config->infbase);
+        logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+        return graph;
+    }).share();
 
-    logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+    auto anno_graph = graph_loader.enqueue([&]() {
+        auto anno_graph = initialize_annotated_dbg(graph.get(), *config);
+        logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+        return anno_graph;
+    }).share();
 
     // defaults for the server
     config->num_top_labels = 10000;
@@ -315,31 +323,39 @@ int run_server(Config *config) {
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &content) {
-            return process_search_request(content, *anno_graph, *config);
-        });
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &content) {
+                return process_search_request(content, *anno_graph.get(), *config);
+            });
+        }
     };
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &content) {
-            return process_align_request(content, *graph, *config);
-        });
+        if (check_data_ready(graph, response)) {
+            process_request(response, request, [&](const std::string &content) {
+                return process_align_request(content, *graph.get(), *config);
+            });
+        }
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &) {
-            return process_column_label_request(*anno_graph);
-        });
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &) {
+                return process_column_label_request(*anno_graph.get());
+            });
+        }
     };
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, [&](const std::string &) {
-            return process_stats_request(*graph, *anno_graph, config->infbase,
-                                         config->infbase_annotators.front());
-        });
+        if (check_data_ready(anno_graph, response)) {
+            process_request(response, request, [&](const std::string &) {
+                return process_stats_request(*graph.get(), *anno_graph.get(), config->infbase,
+                                             config->infbase_annotators.front());
+            });
+        }
     };
 
     server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
@@ -359,10 +375,6 @@ int run_server(Config *config) {
                          ec.message(), ec.category().name(), ec.value());
         }
     };
-
-    // everything is ready, stopping initial server and start the actual server
-    initial_server.stop();
-    initial_server_thread.join();
 
     std::thread server_thread = start_server(server, *config);
     server_thread.join();
