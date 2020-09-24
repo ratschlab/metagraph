@@ -560,6 +560,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         size_t num_added = 0;
+        std::atomic<size_t> num_explored = 0;
 
         std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
         std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
@@ -579,6 +580,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 [&](std::string&& seq, node_index node) {
                     assert(node == full_dbg.kmer_to_node(seq));
                     added_nodes.emplace_back(std::move(seq), node);
+                    ++num_explored;
                     if (canonical) {
                         added_nodes_rc.emplace_back(added_nodes.back().first,
                                                     DeBruijnGraph::npos);
@@ -587,6 +589,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                         added_nodes_rc.back().second = full_dbg.kmer_to_node(
                             added_nodes_rc.back().first
                         );
+                        ++num_explored;
                     }
                 },
                 sub_k,
@@ -626,8 +629,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert((canonical && contigs.size() == rev_comp_contigs.size())
                 || (!canonical && rev_comp_contigs.empty()));
 
-        logger->trace("[Query graph construction] Adding {} suffix-matching k-mers "
-                      "took {} sec", num_added, timer.elapsed());
+        logger->trace("[Query graph construction] Finding {} and adding {} suffix-matching k-mers "
+                      "took {} sec", num_explored, num_added, timer.elapsed());
     }
 
     if (max_hull_forks) {
