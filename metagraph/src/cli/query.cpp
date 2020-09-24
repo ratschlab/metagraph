@@ -158,7 +158,7 @@ struct HullUnitig {
 };
 
 // Expand the query graph by traversing around its nodes which are forks in the
-// full graph. Take at most max_hull_forks forks and traverse a linear path for
+// full graph. Take at most |max_hull_forks| forks and traverse a linear path for
 // at most |max_hull_depth| steps.
 // continue_traversal is given a node and the distrance traversed so far and
 // returns whether traversal should continue.
@@ -171,16 +171,15 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          size_t max_hull_forks,
                          size_t max_hull_depth,
                          double max_hull_depth_per_seq_char,
-                         bool canonical,
                          const ContigCallback &callback,
                          const std::function<bool(const std::string&,
                                                   node_index)> &continue_traversal) {
     assert(max_hull_forks);
 
-    if (canonical) {
-        call_hull_sequences(full_dbg, rev_contig, rev_nodes, contig, nodes,
+    if (rev_contig.size()) {
+        call_hull_sequences(full_dbg, rev_contig, rev_nodes, {}, {},
                             max_hull_forks, max_hull_depth,
-                            max_hull_depth_per_seq_char, false, // canonical
+                            max_hull_depth_per_seq_char,
                             callback, continue_traversal);
     }
 
@@ -649,7 +648,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
             call_hull_sequences(full_dbg, contig, path, rev_contig, rev_path,
                                 max_hull_forks, max_hull_depth,
-                                max_hull_depth_per_seq_char, canonical,
+                                max_hull_depth_per_seq_char,
                 [&](auto&& sequence, auto&& path) {
                     added_paths.emplace_back(std::move(sequence), std::move(path));
                     if (canonical) {
