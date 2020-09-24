@@ -129,9 +129,7 @@ class DBGAlignerConfig {
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
     // Set parameters manually and call `set_scoring_matrix()`
-    DBGAlignerConfig() {
-        assert(num_alternative_paths);
-    }
+    DBGAlignerConfig() {}
 
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
                               int8_t gap_opening = -5,
