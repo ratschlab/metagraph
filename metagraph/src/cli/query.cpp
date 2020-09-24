@@ -138,10 +138,12 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(&contig[i], k),
                 [&](node_index node, size_t match_len) {
+                    assert(match_len >= cur_match_len);
                     cur_match_len = match_len;
-                    callback(dbg_succ.get_node_sequence(node), node);
+                    if (match_len >= prev_match_len) // new match must be at least as long as previous
+                        callback(dbg_succ.get_node_sequence(node), node);
                 },
-                std::max(sub_k, prev_match_len), // new match should be at least as long as previous
+                sub_k,
                 max_num_nodes_per_suffix
             );
             prev_match_len = cur_match_len;
