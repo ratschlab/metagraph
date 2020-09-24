@@ -561,26 +561,21 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         size_t num_added = 0;
 
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < original_size; ++i) {
-            std::string contig, rev_contig;
-            node_index *path = nullptr;
-            node_index *rev_path = nullptr;
-            #pragma omp critical
-            {
-                // keep views of the contig just in case another thread reallocates
-                // the vector
-                contig = contigs[i].first;
-                path = contigs[i].second.data();
+        std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+        std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
 
-                if (i < rev_comp_contigs.size()) {
-                    rev_contig = rev_comp_contigs[i].first;
-                    rev_path = rev_comp_contigs[i].second.data();
-                }
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t i = 0; i < contigs.size(); ++i) {
+            const auto &[contig, path] = contigs[i];
+            std::string_view rev_contig;
+            node_index *rev_path = nullptr;
+            if (i < rev_comp_contigs.size()) {
+                rev_contig = rev_comp_contigs[i].first;
+                rev_path = rev_comp_contigs[i].second.data();
             }
             std::vector<std::pair<std::string, node_index>> added_nodes;
             std::vector<std::pair<std::string, node_index>> added_nodes_rc;
-            call_suffix_match_sequences(*dbg_succ, contig, path, rev_contig, rev_path,
+            call_suffix_match_sequences(*dbg_succ, contig, path.data(), rev_contig, rev_path,
                 [&](std::string&& seq, node_index node) {
                     assert(node == full_dbg.kmer_to_node(seq));
                     added_nodes.emplace_back(std::move(seq), node);
@@ -602,18 +597,30 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             #pragma omp critical
             {
                 for (size_t j = 0; j < added_nodes.size(); ++j) {
-                    contigs.emplace_back(std::move(added_nodes[j].first),
-                                         std::vector<node_index>{ added_nodes[j].second });
-                    graph_init->add_sequence(contigs.back().first,
-                                             [&](node_index) { ++num_added; });
+                    contig_buffer.emplace_back(
+                        std::move(added_nodes[j].first),
+                        std::vector<node_index>{ added_nodes[j].second }
+                    );
                 }
                 for (size_t j = 0; j < added_nodes_rc.size(); ++j) {
-                    rev_comp_contigs.emplace_back(std::move(added_nodes_rc[j].first),
-                                                  std::vector<node_index>{ added_nodes_rc[j].second });
-                    graph_init->add_sequence(rev_comp_contigs.back().first,
-                                             [&](node_index) { ++num_added; });
+                    rev_comp_contig_buffer.emplace_back(
+                        std::move(added_nodes_rc[j].first),
+                        std::vector<node_index>{ added_nodes_rc[j].second }
+                    );
                 }
             }
+        }
+
+        assert((canonical && contig_buffer.size() == rev_comp_contig_buffer.size())
+                || (!canonical && rev_comp_contig_buffer.empty()));
+
+        for (auto&& pair : contig_buffer) {
+            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
+            contigs.emplace_back(std::move(pair));
+        }
+        for (auto&& pair : rev_comp_contig_buffer) {
+            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
+            rev_comp_contigs.emplace_back(std::move(pair));
         }
 
         assert((canonical && contigs.size() == rev_comp_contigs.size())
@@ -632,28 +639,23 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
 
         size_t hull_contig_count = 0;
-        size_t old_size = contigs.size();
+        size_t num_added = 0;
+
+        std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+        std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < old_size; ++i) {
-            std::string contig, rev_contig;
-            node_index *path = nullptr;
+        for (size_t i = 0; i < contigs.size(); ++i) {
+            const auto &[contig, path] = contigs[i];
+            std::string_view rev_contig;
             node_index *rev_path = nullptr;
-            #pragma omp critical
-            {
-                // keep views of the contig just in case another thread reallocates
-                // the vector
-                contig = contigs[i].first;
-                path = contigs[i].second.data();
-
-                if (i < rev_comp_contigs.size()) {
-                    rev_contig = rev_comp_contigs[i].first;
-                    rev_path = rev_comp_contigs[i].second.data();
-                }
+            if (i < rev_comp_contigs.size()) {
+                rev_contig = rev_comp_contigs[i].first;
+                rev_path = rev_comp_contigs[i].second.data();
             }
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
-            call_hull_sequences(full_dbg, contig, path, rev_contig, rev_path,
+            call_hull_sequences(full_dbg, contig, path.data(), rev_contig, rev_path,
                                 max_hull_forks, max_hull_depth,
                                 max_hull_depth_per_seq_char,
                 [&](auto&& sequence, auto&& path) {
@@ -706,27 +708,33 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 hull_contig_count += added_paths.size() + added_paths_rc.size();
                 for (auto&& pair : added_paths) {
                     assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
-                    contigs.emplace_back(std::move(pair));
+                    contig_buffer.emplace_back(std::move(pair));
                 }
                 for (auto&& pair : added_paths_rc) {
                     assert(full_dbg.is_canonical_mode()
                         || pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
-                    rev_comp_contigs.emplace_back(std::move(pair));
+                    rev_comp_contig_buffer.emplace_back(std::move(pair));
                 }
             }
         }
 
-        for (size_t i = original_size; i < contigs.size(); ++i) {
-            graph_init->add_sequence(contigs[i].first);
-            if (i < rev_comp_contigs.size())
-                graph_init->add_sequence(rev_comp_contigs[i].first);
+        assert((canonical && contig_buffer.size() == rev_comp_contig_buffer.size())
+                || (!canonical && rev_comp_contig_buffer.empty()));
+
+        for (auto&& pair : contig_buffer) {
+            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
+            contigs.emplace_back(std::move(pair));
+        }
+        for (auto&& pair : rev_comp_contig_buffer) {
+            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
+            rev_comp_contigs.emplace_back(std::move(pair));
         }
 
         assert((canonical && contigs.size() == rev_comp_contigs.size())
                 || (!canonical && rev_comp_contigs.empty()));
 
-        logger->trace("[Query graph extension] Added {} contigs in {} sec",
-                      hull_contig_count, timer.elapsed());
+        logger->trace("[Query graph extension] Added {} nodes from {} contigs in {} sec",
+                      num_added, hull_contig_count, timer.elapsed());
     }
 
     if (full_dbg.is_canonical_mode()) {
