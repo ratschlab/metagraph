@@ -1,13 +1,13 @@
 #ifndef __ALIGNER_HELPER_HPP__
 #define __ALIGNER_HELPER_HPP__
 
+#include <cassert>
 #include <array>
 #include <memory>
 #include <numeric>
 #include <ostream>
 #include <string>
 #include <vector>
-#include <cassert>
 
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
