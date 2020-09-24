@@ -125,18 +125,15 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  size_t sub_k,
                                  size_t max_num_nodes_per_suffix) {
     assert(sub_k < dbg_succ.get_k());
-    assert(contig.size() >= dbg_succ.get_k());
+    assert(nodes_in_full.size() == contig.size() - dbg_succ.get_k() + 1);
 
-    size_t k = dbg_succ.get_k();
-    size_t num_nodes = contig.size() - dbg_succ.get_k() + 1;
-
-    for (size_t prev_match_len = 0, i = 0; i < num_nodes; ++i) {
+    for (size_t prev_match_len = 0, i = 0; i < nodes_in_full.size(); ++i) {
         if (!nodes_in_full[i]) {
             // if prefix[i:i+prev_match_len] was a match on the previous step, then
             // prefix[i+1:i+prev_match_len] of length prev_match_len-1 must be a match on this step
             size_t cur_match_len = prev_match_len ? prev_match_len - 1 : 0;
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
-                std::string_view(&contig[i], k),
+                std::string_view(&contig[i], dbg_succ.get_k()),
                 [&](node_index node, size_t match_len) {
                     assert(match_len >= cur_match_len);
                     cur_match_len = match_len;
@@ -148,7 +145,7 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
             );
             prev_match_len = cur_match_len;
         } else {
-            prev_match_len = k;
+            prev_match_len = dbg_succ.get_k();
         }
     }
 }
