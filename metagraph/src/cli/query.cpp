@@ -132,6 +132,9 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
             // if prefix[i:i+prev_match_len] was a match on the previous step, then
             // prefix[i+1:i+prev_match_len] of length prev_match_len-1 must be a match on this step
             size_t cur_match_len = prev_match_len ? prev_match_len - 1 : 0;
+            // TODO: call first |max_num_nodes_per_suffix| matches
+            //       and, if there are too many of them, discard them here
+            // TODO: test if this heuristic works and we need to discard large ranges at all
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(&contig[i], dbg_succ.get_k()),
                 [&](node_index node, size_t match_len) {
