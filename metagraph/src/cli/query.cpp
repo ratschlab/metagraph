@@ -132,12 +132,19 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     assert(sub_k < k);
     size_t num_nodes = contig.size() - dbg_succ.get_k() + 1;
 
+    node_index last_node = DBGSuccinct::npos;
+
     for (size_t i = 0; i < num_nodes; ++i) {
         if (nodes_in_full[i] == DeBruijnGraph::npos) {
             dbg_succ.call_nodes_with_suffix(
                 std::string_view(contig.data() + i, k),
                 [&](node_index node, size_t) {
-                    callback(dbg_succ.get_node_sequence(node), node);
+                    // if the current match of length k' is a suffix of the previous
+                    // match of length k'+1, then skip
+                    if (node != last_node) {
+                        last_node = node;
+                        callback(dbg_succ.get_node_sequence(node), node);
+                    }
                 },
                 sub_k, max_num_nodes_per_suffix
             );
