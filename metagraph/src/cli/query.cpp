@@ -137,10 +137,9 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                 [&](node_index node, size_t match_len) {
                     assert(match_len >= cur_match_len);
                     cur_match_len = match_len;
-                    if (match_len >= prev_match_len) // new match must be at least as long as previous
-                        callback(dbg_succ.get_node_sequence(node), node);
+                    callback(dbg_succ.get_node_sequence(node), node);
                 },
-                sub_k,
+                std::max(sub_k, prev_match_len), // new match must be at least as long as previous
                 max_num_nodes_per_suffix
             );
             prev_match_len = cur_match_len;
