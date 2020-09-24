@@ -119,7 +119,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  const std::string_view contig,
-                                 const node_index *nodes_in_full,
+                                 const std::vector<node_index> &nodes_in_full,
                                  const std::function<void(std::string&&,
                                                           node_index)> &callback,
                                  size_t sub_k,
@@ -130,22 +130,23 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     size_t k = dbg_succ.get_k();
     size_t num_nodes = contig.size() - dbg_succ.get_k() + 1;
 
-    node_index last_node = DBGSuccinct::npos;
-
-    for (size_t i = 0; i < num_nodes; ++i) {
-        if (nodes_in_full[i] == DeBruijnGraph::npos) {
-            dbg_succ.call_nodes_with_suffix(
+    for (size_t prev_match_len = 0, i = 0; i < num_nodes; ++i) {
+        if (!nodes_in_full[i]) {
+            // if prefix[i:i+prev_match_len] was a match on the previous step, then
+            // prefix[i+1:i+prev_match_len] of length prev_match_len-1 must be a match on this step
+            size_t cur_match_len = prev_match_len ? prev_match_len - 1 : 0;
+            dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(&contig[i], k),
-                [&](node_index node, size_t) {
-                    // if the current match of length k' is a suffix of the previous
-                    // match of length k'+1, then skip
-                    if (node != last_node) {
-                        last_node = node;
-                        callback(dbg_succ.get_node_sequence(node), node);
-                    }
+                [&](node_index node, size_t match_len) {
+                    cur_match_len = match_len;
+                    callback(dbg_succ.get_node_sequence(node), node);
                 },
-                sub_k, max_num_nodes_per_suffix
+                std::max(sub_k, prev_match_len), // new match should be at least as long as previous
+                max_num_nodes_per_suffix
             );
+            prev_match_len = cur_match_len;
+        } else {
+            prev_match_len = k;
         }
     }
 }
@@ -560,12 +561,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const auto &[contig, path] = contigs[i];
-            std::string_view rev_contig;
-            node_index *rev_path = nullptr;
-            if (i < rev_comp_contigs.size()) {
-                rev_contig = rev_comp_contigs[i].first;
-                rev_path = rev_comp_contigs[i].second.data();
-            }
             std::vector<std::pair<std::string, node_index>> added_nodes;
             std::vector<std::pair<std::string, node_index>> added_nodes_rc;
             auto callback = [&](std::string&& seq, node_index node) {
@@ -583,10 +578,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     ++num_explored;
                 }
             };
-            call_suffix_match_sequences(*dbg_succ, contig, path.data(),
+            call_suffix_match_sequences(*dbg_succ, contig, path,
                                         callback, sub_k, max_num_nodes_per_suffix);
             if (canonical) {
-                call_suffix_match_sequences(*dbg_succ, rev_contig, rev_path,
+                call_suffix_match_sequences(*dbg_succ,
+                                            rev_comp_contigs[i].first,
+                                            rev_comp_contigs[i].second,
                                             callback, sub_k, max_num_nodes_per_suffix);
             }
 

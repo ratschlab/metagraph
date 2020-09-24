@@ -271,10 +271,11 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
 }
 
 void DBGSuccinct
-::call_nodes_with_suffix(std::string_view str,
-                         std::function<void(node_index, uint64_t /* match length */)> callback,
-                         size_t min_match_length,
-                         size_t max_num_allowed_matches) const {
+::call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view str,
+            std::function<void(node_index, uint64_t /* match length */)> callback,
+            size_t min_match_length,
+            size_t max_num_allowed_matches) const {
     if (!max_num_allowed_matches)
         return;
 

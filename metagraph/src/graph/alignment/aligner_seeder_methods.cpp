@@ -125,7 +125,7 @@ void SuffixSeeder<NodeType>
             continue;
 
         bool is_alt = false;
-        graph.call_nodes_with_suffix(
+        graph.call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(query.data() + i, max_seed_length),
             [&](NodeType alt_node, size_t seed_length) {
                 assert(alt_node != DeBruijnGraph::npos);
@@ -198,7 +198,7 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
     bool orientation = this->get_orientation();
 
     for (size_t i = query.size() - k + 1; i + config.min_seed_length <= query.size(); ++i) {
-        graph.call_nodes_with_suffix(
+        graph.call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(query.data() + i, query.size() - i),
             [&](NodeType alt_node, size_t seed_length) {
                 assert(alt_node != DeBruijnGraph::npos);

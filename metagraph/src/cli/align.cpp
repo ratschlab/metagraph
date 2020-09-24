@@ -156,7 +156,7 @@ void map_sequences_in_file(const std::string &file,
             // TODO: make more efficient
             // TODO: canonicalization
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                dbg->call_nodes_with_suffix(
+                dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.empty())
@@ -214,13 +214,13 @@ void map_sequences_in_file(const std::string &file,
                 // TODO: make more efficient
                 std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-                dbg->call_nodes_with_suffix(subseq,
-                                            [&](auto node, auto) {
-                                                std::cout << subseq << ": "
-                                                          << node
-                                                          << "\n";
-                                            },
-                                            config.alignment_length);
+                dbg->call_nodes_with_suffix_matching_longest_prefix(
+                    subseq,
+                    [&](auto node, auto) {
+                        std::cout << subseq << ": " << node << "\n";
+                    },
+                    config.alignment_length
+                );
             }
         }
 
