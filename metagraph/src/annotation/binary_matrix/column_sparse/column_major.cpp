@@ -8,8 +8,11 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
-      : data_(std::move(columns)) {}
+ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>> &&data)
+    : data_(std::move(data)), columns_(&data_) {}
+
+ColumnMajor::ColumnMajor(ColumnMajor &&other)
+    : data_(std::move(other.data_)), columns_(&data_) {}
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_->size()) {

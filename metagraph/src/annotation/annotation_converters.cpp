@@ -984,7 +984,8 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               size_t num_threads);
 
 [[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
-                     const std::string &filename,
+                     const std::string &succ_file,
+                     const std::string &,
                      uint32_t max_length,
                      uint32_t num_threads) {
     const graph::boss::BOSS &boss = graph.get_boss();
@@ -1003,7 +1004,7 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
-    sdsl::int_vector_buffer f(filename, std::ios::out, 1024 * 1024, width);
+    sdsl::int_vector_buffer f(succ_file, std::ios::out, 1024 * 1024, width);
 
     for(uint64_t i = 1; i <= graph.num_nodes(); ++i) {
         uint64_t boss_idx = graph.kmer_to_boss_index(i);
@@ -1017,6 +1018,11 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
         ++progress_bar;
     }
     f.close();
+
+//    std::ofstream fterm(term_file, ios::binary);
+//    sdsl::rrr_vector rterm(terminal);
+//    rterm.serialize(fterm);
+//    fterm.close();
 }
 
 template <typename Label>
@@ -1032,7 +1038,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
     if (!std::filesystem::exists(successor_file) || !std::filesystem::exists(terminal_file)) {
         logger->trace("Building and writing  successor and terminal files to {}, {}",
                       successor_file, terminal_file);
-        build_successor(graph, successor_file, max_depth, get_num_threads());
+        build_successor(graph, successor_file, terminal_file, max_depth, get_num_threads());
     }
 
     const_cast<LabelEncoder<Label> &>(target.get_label_encoder())
@@ -1069,13 +1075,13 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
         target.add_labels(indices, {label});
     }
 
+    auto matrix = target.release_matrix();
     auto diff_annotation
-            = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, target.release_matrix(),
+            = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
                                                         terminal_file);
 
     return std::make_unique<ColumnDiffAnnotator>(std::move(diff_annotation),
                                               source.get_label_encoder());
-    return nullptr;
 }
 
 

@@ -1,60 +1,28 @@
 #include "column_diff.hpp"
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
-#include "graph/annotated_dbg.hpp"
 
 namespace mtg {
 namespace annot {
 namespace binmat {
 
-
 template <class BaseMatrix>
-bool ColumnDiff<BaseMatrix>::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
-    return v != set_bits.end() && *v == column;
+ColumnDiff<BaseMatrix>::ColumnDiff(const graph::DBGSuccinct *graph,
+                                   BaseMatrix &&diffs,
+                                   const std::string &terminal_file)
+    : graph_(graph), diffs_(std::move(diffs)), terminal_file_(terminal_file) {
+    load_terminal();
 }
 
-//TODO: make this mor efficient by querying column?
 template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> ColumnDiff<BaseMatrix>::get_column(Column column) const {
-    std::vector<Row> result;
-    for (Row row = 0; row < num_rows(); ++row) {
-        if (get(row, column))
-            result.push_back(row);
+void ColumnDiff<BaseMatrix>::load_terminal() {
+    std::ifstream f(terminal_file_, ios::binary);
+    if (!f.good()) {
+        common::logger->error("Could not open terminal file {}", terminal_file_);
+        std::exit(1);
     }
-    return result;
-}
-
-template <class BaseMatrix>
-BinaryMatrix::SetBitPositions ColumnDiff<BaseMatrix>::get_row(Row row) const {
-    Vector<uint64_t> result = get_diff(row);
-
-    uint64_t boss_edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-    const graph::boss::BOSS &boss = graph_->get_boss();
-
-    while (!terminal()[row]) {
-        graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
-        assert(boss_edge > 1 && w != 0);
-
-        // fwd always selects the last outgoing edge for a given node
-        boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->boss_to_kmer_index(boss_edge));
-        merge(&result, get_diff(row));
-    };
-    return result;
-}
-
-template <class BaseMatrix>
-bool ColumnDiff<BaseMatrix>::load(std::istream &f) {
-    return diffs_.load(f);
-}
-
-template <class BaseMatrix>
-void ColumnDiff<BaseMatrix>::serialize(std::ostream &f) const {
-    diffs_.serialize(f);
+    terminal_.load(f);
+    f.close();
 }
 
 template <class BaseMatrix>
@@ -70,20 +38,12 @@ bool ColumnDiff<BaseMatrix>::load(const std::string &name) {
     bool result = load(f);
     f.close();
 
-    f.open(terminal_file_, ios::binary);
-    terminal_.load(f);
-    f.close();
+    load_terminal();
 
     return result;
 }
 
-template <class BaseMatrix>
-Vector<uint64_t> ColumnDiff<BaseMatrix>::get_diff(uint64_t node_id) const {
-    return diffs_.get_row(node_id);
-}
-
-template <class BaseMatrix>
-void ColumnDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
+void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
     if (diff2.empty()) {
         return;
     }
@@ -113,7 +73,7 @@ void ColumnDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64
     }
 }
 
-template <>
+template
 class ColumnDiff<ColumnMajor>;
 
 } // namespace binmat

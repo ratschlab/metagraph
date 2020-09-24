@@ -15,6 +15,7 @@ class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
     ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
+    ColumnMajor(ColumnMajor&& other);
 
     uint64_t num_columns() const override { return columns_->size(); }
     uint64_t num_rows() const override;
@@ -32,16 +33,14 @@ class ColumnMajor : public BinaryMatrix {
     // number of ones in the matrix
     uint64_t num_relations() const override;
 
-    static ColumnMajor
-    construct_view(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-        ColumnMajor view;
-        view.columns_ = &columns;
-        return view;
+    void point_to(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+        columns_ = &columns;
     }
 
     const auto& data() const { return *columns_; }
 
   private:
+    ColumnMajor(const std::vector<std::unique_ptr<bit_vector>> *columns): columns_(columns) {}
     std::vector<std::unique_ptr<bit_vector>> data_;
     const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;
 };
