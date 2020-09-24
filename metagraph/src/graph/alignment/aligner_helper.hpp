@@ -121,6 +121,7 @@ class Cigar {
 };
 
 
+// TODO: move to a separate header file aligner_config.hpp
 class DBGAlignerConfig {
   public:
     typedef int32_t score_t;
@@ -128,7 +129,9 @@ class DBGAlignerConfig {
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
     // Set parameters manually and call `set_scoring_matrix()`
-    DBGAlignerConfig() {}
+    DBGAlignerConfig() {
+        assert(num_alternative_paths);
+    }
 
     explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
                               int8_t gap_opening = -5,
