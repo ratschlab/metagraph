@@ -258,6 +258,32 @@ TEST(DBGSuccinct, CallNodesWithSuffixK) {
     EXPECT_EQ(ref_node_str, node_str);
 }
 
+TEST(DBGSuccinct, CallNodesWithSuffixK_v2) {
+    size_t k = 4;
+
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence("AGCCC");
+    graph->add_sequence("CGCC");
+    graph->add_sequence("GGCC");
+    graph->add_sequence("TGCC");
+    // graph->mask_dummy_kmers(1, false);
+
+    std::string query = "AGCC";
+
+    size_t nodes_called = 0;
+    graph->call_nodes_with_suffix(
+        query,
+        [&](DBGSuccinct::node_index /* i */, size_t length) {
+            EXPECT_EQ(query.size(), length);
+            nodes_called++;
+        },
+        k
+    );
+
+    EXPECT_EQ(1u, nodes_called) << *graph;
+}
+
 TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoff) {
     size_t k = 4;
     std::string reference = "GGCCCAGGGGTC";

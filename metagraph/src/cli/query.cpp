@@ -19,8 +19,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
-
-#include "align.hpp"
+#include "cli/align.hpp"
 
 
 namespace mtg {
@@ -121,15 +120,14 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  const std::string_view contig,
                                  const node_index *nodes_in_full,
-                                 const std::string_view rev_contig,
-                                 const node_index *rev_nodes_in_full,
                                  const std::function<void(std::string&&,
                                                           node_index)> &callback,
                                  size_t sub_k,
-                                 size_t max_num_nodes_per_suffix,
-                                 bool check_reverse_complement) {
+                                 size_t max_num_nodes_per_suffix) {
+    assert(sub_k < dbg_succ.get_k());
+    assert(contig.size() >= dbg_succ.get_k());
+
     size_t k = dbg_succ.get_k();
-    assert(sub_k < k);
     size_t num_nodes = contig.size() - dbg_succ.get_k() + 1;
 
     node_index last_node = DBGSuccinct::npos;
@@ -137,7 +135,7 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     for (size_t i = 0; i < num_nodes; ++i) {
         if (nodes_in_full[i] == DeBruijnGraph::npos) {
             dbg_succ.call_nodes_with_suffix(
-                std::string_view(contig.data() + i, k),
+                std::string_view(&contig[i], k),
                 [&](node_index node, size_t) {
                     // if the current match of length k' is a suffix of the previous
                     // match of length k'+1, then skip
@@ -149,12 +147,6 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                 sub_k, max_num_nodes_per_suffix
             );
         }
-    }
-
-    if (check_reverse_complement) {
-        call_suffix_match_sequences(dbg_succ, rev_contig, rev_nodes_in_full,
-                                    contig, nodes_in_full, callback, sub_k,
-                                    max_num_nodes_per_suffix, false);
     }
 }
 
@@ -576,26 +568,27 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             }
             std::vector<std::pair<std::string, node_index>> added_nodes;
             std::vector<std::pair<std::string, node_index>> added_nodes_rc;
-            call_suffix_match_sequences(*dbg_succ, contig, path.data(), rev_contig, rev_path,
-                [&](std::string&& seq, node_index node) {
-                    assert(node == full_dbg.kmer_to_node(seq));
-                    added_nodes.emplace_back(std::move(seq), node);
+            auto callback = [&](std::string&& seq, node_index node) {
+                assert(node == full_dbg.kmer_to_node(seq));
+                added_nodes.emplace_back(std::move(seq), node);
+                ++num_explored;
+                if (canonical) {
+                    added_nodes_rc.emplace_back(added_nodes.back().first,
+                                                DeBruijnGraph::npos);
+                    reverse_complement(added_nodes_rc.back().first.begin(),
+                                       added_nodes_rc.back().first.end());
+                    added_nodes_rc.back().second = full_dbg.kmer_to_node(
+                        added_nodes_rc.back().first
+                    );
                     ++num_explored;
-                    if (canonical) {
-                        added_nodes_rc.emplace_back(added_nodes.back().first,
-                                                    DeBruijnGraph::npos);
-                        reverse_complement(added_nodes_rc.back().first.begin(),
-                                           added_nodes_rc.back().first.end());
-                        added_nodes_rc.back().second = full_dbg.kmer_to_node(
-                            added_nodes_rc.back().first
-                        );
-                        ++num_explored;
-                    }
-                },
-                sub_k,
-                max_num_nodes_per_suffix,
-                canonical
-            );
+                }
+            };
+            call_suffix_match_sequences(*dbg_succ, contig, path.data(),
+                                        callback, sub_k, max_num_nodes_per_suffix);
+            if (canonical) {
+                call_suffix_match_sequences(*dbg_succ, rev_contig, rev_path,
+                                            callback, sub_k, max_num_nodes_per_suffix);
+            }
 
             #pragma omp critical
             {

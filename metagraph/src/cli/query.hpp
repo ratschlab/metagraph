@@ -35,7 +35,7 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
  * @param call_sequences generate sequences to be queried against anno_graph
  * @param num_threads number of threads to use
  * @param canonical if true, the returned query graph is a canonical graph
- * @param config a pointer to a Config to determine construction parameters
+ * @param config a pointer to a Config to determine parameters of the hull
  */
 std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
