@@ -629,7 +629,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < old_size; ++i) {
-            std::string_view contig, rev_contig;
+            std::string contig, rev_contig;
             node_index *path = nullptr;
             node_index *rev_path = nullptr;
             #pragma omp critical
