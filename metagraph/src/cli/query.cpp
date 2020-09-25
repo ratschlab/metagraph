@@ -207,8 +207,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
                 path.push_back(node);
                 seq.push_back(c);
-                depth++;
             });
+            depth++;
             extend = continue_traversal(seq, path.back(), depth, fork_count);
         }
 
@@ -220,8 +220,8 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         if (!extend)
             continue;
 
-        // a fork has been reached before the path has reached max depth
-        assert(full_dbg.has_multiple_outgoing(path.back()));
+        // a fork or a sink has been reached before the path has reached max depth
+        assert(!full_dbg.has_single_outgoing(path.back()));
 
         node = path.back();
         path.resize(0);
@@ -232,7 +232,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
             seq.back() = c;
             assert(full_dbg.kmer_to_node(seq) == next_node);
-            if (continue_traversal(seq, next_node, depth, fork_count)) {
+            if (continue_traversal(seq, next_node, depth + 1, fork_count + 1)) {
                 paths_to_extend.emplace_back(HullPathContext{
                     .last_kmer = seq,
                     .last_node = next_node,
