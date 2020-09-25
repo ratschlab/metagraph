@@ -160,8 +160,7 @@ struct HullPathContext {
 };
 
 // Expand the query graph by traversing around its nodes which are forks in the
-// full graph. Take at most |max_hull_forks| forks and traverse paths for
-// at most |max_hull_depth| steps.
+// full graph.
 // |continue_traversal| is given a node and the distrance traversed so far and
 // returns whether traversal should continue.
 template <class ContigCallback>
@@ -481,8 +480,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] k-mer indexing took {} sec", timer.elapsed());
     timer.reset();
 
-    logger->trace("[Query graph construction] extracted {} k-mers",
-                  graph_init->num_nodes());
+    logger->trace("[Query graph construction] extracted {} k-mers", graph_init->num_nodes());
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
@@ -648,7 +646,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                           node_index last_node,
                                           size_t depth,
                                           size_t fork_count) {
-                if (fork_count >= max_hull_forks)
+                if (fork_count > max_hull_forks || depth >= max_hull_depth)
                     return false;
 
                 // if the last node is already in the graph, cut off traversal
@@ -660,19 +658,19 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 // when a node which has already been accessed is visited,
                 // only continue traversing if the previous access was in a
                 // longer path (i.e., it cut off earlier)
-                bool ret_val;
+                bool extend;
                 // TODO: check the number of forks too (shorter paths may have more forks)
                 #pragma omp critical
                 {
                     auto [it, inserted]
                         = distance_traversed_until_node.emplace(last_node, depth);
 
-                    ret_val = inserted || depth < it->second;
+                    extend = inserted || depth < it->second;
 
                     if (!inserted && depth < it->second)
                         it.value() = depth;
                 }
-                return ret_val;
+                return extend;
             };
 
             for (size_t j = 0; j < path.size(); ++j) {
