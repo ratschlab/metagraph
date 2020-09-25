@@ -152,95 +152,97 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
     }
 }
 
-struct HullPath {
-    std::string seq;
-    std::vector<node_index> path;
+struct HullPathContext {
+    std::string last_kmer;
+    node_index last_node;
+    size_t depth; // not equal to path.size() if the path is cut off
     size_t fork_count;
 };
 
 // Expand the query graph by traversing around its nodes which are forks in the
-// full graph. Take at most |max_hull_forks| forks and traverse a linear path for
+// full graph. Take at most |max_hull_forks| forks and traverse paths for
 // at most |max_hull_depth| steps.
-// continue_traversal is given a node and the distrance traversed so far and
+// |continue_traversal| is given a node and the distrance traversed so far and
 // returns whether traversal should continue.
 template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
                          node_index node,
                          std::string kmer,
-                         size_t max_hull_forks,
-                         size_t max_hull_depth,
                          const ContigCallback &callback,
-                         const std::function<bool(const std::string&, node_index)> &continue_traversal) {
-    assert(max_hull_forks);
-
+                         const std::function<bool(std::string_view seq,
+                                                  node_index last_node,
+                                                  size_t depth,
+                                                  size_t fork_count)> &continue_traversal) {
     // DFS from branching points
     kmer.push_back('$');
-
-    std::vector<HullPath> unitig_traversal;
-    full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
+    std::vector<HullPathContext> paths_to_extend;
+    full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
         kmer.back() = c;
         assert(full_dbg.kmer_to_node(kmer) == next_node);
-        if (continue_traversal(kmer, next_node)) {
-            unitig_traversal.emplace_back(HullPath{
-                .seq = kmer,
-                .path = std::vector<node_index>{ next_node },
+        if (continue_traversal(kmer, next_node, 1, 0)) {
+            paths_to_extend.emplace_back(HullPathContext{
+                .last_kmer = kmer,
+                .last_node = next_node,
+                .depth = 1,
                 .fork_count = 0
             });
+        } else {
+            callback(kmer, std::vector<node_index>{ next_node });
         }
     });
 
-    HullPath hull_unitig;
-    auto &unitig = hull_unitig.seq;
-    auto &path = hull_unitig.path;
-    auto &fork_count = hull_unitig.fork_count;
-    while (unitig_traversal.size()) {
-        hull_unitig = std::move(unitig_traversal.back());
-        unitig_traversal.pop_back();
+    while (paths_to_extend.size()) {
+        HullPathContext hull_path = std::move(paths_to_extend.back());
+        paths_to_extend.pop_back();
 
-        if (fork_count >= max_hull_forks)
+        std::string &seq = hull_path.last_kmer;
+        std::vector<node_index> path = { hull_path.last_node };
+        size_t depth = hull_path.depth;
+        size_t fork_count = hull_path.fork_count;
+
+        assert(seq.size() == path.size() + full_dbg.get_k() - 1);
+
+        bool extend = true;
+        while (extend && full_dbg.has_single_outgoing(path.back())) {
+            full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
+                path.push_back(node);
+                seq.push_back(c);
+                depth++;
+            });
+            extend = continue_traversal(seq, path.back(), depth, fork_count);
+        }
+
+        assert(path.size() == seq.size() - full_dbg.get_k() + 1);
+        assert(path == map_sequence_to_nodes(full_dbg, seq));
+
+        callback(seq, path);
+
+        if (!extend)
             continue;
 
-        assert(unitig.size() == path.size() + full_dbg.get_k() - 1);
+        // a fork has been reached before the path has reached max depth
+        assert(full_dbg.has_multiple_outgoing(path.back()));
 
-        bool traverse = true;
-        node_index node = path.back();
-        while (traverse && unitig.size() < max_hull_depth
-                && full_dbg.has_single_outgoing(node)) {
-            full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                if ((traverse = continue_traversal(unitig, next_node))) {
-                    path.push_back(next_node);
-                    unitig += c;
-                    node = next_node;
-                }
-            });
-        }
+        node = path.back();
+        path.resize(0);
+        seq.erase(seq.begin(), seq.end() - full_dbg.get_k() + 1);
+        seq.push_back('$');
 
-        assert(path.size() == unitig.size() - full_dbg.get_k() + 1);
-        assert(path == map_sequence_to_nodes(full_dbg, unitig));
-        callback(std::string(unitig), std::move(path));
-
-        if (node != DeBruijnGraph::npos && continue_traversal
-                && full_dbg.has_multiple_outgoing(node)) {
-            // a fork has been reached before the path has reached
-            // length max_hull_depth
-            unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
-            unitig.reserve(max_hull_depth);
-            unitig.push_back('$');
-
-            // start new traversals
-            full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                unitig.back() = c;
-                assert(full_dbg.kmer_to_node(unitig) == next_node);
-                if (continue_traversal(unitig, next_node)) {
-                    unitig_traversal.emplace_back(HullPath{
-                        .seq = unitig,
-                        .path = std::vector<node_index>{ next_node },
-                        .fork_count = fork_count + 1
-                    });
-                    unitig_traversal.back().seq.reserve(max_hull_depth);
-                }
-            });
-        }
+        // schedule further traversals
+        full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+            seq.back() = c;
+            assert(full_dbg.kmer_to_node(seq) == next_node);
+            if (continue_traversal(seq, next_node, depth, fork_count)) {
+                paths_to_extend.emplace_back(HullPathContext{
+                    .last_kmer = seq,
+                    .last_node = next_node,
+                    .depth = depth + 1,
+                    .fork_count = fork_count + 1
+                });
+            } else {
+                callback(seq, std::vector<node_index>{ next_node });
+            }
+        });
     }
 }
 
@@ -624,8 +626,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
             // TODO: combine these two callbacks into one
-            auto callback = [&](std::string&& sequence, std::vector<node_index>&& path) {
-                added_paths.emplace_back(std::move(sequence), std::move(path));
+            auto callback = [&](const std::string &sequence,
+                                const std::vector<node_index> &path) {
+                added_paths.emplace_back(sequence, path);
                 if (canonical) {
                     added_paths_rc.emplace_back(added_paths.back().first,
                                                 std::vector<node_index>{});
@@ -640,11 +643,16 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     }
                 }
             };
-            auto continue_traversal = [&](const std::string &sequence, node_index last_node) {
+            auto continue_traversal = [&](std::string_view seq,
+                                          node_index last_node,
+                                          size_t depth,
+                                          size_t fork_count) {
+                if (fork_count >= max_hull_forks)
+                    return false;
+
                 // if the last node is already in the graph, cut off traversal
                 // since this node will be covered in another traversal
-                if (graph_init->find(std::string_view(&*(sequence.end() - graph_init->get_k()),
-                                                      graph_init->get_k()))) {
+                if (graph_init->find(seq.substr(seq.size() - graph_init->get_k()))) {
                     return false;
                 }
 
@@ -653,16 +661,15 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 // longer path (i.e., it cut off earlier)
                 bool ret_val;
                 // TODO: check the number of forks too (shorter paths may have more forks)
-                const size_t distance = sequence.size() - graph_init->get_k() + 1;
                 #pragma omp critical
                 {
                     auto [it, inserted]
-                        = distance_traversed_until_node.emplace(last_node, distance);
+                        = distance_traversed_until_node.emplace(last_node, depth);
 
-                    ret_val = inserted || distance < it->second;
+                    ret_val = inserted || depth < it->second;
 
-                    if (!inserted && distance < it->second)
-                        it.value() = distance;
+                    if (!inserted && depth < it->second)
+                        it.value() = depth;
                 }
                 return ret_val;
             };
@@ -675,7 +682,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                         && full_dbg.has_single_outgoing(path[j]))) {
                     call_hull_sequences(full_dbg, path[j],
                                         contig.substr(j + 1, full_dbg.get_k() - 1),
-                                        max_hull_forks, max_hull_depth,
                                         callback, continue_traversal);
                 }
             }
@@ -692,7 +698,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                             && full_dbg.has_single_outgoing(rev_contig[j]))) {
                         call_hull_sequences(full_dbg, rev_path[j],
                                             rev_contig.substr(j + 1, full_dbg.get_k() - 1),
-                                            max_hull_forks, max_hull_depth,
                                             callback, continue_traversal);
                     }
                 }
