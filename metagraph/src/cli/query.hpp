@@ -30,7 +30,8 @@ class Config;
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
 /**
- * Construct a query graph
+ * Construct a query graph and augment it with neighboring paths around it
+ * if `config` is specified.
  * @param anno_graph annotated de Bruijn graph (the index)
  * @param call_sequences generate sequences to be queried against anno_graph
  * @param num_threads number of threads to use

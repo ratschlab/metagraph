@@ -165,114 +165,85 @@ struct HullUnitig {
 // returns whether traversal should continue.
 template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
-                         const std::string_view contig,
-                         const node_index *nodes,
-                         const std::string_view rev_contig,
-                         const node_index *rev_nodes,
+                         node_index node,
+                         const std::string_view kmer,
                          size_t max_hull_forks,
                          size_t max_hull_depth,
-                         double max_hull_depth_per_seq_char,
                          const ContigCallback &callback,
-                         const std::function<bool(const std::string&,
-                                                  node_index)> &continue_traversal) {
+                         const std::function<bool(const std::string&, node_index)> &continue_traversal) {
     assert(max_hull_forks);
 
-    if (rev_contig.size()) {
-        call_hull_sequences(full_dbg, rev_contig, rev_nodes, {}, {},
-                            max_hull_forks, max_hull_depth,
-                            max_hull_depth_per_seq_char,
-                            callback, continue_traversal);
-    }
+    assert(full_dbg.kmer_to_node(kmer) == node);
 
-    size_t num_nodes = contig.size() - full_dbg.get_k() + 1;
+    // DFS from branching points
+    std::string init_unitig(kmer, 1, full_dbg.get_k() - 1);
+    init_unitig.reserve(max_hull_depth);
+    init_unitig.push_back('$');
 
-    assert(map_sequence_to_nodes(full_dbg, contig)
-            == std::vector<node_index>(nodes, nodes + num_nodes));
+    std::vector<HullUnitig> unitig_traversal;
+    full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
+        init_unitig.back() = c;
+        assert(full_dbg.kmer_to_node(init_unitig) == next_node);
+        if (continue_traversal(init_unitig, next_node)) {
+            unitig_traversal.emplace_back(HullUnitig{
+                .unitig = init_unitig,
+                .path = std::vector<node_index>{ next_node },
+                .fork_count = 0
+            });
+        }
+    });
 
-    for (size_t j = 0; j < num_nodes; ++j) {
-        // if the next starting node is not in the graph, or if it has a single
-        // outgoing node which is also in this contig, skip
-        if (!nodes[j] || (j + 1 < num_nodes && nodes[j + 1] != DeBruijnGraph::npos
-                && full_dbg.has_single_outgoing(nodes[j]))) {
+    HullUnitig hull_unitig;
+    auto &unitig = hull_unitig.unitig;
+    auto &path = hull_unitig.path;
+    auto &fork_count = hull_unitig.fork_count;
+    while (unitig_traversal.size()) {
+        hull_unitig = std::move(unitig_traversal.back());
+        unitig_traversal.pop_back();
+
+        if (fork_count >= max_hull_forks)
             continue;
+
+        assert(unitig.size() == path.size() + full_dbg.get_k() - 1);
+
+        bool traverse = true;
+        node_index node = path.back();
+        while (traverse && unitig.size() < max_hull_depth
+                && full_dbg.has_single_outgoing(node)) {
+            full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
+                if ((traverse = continue_traversal(unitig, next_node))) {
+                    path.push_back(next_node);
+                    unitig += c;
+                    node = next_node;
+                }
+            });
         }
 
-        max_hull_depth = std::min(
-            max_hull_depth,
-            static_cast<size_t>((num_nodes - j + full_dbg.get_k())
-                                    * max_hull_depth_per_seq_char)
-        );
+        assert(path.size() == unitig.size() - full_dbg.get_k() + 1);
+        assert(path == map_sequence_to_nodes(full_dbg, unitig));
+        callback(std::string(unitig), std::move(path));
 
-        // DFS from branching points
-        std::string init_unitig(contig, j + 1, full_dbg.get_k() - 1);
-        init_unitig.reserve(max_hull_depth);
-        init_unitig.push_back('$');
+        if (node != DeBruijnGraph::npos && continue_traversal
+                && full_dbg.has_multiple_outgoing(node)) {
+            // a fork has been reached before the path has reached
+            // length max_hull_depth
+            unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
+            unitig.reserve(max_hull_depth);
+            unitig.push_back('$');
 
-        std::vector<HullUnitig> unitig_traversal;
-        full_dbg.call_outgoing_kmers(nodes[j], [&](auto next_node, char c) {
-            init_unitig.back() = c;
-            assert(full_dbg.kmer_to_node(init_unitig) == next_node);
-            if (continue_traversal(init_unitig, next_node)) {
-                unitig_traversal.emplace_back(HullUnitig{
-                    .unitig = init_unitig,
-                    .path = std::vector<node_index>{ next_node },
-                    .fork_count = 0
-                });
-            }
-        });
-
-        HullUnitig hull_unitig;
-        auto &unitig = hull_unitig.unitig;
-        auto &path = hull_unitig.path;
-        auto &fork_count = hull_unitig.fork_count;
-        while (unitig_traversal.size()) {
-            hull_unitig = std::move(unitig_traversal.back());
-            unitig_traversal.pop_back();
-
-            if (fork_count >= max_hull_forks)
-                continue;
-
-            assert(unitig.size() == path.size() + full_dbg.get_k() - 1);
-
-            bool traverse = true;
-            node_index node = path.back();
-            while (traverse && unitig.size() < max_hull_depth
-                    && full_dbg.has_single_outgoing(node)) {
-                full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                    if ((traverse = continue_traversal(unitig, next_node))) {
-                        path.push_back(next_node);
-                        unitig += c;
-                        node = next_node;
-                    }
-                });
-            }
-
-            assert(path.size() == unitig.size() - full_dbg.get_k() + 1);
-            assert(path == map_sequence_to_nodes(full_dbg, unitig));
-            callback(std::string(unitig), std::move(path));
-
-            if (node != DeBruijnGraph::npos && continue_traversal
-                    && full_dbg.has_multiple_outgoing(node)) {
-                // a fork has been reached before the path has reached
-                // length max_hull_depth
-                unitig = unitig.substr(unitig.size() - full_dbg.get_k() + 1);
-                unitig.reserve(max_hull_depth);
-                unitig.push_back('$');
-
-                // start new traversals
-                full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
-                    unitig.back() = c;
-                    assert(full_dbg.kmer_to_node(unitig) == next_node);
-                    if (continue_traversal(unitig, next_node)) {
-                        unitig_traversal.emplace_back(HullUnitig{
-                            .unitig = unitig,
-                            .path = std::vector<node_index>{ next_node },
-                            .fork_count = fork_count + 1
-                        });
-                        unitig_traversal.back().unitig.reserve(max_hull_depth);
-                    }
-                });
-            }
+            // start new traversals
+            full_dbg.call_outgoing_kmers(node, [&](auto next_node, char c) {
+                unitig.back() = c;
+                assert(full_dbg.kmer_to_node(unitig) == next_node);
+                if (continue_traversal(unitig, next_node)) {
+                    unitig_traversal.emplace_back(HullUnitig{
+                        .unitig = unitig,
+                        .path = std::vector<node_index>{ next_node },
+                        .fork_count = fork_count + 1
+                    });
+                    unitig_traversal.back().unitig.reserve(max_hull_depth);
+                }
+            });
         }
     }
 }
@@ -479,6 +450,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // construct graph storing all k-mers in query
     auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k());
 
+    size_t max_input_sequence_length = 0;
+
     if (kPrefilterWithBloom && dbg_succ && sub_k >= full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
@@ -490,10 +463,21 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             graph_init->add_sequence(
                 seq, get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), seq)
             );
+            if (max_input_sequence_length < seq.size())
+                max_input_sequence_length = seq.size();
         });
     } else {
-        call_sequences([&](const std::string &seq) { graph_init->add_sequence(seq); });
+        call_sequences([&](const std::string &seq) {
+            graph_init->add_sequence(seq);
+            if (max_input_sequence_length < seq.size())
+                max_input_sequence_length = seq.size();
+        });
     }
+
+    max_hull_depth = std::min(
+        max_hull_depth,
+        static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
+    );
 
     logger->trace("[Query graph construction] k-mer indexing took {} sec", timer.elapsed());
     timer.reset();
@@ -630,7 +614,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       max_hull_depth, max_hull_forks);
         timer.reset();
 
-        tsl::hopscotch_map<node_index, size_t> distance_traversed_until_node;
+        tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
 
         size_t hull_contig_count = 0;
         size_t num_added = 0;
@@ -649,53 +633,75 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             }
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
             std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
-            call_hull_sequences(full_dbg, contig, path.data(), rev_contig, rev_path,
-                                max_hull_forks, max_hull_depth,
-                                max_hull_depth_per_seq_char,
-                [&](auto&& sequence, auto&& path) {
-                    added_paths.emplace_back(std::move(sequence), std::move(path));
-                    if (canonical) {
-                        added_paths_rc.emplace_back(added_paths.back().first,
-                                                    std::vector<node_index>{});
-                        reverse_complement(added_paths_rc.back().first.begin(),
-                                           added_paths_rc.back().first.end());
-                        if (!full_dbg.is_canonical_mode()) {
-                            // no need to map here because these will be remapped
-                            // below
-                            added_paths_rc.back().second = map_sequence_to_nodes(
-                                full_dbg, added_paths_rc.back().first
-                            );
-                        }
-                    }
-                },
-                [&](const std::string &sequence, node_index last_node) {
-                    // if a node is already in the graph, cut off traversal
-                    // since this node will be covered in another traversal
-                    if (graph_init->find(std::string_view(
-                            sequence.data() + sequence.size() - graph_init->get_k(),
-                            graph_init->get_k()))) {
-                        return false;
-                    }
-
-                    // when a node which has already been accessed is visited,
-                    // only continue traversing if the previous access was in a
-                    // longer path (i.e., it cut off earlier)
-                    bool ret_val;
-                    size_t distance = sequence.size() - graph_init->get_k() + 1;
-                    #pragma omp critical
-                    {
-                        auto [it, inserted] = distance_traversed_until_node.emplace(
-                            last_node, distance
+            // TODO: combine these two callbacks into one
+            auto callback = [&](std::string&& sequence, std::vector<node_index>&& path) {
+                added_paths.emplace_back(std::move(sequence), std::move(path));
+                if (canonical) {
+                    added_paths_rc.emplace_back(added_paths.back().first,
+                                                std::vector<node_index>{});
+                    reverse_complement(added_paths_rc.back().first.begin(),
+                                       added_paths_rc.back().first.end());
+                    if (!full_dbg.is_canonical_mode()) {
+                        // no need to map here because these will be remapped
+                        // below
+                        added_paths_rc.back().second = map_sequence_to_nodes(
+                            full_dbg, added_paths_rc.back().first
                         );
-
-                        ret_val = inserted || it->second > distance;
-
-                        if (!inserted && ret_val)
-                            it.value() = distance;
                     }
-                    return ret_val;
                 }
-            );
+            };
+            auto continue_traversal = [&](const std::string &sequence, node_index last_node) {
+                // if the last node is already in the graph, cut off traversal
+                // since this node will be covered in another traversal
+                if (graph_init->find(std::string_view(&*(sequence.end() - graph_init->get_k()),
+                                                      graph_init->get_k()))) {
+                    return false;
+                }
+
+                // when a node which has already been accessed is visited,
+                // only continue traversing if the previous access was in a
+                // longer path (i.e., it cut off earlier)
+                bool ret_val;
+                // TODO: check the number of forks too (shorter paths may have more forks)
+                const size_t distance = sequence.size() - graph_init->get_k() + 1;
+                #pragma omp critical
+                {
+                    auto [it, inserted]
+                        = distance_traversed_until_node.emplace(last_node, distance);
+
+                    ret_val = inserted || distance < it->second;
+
+                    if (!inserted && distance < it->second)
+                        it.value() = distance;
+                }
+                return ret_val;
+            };
+
+            for (size_t j = 0; j < path.size(); ++j) {
+                // if the next starting node is not in the graph, or if it has a single
+                // outgoing node which is also in this contig, skip
+                if (path[j] && !(j + 1 < path.size()
+                                        && path[j + 1]
+                                        && full_dbg.has_single_outgoing(path[j]))) {
+                    call_hull_sequences(full_dbg, path[j],
+                                        std::string_view(&contig[j], full_dbg.get_k()),
+                                        max_hull_forks, max_hull_depth,
+                                        callback, continue_traversal);
+                }
+            }
+
+            for (size_t j = 0; j < rev_contig.size(); ++j) {
+                // if the next starting node is not in the graph, or if it has a single
+                // outgoing node which is also in this contig, skip
+                if (rev_contig[j] && !(j + 1 < rev_contig.size()
+                                        && rev_contig[j + 1]
+                                        && full_dbg.has_single_outgoing(rev_contig[j]))) {
+                    call_hull_sequences(full_dbg, rev_path[j],
+                                        std::string_view(&rev_contig[j], full_dbg.get_k()),
+                                        max_hull_forks, max_hull_depth,
+                                        callback, continue_traversal);
+                }
+            }
 
             #pragma omp critical
             {
