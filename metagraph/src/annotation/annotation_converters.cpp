@@ -985,17 +985,18 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
 
 [[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
                      const std::string &succ_file,
-                     const std::string &,
+                     const std::string &term_file,
                      uint32_t max_length,
                      uint32_t num_threads) {
     const graph::boss::BOSS &boss = graph.get_boss();
     sdsl::bit_vector terminal;
     boss.call_sequences_row_diff(
             [&](const vector<uint64_t> &path, std::optional<uint64_t>) {
-                for (const auto &v : path) {
-                    std::cout << v << " ";
+                std::string chars(boss.get_node_str(path.front()));
+                for (uint32_t i = 0; i< path.size();++i) {
+                    chars += boss.decode(boss.get_W(path[i]) % boss.alph_size);
                 }
-                std::cout << std::endl;
+                std::cout << chars << std::endl;
             },
             num_threads, max_length, &terminal);
 
@@ -1008,21 +1009,32 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
 
     for(uint64_t i = 1; i <= graph.num_nodes(); ++i) {
         uint64_t boss_idx = graph.kmer_to_boss_index(i);
-        if ((bool)terminal[boss_idx]) {
+        const graph::boss::BOSS::TAlphabet w = boss.get_W(boss_idx) % boss.alph_size;
+        if (terminal[boss_idx] || w == 0) {
             f.push_back(0);
         } else {
-            uint64_t succ = graph.boss_to_kmer_index(
-                    boss.fwd(boss_idx, boss.get_W(boss_idx) % boss.alph_size));
+            uint64_t succ = graph.boss_to_kmer_index(boss.fwd(boss_idx, w));
             f.push_back(succ);
         }
         ++progress_bar;
     }
     f.close();
 
-//    std::ofstream fterm(term_file, ios::binary);
-//    sdsl::rrr_vector rterm(terminal);
-//    rterm.serialize(fterm);
-//    fterm.close();
+    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
+    sdsl::bit_vector term(graph.num_nodes(), 0);
+    for (uint64_t i = 1; i < terminal.size(); ++i) {
+        if (terminal[i]) {
+            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph.boss_to_kmer_index(i));
+            assert(anno_index < graph.num_nodes());
+            term[anno_index] = 1;
+        }
+    }
+
+    std::ofstream fterm(term_file, ios::binary);
+    sdsl::rrr_vector rterm(term);
+    rterm.serialize(fterm);
+    fterm.close();
 }
 
 template <typename Label>
@@ -1052,27 +1064,42 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                 graph.num_nodes(), num_rows);
         std::exit(1);
     }
-    //size_t num_threads = get_num_threads();
-    sdsl::int_vector_buffer succ(successor_file, std::ios::in);
-    assert(succ.size() == num_rows);
-//    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t i = 0; i < source.get_all_labels().size(); ++i) {
-        const Label& label = source.get_all_labels()[i];
-        const bitmap&  source_col = source.get_column(label);
 
-        std::vector<uint64_t> indices;
-        for (uint64_t idx = 0; idx < num_rows; ++idx) {
-            bool v;
-            if (succ[idx]) {
-                uint64_t anno_idx = graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
-                v = source_col[idx] ^ source_col[anno_idx];
-            } else {
-                v = source_col[idx];
-            }
-            if (v)
-                indices.push_back(idx);
+    sdsl::int_vector_buffer succ(successor_file, std::ios::in, 1024*1024);
+    assert(succ.size() == num_rows);
+    constexpr uint64_t chunk_size = 1 << 20;
+    std::vector<uint64_t> succ_mem;
+    for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
+        succ_mem.resize(std::min(chunk_size, num_rows - chunk));
+        for (uint64_t idx = chunk, i = 0; i < succ_mem.size(); ++idx, ++i) {
+            succ_mem[i] = succ[idx];
         }
-        target.add_labels(indices, {label});
+
+        std::vector<std::vector<uint64_t>> indices(source.num_labels());
+
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (uint64_t l_idx = 0; l_idx < source.num_labels(); ++l_idx) {
+            const Label &label = source.get_all_labels()[l_idx];
+            const bitmap &source_col = source.get_column(label);
+
+            for (uint64_t row_idx = chunk, j = 0; j < succ_mem.size(); ++row_idx, ++j) {
+                bool v;
+                if (succ_mem[j]) {
+                    uint64_t anno_idx
+                            = graph::AnnotatedSequenceGraph::graph_to_anno_index(succ_mem[j]);
+                    v = source_col[row_idx] ^ source_col[anno_idx];
+                } else {
+                    v = source_col[row_idx];
+                }
+                if (v)
+                    indices[l_idx].push_back(row_idx);
+            }
+        }
+
+        for (uint64_t l_idx = 0; l_idx < source.num_labels(); ++l_idx) {
+            const Label &label = source.get_all_labels()[l_idx];
+            target.add_labels(indices[l_idx], { label });
+        }
     }
 
     auto matrix = target.release_matrix();

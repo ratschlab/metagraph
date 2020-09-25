@@ -19,6 +19,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
+    } else if (utils::ends_with(filename, annot::ColumnDiffAnnotator::kExtension)) {
+        return Config::AnnotationType::ColumnDiff;
+
     } else if (utils::ends_with(filename, annot::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
