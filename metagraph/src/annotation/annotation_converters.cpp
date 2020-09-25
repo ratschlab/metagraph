@@ -1068,6 +1068,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
     assert(succ.size() == num_rows);
     constexpr uint64_t chunk_size = 1 << 20;
     std::vector<uint64_t> succ_mem;
+    ProgressBar progress_bar((num_rows - 1) / chunk_size + 1, "Compute diffs", std::cerr,
+                             !common::get_verbose());
     for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
         succ_mem.resize(std::min(chunk_size, num_rows - chunk));
         for (uint64_t idx = chunk, i = 0; i < succ_mem.size(); ++idx, ++i) {
@@ -1099,6 +1101,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
             const Label &label = source.get_all_labels()[l_idx];
             target.add_labels(indices[l_idx], { label });
         }
+        ++progress_bar;
     }
 
     auto matrix = target.release_matrix();
