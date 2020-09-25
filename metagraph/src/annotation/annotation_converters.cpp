@@ -983,7 +983,7 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-[[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
+void build_successor(const graph::DBGSuccinct &graph,
                      const std::string &succ_file,
                      const std::string &term_file,
                      uint32_t max_length,
@@ -1038,12 +1038,11 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
 }
 
 template <typename Label>
-[[clang::optnone]] std::unique_ptr<ColumnDiffAnnotator>
+std::unique_ptr<ColumnDiffAnnotator>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
                        const ColumnCompressed<Label> &source,
                        const std::string &outfbase,
                        uint32_t max_depth) {
-#pragma clang optimize off
     ColumnCompressed<> target(source.num_objects());
     std::string successor_file = outfbase + ".succ";
     std::string terminal_file = outfbase + ".terminal";
