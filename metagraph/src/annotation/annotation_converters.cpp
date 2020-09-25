@@ -991,12 +991,12 @@ void build_successor(const graph::DBGSuccinct &graph,
     const graph::boss::BOSS &boss = graph.get_boss();
     sdsl::bit_vector terminal;
     boss.call_sequences_row_diff(
-            [&](const vector<uint64_t> &path, std::optional<uint64_t>) {
-                std::string chars(boss.get_node_str(path.front()));
+            [&](const vector<uint64_t> &, std::optional<uint64_t>) {
+                /*std::string chars(boss.get_node_str(path.front()));
                 for (uint32_t i = 0; i< path.size();++i) {
                     chars += boss.decode(boss.get_W(path[i]) % boss.alph_size);
                 }
-                std::cout << chars << std::endl;
+                std::cout << chars << std::endl;*/
             },
             num_threads, max_length, &terminal);
 
