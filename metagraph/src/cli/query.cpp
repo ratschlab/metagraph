@@ -433,7 +433,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             if (dbg_succ) {
                 sub_k = config->alignment_min_seed_length;
             } else {
-                logger->warn("Matching suffixes of k-mers only supported for DBGSuccinct");
+                logger->error("Matching suffixes of k-mers only supported for DBGSuccinct");
             }
         }
 
@@ -456,19 +456,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                     "[Query graph construction] Started indexing k-mers pre-filtered "
                     "with Bloom filter");
 
-        call_sequences([&](const std::string &seq) {
+        call_sequences([&](const std::string &sequence) {
             // TODO: implement add_sequence with filter for all graph representations
             graph_init->add_sequence(
-                seq, get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), seq)
+                sequence,
+                get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
             );
-            if (max_input_sequence_length < seq.size())
-                max_input_sequence_length = seq.size();
+            if (max_input_sequence_length < sequence.size())
+                max_input_sequence_length = sequence.size();
         });
     } else {
-        call_sequences([&](const std::string &seq) {
-            graph_init->add_sequence(seq);
-            if (max_input_sequence_length < seq.size())
-                max_input_sequence_length = seq.size();
+        call_sequences([&](const std::string &sequence) {
+            graph_init->add_sequence(sequence);
+            if (max_input_sequence_length < sequence.size())
+                max_input_sequence_length = sequence.size();
         });
     }
 
