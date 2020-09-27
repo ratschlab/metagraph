@@ -538,7 +538,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         size_t num_added = 0;
-        std::atomic<size_t> num_explored = 0;
 
         std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
         std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
@@ -548,23 +547,24 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             const auto &[contig, path] = contigs[i];
             std::vector<std::pair<std::string, node_index>> added_nodes;
             std::vector<std::pair<std::string, node_index>> added_nodes_rc;
-            auto callback = [&](std::string&& seq, node_index node) {
-                assert(node == full_dbg.kmer_to_node(seq));
-                added_nodes.emplace_back(std::move(seq), node);
-                ++num_explored;
-                if (canonical) {
-                    added_nodes_rc.emplace_back(added_nodes.back().first,
-                                                DeBruijnGraph::npos);
+            auto callback = [&](std::string&& kmer, node_index node) {
+                assert(node == full_dbg.kmer_to_node(kmer));
+
+                if (full_dbg.is_canonical_mode())
+                    full_dbg.map_to_nodes(kmer, [&](node_index rc_node) { node = rc_node; });
+
+                added_nodes.emplace_back(std::move(kmer), node);
+
+                if (canonical && !full_dbg.is_canonical_mode()) {
+                    // insert a placeholder
+                    added_nodes_rc.emplace_back(added_nodes.back().first, DeBruijnGraph::npos);
                     reverse_complement(added_nodes_rc.back().first);
-                    added_nodes_rc.back().second = full_dbg.kmer_to_node(
-                        added_nodes_rc.back().first
-                    );
-                    ++num_explored;
                 }
             };
             call_suffix_match_sequences(*dbg_succ, contig, path,
                                         callback, sub_k, max_num_nodes_per_suffix);
-            if (canonical) {
+            if (canonical && !full_dbg.is_canonical_mode()) {
+                assert(!full_dbg.is_canonical_mode());
                 call_suffix_match_sequences(*dbg_succ,
                                             rc_contigs[i].first,
                                             rc_contigs[i].second,
@@ -588,8 +588,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             }
         }
 
-        assert((canonical && contig_buffer.size() == rev_comp_contig_buffer.size())
-                || (!canonical && rev_comp_contig_buffer.empty()));
 
         for (auto&& pair : contig_buffer) {
             graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
@@ -600,11 +598,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             rc_contigs.emplace_back(std::move(pair));
         }
 
-        assert((canonical && contigs.size() == rc_contigs.size())
-                || (!canonical && rc_contigs.empty()));
+        assert(((canonical && !full_dbg.is_canonical_mode()) && contigs.size() == rc_contigs.size())
+                || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
 
-        logger->trace("[Query graph construction] Finding {} and adding {} suffix-matching k-mers "
-                      "took {} sec", num_explored, num_added, timer.elapsed());
+        logger->trace("[Query graph construction] Finding {} and adding {}"
+                      " suffix-matching k-mers took {} sec",
+                      (contigs.size() - original_size) * (rc_contigs.size() ? 2 : 1),
+                      num_added, timer.elapsed());
     }
 
     if (max_hull_forks) {
