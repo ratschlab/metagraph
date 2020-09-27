@@ -387,7 +387,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
             assert(node == full_dbg.kmer_to_node(kmer));
 
             if (full_dbg.is_canonical_mode())
-                full_dbg.map_to_nodes(kmer, [&](node_index rc_node) { node = rc_node; });
+                full_dbg.map_to_nodes(kmer, [&](node_index cn) { node = cn; });
 
             added_nodes.emplace_back(std::move(kmer), node);
 
@@ -440,31 +440,21 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                       std::vector<std::pair<std::string, std::vector<node_index>>> *rc_contigs) {
     tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
 
-    size_t hull_contig_count = 0;
-
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
-    std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < contigs->size(); ++i) {
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
-        std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
         // TODO: combine these two callbacks into one
         auto callback = [&](const std::string &sequence,
                             const std::vector<node_index> &path) {
             added_paths.emplace_back(sequence, path);
-            if (batch_graph.is_canonical_mode()) {
-                added_paths_rc.emplace_back(added_paths.back().first,
-                                            std::vector<node_index>{});
-                reverse_complement(added_paths_rc.back().first);
-                if (!full_dbg.is_canonical_mode()) {
-                    // no need to map here because these will be remapped
-                    // below
-                    added_paths_rc.back().second = map_sequence_to_nodes(
-                        full_dbg, added_paths_rc.back().first
-                    );
-                }
+            if (full_dbg.is_canonical_mode()) {
+                added_paths.back().second.resize(0);
+                full_dbg.map_to_nodes(sequence,
+                    [&](node_index cn) { added_paths.back().second.push_back(cn); }
+                );
             }
         };
         auto continue_traversal = [&](std::string_view seq,
@@ -529,24 +519,15 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
 
         #pragma omp critical
         {
-            hull_contig_count += added_paths.size() + added_paths_rc.size();
             for (auto&& pair : added_paths) {
                 assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
                 contig_buffer.emplace_back(std::move(pair));
-            }
-            for (auto&& pair : added_paths_rc) {
-                assert(full_dbg.is_canonical_mode()
-                    || pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
-                rev_comp_contig_buffer.emplace_back(std::move(pair));
             }
         }
     }
 
     for (auto&& pair : contig_buffer) {
         contigs->emplace_back(std::move(pair));
-    }
-    for (auto&& pair : rev_comp_contig_buffer) {
-        rc_contigs->emplace_back(std::move(pair));
     }
 }
 
@@ -749,7 +730,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth,
                          &contigs, &rc_contigs);
 
-        assert(((canonical && !full_dbg.is_canonical_mode()) && contigs.size() == rc_contigs.size())
+        assert(((canonical && !full_dbg.is_canonical_mode()) && rc_contigs.size() == hull_contigs_begin)
                 || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
 
         size_t num_added = 0;
@@ -757,14 +738,9 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         for (size_t i = hull_contigs_begin; i < contigs.size(); ++i) {
             graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
         }
-        for (size_t i = hull_contigs_begin; i < rc_contigs.size(); ++i) {
-            graph_init->add_sequence(rc_contigs[i].first, [&](node_index) { ++num_added; });
-        }
 
         logger->trace("[Query graph extension] Added {} nodes from {} contigs in {} sec",
-                      num_added,
-                      (contigs.size() - hull_contigs_begin) * (rc_contigs.size() ? 2 : 1),
-                      timer.elapsed());
+                      num_added, contigs.size() - hull_contigs_begin, timer.elapsed());
     }
 
     // merge rc_contigs and contigs
