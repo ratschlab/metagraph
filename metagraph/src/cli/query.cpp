@@ -501,7 +501,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                canonical);  // pull only primary contigs when building canonical query graph
 
     std::vector<std::pair<std::string, std::vector<node_index>>> rc_contigs;
-    if (canonical) {
+    if (canonical && !full_dbg.is_canonical_mode()) {
         rc_contigs = contigs;
         for (auto &[contig, path] : rc_contigs) {
             reverse_complement(contig);
@@ -515,9 +515,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map from nodes in query graph to full graph
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
-        contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
-        if (canonical)
-            rc_contigs[i].second = map_sequence_to_nodes(full_dbg, rc_contigs[i].first);
+        if (full_dbg.is_canonical_mode()) {
+            full_dbg.map_to_nodes(contigs[i].first,
+                                  [&](node_index node) { contigs[i].second.push_back(node); });
+        } else {
+            contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
+            if (canonical)
+                rc_contigs[i].second = map_sequence_to_nodes(full_dbg, rc_contigs[i].first);
+        }
     }
     logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
                   timer.elapsed());
@@ -743,7 +748,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             if (!nodes[j]) {
                 nodes[j] = dual_nodes[j];
             } else if (dual_nodes[j]) {
-                nodes[j] = std::min(nodes[j], dual_nodes[j]);
+                assert(!full_dbg.is_canonical_mode());
+                assert(canonical);
+                logger->warn("Node {} and its dual {} are present in the full"
+                             " non-canonical graph. Only the first of them will"
+                             " be annotated in the canonical query graph.",
+                             nodes[j], dual_nodes[j]);
             }
         }
     }
