@@ -337,7 +337,8 @@ int transform_annotation(Config *config) {
         // or RbBRWT, for which the construction is done with streaming columns
         // from disk.
         if ((config->anno_type != Config::BRWT || !config->infbase.size())
-            && config->anno_type != Config::RbBRWT) {
+            && config->anno_type != Config::RbBRWT
+            && config->anno_type != Config::ColumnDiff) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -357,6 +358,7 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::ColumnDiff: {
+                size_t avail_mem_bytes = config->memory_available * 1e9;
                 logger->trace("Loading graph...");
                 graph::DBGSuccinct graph(2);
                 bool result = graph.load(config->infbase);
@@ -364,18 +366,52 @@ int transform_annotation(Config *config) {
                     logger->error("Cannot load graph from {}", config->infbase);
                     std::exit(1);
                 }
+                avail_mem_bytes -= std::filesystem::file_size(config->infbase);
 
-                timer.reset();
-                logger->trace("Converting to column-diff...");
-                std::unique_ptr<ColumnDiffAnnotator> column_diff
-                        = convert_to_column_diff(graph, *annotator, config->outfbase,
-                                                 config->max_path_length);
-                logger->trace("Annotation converted in {} sec", timer.elapsed());
-                logger->trace("Serializing to '{}'...", config->outfbase);
+                for (uint32_t i = 0; i < files.size();) {
+                    logger->trace("Loading columns for batch-conversion...");
+                    size_t cur_mem_bytes = avail_mem_bytes;
+                    std::vector<std::string> file_batch;
+                    for (; i < files.size(); ++i) {
+                        // *2 in order to account for constructing the sparsified column
+                        size_t file_size = 2 * std::filesystem::file_size(files[i]);
+                        if (file_size > avail_mem_bytes) {
+                            logger->warn(
+                                    "Not enough memory to process {}, requires {} MB",
+                                    files[i], file_size/1e6);
+                            continue;
+                        }
+                        if (file_size > cur_mem_bytes) {
+                            break;
+                        }
+                        cur_mem_bytes -= file_size;
+                        file_batch.push_back(files[i]);
+                    }
 
-                column_diff->serialize(config->outfbase);
+                    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> anno_batch;
+                    for(const auto& fname : file_batch) {
+                        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
+                        anno->merge_load({fname});
+                        anno_batch.push_back(std::move(anno));
+                    }
+                    timer.reset();
+                    logger->trace("Starting converting column-batch...");
+                    std::vector<ColumnDiffAnnotator> column_diffs
+                            = convert_to_column_diff(graph, anno_batch, config->infbase,
+                                                     config->max_path_length);
+                    logger->trace("Column-batch converted in {} sec", timer.elapsed());
 
-                logger->trace("Serialization done in {} sec", timer.elapsed());
+                    logger->trace("Serializing columns...", config->outfbase);
+                    timer.reset();
+                    assert(column_diffs.size() == file_batch.size());
+                    for(uint32_t idx = 0; idx < file_batch.size(); ++idx) {
+                        auto fname = std::filesystem::path(config->outfbase)/
+                                std::filesystem::path(file_batch[i]).filename();
+                        column_diffs[idx].serialize(fname);
+                        logger->trace("Serialized {}", fname);
+                    }
+                    logger->trace("Serialization done in {} sec", timer.elapsed());
+                }
 
                 break;
             }
@@ -479,11 +515,45 @@ int transform_annotation(Config *config) {
             }
         }
 
+    } else if (input_anno_type == Config::ColumnDiff) {
+        if (config->anno_type != Config::BRWT) {
+            logger->error("Only conversion to brwt supported for column_diff");
+            exit(1);
+        }
+        std::unique_ptr<ColumnDiffAnnotator<>> annotator;
+        auto brwt_annotator = config->infbase.size()
+                              ? convert_to_BRWT<MultiBRWTAnnotator>(
+                        files, config->infbase,
+                        config->parallel_nodes,
+                        get_num_threads(),
+                        config->tmp_dir.empty()
+                        ? std::filesystem::path(config->outfbase).remove_filename()
+                        : config->tmp_dir)
+                              : (config->greedy_brwt
+                                 ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
+                                std::move(*annotator),
+                                config->parallel_nodes,
+                                get_num_threads(),
+                                config->num_rows_subsampled)
+                                 : convert_to_simple_BRWT<MultiBRWTAnnotator>(
+                                std::move(*annotator),
+                                config->arity_brwt,
+                                config->parallel_nodes,
+                                get_num_threads()));
+
+        annotator.reset();
+        logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+        logger->trace("Serializing to '{}'", config->outfbase);
+
+        brwt_annotator->serialize(config->outfbase);
+
     } else {
-        logger->error("Conversion to other representations"
-                      " is not implemented for {} annotator",
-                      Config::annotype_to_string(input_anno_type));
-        exit(1);
+            logger->error("Conversion to other representations"
+                    " is not implemented for {} annotator",
+                    Config::annotype_to_string(input_anno_type));
+            exit(1);
+        }
     }
 
     logger->trace("Done");

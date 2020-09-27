@@ -1038,12 +1038,26 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-std::unique_ptr<ColumnDiffAnnotator>
+[[clang::optnone]] std::vector<ColumnDiffAnnotator>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
-                       const ColumnCompressed<Label> &source,
+                       const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
-    ColumnCompressed<> target(source.num_objects());
+#pragma clang optimize off
+    if (sources.empty())
+        return {};
+
+    std::vector<std::unique_ptr<ColumnCompressed<>>> targets;
+    targets.reserve(sources.size());
+    for (const auto& source : sources) {
+        if (source->num_labels() == 0)
+            continue;
+        targets.push_back(std::make_unique<ColumnCompressed<>>(source->num_objects(),
+                                                               source->num_labels()));
+        const_cast<LabelEncoder<Label> &>(targets.back()->get_label_encoder())
+                = source->get_label_encoder();
+    }
+
     std::string successor_file = outfbase + ".succ";
     std::string terminal_file = outfbase + ".terminal";
     if (!std::filesystem::exists(successor_file) || !std::filesystem::exists(terminal_file)) {
@@ -1052,73 +1066,71 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
         build_successor(graph, successor_file, terminal_file, max_depth, get_num_threads());
     }
 
-    const_cast<LabelEncoder<Label> &>(target.get_label_encoder())
-            = source.get_label_encoder();
-
-    uint64_t num_rows = source.num_objects();
-    if(num_rows != graph.num_nodes()) {
-        logger->error(
-                "Graph and annotation are incompatible. Graph has {} nodes, annotation "
-                "has {} entries",
-                graph.num_nodes(), num_rows);
-        std::exit(1);
-    }
+    uint64_t num_rows = graph.num_nodes();
 
     sdsl::int_vector_buffer succ(successor_file, std::ios::in, 1024*1024);
     assert(succ.size() == num_rows);
     constexpr uint64_t chunk_size = 1 << 20;
-    std::vector<uint64_t> succ_mem;
-    ProgressBar progress_bar((num_rows - 1) / chunk_size + 1, "Compute diffs", std::cerr,
-                             !common::get_verbose());
+    std::vector<uint64_t> succ_chunk;
+    ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
     for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
-        succ_mem.resize(std::min(chunk_size, num_rows - chunk));
-        for (uint64_t idx = chunk, i = 0; i < succ_mem.size(); ++idx, ++i) {
-            succ_mem[i] = succ[idx];
+        succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
+        for (uint64_t idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
+            succ_chunk[i] = succ[idx];
         }
 
-        std::vector<std::vector<uint64_t>> indices(source.num_labels());
-
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (uint64_t l_idx = 0; l_idx < source.num_labels(); ++l_idx) {
-            const Label &label = source.get_all_labels()[l_idx];
-            const bitmap &source_col = source.get_column(label);
+        for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
+            if(sources[l_idx]->num_objects() != graph.num_nodes()) {
+                logger->error(
+                        "Graph and annotation are incompatible. Graph has {} nodes, "
+                        "annotation has {} entries",
+                        graph.num_nodes(), num_rows);
+                std::exit(1);
+            }
 
-            for (uint64_t row_idx = chunk, j = 0; j < succ_mem.size(); ++row_idx, ++j) {
-                bool v;
-                if (succ_mem[j]) {
-                    uint64_t anno_idx
-                            = graph::AnnotatedSequenceGraph::graph_to_anno_index(succ_mem[j]);
-                    v = source_col[row_idx] ^ source_col[anno_idx];
-                } else {
-                    v = source_col[row_idx];
+            for (uint64_t l_idx2 = 0; l_idx2 < sources[l_idx]->num_labels(); ++l_idx2) {
+                std::vector<uint64_t> indices;
+                const Label &label = sources[l_idx]->get_all_labels()[l_idx2];
+                const bitmap &source_col = sources[l_idx]->get_column(label);
+
+                for (uint64_t row_idx = chunk, j = 0; j < succ_chunk.size(); ++row_idx, ++j) {
+                    bool v;
+                    if (succ_chunk[j]) {
+                        uint64_t anno_idx
+                                = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                                        succ_chunk[j]);
+                        v = source_col[row_idx] ^ source_col[anno_idx];
+                    } else {
+                        v = source_col[row_idx];
+                    }
+                    if (v)
+                        indices.push_back(row_idx);
                 }
-                if (v)
-                    indices[l_idx].push_back(row_idx);
+                targets[l_idx]->add_labels(indices, { label });
             }
         }
 
-        for (uint64_t l_idx = 0; l_idx < source.num_labels(); ++l_idx) {
-            const Label &label = source.get_all_labels()[l_idx];
-            target.add_labels(indices[l_idx], { label });
-        }
-        ++progress_bar;
+        progress_bar += succ_chunk.size();
     }
 
-    auto matrix = target.release_matrix();
-    auto diff_annotation
-            = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
-                                                        terminal_file);
+    std::vector<ColumnDiffAnnotator> result;
 
-    return std::make_unique<ColumnDiffAnnotator>(std::move(diff_annotation),
-                                              source.get_label_encoder());
+    for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
+        auto matrix = targets[l_idx]->release_matrix();
+        auto diff_annotation
+                = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
+                                                            terminal_file);
+        result.emplace_back(std::move(diff_annotation), sources[l_idx]->get_label_encoder());
+    }
+    return result;
 }
 
-
-template std::unique_ptr<ColumnDiffAnnotator>
-convert_to_column_diff(const graph::DBGSuccinct &graph,
-                       const ColumnCompressed<std::string> &source,
-                       const std::string &outfbase,
-                       uint32_t max_depth);
+template std::vector<ColumnDiffAnnotator> convert_to_column_diff(
+        const graph::DBGSuccinct &graph,
+        const std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &sources,
+        const std::string &outfbase,
+        uint32_t max_depth);
 
 std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
                                                       RowCompressed<std::string> &&annotation,

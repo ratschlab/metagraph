@@ -16,6 +16,7 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::annot;
+using namespace ::testing;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -27,12 +28,12 @@ const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basen
 class ConvertFromRowCompressed : public ::testing::Test {
   protected:
     static const uint64_t num_rows = 5;
-    RowCompressed<> *initial_annotation;
-    MultiLabelEncoded<std::string> *annotation;
+    std::unique_ptr<RowCompressed<>> initial_annotation;
+    std::unique_ptr<MultiLabelEncoded<std::string>> annotation;
     std::unique_ptr<graph::DBGSuccinct> graph;
 
     virtual void SetUp() {
-        initial_annotation = new RowCompressed<>(num_rows);
+        initial_annotation = std::make_unique<RowCompressed<>>(num_rows);
         initial_annotation->add_labels({ 0 }, { "Label0", "Label2", "Label8" });
         initial_annotation->add_labels({ 2 }, { "Label1", "Label2" });
         initial_annotation->add_labels({ 3 }, { "Label1", "Label2", "Label8" });
@@ -49,19 +50,11 @@ class ConvertFromRowCompressed : public ::testing::Test {
         ASSERT_EQ(5u, annotation->num_objects());
         ASSERT_EQ(9u, annotation->num_relations());
 
-        EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}),
-                  convert_to_set(annotation->get(0)));
-        EXPECT_EQ(std::vector<std::string>({}),
-                  annotation->get(1));
-        EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-                  convert_to_set(annotation->get(2)));
-        EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-                  convert_to_set(annotation->get(3)));
-        EXPECT_EQ(convert_to_set({"Label2"}),
-                  convert_to_set(annotation->get(4)));
-
-        delete initial_annotation;
-        delete annotation;
+        EXPECT_THAT(annotation->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get(1), UnorderedElementsAre());
+        EXPECT_THAT(annotation->get(2), UnorderedElementsAre("Label1", "Label2"));
+        EXPECT_THAT(annotation->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get(4), UnorderedElementsAre("Label2"));
     }
 };
 
@@ -120,13 +113,13 @@ MultiLabelEncoded<std::string> *MergeAnnotators::merged_annotation = nullptr;
 
 class ConvertFromColumnCompressed : public ::testing::Test {
   protected:
-    ColumnCompressed<> *initial_annotation = nullptr;
-    MultiLabelEncoded<std::string> *annotation = nullptr;
+    std::unique_ptr<ColumnCompressed<>> initial_annotation;
+    std::unique_ptr<MultiLabelEncoded<std::string>> annotation;
     std::unique_ptr<graph::DBGSuccinct> graph;
 
 
     virtual void SetUp() {
-        initial_annotation = new ColumnCompressed<>(5);
+        initial_annotation = std::make_unique<ColumnCompressed<>>(5);
         initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
         initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
         initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
@@ -141,21 +134,13 @@ class ConvertFromColumnCompressed : public ::testing::Test {
         ASSERT_TRUE(annotation);
         ASSERT_EQ(4u, annotation->num_labels());
         ASSERT_EQ(5u, annotation->num_objects());
-//        ASSERT_EQ(9u, annotation->num_relations());
+        ASSERT_EQ(9u, annotation->num_relations());
 
-        EXPECT_EQ(convert_to_set({"Label0", "Label2", "Label8"}),
-                  convert_to_set(annotation->get(0)));
-        EXPECT_EQ(std::vector<std::string>({}),
-                  annotation->get(1));
-        EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-                  convert_to_set(annotation->get(2)));
-        EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-                  convert_to_set(annotation->get(3)));
-        EXPECT_EQ(convert_to_set({"Label2"}),
-                  convert_to_set(annotation->get(4)));
-
-        delete initial_annotation;
-        delete annotation;
+        EXPECT_THAT(annotation->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get(1), UnorderedElementsAre());
+        EXPECT_THAT(annotation->get(2), UnorderedElementsAre("Label1", "Label2"));
+        EXPECT_THAT(annotation->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get(4), UnorderedElementsAre("Label2"));
     }
 
 };
@@ -175,25 +160,10 @@ void clean_column_diff_files(const std::string& suffix) {
     std::filesystem::remove(outfbase + ".diff.column.annodbg");
 }
 
-TEST(ConvertFromColumnCompressedEmpty, to_ColumnDiff) {
-    ColumnCompressed<> empty_column_annotator(5);
-    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
-
-
-    clean_column_diff_files("column.diff.empty");
-    std::string outfbase = test_dump_basename + "column.diff.empty";
-    std::unique_ptr<ColumnDiffAnnotator> result
-            = convert_to_column_diff(*graph, empty_column_annotator, outfbase, 1);
-
-    EXPECT_EQ(0u, result->num_labels());
-    EXPECT_EQ(0u, result->num_objects());
-    EXPECT_EQ(0u, result->num_relations());
-
-    clean_column_diff_files("column.diff.empty");
-}
-
 TEST(ColumnDiff, succ) {
-    ColumnCompressed<> empty_column_annotator(5);
+    std::vector<std::unique_ptr<ColumnCompressed<>>> empty_source(1);
+    empty_source[0] = std::make_unique<ColumnCompressed<>>(5);
+
     std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
 
     const std::string outfbase = test_dump_basename + "column.diff.succ";
@@ -203,7 +173,7 @@ TEST(ColumnDiff, succ) {
     for (uint32_t max_depth : { 1, 3, 5 }) {
         clean_column_diff_files("column.diff.succ");
 
-        convert_to_column_diff(*graph, empty_column_annotator, outfbase, max_depth);
+        convert_to_column_diff(*graph, empty_source, outfbase, max_depth);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
 
@@ -218,16 +188,144 @@ TEST(ColumnDiff, succ) {
     clean_column_diff_files("column.diff.succ");
 }
 
-TEST_F(ConvertFromColumnCompressed, to_ColumnDiff) {
+TEST(ColumnDiff, ConvertFromColumnCompressedEmpty) {
+    std::vector<std::unique_ptr<ColumnCompressed<>>> empty_source(1);
+    empty_source[0] = std::make_unique<ColumnCompressed<>>(5);
+
+    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+
+
+    clean_column_diff_files("column.diff.empty");
+    std::string outfbase = test_dump_basename + "column.diff.empty";
+    std::vector<ColumnDiffAnnotator> result
+            = convert_to_column_diff<std::string>(*graph, empty_source, outfbase, 1);
+
+    ASSERT_EQ(0u, result.size());
+
+    clean_column_diff_files("column.diff.empty");
+}
+
+TEST(CoumnDiff, ConvertFromColumnCompressedSameLabels) {
+    const std::string outfbase = test_dump_basename + "column.diff.convert";
+    const std::string succ_file = outfbase + ".succ";
+    clean_column_diff_files("column.diff.convert");
+
+    std::vector<std::vector<std::string>> label_groups
+            = { { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" } };
+    for (const auto &labels : label_groups) {
+        auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
+        initial_annotation->add_labels({ 0, 1, 2, 3, 4 }, labels);
+
+        std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
+        source[0] = std::move(initial_annotation);
+
+        auto graph = std::make_unique<graph::DBGSuccinct>(3);
+        graph->add_sequence("ACGTCAC");
+        graph->mask_dummy_kmers(1, false);
+
+        const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
+
+        for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
+            std::vector<ColumnDiffAnnotator> result
+                    = convert_to_column_diff(*graph, source, outfbase, max_depth);
+            clean_column_diff_files("column.diff.convert");
+
+            ASSERT_EQ(1U, result.size());
+            auto &annotation = result[0];
+
+            ASSERT_EQ(labels.size(), annotation.num_labels());
+            ASSERT_EQ(5u, annotation.num_objects());
+            EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
+                      annotation.num_relations());
+
+            for (uint32 i = 0; i < annotation.num_objects(); ++i) {
+                ASSERT_THAT(annotation.get(i), ContainerEq(labels));
+            }
+        }
+    }
+}
+
+TEST(CoumnDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
+    const std::string outfbase = test_dump_basename + "column.diff.convert";
+    const std::string succ_file = outfbase + ".succ";
+    clean_column_diff_files("column.diff.convert");
+
+    std::vector<std::vector<std::string>> label_groups
+            = { { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" } };
+    for (const auto &labels : label_groups) {
+        std::vector<std::unique_ptr<ColumnCompressed<>>> sources;
+        for (const std::string &label : labels) {
+            auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
+            initial_annotation->add_labels({ 0, 1, 2, 3, 4 }, { label });
+            sources.push_back(std::move(initial_annotation));
+        }
+
+        auto graph = std::make_unique<graph::DBGSuccinct>(3);
+        graph->add_sequence("ACGTCAC");
+        graph->mask_dummy_kmers(1, false);
+
+        const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
+
+        for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
+            std::vector<ColumnDiffAnnotator> result
+                    = convert_to_column_diff(*graph, sources, outfbase, max_depth);
+            clean_column_diff_files("column.diff.convert");
+
+            ASSERT_EQ(labels.size(), result.size());
+            for (uint32_t i = 0; i < result.size(); ++i) {
+                auto &annotation = result[i];
+
+                ASSERT_EQ(1, annotation.num_labels());
+                ASSERT_EQ(5u, annotation.num_objects());
+                EXPECT_EQ(expected_relations[max_depth - 1],
+                          annotation.num_relations());
+
+                for (uint32 idx = 0; idx < annotation.num_objects(); ++idx) {
+                    ASSERT_THAT(annotation.get(idx), ElementsAre(labels[i]));
+                }
+            }
+        }
+    }
+}
+
+TEST(CoumnDiff, ConvertFromColumnCompressed) {
 #pragma clang optimize off
     const std::string outfbase = test_dump_basename + "column.diff.convert";
     const std::string succ_file = outfbase + ".succ";
     clean_column_diff_files("column.diff.convert");
 
-    constexpr uint32_t max_depth = 5;
-    annotation = convert_to_column_diff(*graph, *initial_annotation, outfbase, max_depth).release();
+    auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
+    initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
+    initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
+    initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
+    initial_annotation->add_labels({ 4 }, {"Label2"});
 
+    std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
+    source[0] = std::move(initial_annotation);
+
+    auto graph = std::make_unique<graph::DBGSuccinct>(3);
+    graph->add_sequence("ACGTCAC");
+    graph->mask_dummy_kmers(1, false);
+
+    constexpr uint32_t max_depth = 5;
+    std::vector<ColumnDiffAnnotator> result
+            = convert_to_column_diff(*graph, source, outfbase, max_depth);
     clean_column_diff_files("column.diff.convert");
+
+    ASSERT_EQ(1U, result.size());
+    auto &annotation = result[0];
+
+    ASSERT_EQ(4u, annotation.num_labels());
+    ASSERT_EQ(5u, annotation.num_objects());
+    // we added 9 relations, but sparsification brings it up to 12 (because there is no
+    // correlation between annotation and vicinity)
+    ASSERT_EQ(12u, annotation.num_relations());
+
+    ASSERT_THAT(annotation.get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+    ASSERT_THAT(annotation.get(1), UnorderedElementsAre());
+    ASSERT_THAT(annotation.get(2), UnorderedElementsAre("Label1", "Label2"));
+    ASSERT_THAT(annotation.get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+    ASSERT_THAT(annotation.get(4), UnorderedElementsAre("Label2"));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {
@@ -241,9 +339,7 @@ TEST_F(ConvertFromColumnCompressed, to_ColumnDiff) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_BinRelWT) {
-    annotation = convert<BinRelWTAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<BinRelWTAnnotator>(std::move(*initial_annotation));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT_sdsl) {
@@ -257,9 +353,7 @@ TEST_F(ConvertFromColumnCompressed, to_BinRelWT) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_BinRelWT_sdsl) {
-    annotation = convert<BinRelWT_sdslAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<BinRelWT_sdslAnnotator>(std::move(*initial_annotation));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_RowFlat) {
@@ -273,9 +367,7 @@ TEST_F(ConvertFromColumnCompressed, to_BinRelWT_sdsl) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_RowFlat) {
-    annotation = convert<RowFlatAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<RowFlatAnnotator>(std::move(*initial_annotation));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_Rainbowfish) {
@@ -289,9 +381,7 @@ TEST_F(ConvertFromColumnCompressed, to_RowFlat) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
-    annotation = convert<RainbowfishAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_GreedyBRWT) {
@@ -305,9 +395,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_GreedyBRWT) {
-    annotation = convert_to_greedy_BRWT<MultiBRWTAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert_to_greedy_BRWT<MultiBRWTAnnotator>(std::move(*initial_annotation));
 }
 
 
@@ -322,9 +410,7 @@ TEST(ConvertFromRowCompressedEmpty, to_BinRelWT) {
 }
 
 TEST_F(ConvertFromRowCompressed, to_BinRelWT) {
-    annotation = convert<BinRelWTAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<BinRelWTAnnotator>(std::move(*initial_annotation));
 }
 
 TEST(ConvertFromRowCompressedEmpty, to_BinRelWT_sdsl) {
@@ -338,9 +424,7 @@ TEST(ConvertFromRowCompressedEmpty, to_BinRelWT_sdsl) {
 }
 
 TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
-    annotation = convert<BinRelWT_sdslAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<BinRelWT_sdslAnnotator>(std::move(*initial_annotation));
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
@@ -354,17 +438,13 @@ TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
 // }
 
 TEST_F(ConvertFromRowCompressed, to_RowFlat) {
-    annotation = convert<RowFlatAnnotator>(
-        std::move(*initial_annotation)
-    ).release();
+    annotation = convert<RowFlatAnnotator>(std::move(*initial_annotation));
 }
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
     initial_annotation->serialize(test_dump_basename_row_compressed_to_rowflat);
 
-    annotation = convert<RowFlatAnnotator>(
-        test_dump_basename_row_compressed_to_rowflat
-    ).release();
+    annotation = convert<RowFlatAnnotator>(test_dump_basename_row_compressed_to_rowflat);
 }
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
@@ -373,9 +453,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
 
     initial_annotation->serialize(rowflat_filename);
 
-    annotation = convert<RowFlatAnnotator>(
-        rowflat_filename
-    ).release();
+    annotation = convert<RowFlatAnnotator>(rowflat_filename);
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_Rainbowfish) {
@@ -389,7 +467,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
 // }
 
 TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
-    annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation)).release();
+    annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation));
 }
 
 TEST(ConvertFromRowCompressedEmpty, to_RowDiffAnnotation) {
@@ -404,20 +482,20 @@ TEST(ConvertFromRowCompressedEmpty, to_RowDiffAnnotation) {
 }
 
 TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotation) {
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
+    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
 }
 
 TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationCircular) {
     // create a graph that only contains a cycle
     graph = create_graph(2, {"ACGTAG"});
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
+    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
 }
 
 TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationTwoDisconnected) {
     // create a graph that consists of 2 connected components
     graph = create_graph(4, { "AAAACC", "ATTTT" });
 
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
+    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
 }
 
 // test row diff annotation on a graph with multiple disconnected cycles of size 1
@@ -427,14 +505,13 @@ TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationCircularSmall) {
     graph->get_boss().erase_redundant_dummy_edges();
     graph->mask_dummy_kmers(1, false);
 
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation)).release();
+    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
 }
 
 TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationMaxLength) {
     for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
         annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
-                                         max_path_length)
-                             .release();
+                                         max_path_length);
     }
 }
 
@@ -446,8 +523,7 @@ TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationDisconnectedCircular) {
     graph->mask_dummy_kmers(1, false);
     for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
         annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
-                                         max_path_length)
-                             .release();
+                                         max_path_length);
     }
 }
 
