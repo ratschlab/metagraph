@@ -720,8 +720,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     if (max_hull_forks) {
-        logger->trace("[Query graph extension] Computing query graph hull");
-        logger->trace("[Query graph expansion] max traversal distance: {}\tmax fork count: {}",
+        logger->trace("[Query graph augmentation] Computing query graph hull");
+        logger->trace("[Query graph augmentation] max traversal distance: {}, max fork count: {}",
                       max_hull_depth, max_hull_forks);
         timer.reset();
 
@@ -739,7 +739,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
             graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
         }
 
-        logger->trace("[Query graph extension] Added {} nodes from {} contigs in {} sec",
+        logger->trace("[Query graph augmentation] Added {} nodes from {} contigs in {} sec",
                       num_added, contigs.size() - hull_contigs_begin, timer.elapsed());
     }
 
