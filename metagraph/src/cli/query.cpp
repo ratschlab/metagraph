@@ -165,7 +165,6 @@ struct HullPathContext {
 // returns whether traversal should continue.
 template <class ContigCallback>
 void call_hull_sequences(const DeBruijnGraph &full_dbg,
-                         node_index node,
                          std::string kmer,
                          const ContigCallback &callback,
                          const std::function<bool(std::string_view seq,
@@ -173,6 +172,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                                                   size_t depth,
                                                   size_t fork_count)> &continue_traversal) {
     // DFS from branching points
+    node_index node = full_dbg.kmer_to_node(kmer);
+    assert(node);
+    kmer.erase(kmer.begin());
     kmer.push_back('$');
     std::vector<HullPathContext> paths_to_extend;
     full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
@@ -373,8 +375,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
                                    size_t sub_k,
                                    size_t max_num_nodes_per_suffix,
-                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
-                                   std::vector<std::pair<std::string, std::vector<node_index>>> *rc_contigs) {
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
     std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
 
@@ -390,22 +391,9 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
                 full_dbg.map_to_nodes(kmer, [&](node_index cn) { node = cn; });
 
             added_nodes.emplace_back(std::move(kmer), node);
-
-            if (rc_contigs->size()) {
-                // insert a placeholder
-                added_nodes_rc.emplace_back(added_nodes.back().first, DeBruijnGraph::npos);
-                reverse_complement(added_nodes_rc.back().first);
-            }
         };
         call_suffix_match_sequences(full_dbg, contig, path,
                                     callback, sub_k, max_num_nodes_per_suffix);
-        if (rc_contigs->size()) {
-            assert(!full_dbg.is_canonical_mode());
-            call_suffix_match_sequences(full_dbg,
-                                        (*rc_contigs)[i].first,
-                                        (*rc_contigs)[i].second,
-                                        callback, sub_k, max_num_nodes_per_suffix);
-        }
 
         #pragma omp critical
         {
@@ -427,17 +415,13 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
     for (auto&& pair : contig_buffer) {
         contigs->emplace_back(std::move(pair));
     }
-    for (auto&& pair : rev_comp_contig_buffer) {
-        rc_contigs->emplace_back(std::move(pair));
-    }
 }
 
 void add_hull_contigs(const DeBruijnGraph &full_dbg,
                       const DeBruijnGraph &batch_graph,
                       size_t max_hull_forks,
                       size_t max_hull_depth,
-                      std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
-                      std::vector<std::pair<std::string, std::vector<node_index>>> *rc_contigs) {
+                      std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
     tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
 
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
@@ -489,29 +473,17 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         };
 
         for (size_t j = 0; j < path.size(); ++j) {
-            // if the next starting node is not in the graph, or if it has a single
-            // outgoing node which is also in this contig, skip
+            // Start expansion from matched nodes.
+            // If it has a single outgoing node which is also in this contig, skip.
             if (path[j] && !(j + 1 < path.size()
                                     && path[j + 1]
                                     && full_dbg.has_single_outgoing(path[j]))) {
-                call_hull_sequences(full_dbg, path[j],
-                                    contig.substr(j + 1, full_dbg.get_k() - 1),
+                std::string kmer = contig.substr(j, full_dbg.get_k());
+                call_hull_sequences(full_dbg, contig.substr(j, full_dbg.get_k()),
                                     callback, continue_traversal);
-            }
-        }
-
-        if (i < rc_contigs->size()) {
-            const std::string &rev_contig = (*rc_contigs)[i].first;
-            const std::vector<node_index> &rev_path = (*rc_contigs)[i].second;
-
-            for (size_t j = 0; j < rev_path.size(); ++j) {
-                // if the next starting node is not in the graph, or if it has a single
-                // outgoing node which is also in this contig, skip
-                if (rev_path[j] && !(j + 1 < rev_path.size()
-                                        && rev_path[j + 1]
-                                        && full_dbg.has_single_outgoing(rev_path[j]))) {
-                    call_hull_sequences(full_dbg, rev_path[j],
-                                        rev_contig.substr(j + 1, full_dbg.get_k() - 1),
+                if (batch_graph.is_canonical_mode()) {
+                    reverse_complement(kmer);
+                    call_hull_sequences(full_dbg, contig.substr(j, full_dbg.get_k()),
                                         callback, continue_traversal);
                 }
             }
@@ -614,8 +586,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), canonical);
-
+    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(),
+                                                       canonical && max_hull_forks);
     size_t max_input_sequence_length = 0;
 
     if (kPrefilterWithBloom && dbg_succ && sub_k == full_dbg.get_k()) {
@@ -661,14 +633,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                get_num_threads(),
                                canonical);  // pull only primary contigs when building canonical query graph
 
-    std::vector<std::pair<std::string, std::vector<node_index>>> rc_contigs;
-    if (canonical && !full_dbg.is_canonical_mode()) {
-        rc_contigs = contigs;
-        for (auto &[contig, path] : rc_contigs) {
-            reverse_complement(contig);
-        }
-    }
-
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
@@ -676,14 +640,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map from nodes in query graph to full graph
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
-        if (full_dbg.is_canonical_mode()) {
-            full_dbg.map_to_nodes(contigs[i].first,
-                                  [&](node_index node) { contigs[i].second.push_back(node); });
-        } else {
-            contigs[i].second = map_sequence_to_nodes(full_dbg, contigs[i].first);
-            if (canonical)
-                rc_contigs[i].second = map_sequence_to_nodes(full_dbg, rc_contigs[i].first);
-        }
+        full_dbg.map_to_nodes(contigs[i].first,
+                              [&](node_index node) { contigs[i].second.push_back(node); });
     }
     logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
                   timer.elapsed());
@@ -698,25 +656,11 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       "suffixes of length {}", sub_k);
         timer.reset();
 
-        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
-                                      &contigs, &rc_contigs);
+        // TODO: check what happens to reverse complement
+        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix, &contigs);
 
-        assert(((canonical && !full_dbg.is_canonical_mode()) && contigs.size() == rc_contigs.size())
-                || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
-
-        size_t num_added = 0;
-
-        for (size_t i = original_size; i < contigs.size(); ++i) {
-            graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
-        }
-        for (size_t i = original_size; i < rc_contigs.size(); ++i) {
-            graph_init->add_sequence(rc_contigs[i].first, [&](node_index) { ++num_added; });
-        }
-
-        logger->trace("[Query graph construction] Finding {} and adding {}"
-                      " suffix-matching k-mers took {} sec",
-                      (contigs.size() - original_size) * (rc_contigs.size() ? 2 : 1),
-                      num_added, timer.elapsed());
+        logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
+                      contigs.size() - original_size, timer.elapsed());
     }
 
     if (max_hull_forks) {
@@ -725,45 +669,19 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       max_hull_depth, max_hull_forks);
         timer.reset();
 
+        for (size_t i = original_size; i < contigs.size(); ++i) {
+            graph_init->add_sequence(contigs[i].first);
+        }
+
         size_t hull_contigs_begin = contigs.size();
 
-        add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth,
-                         &contigs, &rc_contigs);
+        add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth, &contigs);
 
-        assert(((canonical && !full_dbg.is_canonical_mode()) && rc_contigs.size() == hull_contigs_begin)
-                || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
-
-        size_t num_added = 0;
-
-        for (size_t i = hull_contigs_begin; i < contigs.size(); ++i) {
-            graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
-        }
-
-        logger->trace("[Query graph augmentation] Added {} nodes from {} contigs in {} sec",
-                      num_added, contigs.size() - hull_contigs_begin, timer.elapsed());
+        logger->trace("[Query graph augmentation] Augmented the graph with {} contigs in {} sec",
+                      contigs.size() - hull_contigs_begin, timer.elapsed());
     }
 
-    // merge rc_contigs and contigs
-    for (size_t i = 0; i < rc_contigs.size(); ++i) {
-        std::vector<node_index> &nodes = contigs[i].second;
-        std::vector<node_index> &dual_nodes = rc_contigs[i].second;
-        std::reverse(dual_nodes.begin(), dual_nodes.end());
-        assert(nodes.size() == dual_nodes.size());
-
-        for (size_t j = 0; j < nodes.size(); ++j) {
-            if (!nodes[j]) {
-                nodes[j] = dual_nodes[j];
-            } else if (dual_nodes[j]) {
-                assert(!full_dbg.is_canonical_mode());
-                assert(canonical);
-                logger->warn("Node {} and its dual {} are present in the full"
-                             " non-canonical graph. Only the first of them will"
-                             " be annotated in the canonical query graph.",
-                             nodes[j], dual_nodes[j]);
-            }
-        }
-    }
-    rc_contigs.clear();
+    graph_init.reset();
 
     logger->trace("[Query graph construction] Intersecting batch graph with full graph");
     timer.reset();
