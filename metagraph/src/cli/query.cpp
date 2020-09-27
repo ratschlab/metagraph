@@ -507,9 +507,9 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
             for (size_t j = 0; j < rev_path.size(); ++j) {
                 // if the next starting node is not in the graph, or if it has a single
                 // outgoing node which is also in this contig, skip
-                if (rev_contig[j] && !(j + 1 < rev_contig.size()
-                                        && rev_contig[j + 1]
-                                        && full_dbg.has_single_outgoing(rev_contig[j]))) {
+                if (rev_path[j] && !(j + 1 < rev_path.size()
+                                        && rev_path[j + 1]
+                                        && full_dbg.has_single_outgoing(rev_path[j]))) {
                     call_hull_sequences(full_dbg, rev_path[j],
                                         rev_contig.substr(j + 1, full_dbg.get_k() - 1),
                                         callback, continue_traversal);
@@ -795,7 +795,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
         size_t j = 0;
         // nodes in the query graph hull may overlap
-        graph->map_to_nodes_sequentially(contig, [&](node_index node) {
+        graph->map_to_nodes(contig, [&](node_index node) {
             __atomic_store_n(&index_in_full_graph[node], nodes_in_full[j++],
                              __ATOMIC_RELAXED);
         });
