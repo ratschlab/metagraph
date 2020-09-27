@@ -370,6 +370,68 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     );
 }
 
+void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
+                                   size_t sub_k,
+                                   size_t max_num_nodes_per_suffix,
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *rc_contigs) {
+    std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+    std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < contigs->size(); ++i) {
+        const auto &[contig, path] = (*contigs)[i];
+        std::vector<std::pair<std::string, node_index>> added_nodes;
+        std::vector<std::pair<std::string, node_index>> added_nodes_rc;
+        auto callback = [&](std::string&& kmer, node_index node) {
+            assert(node == full_dbg.kmer_to_node(kmer));
+
+            if (full_dbg.is_canonical_mode())
+                full_dbg.map_to_nodes(kmer, [&](node_index rc_node) { node = rc_node; });
+
+            added_nodes.emplace_back(std::move(kmer), node);
+
+            if (rc_contigs->size()) {
+                // insert a placeholder
+                added_nodes_rc.emplace_back(added_nodes.back().first, DeBruijnGraph::npos);
+                reverse_complement(added_nodes_rc.back().first);
+            }
+        };
+        call_suffix_match_sequences(full_dbg, contig, path,
+                                    callback, sub_k, max_num_nodes_per_suffix);
+        if (rc_contigs->size()) {
+            assert(!full_dbg.is_canonical_mode());
+            call_suffix_match_sequences(full_dbg,
+                                        (*rc_contigs)[i].first,
+                                        (*rc_contigs)[i].second,
+                                        callback, sub_k, max_num_nodes_per_suffix);
+        }
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < added_nodes.size(); ++j) {
+                contig_buffer.emplace_back(
+                    std::move(added_nodes[j].first),
+                    std::vector<node_index>{ added_nodes[j].second }
+                );
+            }
+            for (size_t j = 0; j < added_nodes_rc.size(); ++j) {
+                rev_comp_contig_buffer.emplace_back(
+                    std::move(added_nodes_rc[j].first),
+                    std::vector<node_index>{ added_nodes_rc[j].second }
+                );
+            }
+        }
+    }
+
+    for (auto&& pair : contig_buffer) {
+        contigs->emplace_back(std::move(pair));
+    }
+    for (auto&& pair : rev_comp_contig_buffer) {
+        rc_contigs->emplace_back(std::move(pair));
+    }
+}
+
 template <class Graph, class Contigs>
 void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
     for (const auto &[contig, nodes_in_full] : contigs) {
@@ -537,69 +599,20 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       "suffixes of length {}", sub_k);
         timer.reset();
 
-        size_t num_added = 0;
-
-        std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
-        std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
-
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const auto &[contig, path] = contigs[i];
-            std::vector<std::pair<std::string, node_index>> added_nodes;
-            std::vector<std::pair<std::string, node_index>> added_nodes_rc;
-            auto callback = [&](std::string&& kmer, node_index node) {
-                assert(node == full_dbg.kmer_to_node(kmer));
-
-                if (full_dbg.is_canonical_mode())
-                    full_dbg.map_to_nodes(kmer, [&](node_index rc_node) { node = rc_node; });
-
-                added_nodes.emplace_back(std::move(kmer), node);
-
-                if (canonical && !full_dbg.is_canonical_mode()) {
-                    // insert a placeholder
-                    added_nodes_rc.emplace_back(added_nodes.back().first, DeBruijnGraph::npos);
-                    reverse_complement(added_nodes_rc.back().first);
-                }
-            };
-            call_suffix_match_sequences(*dbg_succ, contig, path,
-                                        callback, sub_k, max_num_nodes_per_suffix);
-            if (canonical && !full_dbg.is_canonical_mode()) {
-                assert(!full_dbg.is_canonical_mode());
-                call_suffix_match_sequences(*dbg_succ,
-                                            rc_contigs[i].first,
-                                            rc_contigs[i].second,
-                                            callback, sub_k, max_num_nodes_per_suffix);
-            }
-
-            #pragma omp critical
-            {
-                for (size_t j = 0; j < added_nodes.size(); ++j) {
-                    contig_buffer.emplace_back(
-                        std::move(added_nodes[j].first),
-                        std::vector<node_index>{ added_nodes[j].second }
-                    );
-                }
-                for (size_t j = 0; j < added_nodes_rc.size(); ++j) {
-                    rev_comp_contig_buffer.emplace_back(
-                        std::move(added_nodes_rc[j].first),
-                        std::vector<node_index>{ added_nodes_rc[j].second }
-                    );
-                }
-            }
-        }
-
-
-        for (auto&& pair : contig_buffer) {
-            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
-            contigs.emplace_back(std::move(pair));
-        }
-        for (auto&& pair : rev_comp_contig_buffer) {
-            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
-            rc_contigs.emplace_back(std::move(pair));
-        }
+        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
+                                      &contigs, &rc_contigs);
 
         assert(((canonical && !full_dbg.is_canonical_mode()) && contigs.size() == rc_contigs.size())
                 || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
+
+        size_t num_added = 0;
+
+        for (size_t i = original_size; i < contigs.size(); ++i) {
+            graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
+        }
+        for (size_t i = original_size; i < rc_contigs.size(); ++i) {
+            graph_init->add_sequence(rc_contigs[i].first, [&](node_index) { ++num_added; });
+        }
 
         logger->trace("[Query graph construction] Finding {} and adding {}"
                       " suffix-matching k-mers took {} sec",
