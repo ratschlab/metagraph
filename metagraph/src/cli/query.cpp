@@ -432,6 +432,124 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
     }
 }
 
+void add_hull_contigs(const DeBruijnGraph &full_dbg,
+                      const DeBruijnGraph &batch_graph,
+                      size_t max_hull_forks,
+                      size_t max_hull_depth,
+                      std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
+                      std::vector<std::pair<std::string, std::vector<node_index>>> *rc_contigs) {
+    tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
+
+    size_t hull_contig_count = 0;
+
+    std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+    std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < contigs->size(); ++i) {
+        const auto &[contig, path] = (*contigs)[i];
+        std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
+        std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
+        // TODO: combine these two callbacks into one
+        auto callback = [&](const std::string &sequence,
+                            const std::vector<node_index> &path) {
+            added_paths.emplace_back(sequence, path);
+            if (batch_graph.is_canonical_mode()) {
+                added_paths_rc.emplace_back(added_paths.back().first,
+                                            std::vector<node_index>{});
+                reverse_complement(added_paths_rc.back().first);
+                if (!full_dbg.is_canonical_mode()) {
+                    // no need to map here because these will be remapped
+                    // below
+                    added_paths_rc.back().second = map_sequence_to_nodes(
+                        full_dbg, added_paths_rc.back().first
+                    );
+                }
+            }
+        };
+        auto continue_traversal = [&](std::string_view seq,
+                                      node_index last_node,
+                                      size_t depth,
+                                      size_t fork_count) {
+            if (fork_count > max_hull_forks || depth >= max_hull_depth)
+                return false;
+
+            // if the last node is already in the graph, cut off traversal
+            // since this node will be covered in another traversal
+            if (batch_graph.find(seq.substr(seq.size() - batch_graph.get_k()))) {
+                return false;
+            }
+
+            // when a node which has already been accessed is visited,
+            // only continue traversing if the previous access was in a
+            // longer path (i.e., it cut off earlier)
+            bool extend;
+            // TODO: check the number of forks too (shorter paths may have more forks)
+            #pragma omp critical
+            {
+                auto [it, inserted]
+                    = distance_traversed_until_node.emplace(last_node, depth);
+
+                extend = inserted || depth < it->second;
+
+                if (!inserted && depth < it->second)
+                    it.value() = depth;
+            }
+            return extend;
+        };
+
+        for (size_t j = 0; j < path.size(); ++j) {
+            // if the next starting node is not in the graph, or if it has a single
+            // outgoing node which is also in this contig, skip
+            if (path[j] && !(j + 1 < path.size()
+                                    && path[j + 1]
+                                    && full_dbg.has_single_outgoing(path[j]))) {
+                call_hull_sequences(full_dbg, path[j],
+                                    contig.substr(j + 1, full_dbg.get_k() - 1),
+                                    callback, continue_traversal);
+            }
+        }
+
+        if (i < rc_contigs->size()) {
+            const std::string &rev_contig = (*rc_contigs)[i].first;
+            const std::vector<node_index> &rev_path = (*rc_contigs)[i].second;
+
+            for (size_t j = 0; j < rev_path.size(); ++j) {
+                // if the next starting node is not in the graph, or if it has a single
+                // outgoing node which is also in this contig, skip
+                if (rev_contig[j] && !(j + 1 < rev_contig.size()
+                                        && rev_contig[j + 1]
+                                        && full_dbg.has_single_outgoing(rev_contig[j]))) {
+                    call_hull_sequences(full_dbg, rev_path[j],
+                                        rev_contig.substr(j + 1, full_dbg.get_k() - 1),
+                                        callback, continue_traversal);
+                }
+            }
+        }
+
+        #pragma omp critical
+        {
+            hull_contig_count += added_paths.size() + added_paths_rc.size();
+            for (auto&& pair : added_paths) {
+                assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
+                contig_buffer.emplace_back(std::move(pair));
+            }
+            for (auto&& pair : added_paths_rc) {
+                assert(full_dbg.is_canonical_mode()
+                    || pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
+                rev_comp_contig_buffer.emplace_back(std::move(pair));
+            }
+        }
+    }
+
+    for (auto&& pair : contig_buffer) {
+        contigs->emplace_back(std::move(pair));
+    }
+    for (auto&& pair : rev_comp_contig_buffer) {
+        rc_contigs->emplace_back(std::move(pair));
+    }
+}
+
 template <class Graph, class Contigs>
 void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
     for (const auto &[contig, nodes_in_full] : contigs) {
@@ -515,7 +633,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k());
+    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), canonical);
 
     size_t max_input_sequence_length = 0;
 
@@ -626,128 +744,27 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       max_hull_depth, max_hull_forks);
         timer.reset();
 
-        tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
+        size_t hull_contigs_begin = contigs.size();
 
-        size_t hull_contig_count = 0;
+        add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth,
+                         &contigs, &rc_contigs);
+
+        assert(((canonical && !full_dbg.is_canonical_mode()) && contigs.size() == rc_contigs.size())
+                || (!(canonical && !full_dbg.is_canonical_mode()) && rc_contigs.empty()));
+
         size_t num_added = 0;
 
-        std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
-        std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
-
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const auto &[contig, path] = contigs[i];
-            std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
-            std::vector<std::pair<std::string, std::vector<node_index>>> added_paths_rc;
-            // TODO: combine these two callbacks into one
-            auto callback = [&](const std::string &sequence,
-                                const std::vector<node_index> &path) {
-                added_paths.emplace_back(sequence, path);
-                if (canonical) {
-                    added_paths_rc.emplace_back(added_paths.back().first,
-                                                std::vector<node_index>{});
-                    reverse_complement(added_paths_rc.back().first);
-                    if (!full_dbg.is_canonical_mode()) {
-                        // no need to map here because these will be remapped
-                        // below
-                        added_paths_rc.back().second = map_sequence_to_nodes(
-                            full_dbg, added_paths_rc.back().first
-                        );
-                    }
-                }
-            };
-            auto continue_traversal = [&](std::string_view seq,
-                                          node_index last_node,
-                                          size_t depth,
-                                          size_t fork_count) {
-                if (fork_count > max_hull_forks || depth >= max_hull_depth)
-                    return false;
-
-                // if the last node is already in the graph, cut off traversal
-                // since this node will be covered in another traversal
-                if (graph_init->find(seq.substr(seq.size() - graph_init->get_k()))) {
-                    return false;
-                }
-
-                // when a node which has already been accessed is visited,
-                // only continue traversing if the previous access was in a
-                // longer path (i.e., it cut off earlier)
-                bool extend;
-                // TODO: check the number of forks too (shorter paths may have more forks)
-                #pragma omp critical
-                {
-                    auto [it, inserted]
-                        = distance_traversed_until_node.emplace(last_node, depth);
-
-                    extend = inserted || depth < it->second;
-
-                    if (!inserted && depth < it->second)
-                        it.value() = depth;
-                }
-                return extend;
-            };
-
-            for (size_t j = 0; j < path.size(); ++j) {
-                // if the next starting node is not in the graph, or if it has a single
-                // outgoing node which is also in this contig, skip
-                if (path[j] && !(j + 1 < path.size()
-                                        && path[j + 1]
-                                        && full_dbg.has_single_outgoing(path[j]))) {
-                    call_hull_sequences(full_dbg, path[j],
-                                        contig.substr(j + 1, full_dbg.get_k() - 1),
-                                        callback, continue_traversal);
-                }
-            }
-
-            if (i < rc_contigs.size()) {
-                const std::string &rev_contig = rc_contigs[i].first;
-                const std::vector<node_index> &rev_path = rc_contigs[i].second;
-
-                for (size_t j = 0; j < rev_path.size(); ++j) {
-                    // if the next starting node is not in the graph, or if it has a single
-                    // outgoing node which is also in this contig, skip
-                    if (rev_contig[j] && !(j + 1 < rev_contig.size()
-                                            && rev_contig[j + 1]
-                                            && full_dbg.has_single_outgoing(rev_contig[j]))) {
-                        call_hull_sequences(full_dbg, rev_path[j],
-                                            rev_contig.substr(j + 1, full_dbg.get_k() - 1),
-                                            callback, continue_traversal);
-                    }
-                }
-            }
-
-            #pragma omp critical
-            {
-                hull_contig_count += added_paths.size() + added_paths_rc.size();
-                for (auto&& pair : added_paths) {
-                    assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
-                    contig_buffer.emplace_back(std::move(pair));
-                }
-                for (auto&& pair : added_paths_rc) {
-                    assert(full_dbg.is_canonical_mode()
-                        || pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
-                    rev_comp_contig_buffer.emplace_back(std::move(pair));
-                }
-            }
+        for (size_t i = hull_contigs_begin; i < contigs.size(); ++i) {
+            graph_init->add_sequence(contigs[i].first, [&](node_index) { ++num_added; });
         }
-
-        assert((canonical && contig_buffer.size() == rev_comp_contig_buffer.size())
-                || (!canonical && rev_comp_contig_buffer.empty()));
-
-        for (auto&& pair : contig_buffer) {
-            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
-            contigs.emplace_back(std::move(pair));
+        for (size_t i = hull_contigs_begin; i < rc_contigs.size(); ++i) {
+            graph_init->add_sequence(rc_contigs[i].first, [&](node_index) { ++num_added; });
         }
-        for (auto&& pair : rev_comp_contig_buffer) {
-            graph_init->add_sequence(pair.first, [&](node_index) { ++num_added; });
-            rc_contigs.emplace_back(std::move(pair));
-        }
-
-        assert((canonical && contigs.size() == rc_contigs.size())
-                || (!canonical && rc_contigs.empty()));
 
         logger->trace("[Query graph extension] Added {} nodes from {} contigs in {} sec",
-                      num_added, hull_contig_count, timer.elapsed());
+                      num_added,
+                      (contigs.size() - hull_contigs_begin) * (rc_contigs.size() ? 2 : 1),
+                      timer.elapsed());
     }
 
     // merge rc_contigs and contigs
