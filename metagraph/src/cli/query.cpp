@@ -484,22 +484,26 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
 
         for (size_t j = 0; j < path.size(); ++j) {
             // Start expansion from matched nodes.
-            // If it has a single outgoing node which is also in this contig, skip.
             if (path[j]) {
-                if (!(j + 1 < path.size()
-                                    && path[j + 1]
-                                    && full_dbg.has_single_outgoing(path[j]))) {
+                // If it has a single outgoing node which is also in this contig, skip.
+                if (!(j + 1 < path.size() && path[j + 1]
+                        && full_dbg.has_single_outgoing(path[j]))) {
                     std::string kmer = contig.substr(j, full_dbg.get_k());
                     call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
                     if (batch_graph.is_canonical_mode()) {
                         reverse_complement(kmer);
                         call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
                     }
-                } else if (batch_graph.is_canonical_mode()
-                        && !(j && path[j - 1] && full_dbg.has_single_incoming(path[j]))) {
-                    std::string kmer = contig.substr(j, full_dbg.get_k());
-                    reverse_complement(kmer);
-                    call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+                } else if (batch_graph.is_canonical_mode()) {
+                    if (full_dbg.is_canonical_mode()) {
+                        if (!(j && path[j - 1] && full_dbg.has_single_incoming(path[j]))) {
+                            std::string kmer = contig.substr(j, full_dbg.get_k());
+                            reverse_complement(kmer);
+                            call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+                        }
+                    } else {
+                        // TODO: handle primary graphs
+                    }
                 }
             }
         }
