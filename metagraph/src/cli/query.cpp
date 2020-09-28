@@ -384,15 +384,14 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
                                    size_t sub_k,
                                    size_t max_num_nodes_per_suffix,
-                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
+                                   bool check_reverse_complement) {
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
-    std::vector<std::pair<std::string, std::vector<node_index>>> rev_comp_contig_buffer;
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < contigs->size(); ++i) {
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, node_index>> added_nodes;
-        std::vector<std::pair<std::string, node_index>> added_nodes_rc;
         auto callback = [&](std::string&& kmer, node_index node) {
             assert(node == full_dbg.kmer_to_node(kmer));
 
@@ -404,18 +403,20 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
         call_suffix_match_sequences(full_dbg, contig, path,
                                     callback, sub_k, max_num_nodes_per_suffix);
 
+        if (check_reverse_complement && !full_dbg.is_canonical_mode()) {
+            std::string rev_contig = contig;
+            reverse_complement(rev_contig);
+            call_suffix_match_sequences(full_dbg, rev_contig,
+                                        map_sequence_to_nodes(full_dbg, rev_contig),
+                                        callback, sub_k, max_num_nodes_per_suffix);
+        }
+
         #pragma omp critical
         {
             for (size_t j = 0; j < added_nodes.size(); ++j) {
                 contig_buffer.emplace_back(
                     std::move(added_nodes[j].first),
                     std::vector<node_index>{ added_nodes[j].second }
-                );
-            }
-            for (size_t j = 0; j < added_nodes_rc.size(); ++j) {
-                rev_comp_contig_buffer.emplace_back(
-                    std::move(added_nodes_rc[j].first),
-                    std::vector<node_index>{ added_nodes_rc[j].second }
                 );
             }
         }
@@ -484,12 +485,19 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         for (size_t j = 0; j < path.size(); ++j) {
             // Start expansion from matched nodes.
             // If it has a single outgoing node which is also in this contig, skip.
-            if (path[j] && !(j + 1 < path.size()
+            if (path[j]) {
+                if (!(j + 1 < path.size()
                                     && path[j + 1]
                                     && full_dbg.has_single_outgoing(path[j]))) {
-                std::string kmer = contig.substr(j, full_dbg.get_k());
-                call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
-                if (batch_graph.is_canonical_mode()) {
+                    std::string kmer = contig.substr(j, full_dbg.get_k());
+                    call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+                    if (batch_graph.is_canonical_mode()) {
+                        reverse_complement(kmer);
+                        call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+                    }
+                } else if (batch_graph.is_canonical_mode()
+                        && !(j && path[j - 1] && full_dbg.has_single_incoming(path[j]))) {
+                    std::string kmer = contig.substr(j, full_dbg.get_k());
                     reverse_complement(kmer);
                     call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
                 }
@@ -664,7 +672,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         // TODO: check what happens to reverse complement
-        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix, &contigs);
+        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
+                                      &contigs, canonical);
 
         logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
                       contigs.size() - original_size, timer.elapsed());
