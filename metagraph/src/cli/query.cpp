@@ -125,7 +125,7 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  size_t sub_k,
                                  size_t max_num_nodes_per_suffix) {
     assert(sub_k < dbg_succ.get_k());
-    assert(nodes_in_full.size() == contig.size() - dbg_succ.get_k() + 1);
+    assert(nodes_in_full.size() == contig.length() - dbg_succ.get_k() + 1);
 
     for (size_t prev_match_len = 0, i = 0; i < nodes_in_full.size(); ++i) {
         if (!nodes_in_full[i]) {
@@ -206,7 +206,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         size_t depth = hull_path.depth;
         size_t fork_count = hull_path.fork_count;
 
-        assert(seq.size() == path.size() + full_dbg.get_k() - 1);
+        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
 
         bool extend = true;
         while (extend && full_dbg.has_single_outgoing(path.back())) {
@@ -221,7 +221,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
             extend = continue_traversal(seq, path.back(), depth, fork_count);
         }
 
-        assert(path.size() == seq.size() - full_dbg.get_k() + 1);
+        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
         assert(path == map_sequence_to_nodes(full_dbg, seq));
 
         callback(seq, path);
@@ -462,7 +462,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
 
             // if the last node is already in the graph, cut off traversal
             // since this node will be covered in another traversal
-            if (batch_graph.find(seq.substr(seq.size() - batch_graph.get_k()))) {
+            if (batch_graph.find(seq.substr(seq.length() - batch_graph.get_k()))) {
                 return false;
             }
 
@@ -516,7 +516,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         #pragma omp critical
         {
             for (auto&& pair : added_paths) {
-                assert(pair.first.size() == pair.second.size() + full_dbg.get_k() - 1);
+                assert(pair.second.size() == pair.first.length() - full_dbg.get_k() + 1);
                 contig_buffer.emplace_back(std::move(pair));
             }
         }
@@ -628,14 +628,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 sequence,
                 get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
             );
-            if (max_input_sequence_length < sequence.size())
-                max_input_sequence_length = sequence.size();
+            if (max_input_sequence_length < sequence.length())
+                max_input_sequence_length = sequence.length();
         });
     } else {
         call_sequences([&](const std::string &sequence) {
             graph_init->add_sequence(sequence);
-            if (max_input_sequence_length < sequence.size())
-                max_input_sequence_length = sequence.size();
+            if (max_input_sequence_length < sequence.length())
+                max_input_sequence_length = sequence.length();
         });
     }
 
@@ -666,7 +666,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map from nodes in query graph to full graph
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
-        contigs[i].second.reserve(contigs[i].first.size() - graph_init->get_k() + 1);
+        contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
                               [&](node_index node) { contigs[i].second.push_back(node); });
     }
@@ -740,7 +740,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     for (size_t i = 0; i < contigs.size(); ++i) {
         const std::string &contig = contigs[i].first;
         const std::vector<node_index> &nodes_in_full = contigs[i].second;
-        assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
+        assert(nodes_in_full.size() == contig.length() - full_dbg.get_k() + 1);
         size_t j = 0;
         // nodes in the query graph hull may overlap
         graph->map_to_nodes(contig, [&](node_index node) {
