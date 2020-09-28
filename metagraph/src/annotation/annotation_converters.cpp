@@ -1083,12 +1083,11 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-[[clang::optnone]] std::vector<ColumnDiffAnnotator>
+std::vector<ColumnDiffAnnotator>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
-#pragma clang optimize off
     if (sources.empty())
         return {};
 

@@ -289,7 +289,6 @@ TEST(CoumnDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
 }
 
 TEST(CoumnDiff, ConvertFromColumnCompressed) {
-#pragma clang optimize off
     const std::string outfbase = test_dump_basename + "column.diff.convert";
     const std::string succ_file = outfbase + ".succ";
     clean_column_diff_files("column.diff.convert");

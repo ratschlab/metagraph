@@ -42,8 +42,7 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-[[clang::optnone]] int transform_annotation(Config *config) {
-#pragma clang optimize off
+int transform_annotation(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
