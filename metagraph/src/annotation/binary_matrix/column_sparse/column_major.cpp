@@ -114,7 +114,7 @@ void ColumnMajor::serialize(std::ostream &out) const {
 
     for (const auto &column : *columns_) {
         assert(column.get());
-        column->serialize(out);
+        column->convert_to<bit_vector_sd>().serialize(out);
     }
 }
 

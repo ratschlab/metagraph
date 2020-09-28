@@ -410,7 +410,10 @@ convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &ann
     auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
         for (const auto &fname : annotation_files) {
             ColumnDiffAnnotator annotator;
-            annotator.merge_load({fname});
+            if (!annotator.merge_load({fname})) {
+                logger->error("Could not load {}", fname);
+                std::exit(1);
+            }
             ColumnDiff<ColumnMajor> mat = annotator.release_matrix();
             mat.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&column) {
                 std::string label = annotator.get_label_encoder().get_labels()[idx];

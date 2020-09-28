@@ -56,9 +56,10 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     const Config::AnnotationType input_anno_type
         = parse_annotation_type(files.at(0));
 
-    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
+    if (input_anno_type != Config::ColumnCompressed
+        && input_anno_type != Config::ColumnDiff && files.size() > 1) {
         logger->error("Conversion of multiple annotators is only "
-                      "supported for ColumnCompressed");
+                      "supported for ColumnCompressed and ColumnRowDiff");
         exit(1);
     }
 
