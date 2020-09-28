@@ -173,7 +173,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
                                                   size_t fork_count)> &continue_traversal) {
     // DFS from branching points
     node_index node = full_dbg.kmer_to_node(kmer);
-    assert(node);
+    if (!node)
+        return;
+
     kmer.erase(kmer.begin());
     kmer.push_back('$');
     std::vector<HullPathContext> paths_to_extend;
@@ -483,27 +485,29 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         };
 
         for (size_t j = 0; j < path.size(); ++j) {
-            // Start expansion from matched nodes.
-            if (path[j]) {
-                // If it has a single outgoing node which is also in this contig, skip.
-                if (!(j + 1 < path.size() && path[j + 1]
-                        && full_dbg.has_single_outgoing(path[j]))) {
-                    std::string kmer = contig.substr(j, full_dbg.get_k());
-                    call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
-                    if (batch_graph.is_canonical_mode()) {
-                        reverse_complement(kmer);
-                        call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+            if (!path[j]) {
+                // If a node is unmatched, start expansion from all the nodes
+                // adjacent to it.
+                std::string kmer = contig.substr(j, full_dbg.get_k());
+                // forward expansion from the incoming nodes
+                batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
+                    [&](node_index next) {
+                        call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                            callback, continue_traversal);
                     }
-                } else if (batch_graph.is_canonical_mode()) {
-                    if (full_dbg.is_canonical_mode()) {
-                        if (!(j && path[j - 1] && full_dbg.has_single_incoming(path[j]))) {
-                            std::string kmer = contig.substr(j, full_dbg.get_k());
-                            reverse_complement(kmer);
-                            call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
+                );
+                // TODO: also do backward expansion from the outgoing nodes
+                // The following workaround works for canonical graphs where
+                // (incoming to forward) is equivalent to (outgoing from rev-comp),
+                // but this doesn't work for non-canonical graphs. Fix this...
+                if (batch_graph.is_canonical_mode()) {
+                    reverse_complement(kmer);
+                    batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
+                        [&](node_index next) {
+                            call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                                callback, continue_traversal);
                         }
-                    } else {
-                        // TODO: handle primary graphs
-                    }
+                    );
                 }
             }
         }
