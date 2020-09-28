@@ -178,6 +178,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     kmer.push_back('$');
     std::vector<HullPathContext> paths_to_extend;
     full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+        if (c == '$')
+            return;
+
         kmer.back() = c;
         assert(full_dbg.kmer_to_node(kmer) == next_node);
         if (continue_traversal(kmer, next_node, 1, 0)) {
@@ -206,6 +209,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         bool extend = true;
         while (extend && full_dbg.has_single_outgoing(path.back())) {
             full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
+                if (c == '$')
+                    return;
+
                 path.push_back(node);
                 seq.push_back(c);
             });
@@ -231,6 +237,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
 
         // schedule further traversals
         full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+            if (c == '$')
+                return;
+
             seq.back() = c;
             assert(full_dbg.kmer_to_node(seq) == next_node);
             if (continue_traversal(seq, next_node, depth + 1, fork_count + 1)) {
@@ -479,12 +488,10 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                                     && path[j + 1]
                                     && full_dbg.has_single_outgoing(path[j]))) {
                 std::string kmer = contig.substr(j, full_dbg.get_k());
-                call_hull_sequences(full_dbg, contig.substr(j, full_dbg.get_k()),
-                                    callback, continue_traversal);
+                call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
                 if (batch_graph.is_canonical_mode()) {
                     reverse_complement(kmer);
-                    call_hull_sequences(full_dbg, contig.substr(j, full_dbg.get_k()),
-                                        callback, continue_traversal);
+                    call_hull_sequences(full_dbg, kmer, callback, continue_traversal);
                 }
             }
         }
