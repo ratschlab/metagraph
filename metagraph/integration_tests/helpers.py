@@ -76,3 +76,9 @@ class TimeLoggingTestResult(unittest.TextTestResult):
     def printErrors(self):
         # all errors are printed in addFailure and addError
         pass
+
+
+def get_test_class_name(cls, num, params_dict):
+    # By default the generated class named includes either the "name"
+    # parameter (if present), or the first string value.
+    return "{}_{}_{}".format(cls.__name__, num, '_'.join(params_dict.values()))
