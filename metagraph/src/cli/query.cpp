@@ -613,6 +613,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                                        canonical && max_hull_forks);
     size_t max_input_sequence_length = 0;
 
+    logger->trace("[Query graph construction] Building the batch graph...");
+
     if (kPrefilterWithBloom && dbg_succ && sub_k == full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
@@ -641,10 +643,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
     );
 
-    logger->trace("[Query graph construction] k-mer indexing took {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
+                  " and took {} sec to construct",
+                  graph_init->num_nodes(), timer.elapsed());
     timer.reset();
-
-    logger->trace("[Query graph construction] extracted {} k-mers", graph_init->num_nodes());
 
     // pull contigs from query graph
     std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
@@ -659,14 +661,14 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    logger->trace("[Query graph construction] Mapping k-mers back to full graph");
+    logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
         full_dbg.map_to_nodes(contigs[i].first,
                               [&](node_index node) { contigs[i].second.push_back(node); });
     }
-    logger->trace("[Query graph construction] Contigs mapped to graph in {} sec",
+    logger->trace("[Query graph construction] Contigs mapped to the full graph in {} sec",
                   timer.elapsed());
     timer.reset();
 
@@ -676,7 +678,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     if (sub_k < full_dbg.get_k()) {
         assert(dbg_succ);
         logger->trace("[Query graph construction] Adding k-mers with matching "
-                      "suffixes of length {}", sub_k);
+                      "suffixes of length {}...", sub_k);
         timer.reset();
 
         // TODO: check what happens to reverse complement
@@ -688,11 +690,12 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     }
 
     if (max_hull_forks) {
-        logger->trace("[Query graph augmentation] Computing query graph hull");
+        logger->trace("[Query graph augmentation] Computing query graph hull...");
         logger->trace("[Query graph augmentation] max traversal distance: {}, max fork count: {}",
                       max_hull_depth, max_hull_forks);
         timer.reset();
 
+        // add k-mers with sub_k-suffix matches
         for (size_t i = original_size; i < contigs.size(); ++i) {
             graph_init->add_sequence(contigs[i].first);
         }
@@ -701,13 +704,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
         add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth, &contigs);
 
-        logger->trace("[Query graph augmentation] Augmented the graph with {} contigs in {} sec",
+        logger->trace("[Query graph augmentation] Augmented the batch graph with {} contigs in {} sec",
                       contigs.size() - hull_contigs_begin, timer.elapsed());
     }
 
     graph_init.reset();
 
-    logger->trace("[Query graph construction] Intersecting batch graph with full graph");
+    logger->trace("[Query graph construction] Building the query graph...");
     timer.reset();
     std::shared_ptr<DeBruijnGraph> graph;
 
@@ -723,17 +726,19 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         add_to_graph(*graph, contigs, full_dbg.get_k());
     }
 
-    logger->trace("[Query graph construction] Intersected in {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Query graph contains {} k-mers"
+                  " and took {} sec to construct",
+                  timer.elapsed(), graph->num_nodes());
     timer.reset();
 
-    logger->trace("[Query graph construction] Remapping nodes to full graph");
+    logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
 
     std::vector<node_index> index_in_full_graph(graph->max_index() + 1);
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
-        std::string &contig = contigs[i].first;
-        std::vector<node_index> &nodes_in_full = contigs[i].second;
+        const std::string &contig = contigs[i].first;
+        const std::vector<node_index> &nodes_in_full = contigs[i].second;
         assert(contig.size() == nodes_in_full.size() + full_dbg.get_k() - 1);
         size_t j = 0;
         // nodes in the query graph hull may overlap
@@ -754,9 +759,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     assert(!index_in_full_graph.at(0));
 
-    logger->trace("[Query graph construction] Query graph contains {} k-mers",
-                  graph->num_nodes());
-
     // convert to annotation indexes: remove 0 and shift
     size_t num_objects = 0;
     for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
@@ -765,12 +767,13 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
             ++num_objects;
         } else {
+            assert(canonical);
             index_in_full_graph[i - 1] = -1;  // npos
         }
     }
     index_in_full_graph.pop_back();
 
-    logger->trace("[Query graph construction] Slicing {} rows out of full annotation",
+    logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
                   num_objects);
 
     // initialize fast query annotation
@@ -827,15 +830,15 @@ int query_graph(Config *config) {
     return 0;
 }
 
-inline void query_sequence(size_t id, std::string name, std::string seq,
+std::string query_sequence(size_t id, std::string name, std::string seq,
                            const AnnotatedDBG &anno_graph,
                            const Config &config,
-                           const align::DBGAlignerConfig *aligner_config,
-                           const std::function<void(const std::string&)> &callback) {
+                           const align::DBGAlignerConfig *aligner_config) {
     if (aligner_config) {
-        auto matches = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
-        if (matches.size()) {
-            auto &match = matches[0];
+        auto alignments
+            = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
+        if (alignments.size()) {
+            auto &match = alignments[0];
             // sequence for querying -- the best alignment
             if (match.get_offset()) {
                 seq = anno_graph.get_graph()
@@ -857,11 +860,11 @@ inline void query_sequence(size_t id, std::string name, std::string seq,
         }
     }
 
-    callback(QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                                          config.count_labels, config.print_signature,
-                                          config.suppress_unlabeled, config.num_top_labels,
-                                          config.discovery_fraction, config.anno_labels_delimiter,
-                                          anno_graph));
+    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
+                                        config.count_labels, config.print_signature,
+                                        config.suppress_unlabeled, config.num_top_labels,
+                                        config.discovery_fraction, config.anno_labels_delimiter,
+                                        anno_graph);
 }
 
 void QueryExecutor::query_fasta(const string &file,
@@ -881,9 +884,9 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](size_t id, std::string name, std::string seq) {
-            query_sequence(id, name, seq, anno_graph_,
-                           config_, aligner_config_.get(), callback);
+        thread_pool_.enqueue([&](const auto&... args) {
+            callback(query_sequence(args..., anno_graph_,
+                                    config_, aligner_config_.get()));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -906,11 +909,10 @@ void QueryExecutor
         Timer batch_timer;
 
         uint64_t num_bytes_read = 0;
-
-        StringGenerator generate_batch = [&](auto call_sequence) {
+        // A generator that can be called multiple times until all sequences
+        // are called.
+        StringGenerator generate_next_batch = [&](auto call_sequence) {
             num_bytes_read = 0;
-
-            // the query graph is constructed directly from the input sequences
             for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
                 call_sequence(it->seq.s);
                 num_bytes_read += it->seq.l;
@@ -919,13 +921,13 @@ void QueryExecutor
 
         auto query_graph = construct_query_graph(
             anno_graph_,
-            generate_batch,
+            generate_next_batch,
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
             aligner_config_ ? &config_ : nullptr
         );
 
-        logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
+        logger->trace("Query graph constructed for batch of {} base pairs from '{}' in {} sec",
                       num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
 
         batch_timer.reset();
@@ -933,9 +935,9 @@ void QueryExecutor
         for ( ; begin != it; ++begin) {
             assert(begin != end);
 
-            thread_pool_.enqueue([&](size_t id, const std::string &name, const std::string &seq) {
-                query_sequence(id, name, seq, *query_graph,
-                               config_, aligner_config_.get(), callback);
+            thread_pool_.enqueue([&](const auto&... args) {
+                callback(query_sequence(args..., *query_graph,
+                                        config_, aligner_config_.get()));
             }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
         }
 
