@@ -243,17 +243,11 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
  *                   in the canonical mode storing all k-mers found in the full
  *                   graph.
  *
- * 3. If |discovery_fraction| is greater than zero, map all query sequences to
- *    the query graph and filter out those having too few k-mer matches.
- *    Then, remove from the query graph those k-mers occurring only in query
- *    sequences that have been filtered out.
- *
- * 4. Extract annotation for the nodes of the query graph and return.
+ * 3. Extract annotation for the nodes of the query graph and return.
  */
 std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
-                      double discovery_fraction,
                       size_t num_threads,
                       bool canonical) {
     const auto &full_dbg = anno_graph.get_graph();
@@ -397,55 +391,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     contigs = decltype(contigs)();
 
     assert(!index_in_full_graph.at(0));
-
-    if (discovery_fraction > 0) {
-        sdsl::bit_vector mask(graph->max_index() + 1, false);
-
-        call_sequences([&](const std::string &sequence) {
-            if (sequence.length() < graph->get_k())
-                return;
-
-            const size_t num_kmers = sequence.length() - graph->get_k() + 1;
-            const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
-            const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-            size_t num_kmers_discovered = 0;
-            size_t num_kmers_missing = 0;
-
-            std::vector<DeBruijnGraph::node_index> nodes;
-            nodes.reserve(num_kmers);
-
-            graph->map_to_nodes(sequence,
-                [&](auto node) {
-                    if (index_in_full_graph[node]) {
-                        num_kmers_discovered++;
-                        nodes.push_back(node);
-                    } else {
-                        num_kmers_missing++;
-                    }
-                },
-                [&]() { return num_kmers_missing > max_kmers_missing
-                                || num_kmers_discovered >= min_kmers_discovered; }
-            );
-
-            if (num_kmers_missing <= max_kmers_missing) {
-                for (auto node : nodes) {
-                    mask[node] = true;
-                }
-            }
-        });
-
-        // correcting the mask
-        call_zeros(mask, [&](auto i) { index_in_full_graph[i] = 0; });
-
-        graph = std::make_shared<MaskedDeBruijnGraph>(
-            graph,
-            std::make_unique<bit_vector_stat>(std::move(mask))
-        );
-
-        logger->trace("[Query graph construction] Reduced k-mer dictionary in {} sec",
-                      timer.elapsed());
-        timer.reset();
-    }
 
     // convert to annotation indexes: remove 0 and shift
     for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
@@ -664,7 +609,6 @@ void QueryExecutor
         auto query_graph = construct_query_graph(
             anno_graph_,
             generate_batch,
-            config_.count_labels ? 0 : config_.discovery_fraction,
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical
         );
