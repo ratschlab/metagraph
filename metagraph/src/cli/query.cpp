@@ -837,6 +837,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
     if (aligner_config) {
         auto alignments
             = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
+        assert(alignments.size() == 1 && "Only the best alignment is needed");
         if (alignments.size()) {
             auto &match = alignments[0];
             // sequence for querying -- the best alignment
