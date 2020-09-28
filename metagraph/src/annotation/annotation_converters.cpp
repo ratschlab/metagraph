@@ -334,13 +334,44 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
-template <>
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                                    const std::string &linkage_matrix_file,
-                                    size_t num_parallel_nodes,
-                                    size_t num_threads,
-                                    const std::filesystem::path &tmp_path) {
+convert_to_BRWT(
+        const std::string &linkage_matrix_file,
+        size_t num_parallel_nodes,
+        size_t num_threads,
+        const std::filesystem::path &tmp_path,
+        const std::function<void(const BRWTBottomUpBuilder::CallColumn &)> &get_columns,
+        std::vector<std::pair<uint64_t, std::string>> &&column_names) {
+    auto linkage = parse_linkage_matrix(linkage_matrix_file);
+
+    if (!linkage.size())
+        logger->warn("Parsed empty linkage tree");
+
+    auto matrix = std::make_unique<BRWT>(
+            BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
+                                       num_parallel_nodes, num_threads));
+
+    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
+    column_names.erase(std::unique(column_names.begin(), column_names.end()),
+                       column_names.end());
+
+    assert(matrix->num_columns() == column_names.size());
+
+    LEncoder label_encoder;
+    for (const auto &[i, label] : column_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
+}
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator> convert_col_compressed_to_BRWT<MultiBRWTAnnotator>(
+        const std::vector<std::string> &annotation_files,
+        const std::string &linkage_matrix_file,
+        size_t num_parallel_nodes,
+        size_t num_threads,
+        const std::filesystem::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -361,29 +392,40 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
             exit(1);
         }
     };
-
-    auto linkage = parse_linkage_matrix(linkage_matrix_file);
-
-    if (!linkage.size())
-        logger->warn("Parsed empty linkage tree");
-
-    auto matrix = std::make_unique<BRWT>(
-        BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
-                                   num_parallel_nodes, num_threads));
-
-    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
-    column_names.erase(std::unique(column_names.begin(), column_names.end()),
-                       column_names.end());
-
-    assert(matrix->num_columns() == column_names.size());
-
-    LEncoder label_encoder;
-    for (const auto &[i, label] : column_names) {
-        label_encoder.insert_and_encode(label);
-    }
-
-    return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
+    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads, tmp_path,
+                    get_columns, std::move(column_names));
 }
+
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator>
+convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                                             const std::string &linkage_matrix_file,
+                                             size_t num_parallel_nodes,
+                                             size_t num_threads,
+                                             const std::filesystem::path &tmp_path) {
+    std::vector<std::pair<uint64_t, std::string>> column_names;
+    std::mutex mu;
+
+    auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
+        for (const auto &fname : annotation_files) {
+            ColumnDiffAnnotator annotator;
+            annotator.merge_load({fname});
+            ColumnDiff<ColumnMajor> mat = annotator.release_matrix();
+            mat.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&column) {
+                std::string label = annotator.get_label_encoder().get_labels()[idx];
+                call_column(idx, std::move(column));
+
+                std::lock_guard<std::mutex> lock(mu);
+                column_names.emplace_back(idx, label);
+            });
+        }
+    };
+
+    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads, tmp_path,
+                           get_columns, std::move(column_names));
+}
+
 
 template <>
 void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,

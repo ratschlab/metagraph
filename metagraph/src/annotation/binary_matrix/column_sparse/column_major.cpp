@@ -129,6 +129,12 @@ uint64_t ColumnMajor::num_relations() const {
     return num_set_bits;
 }
 
+void ColumnMajor::call_columns(const ColumnCallback &callback) {
+    for(uint64_t i = 0; i < data_.size(); ++i) {
+        callback(i, std::move(data_[i]));
+    }
+}
+
 } // namespace binmat
 } // namespace annot
 } // namespace mtg

@@ -441,7 +441,7 @@ int transform_annotation(Config *config) {
             }
             case Config::BRWT: {
                 auto brwt_annotator = config->infbase.size()
-                    ? convert_to_BRWT<MultiBRWTAnnotator>(
+                    ? convert_col_compressed_to_BRWT<MultiBRWTAnnotator>(
                         files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
@@ -520,28 +520,15 @@ int transform_annotation(Config *config) {
             logger->error("Only conversion to brwt supported for column_diff");
             exit(1);
         }
-        std::unique_ptr<ColumnDiffAnnotator<>> annotator;
-        auto brwt_annotator = config->infbase.size()
-                              ? convert_to_BRWT<MultiBRWTAnnotator>(
+        std::string tmp_dir = config->tmp_dir.empty()
+                ? std::filesystem::path(config->outfbase).remove_filename()
+                : config->tmp_dir;
+        auto brwt_annotator =  convert_col_diff_to_BRWT<MultiBRWTAnnotator>(
                         files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
-                        config->tmp_dir.empty()
-                        ? std::filesystem::path(config->outfbase).remove_filename()
-                        : config->tmp_dir)
-                              : (config->greedy_brwt
-                                 ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
-                                std::move(*annotator),
-                                config->parallel_nodes,
-                                get_num_threads(),
-                                config->num_rows_subsampled)
-                                 : convert_to_simple_BRWT<MultiBRWTAnnotator>(
-                                std::move(*annotator),
-                                config->arity_brwt,
-                                config->parallel_nodes,
-                                get_num_threads()));
+                        tmp_dir);
 
-        annotator.reset();
         logger->trace("Annotation converted in {} sec", timer.elapsed());
 
         logger->trace("Serializing to '{}'", config->outfbase);

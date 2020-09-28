@@ -39,6 +39,13 @@ class ColumnMajor : public BinaryMatrix {
 
     const auto& data() const { return *columns_; }
 
+    using ColumnCallback = std::function<void(uint64_t, std::unique_ptr<bit_vector> &&)>;
+    /**
+     * Calls #callback on each of the columns. Note that this function "consumes" the
+     * columns and leaves the object empty.
+     */
+    void call_columns(const ColumnCallback &callback);
+
   private:
     ColumnMajor(const std::vector<std::unique_ptr<bit_vector>> *columns): columns_(columns) {}
     std::vector<std::unique_ptr<bit_vector>> data_;

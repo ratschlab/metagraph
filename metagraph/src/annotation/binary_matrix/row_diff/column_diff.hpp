@@ -100,9 +100,15 @@ class ColumnDiff : public BinaryMatrix {
     void serialize(const std::string &name) const;
     bool load(const std::string &name);
 
+    using ColumnCallback = typename BaseMatrix::ColumnCallback;
+    void call_columns(const  ColumnCallback &callback) {
+        diffs_.call_columns(callback);
+    }
+
     const sdsl::rrr_vector<> &terminal() const { return terminal_; }
 
     const BaseMatrix &diffs() const { return diffs_; }
+    BaseMatrix &diffs() { return diffs_; }
 
     Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
 
