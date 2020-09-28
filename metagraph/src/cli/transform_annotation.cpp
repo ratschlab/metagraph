@@ -42,7 +42,8 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-int transform_annotation(Config *config) {
+[[clang::optnone]] int transform_annotation(Config *config) {
+#pragma clang optimize off
     assert(config);
 
     const auto &files = config->fnames;
@@ -405,10 +406,15 @@ int transform_annotation(Config *config) {
                     timer.reset();
                     assert(column_diffs.size() == file_batch.size());
                     for(uint32_t idx = 0; idx < file_batch.size(); ++idx) {
-                        auto fname = std::filesystem::path(config->outfbase)/
-                                std::filesystem::path(file_batch[i]).filename();
-                        column_diffs[idx].serialize(fname);
-                        logger->trace("Serialized {}", fname);
+                        using std::filesystem::path;
+                        auto fname = path(file_batch[idx])
+                                             .filename()
+                                             .replace_extension()
+                                             .replace_extension(
+                                                     ColumnDiffAnnotator::kExtension);
+                        auto fpath = path(config->outfbase).remove_filename()/fname;
+                        column_diffs[idx].serialize(fpath);
+                        logger->trace("Serialized {}", fpath);
                     }
                     logger->trace("Serialization done in {} sec", timer.elapsed());
                 }
@@ -536,11 +542,10 @@ int transform_annotation(Config *config) {
         brwt_annotator->serialize(config->outfbase);
 
     } else {
-            logger->error("Conversion to other representations"
-                    " is not implemented for {} annotator",
-                    Config::annotype_to_string(input_anno_type));
-            exit(1);
-        }
+        logger->error("Conversion to other representations"
+                      " is not implemented for {} annotator",
+                      Config::annotype_to_string(input_anno_type));
+        exit(1);
     }
 
     logger->trace("Done");
