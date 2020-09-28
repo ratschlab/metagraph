@@ -257,6 +257,30 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
                                               annotator.get_label_encoder());
 }
 
+template <class StaticAnnotation>
+typename std::unique_ptr<StaticAnnotation>
+convert_col_diff_to_BRWT(ColumnDiffAnnotator&& annotator,
+                BRWTBottomUpBuilder::Partitioner partitioning,
+                size_t num_parallel_nodes,
+                size_t num_threads) {
+    // we are going to take the columns from the annotator and thus
+    // have to replace them with empty columns to keep the structure valid
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    annotator.release_matrix().call_columns([&](uint64_t, std::unique_ptr<bit_vector> &&col) {
+        columns.push_back(std::move(col));
+    });
+
+    auto matrix = std::make_unique<BRWT>(
+            BRWTBottomUpBuilder::build(std::move(columns),
+                                       partitioning,
+                                       num_parallel_nodes,
+                                       num_threads)
+    );
+
+    return std::make_unique<StaticAnnotation>(std::move(matrix),
+                                              annotator.get_label_encoder());
+}
+
 template <>
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
@@ -287,6 +311,18 @@ convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
         num_parallel_nodes,
         num_threads
     );
+}
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator>
+convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(ColumnDiffAnnotator &&annotation,
+                                                                 size_t grouping_arity,
+                                                                 size_t num_parallel_nodes,
+                                                                 size_t num_threads) {
+    return convert_col_diff_to_BRWT<MultiBRWTAnnotator>(
+            std::move(annotation),
+            BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
+            num_parallel_nodes, num_threads);
 }
 
 std::vector<std::vector<uint64_t>>

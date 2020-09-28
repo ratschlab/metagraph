@@ -48,6 +48,8 @@ class ColumnDiff : public BinaryMatrix {
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
+    const std::string& terminal_file() const { return terminal_file_; }
+
     /**
      * Returns the number of set bits in the matrix.
      */
@@ -94,8 +96,21 @@ class ColumnDiff : public BinaryMatrix {
         return result;
     }
 
-    bool load(std::istream &f) override { return diffs_.load(f); }
-    void serialize(std::ostream &f) const override { diffs_.serialize(f); };
+    bool load(std::istream &f) override {
+        size_t len;
+        f.read(reinterpret_cast<char *>(&len), sizeof(size_t));
+        terminal_file_ = std::string(len, '\0');
+        f.read(terminal_file_.data(), len);
+
+        return diffs_.load(f);
+    }
+
+    void serialize(std::ostream &f) const override {
+        size_t len = terminal_file_.size();
+        f.write(reinterpret_cast<char *>(&len), sizeof(size_t));
+        f.write(terminal_file_.c_str(), len);
+        diffs_.serialize(f);
+    };
 
     void serialize(const std::string &name) const;
     bool load(const std::string &name);

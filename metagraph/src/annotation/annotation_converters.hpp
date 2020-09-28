@@ -38,6 +38,13 @@ convert_to_simple_BRWT(ColumnCompressed<Label>&& annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
 
+template <class StaticAnnotation>
+typename std::unique_ptr<StaticAnnotation>
+convert_col_diff_to_simple_BRWT(ColumnDiffAnnotator &&annotation,
+                                size_t grouping_arity = 2,
+                                size_t num_parallel_nodes = 1,
+                                size_t num_threads = 1);
+
 template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert_to_greedy_BRWT(ColumnCompressed<Label>&& annotation,
