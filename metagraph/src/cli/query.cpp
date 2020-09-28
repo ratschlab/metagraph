@@ -405,7 +405,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
         call_suffix_match_sequences(full_dbg, contig, path,
                                     callback, sub_k, max_num_nodes_per_suffix);
 
-        if (check_reverse_complement && !full_dbg.is_canonical_mode()) {
+        if (check_reverse_complement) {
             std::string rev_contig = contig;
             reverse_complement(rev_contig);
             call_suffix_match_sequences(full_dbg, rev_contig,
@@ -442,7 +442,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
     for (size_t i = 0; i < contigs->size(); ++i) {
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
-        // TODO: combine these two callbacks into one
+        // TODO: combine these two callbacks into one?
         auto callback = [&](const std::string &sequence,
                             const std::vector<node_index> &path) {
             added_paths.emplace_back(sequence, path);
@@ -496,11 +496,10 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                                             callback, continue_traversal);
                     }
                 );
-                // TODO: also do backward expansion from the outgoing nodes
-                // The following workaround works for canonical graphs where
-                // (incoming to forward) is equivalent to (outgoing from rev-comp),
-                // but this doesn't work for non-canonical graphs. Fix this...
                 if (batch_graph.is_canonical_mode()) {
+                    // In canonical graphs, (incoming to forward) is equivalent
+                    // to (outgoing from rev-comp), so the following code invokes
+                    // backward expansion.
                     reverse_complement(kmer);
                     batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
                         [&](node_index next) {
@@ -509,6 +508,8 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                         }
                     );
                 }
+                // TODO: For non-canonical graphs, also expand backwards from
+                //       the outgoing nodes?
             }
         }
 
@@ -665,6 +666,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map from nodes in query graph to full graph
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < contigs.size(); ++i) {
+        contigs[i].second.reserve(contigs[i].first.size() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
                               [&](node_index node) { contigs[i].second.push_back(node); });
     }
@@ -681,7 +683,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       "suffixes of length {}...", sub_k);
         timer.reset();
 
-        // TODO: check what happens to reverse complement
         add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
                                       &contigs, canonical);
 
@@ -749,8 +750,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         assert(j == nodes_in_full.size());
     }
 
-    if (original_size != contigs.size())
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
     logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
                   timer.elapsed());
