@@ -514,12 +514,14 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         }
 
         std::string last_kmer = contig.substr(contig.length() - full_dbg.get_k(), full_dbg.get_k());
-        call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+        if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
+            call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
 
         if (batch_graph.is_canonical_mode()) {
             last_kmer = contig.substr(0, full_dbg.get_k());
             reverse_complement(last_kmer);
-            call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+            if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
+                call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
         }
 
         #pragma omp critical
