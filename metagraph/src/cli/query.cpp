@@ -13,6 +13,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -461,7 +462,13 @@ int query_graph(Config *config) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
-        aligner = build_aligner(*graph, *config);
+        if (!graph->is_canonical_mode() && config->canonical) {
+            // wrap the primary graph into a canonical one
+            graph.reset(new CanonicalDBG(graph, true));
+            aligner = build_aligner(*graph, *config);
+        } else {
+            aligner = build_aligner(*graph, *config);
+        }
 
         // the fwd_and_reverse argument in the aligner config returns the best of
         // the forward and reverse complement alignments, rather than both.
