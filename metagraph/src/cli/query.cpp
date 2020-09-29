@@ -813,7 +813,7 @@ int query_graph(Config *config) {
 
     auto graph = load_critical_dbg(config->infbase);
 
-    if (config->canonical)
+    if (config->canonical && !graph->is_canonical_mode())
         graph = std::make_shared<CanonicalDBG>(graph);
 
     auto anno_graph = initialize_annotated_dbg(graph, *config);
