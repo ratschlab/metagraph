@@ -463,7 +463,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         if (!graph->is_canonical_mode() && config->canonical) {
-            // wrapp the primary graph into a canonical one
+            // wrap the primary graph into a canonical one
             graph.reset(new CanonicalDBG(graph, true));
             aligner = build_aligner(*graph, *config);
         } else {
