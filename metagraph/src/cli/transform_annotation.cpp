@@ -41,9 +41,8 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
 }
 
-bool merge_load(const std::vector<std::string> &filenames,
-                size_t num_threads,
-                ColumnDiffAnnotator *result) {
+std::unique_ptr<ColumnDiffAnnotator> merge_load(const std::vector<std::string> &filenames,
+                                                size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
     std::vector<uint64_t> offsets(filenames.size() + 1, 0);
@@ -110,9 +109,11 @@ bool merge_load(const std::vector<std::string> &filenames,
     LabelEncoder<std::string> label_encoder;
     std::for_each(labels.begin(), labels.end(),
                   [&](const auto &l) { label_encoder.insert_and_encode(l); });
-    *result = ColumnDiffAnnotator(std::move(merged_anno), label_encoder);
+    auto result = error_occurred
+            ? nullptr
+            : std::make_unique<ColumnDiffAnnotator>(std::move(merged_anno), label_encoder);
 
-    return !error_occurred;
+    return result;
 }
 
 
@@ -603,12 +604,13 @@ int transform_annotation(Config *config) {
         std::unique_ptr<MultiBRWTAnnotator> brwt_annotator;
         if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
             logger->trace("Loading annotation from disk...");
-            ColumnDiffAnnotator annotator;
-            if (!merge_load(files, get_num_threads(), &annotator))
+            std::unique_ptr<ColumnDiffAnnotator> annotator
+                    = merge_load(files, get_num_threads());
+            if (!annotator)
                 std::exit(1);
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
             brwt_annotator = convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(
-                    std::move(annotator), config->arity_brwt,
+                    std::move(*annotator), config->arity_brwt,
                     config->parallel_nodes, get_num_threads());
         } else {
             std::string tmp_dir = config->tmp_dir.empty()
