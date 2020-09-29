@@ -12,6 +12,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -811,6 +812,10 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     auto graph = load_critical_dbg(config->infbase);
+
+    if (config->canonical)
+        graph = std::make_shared<CanonicalDBG>(graph);
+
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);

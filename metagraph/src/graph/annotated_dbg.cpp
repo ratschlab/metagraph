@@ -14,6 +14,8 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 
+#include "graph/representation/canonical_dbg.hpp"
+
 typedef std::pair<std::string, size_t> StringCountPair;
 
 
@@ -348,6 +350,11 @@ void AnnotatedSequenceGraph
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
+    if (dynamic_cast<const CanonicalDBG*>(graph_.get())) {
+        return dynamic_cast<const CanonicalDBG&>(*graph_).get_graph().max_index()
+            == annotator_->num_objects();
+    }
+
     return graph_->max_index() == annotator_->num_objects();
 }
 
