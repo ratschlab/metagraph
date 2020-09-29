@@ -741,7 +741,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     logger->trace("[Query graph construction] Query graph contains {} k-mers"
                   " and took {} sec to construct",
-                  timer.elapsed(), graph->num_nodes());
+                  graph->num_nodes(), timer.elapsed());
     timer.reset();
 
     logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
@@ -790,9 +790,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
-    auto annotation = slice_annotation(full_annotation,
-                                       index_in_full_graph,
-                                       num_threads);
+    auto annotation = slice_annotation(full_annotation, index_in_full_graph, num_threads);
 
     logger->trace("[Query graph construction] Query annotation with {} labels"
                   " and {} set bits constructed in {} sec",
