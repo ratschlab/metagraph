@@ -1155,18 +1155,15 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
     std::vector<uint64_t> succ_chunk;
     ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
     for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
-        Timer timer;
         succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
         for (uint64_t idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
             succ_chunk[i] = succ[idx] == 0
                     ? std::numeric_limits<uint64_t>::max()
                     : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
         }
-        logger->trace("Computed succ chunk in {}", timer.elapsed());
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
-            Timer timer2;
             if(sources[l_idx]->num_objects() != graph.num_nodes()) {
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
@@ -1188,11 +1185,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                     if (v)
                         indices.push_back(row_idx);
                 }
-                Timer timer3;
                 targets[l_idx]->add_labels(indices, { label });
-                logger->trace("Added indices in {}", timer3.elapsed());
             }
-            logger->trace("Computed chunk diff in {}", timer2.elapsed());
         }
 
         progress_bar += succ_chunk.size();
