@@ -21,17 +21,56 @@ graph_file_extension = {'succinct': '.dbg',
                         'hashstr': '.hashstrdbg'}
 
 anno_file_extension = {'column': '.column.annodbg',
-                       'row': '.row.annodbg'}
+                       'row': '.row.annodbg',
+                       'rb_brwt': '.rb_brwt.annodbg',
+                       'brwt': '.brwt.annodbg',
+                       'rbfish': '.rbfish.annodbg',
+                       'flat': '.flat.annodbg'}
 
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
+ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
 NUM_THREADS = 4
+
+
+def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, extra_params=''):
+    target_anno = anno_repr
+    if anno_repr in {'rb_brwt', 'brwt'}:
+        target_anno = anno_repr
+        anno_repr = 'column'
+    elif anno_repr in {'flat', 'rbfish'}:
+        target_anno = anno_repr
+        anno_repr = 'row'
+
+    annotate_command = '{exe} annotate {extra_params} --anno-header -i {graph} \
+            --anno-type {anno_repr} -o {outfile} {input}'.format(
+        exe=METAGRAPH,
+        graph=graph_filename,
+        anno_repr=anno_repr,
+        outfile=output_filename,
+        input=input_fasta,
+        extra_params=extra_params
+    )
+    res = subprocess.run([annotate_command], shell=True)
+    assert(res.returncode == 0)
+
+    if target_anno != anno_repr:
+        annotate_command = '{exe} transform_anno \
+                --anno-type {target_anno} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            target_anno=target_anno,
+            outfile=output_filename,
+            input=output_filename + anno_file_extension[anno_repr]
+        )
+        res = subprocess.run([annotate_command], shell=True)
+        assert(res.returncode == 0)
+        os.remove(output_filename + anno_file_extension[anno_repr])
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=list(itertools.product(
         GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'],
-        ['row', 'column']
+        ANNO_TYPES
     )),
     class_name_func=get_test_class_name
 )
@@ -85,17 +124,12 @@ class TestQuery(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        # build annotation
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
-                --anno-type {anno_repr} -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
-            anno_repr=cls.anno_repr,
-            outfile=cls.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        build_annotation(
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            cls.anno_repr,
+            cls.tempdir.name + '/annotation'
         )
-        res = subprocess.run([annotate_command], shell=True)
-        assert(res.returncode == 0)
 
         # check annotation
         anno_stats_command = '{exe} stats -a {annotation}'.format(
@@ -445,7 +479,7 @@ class TestQuery(unittest.TestCase):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=list(itertools.product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
-        ['row', 'column']
+        ANNO_TYPES
     )),
     class_name_func=get_test_class_name
 )
@@ -499,17 +533,12 @@ class TestQueryCanonical(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        # build annotation
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
-                --anno-type {anno_repr} -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
-            anno_repr=cls.anno_repr,
-            outfile=cls.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        build_annotation(
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            cls.anno_repr,
+            cls.tempdir.name + '/annotation'
         )
-        res = subprocess.run([annotate_command], shell=True)
-        assert(res.returncode == 0)
 
         # check annotation
         anno_stats_command = '{exe} stats -a {annotation}'.format(
@@ -633,7 +662,7 @@ class TestQueryCanonical(unittest.TestCase):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=list(itertools.product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
-        ['row', 'column']
+        ANNO_TYPES
     )),
     class_name_func=get_test_class_name
 )
@@ -711,17 +740,13 @@ class TestQueryPrimary(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        # build annotation
-        annotate_command = '{exe} annotate --fwd-and-reverse --anno-header -i {graph} \
-                --anno-type {anno_repr} -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
-            anno_repr=cls.anno_repr,
-            outfile=cls.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        build_annotation(
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            cls.anno_repr,
+            cls.tempdir.name + '/annotation',
+            extra_params='--fwd-and-reverse'
         )
-        res = subprocess.run([annotate_command], shell=True)
-        assert(res.returncode == 0)
 
         # check annotation
         anno_stats_command = '{exe} stats -a {annotation}'.format(
