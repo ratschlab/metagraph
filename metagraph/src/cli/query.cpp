@@ -157,8 +157,11 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         );
     }
 
-    ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
-                          utils::LessFirst(), num_threads);
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const RowDiff *>(&full_annotation.get_matrix())) {
+        ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
+                              utils::LessFirst(), num_threads);
+    }
 
     using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
                                     utils::VectorHash,
