@@ -105,29 +105,27 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
  *             from the full annotation matrix
  *
  * @param[in]  full_annotation  The full annotation matrix.
- * @param[in]  index_in_full    Indexes of rows in the full annotation matrix.
- *                              index_in_full[i] = -1 means that the i-th row in
- *                              the submatrix is empty.
+ * @param[in]  num_rows         The number of rows in the target submatrix.
+ * @param[in]  full_to_small    The mapping between the rows in the full matrix
+ *                              and its submatrix.
  * @param[in]  num_threads      The number of threads used.
  *
  * @return     Annotation submatrix in the UniqueRowAnnotator representation
  */
 std::unique_ptr<annot::UniqueRowAnnotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
-                 const std::vector<uint64_t> &index_in_full,
+                 uint64_t num_rows,
+                 std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
                  size_t num_threads) {
-    const uint64_t npos = -1;
-
     if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
         // shortcut construction for Rainbow<> annotation
-        std::vector<uint64_t> row_indexes;
-        row_indexes.reserve(index_in_full.size());
-        for (uint64_t i : index_in_full) {
-            if (i != npos) {
-                row_indexes.push_back(i);
-            } else {
-                row_indexes.push_back(0);
-            }
+        std::vector<bool> empty_rows(num_rows, true);
+        std::vector<uint64_t> row_indexes(num_rows, 0);
+        for (auto [row_in_full, i] : full_to_small) {
+            assert(row_in_full < full_annotation.num_objects());
+            assert(i < num_rows);
+            row_indexes[i] = row_in_full;
+            empty_rows[i] = false;
         }
 
         // get unique rows and set pointers to them in |row_indexes|
@@ -139,14 +137,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
 
         // if the 0-th row is not empty, we must insert an empty unique row
-        // and reassign those indexes pointing to npos in |index_in_full|.
+        // and reassign those indexes marked in |empty_rows|.
         if (rb->get_row(0).size()) {
             logger->trace("Add empty row");
             unique_rows.emplace_back();
-            for (uint64_t i = 0; i < index_in_full.size(); ++i) {
-                if (index_in_full[i] == npos) {
+            for (size_t i = 0; i < empty_rows.size(); ++i) {
+                if (empty_rows[i])
                     row_indexes[i] = unique_rows.size() - 1;
-                }
             }
         }
 
@@ -160,14 +157,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         );
     }
 
-    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
-
-    for (uint64_t i = 0; i < index_in_full.size(); ++i) {
-        if (index_in_full[i] != npos)
-            from_full_to_small.emplace_back(index_in_full[i], i);
-    }
-
-    ips4o::parallel::sort(from_full_to_small.begin(), from_full_to_small.end(),
+    ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
                           utils::LessFirst(), num_threads);
 
     using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
@@ -177,22 +167,22 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                                     std::vector<BinaryMatrix::SetBitPositions>,
                                     uint32_t>;
     RowSet unique_rows { BinaryMatrix::SetBitPositions() };
-    std::vector<uint32_t> row_rank(index_in_full.size(), 0);
+    std::vector<uint32_t> row_rank(num_rows, 0);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t batch_begin = 0;
-                        batch_begin < from_full_to_small.size();
+                        batch_begin < full_to_small.size();
                                         batch_begin += kRowBatchSize) {
         const uint64_t batch_end
             = std::min(batch_begin + kRowBatchSize,
-                       static_cast<uint64_t>(from_full_to_small.size()));
+                       static_cast<uint64_t>(full_to_small.size()));
 
         std::vector<uint64_t> row_indexes;
         row_indexes.reserve(batch_end - batch_begin);
         for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            assert(from_full_to_small[i].first < full_annotation.num_objects());
+            assert(full_to_small[i].first < full_annotation.num_objects());
 
-            row_indexes.push_back(from_full_to_small[i].first);
+            row_indexes.push_back(full_to_small[i].first);
         }
 
         auto rows = full_annotation.get_matrix().get_rows(row_indexes);
@@ -204,7 +194,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             for (uint64_t i = batch_begin; i < batch_end; ++i) {
                 const auto &row = rows[i - batch_begin];
                 auto it = unique_rows.emplace(row).first;
-                row_rank[from_full_to_small[i].second] = it - unique_rows.begin();
+                row_rank[full_to_small[i].second] = it - unique_rows.begin();
                 if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
                     throw std::runtime_error("There must be less than 2^32 unique rows."
                                              " Reduce the query batch size.");
@@ -300,7 +290,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
 
     // map contigs onto the full graph
-    std::vector<uint64_t> index_in_full_graph;
+    std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
     if (canonical) {
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
@@ -352,18 +342,27 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       timer.elapsed());
         timer.reset();
 
-        index_in_full_graph.assign(graph->max_index() + 1, 0);
-
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             const auto &nodes_in_full = contigs[i].second;
 
+            std::vector<uint64_t> path(nodes_in_full.size());
             size_t j = 0;
             graph->map_to_nodes(contig, [&](auto node) {
-                index_in_full_graph[node] = nodes_in_full[j++];
+                path[j++] = node;
             });
-            assert(j == nodes_in_full.size());
+            assert(j == path.size());
+
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < path.size(); ++j) {
+                    if (nodes_in_full[j]) {
+                        assert(path[j]);
+                        from_full_to_small.emplace_back(nodes_in_full[j], path[j]);
+                    }
+                }
+            }
         }
 
         logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
@@ -371,18 +370,26 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
     } else {
-        index_in_full_graph.assign(graph->max_index() + 1, 0);
-
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
         for (size_t i = 0; i < contigs.size(); ++i) {
             const std::string &contig = contigs[i].first;
             const auto &path = contigs[i].second;
 
+            std::vector<uint64_t> in_full(path.size());
             size_t j = 0;
-            full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
-                index_in_full_graph[path[j++]] = node_in_full;
+            full_dbg.map_to_nodes(contig, [&](auto node) {
+                in_full[j++] = node;
             });
-            assert(j == path.size());
+            assert(j == in_full.size());
+
+            #pragma omp critical
+            {
+                for (size_t j = 0; j < path.size(); ++j) {
+                    assert(path[j]);
+                    if (in_full[j])
+                        from_full_to_small.emplace_back(in_full[j], path[j]);
+                }
+            }
         }
 
         logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
@@ -391,23 +398,17 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     contigs = decltype(contigs)();
 
-    assert(!index_in_full_graph.at(0));
-
-    // convert to annotation indexes: remove 0 and shift
-    for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
-        if (index_in_full_graph[i]) {
-            index_in_full_graph[i - 1]
-                = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
-        } else {
-            index_in_full_graph[i - 1] = -1;  // npos
-        }
+    for (auto &[first, second] : from_full_to_small) {
+        assert(first && second);
+        first = AnnotatedDBG::graph_to_anno_index(first);
+        second = AnnotatedDBG::graph_to_anno_index(second);
     }
-    index_in_full_graph.pop_back();
 
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
     auto annotation = slice_annotation(full_annotation,
-                                       index_in_full_graph,
+                                       graph->max_index(),
+                                       std::move(from_full_to_small),
                                        num_threads);
 
     logger->trace("[Query graph construction] Query annotation constructed in {} sec",
