@@ -197,7 +197,7 @@ TEST(ColumnDiff, ConvertFromColumnCompressedEmpty) {
 
     clean_column_diff_files("column.diff.empty");
     std::string outfbase = test_dump_basename + "column.diff.empty";
-    std::vector<ColumnDiffAnnotator> result
+    std::vector<std::unique_ptr<ColumnDiffAnnotator>> result
             = convert_to_column_diff<std::string>(*graph, empty_source, outfbase, 1);
 
     ASSERT_EQ(0u, result.size());
@@ -226,20 +226,19 @@ TEST(CoumnDiff, ConvertFromColumnCompressedSameLabels) {
         const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
 
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
-            std::vector<ColumnDiffAnnotator> result
+            std::vector<std::unique_ptr<ColumnDiffAnnotator>> result
                     = convert_to_column_diff(*graph, source, outfbase, max_depth);
             clean_column_diff_files("column.diff.convert");
 
             ASSERT_EQ(1U, result.size());
-            auto &annotation = result[0];
 
-            ASSERT_EQ(labels.size(), annotation.num_labels());
-            ASSERT_EQ(5u, annotation.num_objects());
+            ASSERT_EQ(labels.size(), result[0]->num_labels());
+            ASSERT_EQ(5u, result[0]->num_objects());
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
-                      annotation.num_relations());
+                      result[0]->num_relations());
 
-            for (uint32 i = 0; i < annotation.num_objects(); ++i) {
-                ASSERT_THAT(annotation.get(i), ContainerEq(labels));
+            for (uint32 i = 0; i < result[0]->num_objects(); ++i) {
+                ASSERT_THAT(result[0]->get(i), ContainerEq(labels));
             }
         }
     }
@@ -267,21 +266,19 @@ TEST(CoumnDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
         const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
 
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
-            std::vector<ColumnDiffAnnotator> result
+            std::vector<std::unique_ptr<ColumnDiffAnnotator>> result
                     = convert_to_column_diff(*graph, sources, outfbase, max_depth);
             clean_column_diff_files("column.diff.convert");
 
             ASSERT_EQ(labels.size(), result.size());
             for (uint32_t i = 0; i < result.size(); ++i) {
-                auto &annotation = result[i];
-
-                ASSERT_EQ(1, annotation.num_labels());
-                ASSERT_EQ(5u, annotation.num_objects());
+                ASSERT_EQ(1, result[i]->num_labels());
+                ASSERT_EQ(5u, result[i]->num_objects());
                 EXPECT_EQ(expected_relations[max_depth - 1],
-                          annotation.num_relations());
+                          result[i]->num_relations());
 
-                for (uint32 idx = 0; idx < annotation.num_objects(); ++idx) {
-                    ASSERT_THAT(annotation.get(idx), ElementsAre(labels[i]));
+                for (uint32 idx = 0; idx < result[i]->num_objects(); ++idx) {
+                    ASSERT_THAT(result[i]->get(idx), ElementsAre(labels[i]));
                 }
             }
         }
@@ -307,24 +304,23 @@ TEST(CoumnDiff, ConvertFromColumnCompressed) {
     graph->mask_dummy_kmers(1, false);
 
     constexpr uint32_t max_depth = 5;
-    std::vector<ColumnDiffAnnotator> result
+    std::vector<std::unique_ptr<ColumnDiffAnnotator>> result
             = convert_to_column_diff(*graph, source, outfbase, max_depth);
     clean_column_diff_files("column.diff.convert");
 
     ASSERT_EQ(1U, result.size());
-    auto &annotation = result[0];
 
-    ASSERT_EQ(4u, annotation.num_labels());
-    ASSERT_EQ(5u, annotation.num_objects());
+    ASSERT_EQ(4u, result[0]->num_labels());
+    ASSERT_EQ(5u, result[0]->num_objects());
     // we added 9 relations, but sparsification brings it up to 12 (because there is no
     // correlation between annotation and vicinity)
-    ASSERT_EQ(12u, annotation.num_relations());
+    ASSERT_EQ(12u, result[0]->num_relations());
 
-    ASSERT_THAT(annotation.get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
-    ASSERT_THAT(annotation.get(1), UnorderedElementsAre());
-    ASSERT_THAT(annotation.get(2), UnorderedElementsAre("Label1", "Label2"));
-    ASSERT_THAT(annotation.get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
-    ASSERT_THAT(annotation.get(4), UnorderedElementsAre("Label2"));
+    ASSERT_THAT(result[0]->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+    ASSERT_THAT(result[0]->get(1), UnorderedElementsAre());
+    ASSERT_THAT(result[0]->get(2), UnorderedElementsAre("Label1", "Label2"));
+    ASSERT_THAT(result[0]->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+    ASSERT_THAT(result[0]->get(4), UnorderedElementsAre("Label2"));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {

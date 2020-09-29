@@ -471,7 +471,7 @@ int transform_annotation(Config *config) {
                     }
                     timer.reset();
                     logger->trace("Starting converting column-batch...");
-                    std::vector<ColumnDiffAnnotator> column_diffs
+                    std::vector<std::unique_ptr<ColumnDiffAnnotator>> column_diffs
                             = convert_to_column_diff(graph, anno_batch, config->infbase,
                                                      config->max_path_length);
                     logger->trace("Column-batch converted in {} sec", timer.elapsed());
@@ -487,7 +487,7 @@ int transform_annotation(Config *config) {
                                              .replace_extension(
                                                      ColumnDiffAnnotator::kExtension);
                         auto fpath = path(config->outfbase).remove_filename()/fname;
-                        column_diffs[idx].serialize(fpath);
+                        column_diffs[idx]->serialize(fpath);
                         logger->trace("Serialized {}", fpath);
                     }
                     logger->trace("Serialization done in {} sec", timer.elapsed());

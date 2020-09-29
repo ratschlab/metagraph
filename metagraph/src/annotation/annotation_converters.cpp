@@ -12,6 +12,7 @@
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -1119,7 +1120,7 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-std::vector<ColumnDiffAnnotator>
+std::vector<std::unique_ptr<ColumnDiffAnnotator>>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
@@ -1154,13 +1155,18 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
     std::vector<uint64_t> succ_chunk;
     ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
     for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
+        Timer timer;
         succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
         for (uint64_t idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
-            succ_chunk[i] = succ[idx];
+            succ_chunk[i] = succ[idx] == 0
+                    ? std::numeric_limits<uint64_t>::max()
+                    : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
         }
+        logger->trace("Computed succ chunk in {}", timer.elapsed());
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
+            Timer timer2;
             if(sources[l_idx]->num_objects() != graph.num_nodes()) {
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
@@ -1172,41 +1178,40 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
             for (uint64_t l_idx2 = 0; l_idx2 < sources[l_idx]->num_labels(); ++l_idx2) {
                 std::vector<uint64_t> indices;
                 const Label &label = sources[l_idx]->get_all_labels()[l_idx2];
-                const bitmap &source_col = sources[l_idx]->get_column(label);
+                const std::unique_ptr<bit_vector> &source_col
+                        = sources[l_idx]->get_matrix().data()[l_idx2];
 
                 for (uint64_t row_idx = chunk, j = 0; j < succ_chunk.size(); ++row_idx, ++j) {
-                    bool v;
-                    if (succ_chunk[j]) {
-                        uint64_t anno_idx
-                                = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                                        succ_chunk[j]);
-                        v = source_col[row_idx] ^ source_col[anno_idx];
-                    } else {
-                        v = source_col[row_idx];
-                    }
+                    bool v = succ_chunk[j] != std::numeric_limits<uint64_t>::max()
+                            ? (*source_col)[row_idx] ^ (*source_col)[succ_chunk[j]]
+                            : (*source_col)[row_idx];
                     if (v)
                         indices.push_back(row_idx);
                 }
+                Timer timer3;
                 targets[l_idx]->add_labels(indices, { label });
+                logger->trace("Added indices in {}", timer3.elapsed());
             }
+            logger->trace("Computed chunk diff in {}", timer2.elapsed());
         }
 
         progress_bar += succ_chunk.size();
     }
 
-    std::vector<ColumnDiffAnnotator> result;
+    std::vector<std::unique_ptr<ColumnDiffAnnotator>> result;
 
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
-        auto matrix = targets[l_idx]->release_matrix();
+        ColumnMajor matrix = targets[l_idx]->release_matrix();
         auto diff_annotation
                 = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
                                                             terminal_file);
-        result.emplace_back(std::move(diff_annotation), sources[l_idx]->get_label_encoder());
+        result.push_back(std::make_unique<ColumnDiffAnnotator>(
+                std::move(diff_annotation), sources[l_idx]->get_label_encoder()));
     }
     return result;
 }
 
-template std::vector<ColumnDiffAnnotator> convert_to_column_diff(
+template std::vector<std::unique_ptr<ColumnDiffAnnotator>> convert_to_column_diff(
         const graph::DBGSuccinct &graph,
         const std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &sources,
         const std::string &outfbase,

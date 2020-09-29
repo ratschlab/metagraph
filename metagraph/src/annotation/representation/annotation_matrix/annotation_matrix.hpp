@@ -18,6 +18,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
     explicit StaticBinRelAnnotator() : matrix_(new BinaryMatrixType()) {}
+    StaticBinRelAnnotator(const StaticBinRelAnnotator&) = delete;
 
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                           const LabelEncoder<Label> &label_encoder);
