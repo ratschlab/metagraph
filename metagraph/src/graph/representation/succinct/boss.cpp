@@ -2408,7 +2408,7 @@ void call_paths_row_diff(
                 skip_count--;
             }
 
-            // make one traversal step
+            // make one traversal step (this will pick the last outgoing edge)
             edge = boss.fwd(edge, w);
 
             out_edges.resize(0);
@@ -2427,7 +2427,8 @@ void call_paths_row_diff(
             if (out_edges.empty() || fetch_bit(visited->data(), out_edges.front(), async))
                 break;
 
-            edge = out_edges.front();
+            assert(edge == out_edges.front());
+            edge = out_edges.front(); // TODO: remove
 
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(

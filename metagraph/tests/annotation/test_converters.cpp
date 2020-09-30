@@ -341,8 +341,8 @@ TEST(CoumnDiff, ConvertFromColumnCompressed) {
 
     ASSERT_EQ(4u, result[0]->num_labels());
     ASSERT_EQ(5u, result[0]->num_objects());
-    // we added 9 relations, but sparsification brings it up to 12 (because there is no
-    // correlation between annotation and vicinity)
+    // we added 9 relations, and after sparsification we still have 9 (because in our
+    // test graph there is no correlation between annotation and vicinity)
     ASSERT_EQ(12u, result[0]->num_relations());
 
     ASSERT_THAT(result[0]->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));

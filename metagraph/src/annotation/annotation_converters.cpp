@@ -1114,13 +1114,19 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
             succ.push_back(next);
         }
         uint64_t back_idx = boss.bwd(boss_idx);
-        boss.call_incoming_to_target(back_idx, boss.get_W(back_idx),
-                                     [&](BOSS::edge_index incoming_edge) {
-                                         if (terminal[incoming_edge] || dummy[incoming_edge])
-                                             return;
-                                         pred.push_back(graph.boss_to_kmer_index(incoming_edge));
-                                         pred_boundary.push_back(0);
-                                     });
+        boss.call_incoming_to_target(
+                back_idx, boss.get_W(back_idx), [&](BOSS::edge_index incoming_edge) {
+                    // terminal and dummy predecessors are ignored; also ignore
+                    // predecessors for which boss_idx is not the last outgoing
+                    // edge (bc. we only traverse the last outgoing at a bifurcation)
+                    if (terminal[incoming_edge] || dummy[incoming_edge]
+                        || boss.fwd(incoming_edge, boss.get_W(incoming_edge) % boss.alph_size)
+                                != boss_idx)
+                        return;
+
+                    pred.push_back(graph.boss_to_kmer_index(incoming_edge));
+                    pred_boundary.push_back(0);
+                });
         pred_boundary.push_back(1);
         ++progress_bar;
     }
@@ -1175,17 +1181,44 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
     uint64_t num_rows = graph.num_nodes();
 
     sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::in, 1024*1024);
+    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::in, 1024*1024);
+    sdsl::rrr_vector pred_boundary;
+
+    std::ifstream fpred_boundary(outfbase + ".pred_boundary");
+    pred_boundary.load(fpred_boundary);
+    fpred_boundary.close();
+
     assert(succ.size() == num_rows);
+    assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
+           == pred.size());
     constexpr uint64_t chunk_size = 1 << 20;
     std::vector<uint64_t> succ_chunk;
+    std::vector<uint64_t> pred_chunk_idx;
+    auto pred_boundary_it = pred_boundary.begin();
+    auto pred_it = pred.begin();
     ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
     for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
         succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
+        pred_chunk_idx.resize(std::min(chunk_size, num_rows - chunk) + 1);
+        pred_chunk_idx[0] = 0;
+
+        std::vector<uint64_t> pred_chunk;
+        pred_chunk.reserve(succ_chunk.size() * 1.1);
+
         for (uint64_t idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
             succ_chunk[i] = succ[idx] == 0
                     ? std::numeric_limits<uint64_t>::max()
                     : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
+            pred_chunk_idx[i+1] = pred_chunk_idx[i];
+            while (*pred_boundary_it == 0) {
+                ++pred_chunk_idx[i+1];
+                pred_chunk.push_back(*pred_it);
+                ++pred_it;
+                ++pred_boundary_it;
+            }
+            ++pred_boundary_it;
         }
+        assert(pred_boundary_it == pred_boundary.end());
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
@@ -1202,14 +1235,22 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                 const Label &label = sources[l_idx]->get_all_labels()[l_idx2];
                 const std::unique_ptr<bit_vector> &source_col
                         = sources[l_idx]->get_matrix().data()[l_idx2];
-
-                for (uint64_t row_idx = chunk, j = 0; j < succ_chunk.size(); ++row_idx, ++j) {
-                    bool v = succ_chunk[j] != std::numeric_limits<uint64_t>::max()
-                            ? (*source_col)[row_idx] ^ (*source_col)[succ_chunk[j]]
-                            : (*source_col)[row_idx];
+                source_col->call_ones([&](uint64_t row_idx) {
+                    // check successor node and add current node if it's either terminal
+                    // or different from its successor
+                    bool v = succ_chunk[row_idx] != std::numeric_limits<uint64_t>::max()
+                            ? !(*source_col)[succ_chunk[row_idx]]
+                            : 1;
                     if (v)
                         indices.push_back(row_idx);
-                }
+
+                    // check predecessor nodes and add them if they are different (not 1)
+                    for (uint64_t p_idx = pred_chunk_idx[row_idx];
+                         p_idx < pred_chunk_idx[row_idx + 1]; ++p_idx) {
+                        if (!(*source_col)[p_idx])
+                            indices.push_back(p_idx);
+                    }
+                });
                 targets[l_idx]->add_labels(indices, { label });
             }
         }
