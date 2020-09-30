@@ -132,7 +132,8 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
                                                             config_.bandwidth);
 
         if (node_begin != node_end)
-            overlapping_range_ |= (begin < node_end && end > node_begin);
+            overlapping_range_ |= (begin < std::min(size, node_end + 9)
+                && std::min(size, end + 9)> node_begin);
     }
 
     return std::make_pair(find, false);
@@ -280,7 +281,6 @@ inline void compute_HE_avx2(size_t length,
     for (size_t i = 1; i < length; i += 8) {
         // load previous values for cells to update
         __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
-        __m256i gap_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
 
         // compute match score
         __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
@@ -305,10 +305,16 @@ inline void compute_HE_avx2(size_t length,
 
         // compute updated gap size count
         __m256i ones = _mm256_set1_epi32(1);
-        __m256i incoming_count = _mm256_add_epi32(
-            _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]),
-            ones
+        __m256i count_orig = _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]);
+        __m256i update_count = _mm256_add_epi32(count_orig, ones);
+        update_count = _mm256_blendv_epi8(
+            ones, update_count, _mm256_cmpeq_epi32(update_score, update_score_extend)
         );
+
+        __m256i gap_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
+        __m256i gap_cmp = _mm256_cmpgt_epi32(update_score, gap_orig);
+        update_score = _mm256_blendv_epi8(gap_orig, update_score, gap_cmp);
+        update_count = _mm256_blendv_epi8(count_orig, update_count, gap_cmp);
 
         // compute score for cell update. check if inserting a gap improves the update
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
@@ -317,54 +323,113 @@ inline void compute_HE_avx2(size_t length,
         // determine which indices satisfy the x-drop criteria
         __m256i xdrop_cmp = _mm256_cmpgt_epi32(H, xdrop_cutoff);
 
-        // mask indices which are out of bounds
-        xdrop_cmp = _mm256_and_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(length),
-                                     _mm256_add_epi32(_mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7),
-                                                      _mm256_set1_epi32(i))), xdrop_cmp);
-
         // revert values not satisfying the x-drop criteria
         H = _mm256_blendv_epi8(H_orig, H, xdrop_cmp);
-        update_score = _mm256_blendv_epi8(gap_orig, update_score, xdrop_cmp);
 
-        // check which updates should be stores
         __m256i both_cmp = _mm256_cmpgt_epi32(H, H_orig);
-        __m256i gap_cmp = _mm256_cmpgt_epi32(update_score, gap_orig);
-
-        // update scores in cells of DP table
-
-        // update gap count
-        _mm256_maskstore_epi32(&update_gap_count[i], gap_cmp, _mm256_blendv_epi8(
-            ones,
-            incoming_count,
-            _mm256_cmpeq_epi32(update_score, update_score_extend)
-        ));
+        if (!_mm256_movemask_epi8(both_cmp))
+            continue;
 
         // update scores
-        _mm256_maskstore_epi32(&update_scores[i], both_cmp, H);
-        _mm256_maskstore_epi32(&update_gap_scores[i], gap_cmp, update_score);
+        _mm256_storeu_si256((__m256i*)&update_scores[i], H);
+        _mm256_storeu_si256((__m256i*)&update_gap_scores[i], update_score);
 
-        // update traceback operation
+        _mm256_storeu_si256((__m256i*)&update_gap_count[i], update_count);
+
         _mm256_maskstore_epi32(&update_ops[i], both_cmp,
             _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)&profile_ops[i]),
                                insert_p,
                                update_cmp)
         );
 
-        // update traceback node
+        _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
+
         const __m128i *cmp = (__m128i*)&both_cmp;
         _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
         _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
-        cmp = (__m128i*)&gap_cmp;
         _mm256_maskstore_epi64(&update_gap_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
         _mm256_maskstore_epi64(&update_gap_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
-
-        // update mask
-        both_cmp = _mm256_or_si256(both_cmp, gap_cmp);
-        _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
     }
 }
 
 #endif
+
+// direct translation of compute_HE_avx2 to scalar code
+inline void compute_HE(size_t length,
+                       uint64_t prev_node,
+                       int32_t gap_opening_penalty,
+                       int32_t gap_extension_penalty,
+                       int32_t *update_scores,
+                       int32_t *update_gap_scores,
+                       long long int *update_prevs,
+                       int32_t *update_ops,
+                       int32_t *update_gap_count,
+                       long long int *update_gap_prevs,
+                       const int32_t *incoming_scores,
+                       const int32_t *incoming_gap_scores,
+                       const int32_t *profile_scores,
+                       const int32_t *profile_ops,
+                       const int32_t *incoming_gap_count,
+                       int32_t *updated_mask,
+                       int32_t xdrop_cutoff) {
+    // round to cover the same address space as the AVX2 version
+    for (size_t j = 1; j < length; j += 8) {
+        for (size_t i = j; i < j + 8; ++i) {
+            // store score updates
+            // load previous values for cells to update
+            int32_t H_orig = update_scores[i];
+
+            // compute match score
+            int32_t incoming_p = incoming_scores[i - 1];
+            int32_t match_score = incoming_p + profile_scores[i];
+
+            // compute score for cell update
+            int32_t H = std::max(H_orig, match_score);
+
+            // compute insert score
+            int32_t update_score_open = incoming_scores[i] + gap_opening_penalty;
+            int32_t update_score_extend = incoming_gap_scores[i] + gap_extension_penalty;
+            int32_t update_score = std::max(update_score_open, update_score_extend);
+
+            // compute updated gap size count
+            int32_t incoming_count = 1 + (update_score == update_score_extend
+                ? incoming_gap_count[i]
+                : 0);
+
+            if (update_score <= update_gap_scores[i]) {
+                update_score = update_gap_scores[i];
+                incoming_count = update_gap_count[i];
+            }
+
+            // compute score for cell update. check if inserting a gap improves the update
+            int32_t update_cmp = update_score > H ? 0xFFFFFFFF : 0x0;
+            H = std::max(H, update_score);
+
+            // determine which indices satisfy the x-drop criteria
+            int32_t xdrop_cmp = H > xdrop_cutoff ? 0xFFFFFFFF : 0x0;
+
+            // revert values not satisfying the x-drop criteria
+            if (!xdrop_cmp)
+                H = H_orig;
+
+            int32_t both_cmp = H > H_orig ? 0xFFFFFFFF : 0x0;
+            if (!both_cmp)
+                continue;
+
+            // update scores
+            update_scores[i] = H;
+            update_gap_scores[i] = update_score;
+            update_gap_count[i] = incoming_count;
+
+            if (both_cmp)
+                update_gap_prevs[i] = prev_node;
+
+            update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
+            updated_mask[i] = both_cmp;
+            update_prevs[i] = prev_node;
+        }
+    }
+}
 
 template <typename NodeType,
           typename score_t = typename Alignment<NodeType>::score_t>
@@ -393,30 +458,38 @@ inline void compute_updates(const DBGAlignerConfig &config,
         incoming_gap_scores[0] + config.gap_extension_penalty
     );
 
-    if (update_score >= xdrop_cutoff) {
-        if (update_score > update_gap_scores[0]) {
-            update_gap_count[0] = update_score == incoming_scores[0] + config.gap_opening_penalty
-                ? 1 : incoming_gap_count[0] + 1;
-            update_gap_scores[0] = update_score;
-            update_gap_prevs[0] = prev_node;
-            updated_mask[0] = 0xFFFFFFFF;
-        }
+    if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
+        update_scores[0] = update_score;
+        update_ops[0] = Cigar::INSERTION;
+        update_prevs[0] = prev_node;
+        updated_mask[0] = 0xFFFFFFFF;
 
-        if (update_score > update_scores[0]) {
-            update_scores[0] = update_score;
-            update_ops[0] = Cigar::INSERTION;
-            update_prevs[0] = prev_node;
-            updated_mask[0] = 0xFFFFFFFF;
-        }
+        update_gap_scores[0] = update_score;
+        update_gap_prevs[0] = prev_node;
+        update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
+            ? incoming_gap_count[0] + 1
+            : 1;
     }
 
-    size_t i = 1;
-
-#ifdef __AVX2__
-
-    // ensure sizes are the same before casting for AVX2 instructions
+    // ensure sizes are the same before casting
     static_assert(sizeof(NodeType) == sizeof(long long int));
     static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
+
+    auto update_block = [&]() {
+        compute_HE(length, prev_node,
+                   config.gap_opening_penalty, config.gap_extension_penalty,
+                   update_scores, update_gap_scores,
+                   reinterpret_cast<long long int*>(update_prevs),
+                   reinterpret_cast<int32_t*>(update_ops),
+                   update_gap_count,
+                   reinterpret_cast<long long int*>(update_gap_prevs),
+                   incoming_scores, incoming_gap_scores,
+                   reinterpret_cast<const int32_t*>(profile_scores),
+                   reinterpret_cast<const int32_t*>(profile_ops),
+                   incoming_gap_count, updated_mask.data(), xdrop_cutoff - 1);
+    };
+
+#ifdef __AVX2__
 
     if (prev_node != node) {
         // update 8 scores at a time
@@ -424,67 +497,28 @@ inline void compute_updates(const DBGAlignerConfig &config,
                         _mm256_set1_epi64x(prev_node),
                         _mm256_set1_epi32(config.gap_opening_penalty),
                         _mm256_set1_epi32(config.gap_extension_penalty),
-                        update_scores,
-                        update_gap_scores,
+                        update_scores, update_gap_scores,
                         reinterpret_cast<long long int*>(update_prevs),
                         reinterpret_cast<int32_t*>(update_ops),
                         update_gap_count,
                         reinterpret_cast<long long int*>(update_gap_prevs),
-                        incoming_scores,
-                        incoming_gap_scores,
+                        incoming_scores, incoming_gap_scores,
                         reinterpret_cast<const int32_t*>(profile_scores),
                         reinterpret_cast<const int32_t*>(profile_ops),
-                        incoming_gap_count,
-                        updated_mask.data(),
+                        incoming_gap_count, updated_mask.data(),
                         _mm256_set1_epi32(xdrop_cutoff - 1));
-        i = length;
+    } else {
+        update_block();
     }
+
+#else
+
+    update_block();
 
 #endif
 
-    for (; i < length; ++i) {
-        score_t H_orig = update_scores[i];
-
-        // check match score
-        score_t match_score = incoming_scores[i - 1] + score_t(profile_scores[i]);
-        score_t H = std::max(H_orig, match_score);
-
-        // check insert score
-        score_t update_score_open = incoming_scores[i] + score_t(config.gap_opening_penalty);
-        score_t update_score_extend = incoming_gap_scores[i] + score_t(config.gap_extension_penalty);
-        score_t update_score = std::max(update_score_open, update_score_extend);
-
-        // pick best one
-        bool update_cmp = update_score > H;
-        H = std::max(H, update_score);
-
-        // update if scores improve
-        if (H >= xdrop_cutoff) {
-            if (update_score > update_gap_scores[i]) {
-                update_gap_scores[i] = update_score;
-                update_gap_count[i] = update_score == update_score_open
-                    ? 1 : incoming_gap_count[i] + 1;
-                update_gap_prevs[i] = prev_node;
-                updated_mask[i] = 0xFFFFFFFF;
-            }
-
-            if (H > H_orig) {
-                update_scores[i] = H;
-                update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
-                update_prevs[i] = prev_node;
-                updated_mask[i] = 0xFFFFFFFF;
-            }
-        }
-    }
-
-    update_del_scores(config,
-                      update_scores,
-                      update_prevs,
-                      update_ops,
-                      node,
-                      updated_mask.data(),
-                      length,
-                      xdrop_cutoff);
+    update_del_scores(config, update_scores, update_prevs, update_ops, node,
+                      updated_mask.data(), length, xdrop_cutoff);
 }
 
 
@@ -683,7 +717,7 @@ void DefaultColumnExtender<NodeType>
         // store the mask indicating which cells were updated
         // this is padded to ensure that the vectorized code doesn't access
         // out of bounds
-        AlignedVector<int32_t> updated_mask(end - begin + 8, false);
+        AlignedVector<int32_t> updated_mask(end - begin + 9, false);
 
         assert(next_column.scores.size() == next_column.gap_scores.size());
         assert(incoming->scores.size() == incoming->gap_scores.size());
@@ -710,7 +744,7 @@ void DefaultColumnExtender<NodeType>
 
         // Find the maximum changed value
         const score_t *best_update = nullptr;
-        for (size_t i = begin, j = 0; i < end; ++i, ++j) {
+        for (size_t i = begin, j = 0; i < size && j < updated_mask.size(); ++i, ++j) {
             if (updated_mask[j] && (!best_update || next_column.scores[i] > *best_update))
                 best_update = &next_column.scores[i];
         }
@@ -725,7 +759,6 @@ void DefaultColumnExtender<NodeType>
                 next_column.best_pos = best_update - next_column.scores.data();
 
                 assert(next_column.best_pos >= begin);
-                assert(next_column.best_pos < end);
                 assert(next_column.best_pos < size);
             }
 
