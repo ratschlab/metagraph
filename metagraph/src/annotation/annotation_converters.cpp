@@ -1065,11 +1065,10 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-[[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
+void build_successor(const graph::DBGSuccinct &graph,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
-#pragma clang optimize off
     bool must_build = false;
     for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
