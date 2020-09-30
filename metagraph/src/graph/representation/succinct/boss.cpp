@@ -2360,6 +2360,7 @@ void call_paths_row_diff(
         sdsl::bit_vector *visited,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal,
+        sdsl::bit_vector *dummy,
         ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
@@ -2394,13 +2395,16 @@ void call_paths_row_diff(
             TAlphabet w = boss.get_W(edge) % boss.alph_size;
 
             // stop the traversal on dummy sink nodes
-            if (w == boss.kSentinelCode)
+            if (w == boss.kSentinelCode) {
+                set_bit(dummy->data(), edge, async);
                 break;
+            }
 
             // don't add dummy source k-mers to the path
             if (skip_count == 0) {
                 path.push_back(edge);
             } else {
+                set_bit(dummy->data(), edge, async);
                 skip_count--;
             }
 
@@ -2430,7 +2434,7 @@ void call_paths_row_diff(
                         [=,&boss,&thread_pool,&progress_bar](std::vector<edge_index> &edges) {
                             call_paths_row_diff(boss, std::move(edges), callback,
                                                 thread_pool, max_length, visited,
-                                                terminal, near_terminal, progress_bar);
+                                                terminal, near_terminal, dummy, progress_bar);
                         },
                         std::vector<edge_index>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
                                           edges.end())
@@ -2649,12 +2653,15 @@ void BOSS::call_sequences_row_diff(
         Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
         size_t num_threads,
         size_t max_length,
-        sdsl::bit_vector *terminal) const {
+        sdsl::bit_vector *terminal,
+        sdsl::bit_vector *dummy) const {
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
     terminal->resize(W_->size());
+    dummy->resize((W_->size()));
     sdsl::util::set_to_value(*terminal, false);
+    sdsl::util::set_to_value(*dummy, false);
     visited[0] = true;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -2667,7 +2674,7 @@ void BOSS::call_sequences_row_diff(
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&, start]() {
             call_paths_row_diff(*this, { start }, callback, thread_pool, max_length,
-                                &visited, terminal, &near_terminal, progress_bar);
+                                &visited, terminal, &near_terminal, dummy,progress_bar);
         });
     };
 

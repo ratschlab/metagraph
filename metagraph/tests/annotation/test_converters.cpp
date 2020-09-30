@@ -154,10 +154,13 @@ std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string>
     return graph;
 }
 
-void clean_column_diff_files(const std::string& suffix) {
-    std::string outfbase = test_dump_basename + suffix;
-    std::filesystem::remove(outfbase + ".succ");
-    std::filesystem::remove(outfbase + ".diff.column.annodbg");
+void clean_column_diff_files(const std::string &graph_name) {
+    std::string outfbase = test_dump_basename + graph_name;
+    // TODO - update extension if needed
+    for (const auto &suf :
+         { ".succ", ".pred", ".pred_boundary", ".terminal", "row_diff.column.annodbg" }) {
+        std::filesystem::remove(outfbase + suf);
+    }
 }
 
 TEST(ColumnDiff, succ) {
@@ -168,20 +171,46 @@ TEST(ColumnDiff, succ) {
 
     const std::string outfbase = test_dump_basename + "column.diff.succ";
     const std::string succ_file = outfbase + ".succ";
-    const std::vector<std::vector<uint64_t>> expected
+    const std::string pred_file = outfbase + ".pred";
+    const std::string pred_boundary_file = outfbase + ".pred_boundary";
+    const std::vector<std::vector<uint64_t>> expected_succ
             = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
+    const std::vector<std::vector<uint64_t>> expected_pred
+            = { {}, { 3, 2, 4 }, { 3, 5, 2, 4 } };
+    const std::vector<std::vector<bool>> expected_boundary
+            = { { 1, 1, 1, 1, 1 }, { 0, 1, 1, 1, 0, 1, 0, 1 }, { 0, 1, 1, 0, 1, 0, 1, 0, 1 } };
+
     for (uint32_t max_depth : { 1, 3, 5 }) {
         clean_column_diff_files("column.diff.succ");
 
         convert_to_column_diff(*graph, empty_source, outfbase, max_depth);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
+        ASSERT_TRUE(std::filesystem::exists(pred_file));
+        ASSERT_TRUE(std::filesystem::exists(pred_boundary_file));
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
 
+        uint32_t idx = max_depth / 2;
         ASSERT_EQ(5, succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected[max_depth / 2][i], succ[i]) << max_depth << " " << i;
+            EXPECT_EQ(expected_succ[idx][i], succ[i]);
+        }
+
+        sdsl::int_vector_buffer pred(pred_file, std::ios::in);
+
+        EXPECT_EQ(expected_pred[idx].size(), pred.size());
+        for (uint32_t i = 0; i < pred.size(); ++i) {
+            EXPECT_EQ(expected_pred[idx][i], pred[i]) << max_depth << " " << i;
+        }
+
+        sdsl::rrr_vector boundary;
+        std::ifstream fpred_boundary(pred_boundary_file, std::ios::binary);
+        boundary.load(fpred_boundary);
+
+        ASSERT_EQ(expected_boundary[idx].size(), boundary.size());
+        for(uint32_t i = 0; i < expected_boundary[idx].size(); ++i) {
+            EXPECT_EQ(expected_boundary[idx][i], boundary[i]);
         }
     }
 

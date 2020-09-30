@@ -155,7 +155,8 @@ class BOSS {
             Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
             size_t num_threads,
             size_t max_length,
-            sdsl::bit_vector *terminal) const;
+            sdsl::bit_vector *terminal,
+            sdsl::bit_vector *dummy) const;
 
     /**
      * Call unitigs (dummy edges are skipped).

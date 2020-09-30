@@ -97,8 +97,9 @@ class ColumnDiff : public BinaryMatrix {
     }
 
     bool load(std::istream &f) override {
-        size_t len;
-        f.read(reinterpret_cast<char *>(&len), sizeof(size_t));
+        uint64_t len;
+        common::logger->trace("Loading terminal nodes from {}", terminal_file_);
+        f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
         terminal_file_ = std::string(len, '\0');
         f.read(terminal_file_.data(), len);
 
@@ -106,8 +107,8 @@ class ColumnDiff : public BinaryMatrix {
     }
 
     void serialize(std::ostream &f) const override {
-        size_t len = terminal_file_.size();
-        f.write(reinterpret_cast<char *>(&len), sizeof(size_t));
+        uint64_t len = terminal_file_.size();
+        f.write(reinterpret_cast<char *>(&len), sizeof(uint64_t));
         f.write(terminal_file_.c_str(), len);
         diffs_.serialize(f);
     };

@@ -1065,13 +1065,26 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-void build_successor(const graph::DBGSuccinct &graph,
-                     const std::string &succ_file,
-                     const std::string &term_file,
+[[clang::optnone]] void build_successor(const graph::DBGSuccinct &graph,
+                     const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
-    const graph::boss::BOSS &boss = graph.get_boss();
+#pragma clang optimize off
+    bool must_build = false;
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
+        if (!std::filesystem::exists(outfbase + suffix)) {
+            logger->trace("Building and writing  successor/predecessor/terminal files");
+            must_build = true;
+            break;
+        }
+    }
+    if (!must_build)
+        return;
+
+    using graph::boss::BOSS;
+    const BOSS &boss = graph.get_boss();
     sdsl::bit_vector terminal;
+    sdsl::bit_vector dummy;
     boss.call_sequences_row_diff(
             [&](const vector<uint64_t> &, std::optional<uint64_t>) {
                 /*std::string chars(boss.get_node_str(path.front()));
@@ -1080,40 +1093,58 @@ void build_successor(const graph::DBGSuccinct &graph,
                 }
                 std::cout << chars << std::endl;*/
             },
-            num_threads, max_length, &terminal);
+            num_threads, max_length, &terminal, &dummy);
 
     ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
-    sdsl::int_vector_buffer f(succ_file, std::ios::out, 1024 * 1024, width);
+    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
+    std::vector<bool> pred_boundary;
+    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
 
     for(uint64_t i = 1; i <= graph.num_nodes(); ++i) {
         uint64_t boss_idx = graph.kmer_to_boss_index(i);
-        const graph::boss::BOSS::TAlphabet w = boss.get_W(boss_idx) % boss.alph_size;
-        if (terminal[boss_idx] || w == 0) {
-            f.push_back(0);
+        if (dummy[boss_idx] || terminal[boss_idx]) {
+            succ.push_back(0);
         } else {
-            uint64_t succ = graph.boss_to_kmer_index(boss.fwd(boss_idx, w));
-            f.push_back(succ);
+            const graph::boss::BOSS::TAlphabet w = boss.get_W(boss_idx) % boss.alph_size;
+            uint64_t next = w ? graph.boss_to_kmer_index(boss.fwd(boss_idx, w)) : 0;
+            succ.push_back(next);
         }
+        uint64_t back_idx = boss.bwd(boss_idx);
+        boss.call_incoming_to_target(back_idx, boss.get_W(back_idx),
+                                     [&](BOSS::edge_index incoming_edge) {
+                                         if (terminal[incoming_edge] || dummy[incoming_edge])
+                                             return;
+                                         pred.push_back(graph.boss_to_kmer_index(incoming_edge));
+                                         pred_boundary.push_back(0);
+                                     });
+        pred_boundary.push_back(1);
         ++progress_bar;
     }
-    f.close();
+    succ.close();
+    pred.close();
+
+    std::ofstream fpred_boundary(outfbase + ".pred_boundary");
+    sdsl::rrr_vector rpred_boundary(to_sdsl(pred_boundary));
+    rpred_boundary.serialize(fpred_boundary);
+    fpred_boundary.close();
 
     // terminal uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(graph.num_nodes(), 0);
     for (uint64_t i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {
+            uint64_t graph_idx = graph.boss_to_kmer_index(i);
             uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph.boss_to_kmer_index(i));
+                    graph_idx);
             assert(anno_index < graph.num_nodes());
             term[anno_index] = 1;
         }
     }
 
-    std::ofstream fterm(term_file, ios::binary);
+    std::ofstream fterm(outfbase + ".terminal", ios::binary);
     sdsl::rrr_vector rterm(term);
     rterm.serialize(fterm);
     fterm.close();
@@ -1139,17 +1170,11 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                 = source->get_label_encoder();
     }
 
-    std::string successor_file = outfbase + ".succ";
-    std::string terminal_file = outfbase + ".terminal";
-    if (!std::filesystem::exists(successor_file) || !std::filesystem::exists(terminal_file)) {
-        logger->trace("Building and writing  successor and terminal files to {}, {}",
-                      successor_file, terminal_file);
-        build_successor(graph, successor_file, terminal_file, max_depth, get_num_threads());
-    }
+    build_successor(graph, outfbase, max_depth, get_num_threads());
 
     uint64_t num_rows = graph.num_nodes();
 
-    sdsl::int_vector_buffer succ(successor_file, std::ios::in, 1024*1024);
+    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::in, 1024*1024);
     assert(succ.size() == num_rows);
     constexpr uint64_t chunk_size = 1 << 20;
     std::vector<uint64_t> succ_chunk;
@@ -1198,7 +1223,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
         ColumnMajor matrix = targets[l_idx]->release_matrix();
         auto diff_annotation
                 = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
-                                                            terminal_file);
+                                                            outfbase + ".terminal");
         result.push_back(std::make_unique<ColumnDiffAnnotator>(
                 std::move(diff_annotation), sources[l_idx]->get_label_encoder()));
     }
@@ -1220,6 +1245,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
     Vector<uint64_t> node_diffs;
     Vector<std::pair<uint64_t, uint32_t>> pos(nnodes, { 0, 0 });
     sdsl::bit_vector terminal;
+    sdsl::bit_vector dummy;
 
     std::atomic<uint64_t> terminal_count = 0;
     std::atomic<uint64_t> forced_terminal_count = 0;
@@ -1290,7 +1316,7 @@ std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &
             // for each node in path, the boundary bit vector has one 0 for each diff and
             // ends with a 1
             boundary_size.fetch_add(diffs.size() + path.size(), std::memory_order_relaxed);
-        }, num_threads, max_depth, &terminal);
+        }, num_threads, max_depth, &terminal, &dummy);
     std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace(
