@@ -4,8 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include "annotation/binary_matrix/column_sparse//column_major.hpp"
+#include "annotation/binary_matrix/row_diff/column_diff.hpp"
 #include "annotation/representation/base/annotation.hpp"
-
 
 namespace mtg {
 namespace annot {
@@ -54,6 +55,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
+
+// specialization of merge_load for ColumnDiff - it allows loading from multiple files
+template <>
+bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
+        const std::vector<std::string> &filenames);
 
 } // namespace annot
 } // namespace mtg

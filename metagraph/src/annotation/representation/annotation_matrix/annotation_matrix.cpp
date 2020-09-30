@@ -1,5 +1,6 @@
 #include "annotation_matrix.hpp"
 
+#include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
@@ -140,6 +141,80 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
       : matrix_(std::move(matrix)) {
     assert(matrix_.get());
     label_encoder_ = label_encoder;
+}
+
+// template specialization of merge_load
+template <>
+bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
+        const std::vector<std::string> &filenames) {
+    size_t num_threads = get_num_threads();
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size() + 1, 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        std::ifstream instream(filenames[i], std::ios::binary);
+        if (!instream.good()) {
+            common::logger->error("Can't read from {}", filenames[i]);
+            error_occurred = true;
+        }
+
+        LabelEncoder<std::string> label_encoder;
+        if (!label_encoder.load(instream)) {
+            common::logger->error("Can't load label encoder from {}", filenames[i]);
+            error_occurred = true;
+        }
+
+        offsets[i + 1] = label_encoder.size();
+    }
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    std::vector<std::string> labels(offsets.back());
+    std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
+
+    std::string terminal_file;
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        try {
+            common::logger->trace("Loading annotations from file {}", filenames[i]);
+            ColumnDiffAnnotator annotation;
+            if (!annotation.load(filenames[i])) {
+                common::logger->error("Can't load {}", filenames[i]);
+                std::exit(1);
+            }
+            assert(terminal_file.empty() || terminal_file == annotation.get_matrix().terminal_file());
+            terminal_file = annotation.get_matrix().terminal_file();
+
+            const LabelEncoder<std::string> &label_encoder_load = annotation.get_label_encoder();
+            if (!label_encoder_load.size())
+                common::logger->warn("No labels in {}", filenames[i]);
+
+            annotation.release_matrix().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector>&& col){
+              labels[offsets[i] + idx] = label_encoder_load.get_labels()[idx];
+              columns[offsets[i] + idx] = std::move(col);
+            });
+        } catch (...) {
+            error_occurred = true;
+        }
+    }
+    matrix_ = std::make_unique<binmat::ColumnDiff<binmat::ColumnMajor>>(
+            nullptr, binmat::ColumnMajor(std::move(columns)), terminal_file);
+    std::for_each(labels.begin(), labels.end(),
+                  [&](const auto &l) { label_encoder_.insert_and_encode(l); });
+
+    return !error_occurred;
 }
 
 template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;

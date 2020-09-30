@@ -41,82 +41,6 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
 }
 
-std::unique_ptr<ColumnDiffAnnotator> merge_load(const std::vector<std::string> &filenames,
-                                                size_t num_threads) {
-    std::atomic<bool> error_occurred = false;
-
-    std::vector<uint64_t> offsets(filenames.size() + 1, 0);
-
-    // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
-        std::ifstream instream(filenames[i], std::ios::binary);
-        if (!instream.good()) {
-            logger->error("Can't read from {}", filenames[i]);
-            error_occurred = true;
-        }
-
-        LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(instream)) {
-            logger->error("Can't load label encoder from {}", filenames[i]);
-            error_occurred = true;
-        }
-
-        offsets[i + 1] = label_encoder.size();
-    }
-
-    // compute global offsets (partial sums)
-    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
-
-    std::vector<std::string> labels(offsets.back());
-    std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
-
-    std::string terminal_file;
-
-    // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
-        try {
-            logger->trace("Loading annotations from file {}", filenames[i]);
-            ColumnDiffAnnotator annotation;
-            if (!annotation.load(filenames[i])) {
-                logger->error("Can't load {}", filenames[i]);
-                std::exit(1);
-            }
-            assert(terminal_file.empty() || terminal_file == annotation.get_matrix().terminal_file());
-            terminal_file = annotation.get_matrix().terminal_file();
-
-            const LabelEncoder<std::string> &label_encoder_load = annotation.get_label_encoder();
-            if (!label_encoder_load.size())
-                logger->warn("No labels in {}", filenames[i]);
-
-            annotation.release_matrix().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector>&& col){
-                labels[offsets[i] + idx] = label_encoder_load.get_labels()[idx];
-                columns[offsets[i] + idx] = std::move(col);
-            });
-        } catch (...) {
-            error_occurred = true;
-        }
-    }
-    auto merged_anno = std::make_unique<binmat::ColumnDiff<binmat::ColumnMajor>>(
-            nullptr, binmat::ColumnMajor(std::move(columns)), terminal_file);
-    LabelEncoder<std::string> label_encoder;
-    std::for_each(labels.begin(), labels.end(),
-                  [&](const auto &l) { label_encoder.insert_and_encode(l); });
-    auto result = error_occurred
-            ? nullptr
-            : std::make_unique<ColumnDiffAnnotator>(std::move(merged_anno), label_encoder);
-
-    return result;
-}
-
-
 int transform_annotation(Config *config) {
     assert(config);
 
@@ -604,9 +528,8 @@ int transform_annotation(Config *config) {
         std::unique_ptr<MultiBRWTAnnotator> brwt_annotator;
         if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
             logger->trace("Loading annotation from disk...");
-            std::unique_ptr<ColumnDiffAnnotator> annotator
-                    = merge_load(files, get_num_threads());
-            if (!annotator)
+            auto annotator = std::make_unique<ColumnDiffAnnotator>();
+            if (!annotator->merge_load(files))
                 std::exit(1);
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
             brwt_annotator = convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(
