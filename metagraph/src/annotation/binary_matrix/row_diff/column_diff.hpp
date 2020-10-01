@@ -98,10 +98,10 @@ class ColumnDiff : public BinaryMatrix {
 
     bool load(std::istream &f) override {
         uint64_t len;
-        common::logger->trace("Loading terminal nodes from {}", terminal_file_);
         f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
         terminal_file_ = std::string(len, '\0');
         f.read(terminal_file_.data(), len);
+        common::logger->trace("Loading terminal nodes from {}", terminal_file_);
 
         return diffs_.load(f);
     }

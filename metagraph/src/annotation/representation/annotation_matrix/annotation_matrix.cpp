@@ -189,20 +189,21 @@ bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
 
         try {
             common::logger->trace("Loading annotations from file {}", filenames[i]);
-            ColumnDiffAnnotator annotation;
-            if (!annotation.load(filenames[i])) {
+            LabelEncoder<std::string> label_encoder;
+            std::ifstream instream(filenames[i], std::ios::binary);
+            binmat::ColumnDiff<binmat::ColumnMajor> matrix;
+            if (!label_encoder.load(instream) || !matrix.load(instream)) {
                 common::logger->error("Can't load {}", filenames[i]);
                 std::exit(1);
             }
-            assert(terminal_file.empty() || terminal_file == annotation.get_matrix().terminal_file());
-            terminal_file = annotation.get_matrix().terminal_file();
-
-            const LabelEncoder<std::string> &label_encoder_load = annotation.get_label_encoder();
-            if (!label_encoder_load.size())
+            if (!label_encoder.size())
                 common::logger->warn("No labels in {}", filenames[i]);
 
-            annotation.release_matrix().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector>&& col){
-              labels[offsets[i] + idx] = label_encoder_load.get_labels()[idx];
+            assert(terminal_file.empty() || terminal_file == matrix.terminal_file());
+            terminal_file = matrix.terminal_file();
+
+            matrix.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector>&& col){
+              labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
               columns[offsets[i] + idx] = std::move(col);
             });
         } catch (...) {
