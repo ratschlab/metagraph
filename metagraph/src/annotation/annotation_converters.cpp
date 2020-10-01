@@ -1156,11 +1156,12 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-std::vector<std::unique_ptr<ColumnDiffAnnotator>>
+[[clang::optnone]] std::vector<std::unique_ptr<ColumnDiffAnnotator>>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
+#pragma clang optimize off
     if (sources.empty())
         return {};
 
@@ -1218,7 +1219,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
             }
             ++pred_boundary_it;
         }
-        assert(pred_boundary_it == pred_boundary.end());
+
+        assert(pred_chunk.size() == pred_chunk_idx.back());
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
@@ -1235,18 +1237,19 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                 const Label &label = sources[l_idx]->get_all_labels()[l_idx2];
                 const std::unique_ptr<bit_vector> &source_col
                         = sources[l_idx]->get_matrix().data()[l_idx2];
-                source_col->call_ones([&](uint64_t row_idx) {
+                source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(), [&](uint64_t row_idx) {
                     // check successor node and add current node if it's either terminal
                     // or different from its successor
-                    bool v = succ_chunk[row_idx] != std::numeric_limits<uint64_t>::max()
-                            ? !(*source_col)[succ_chunk[row_idx]]
+                    uint64_t chunk_idx = row_idx - chunk;
+                    bool v = succ_chunk[chunk_idx] != std::numeric_limits<uint64_t>::max()
+                            ? !(*source_col)[succ_chunk[chunk_idx]]
                             : 1;
                     if (v)
                         indices.push_back(row_idx);
 
                     // check predecessor nodes and add them if they are different (not 1)
-                    for (uint64_t p_idx = pred_chunk_idx[row_idx];
-                         p_idx < pred_chunk_idx[row_idx + 1]; ++p_idx) {
+                    for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
+                         p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
                         if (!(*source_col)[pred_chunk[p_idx]])
                             indices.push_back(pred_chunk[p_idx]);
                     }
@@ -1257,6 +1260,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
 
         progress_bar += succ_chunk.size();
     }
+
+    assert(pred_boundary_it == pred_boundary.end());
 
     std::vector<std::unique_ptr<ColumnDiffAnnotator>> result;
 

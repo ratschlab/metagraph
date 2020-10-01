@@ -327,7 +327,6 @@ void test_column_diff(uint32_t k,
         graph->add_sequence(seq);
     }
     graph->mask_dummy_kmers(1, false);
-    std::cout << "nodex " << graph->num_nodes();
 
     auto initial_annotation = std::make_unique<ColumnCompressed<>>(graph->num_nodes());
     std::vector<uint32_t> added_idx(graph->num_nodes());
