@@ -191,6 +191,10 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
     Cigar::Operator op = column->second.ops.at(i);
     NodeType prev_node = column->second.prev_nodes.at(i);
     NodeType prev_gap_node = column->second.gap_prev_nodes.at(i);
+
+    if (op == Cigar::INSERTION)
+        prev_node = prev_gap_node;
+
     uint8_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
 
     if (!i && prev_node == SequenceGraph::npos)
@@ -204,7 +208,7 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
     std::vector<typename DPTable<NodeType>::const_iterator> out_columns;
     while (prev_node != SequenceGraph::npos) {
-        auto prev_column = dp_table.find(op == Cigar::INSERTION ? prev_gap_node : prev_node);
+        auto prev_column = dp_table.find(prev_node);
         assert(prev_column != dp_table.end());
 
         switch (op) {
@@ -248,6 +252,8 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
         }
         prev_node = column->second.prev_nodes.at(i);
         prev_gap_node = column->second.gap_prev_nodes.at(i);
+        if (op == Cigar::INSERTION)
+            prev_node = prev_gap_node;
     }
 
     const auto &score_col = column->second.scores;
