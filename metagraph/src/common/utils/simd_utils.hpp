@@ -258,12 +258,21 @@ inline __m256i rshiftpushback_epi32(__m256i v, uint32_t a) {
     );
 }
 
-inline __m256i expandepu8_epi32(uint64_t a) {
-    return _mm256_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_insert_epi64(
-        _mm256_undefined_si256(), a, 0
-    )));
+#if defined(__AVX512VL__) && defined(__AVX512F__)
+#define mm256_cvtepi32_epi8 _mm256_cvtepi32_epi8
+#else
+inline __m128i mm256_cvtepi32_epi8(__m256i a) {
+    a = _mm256_shuffle_epi8(a,
+        _mm256_setr_epi8(   0,    4,    8,   12, 0x80, 0x80, 0x80, 0x80,
+                         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+                            0,    4,    8,   12, 0x80, 0x80, 0x80, 0x80,
+                         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80)
+    );
+    return _mm256_castsi256_si128(
+        _mm256_permutevar8x32_epi32(a, _mm256_setr_epi32(0, 4, 1, 1, 1, 1, 1, 1))
+    );
 }
-
+#endif
 
 /**
  * Helpers for score_kmer_presence_mask

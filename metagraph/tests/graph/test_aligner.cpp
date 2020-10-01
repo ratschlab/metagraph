@@ -1407,8 +1407,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
     auto paths = aligner.align(query);
 
     ASSERT_EQ(2ull, paths.size());
-    EXPECT_EQ(557llu, paths[0].get_score());
-    EXPECT_EQ(556llu, paths[1].get_score());
+    EXPECT_EQ(557llu, paths[0].get_score()) << paths[0];
+    EXPECT_EQ(556llu, paths[1].get_score()) << paths[1];
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {

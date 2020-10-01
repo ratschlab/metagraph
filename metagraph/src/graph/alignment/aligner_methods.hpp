@@ -273,7 +273,7 @@ class DefaultColumnExtender : public Extender<NodeType> {
     // used for branch and bound checks
     std::vector<score_t> partial_sums_;
 
-    tsl::hopscotch_map<char, AlignedVector<score_t>> profile_score;
+    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op;
 
     std::string_view query;

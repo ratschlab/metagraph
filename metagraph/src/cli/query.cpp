@@ -16,6 +16,7 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -828,6 +829,14 @@ int query_graph(Config *config) {
         aligner_config.reset(new align::DBGAlignerConfig(
             initialize_aligner_config(*graph, *config)
         ));
+
+        if (!graph->is_canonical_mode() && config->canonical) {
+            // wrap the primary graph into a canonical one
+            graph.reset(new CanonicalDBG(graph, true));
+            aligner = build_aligner(*graph, *aligner_config);
+        } else {
+            aligner = build_aligner(*graph, *aligner_config);
+        }
     }
 
     QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
