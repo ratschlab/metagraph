@@ -44,25 +44,10 @@ void DefaultColumnExtender<NodeType>
         const auto &row = config_.get_row(c);
         const auto &op_row = Cigar::get_op_row(c);
 
-#ifdef __AVX2__
-
-        __m256i *score_cast = (__m256i*)profile_score_row.data();
-        __m256i *op_cast = (__m256i*)profile_op_row.data();
-        for (size_t i = 0; i < query.size(); i += 8) {
-            __m256i str_p = expandepu8_epi32(*(uint64_t*)&query[i]);
-            _mm256_store_si256(score_cast++, _mm256_i32gather_epi32(row.data(), str_p, 4));
-            _mm256_store_si256(op_cast++, _mm256_i32gather_epi32((int*)op_row.data(), str_p, 4));
-        }
-
-#else
-
         std::transform(query.begin(), query.end(), profile_score_row.begin(),
                        [&row](char q) { return row[q]; });
         std::transform(query.begin(), query.end(), profile_op_row.begin(),
                        [&op_row](char q) { return op_row[q]; });
-
-#endif
-
     }
 }
 
@@ -221,14 +206,12 @@ void DefaultColumnExtender<NodeType>::check_and_push(ColumnRef&& next_column) {
  * Helpers for column score updating
  */
 
-template <typename NodeType,
-          typename score_t = typename Alignment<NodeType>::score_t>
+template <typename score_t>
 inline void update_del_scores(const DBGAlignerConfig &config,
                               score_t *update_scores,
-                              NodeType *update_prevs,
+                              uint8_t *update_prevs,
                               Cigar::Operator *update_ops,
-                              const NodeType &node,
-                              int32_t *updated_mask,
+                              int8_t *updated_mask,
                               size_t length,
                               score_t xdrop_cutoff) {
     for (size_t i = 1; i < length; ++i) {
@@ -242,10 +225,10 @@ inline void update_del_scores(const DBGAlignerConfig &config,
             while (i < length && del_score > update_scores[i]) {
                 update_scores[i] = del_score;
                 update_ops[i] = Cigar::DELETION;
-                update_prevs[i] = node;
+                update_prevs[i] = 0xFF;
 
                 if (updated_mask)
-                    updated_mask[i] = 0xFFFFFFFF;
+                    updated_mask[i] = 0xFF;
 
                 del_score += config.gap_extension_penalty;
                 ++i;
@@ -258,26 +241,26 @@ inline void update_del_scores(const DBGAlignerConfig &config,
 #ifdef __AVX2__
 
 inline void compute_HE_avx2(size_t length,
-                            __m256i prev_node,
+                            __m128i prev_node,
                             __m256i gap_opening_penalty,
                             __m256i gap_extension_penalty,
                             int32_t *update_scores,
                             int32_t *update_gap_scores,
-                            long long int *update_prevs,
-                            int32_t *update_ops,
+                            uint8_t *update_prevs,
+                            int8_t *update_ops,
                             int32_t *update_gap_count,
-                            long long int *update_gap_prevs,
+                            uint8_t *update_gap_prevs,
                             const int32_t *incoming_scores,
                             const int32_t *incoming_gap_scores,
-                            const int32_t *profile_scores,
-                            const int32_t *profile_ops,
+                            const int8_t *profile_scores,
+                            const int8_t *profile_ops,
                             const int32_t *incoming_gap_count,
-                            int32_t *updated_mask,
+                            int8_t *updated_mask,
                             __m256i xdrop_cutoff) {
     assert(update_scores != incoming_scores);
     assert(update_gap_scores != incoming_gap_scores);
 
-    __m256i insert_p = _mm256_set1_epi32(Cigar::INSERTION);
+    __m128i insert_p = _mm_set1_epi8(Cigar::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
         // load previous values for cells to update
         __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
@@ -285,8 +268,7 @@ inline void compute_HE_avx2(size_t length,
         // compute match score
         __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
         __m256i match_score = _mm256_add_epi32(
-            incoming_p,
-            _mm256_loadu_si256((__m256i*)&profile_scores[i])
+            incoming_p, _mm256_cvtepi8_epi32(_mm_loadu_si64(&profile_scores[i]))
         );
 
         // compute score for cell update
@@ -304,12 +286,12 @@ inline void compute_HE_avx2(size_t length,
         __m256i update_score = _mm256_max_epi32(update_score_open, update_score_extend);
 
         // compute updated gap size count
-        __m256i ones = _mm256_set1_epi32(1);
         __m256i count_orig = _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]);
-        __m256i update_count = _mm256_add_epi32(count_orig, ones);
-        update_count = _mm256_blendv_epi8(
-            ones, update_count, _mm256_cmpeq_epi32(update_score, update_score_extend)
+        __m256i update_count = _mm256_and_si256(
+            count_orig,
+            _mm256_cmpeq_epi32(update_score, update_score_extend)
         );
+        update_count = _mm256_add_epi32(update_count, _mm256_set1_epi32(1));
 
         __m256i gap_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
         __m256i gap_cmp = _mm256_cmpgt_epi32(update_score, gap_orig);
@@ -336,19 +318,24 @@ inline void compute_HE_avx2(size_t length,
 
         _mm256_storeu_si256((__m256i*)&update_gap_count[i], update_count);
 
-        _mm256_maskstore_epi32(&update_ops[i], both_cmp,
-            _mm256_blendv_epi8(_mm256_loadu_si256((__m256i*)&profile_ops[i]),
-                               insert_p,
-                               update_cmp)
-        );
+        __m128i profile_op = _mm_loadu_si64(&profile_ops[i]);
+        __m128i update_op = _mm_loadu_si64(&update_ops[i]);
+        __m128i update_cmp_small = mm256_cvtepi32_epi8(update_cmp);
+        __m128i both_cmp_small = mm256_cvtepi32_epi8(both_cmp);
 
-        _mm256_maskstore_epi32(&updated_mask[i], both_cmp, both_cmp);
+        profile_op = _mm_blendv_epi8(profile_op, insert_p, update_cmp_small);
+        update_op = _mm_blendv_epi8(update_op, profile_op, both_cmp_small);
+        _mm_storeu_si64(&update_ops[i], update_op);
 
-        const __m128i *cmp = (__m128i*)&both_cmp;
-        _mm256_maskstore_epi64(&update_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
-        _mm256_maskstore_epi64(&update_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
-        _mm256_maskstore_epi64(&update_gap_prevs[i], _mm256_cvtepi32_epi64(cmp[0]), prev_node);
-        _mm256_maskstore_epi64(&update_gap_prevs[i + 4], _mm256_cvtepi32_epi64(cmp[1]), prev_node);
+        __m128i mask = _mm_or_si128(_mm_loadu_si64(&updated_mask[i]), both_cmp_small);
+        _mm_storeu_si64(&updated_mask[i], mask);
+
+        __m128i score_node = _mm_loadu_si64(&update_prevs[i]);
+        _mm_storeu_si64(&update_prevs[i],
+                        _mm_blendv_epi8(score_node, prev_node, both_cmp_small));
+        __m128i score_gap_node = _mm_loadu_si64(&update_gap_prevs[i]);
+        _mm_storeu_si64(&update_gap_prevs[i],
+                        _mm_blendv_epi8(score_gap_node, prev_node, both_cmp_small));
     }
 }
 
@@ -356,21 +343,21 @@ inline void compute_HE_avx2(size_t length,
 
 // direct translation of compute_HE_avx2 to scalar code
 inline void compute_HE(size_t length,
-                       uint64_t prev_node,
+                       uint8_t prev_node,
                        int32_t gap_opening_penalty,
                        int32_t gap_extension_penalty,
                        int32_t *update_scores,
                        int32_t *update_gap_scores,
-                       long long int *update_prevs,
-                       int32_t *update_ops,
+                       uint8_t *update_prevs,
+                       Cigar::Operator *update_ops,
                        int32_t *update_gap_count,
-                       long long int *update_gap_prevs,
+                       uint8_t *update_gap_prevs,
                        const int32_t *incoming_scores,
                        const int32_t *incoming_gap_scores,
-                       const int32_t *profile_scores,
-                       const int32_t *profile_ops,
+                       const int8_t *profile_scores,
+                       const Cigar::Operator *profile_ops,
                        const int32_t *incoming_gap_count,
-                       int32_t *updated_mask,
+                       int8_t *updated_mask,
                        int32_t xdrop_cutoff) {
     // round to cover the same address space as the AVX2 version
     for (size_t j = 1; j < length; j += 8) {
@@ -425,32 +412,35 @@ inline void compute_HE(size_t length,
                 update_gap_prevs[i] = prev_node;
 
             update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
-            updated_mask[i] = both_cmp;
+            updated_mask[i] = 0xFF;
             update_prevs[i] = prev_node;
         }
     }
 }
 
 template <typename NodeType,
+          typename Column,
           typename score_t = typename Alignment<NodeType>::score_t>
-inline void compute_updates(const DBGAlignerConfig &config,
-                            score_t *update_scores,
-                            score_t *update_gap_scores,
-                            NodeType *update_prevs,
-                            int32_t *update_gap_count,
-                            NodeType *update_gap_prevs,
-                            Cigar::Operator *update_ops,
+inline void compute_updates(Column &update_column,
+                            size_t begin,
+                            const DBGAlignerConfig &config,
                             const NodeType &prev_node,
                             const NodeType &node,
                             const score_t *incoming_scores,
                             const score_t *incoming_gap_scores,
                             const int32_t *incoming_gap_count,
-                            const score_t *profile_scores,
+                            const int8_t *profile_scores,
                             const Cigar::Operator *profile_ops,
-                            AlignedVector<int32_t> &updated_mask,
+                            AlignedVector<int8_t> &updated_mask,
                             size_t length,
                             score_t xdrop_cutoff) {
     assert(length);
+    score_t *update_scores = update_column.scores.data() + begin;
+    score_t *update_gap_scores = update_column.gap_scores.data() + begin;
+    uint8_t *update_prevs = update_column.prev_nodes.data() + begin;
+    int32_t *update_gap_count = update_column.gap_count.data() + begin;
+    uint8_t *update_gap_prevs = update_column.gap_prev_nodes.data() + begin;
+    Cigar::Operator *update_ops = update_column.ops.data() + begin;
 
     // handle first element (i.e., no match update possible)
     score_t update_score = std::max(
@@ -458,34 +448,35 @@ inline void compute_updates(const DBGAlignerConfig &config,
         incoming_gap_scores[0] + config.gap_extension_penalty
     );
 
+    uint8_t prev_node_rank = prev_node != node
+        ? update_column.rank_prev_node(prev_node)
+        : 0xFF;
+
     if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
         update_scores[0] = update_score;
         update_ops[0] = Cigar::INSERTION;
-        update_prevs[0] = prev_node;
-        updated_mask[0] = 0xFFFFFFFF;
+        update_prevs[0] = prev_node_rank;
+        updated_mask[0] = 0xFF;
 
         update_gap_scores[0] = update_score;
-        update_gap_prevs[0] = prev_node;
+        update_gap_prevs[0] = prev_node_rank;
         update_gap_count[0] = update_score == incoming_gap_scores[0] + config.gap_extension_penalty
             ? incoming_gap_count[0] + 1
             : 1;
     }
 
     // ensure sizes are the same before casting
-    static_assert(sizeof(NodeType) == sizeof(long long int));
-    static_assert(sizeof(Cigar::Operator) == sizeof(int32_t));
+    static_assert(sizeof(Cigar::Operator) == sizeof(int8_t));
 
     auto update_block = [&]() {
-        compute_HE(length, prev_node,
+        compute_HE(length, prev_node_rank,
                    config.gap_opening_penalty, config.gap_extension_penalty,
                    update_scores, update_gap_scores,
-                   reinterpret_cast<long long int*>(update_prevs),
-                   reinterpret_cast<int32_t*>(update_ops),
-                   update_gap_count,
-                   reinterpret_cast<long long int*>(update_gap_prevs),
+                   update_prevs,
+                   update_ops, update_gap_count,
+                   update_gap_prevs,
                    incoming_scores, incoming_gap_scores,
-                   reinterpret_cast<const int32_t*>(profile_scores),
-                   reinterpret_cast<const int32_t*>(profile_ops),
+                   profile_scores, profile_ops,
                    incoming_gap_count, updated_mask.data(), xdrop_cutoff - 1);
     };
 
@@ -494,17 +485,16 @@ inline void compute_updates(const DBGAlignerConfig &config,
     if (prev_node != node) {
         // update 8 scores at a time
         compute_HE_avx2(length,
-                        _mm256_set1_epi64x(prev_node),
+                        _mm_set1_epi8(prev_node_rank),
                         _mm256_set1_epi32(config.gap_opening_penalty),
                         _mm256_set1_epi32(config.gap_extension_penalty),
                         update_scores, update_gap_scores,
-                        reinterpret_cast<long long int*>(update_prevs),
-                        reinterpret_cast<int32_t*>(update_ops),
+                        update_prevs,
+                        reinterpret_cast<int8_t*>(update_ops),
                         update_gap_count,
-                        reinterpret_cast<long long int*>(update_gap_prevs),
+                        update_gap_prevs,
                         incoming_scores, incoming_gap_scores,
-                        reinterpret_cast<const int32_t*>(profile_scores),
-                        reinterpret_cast<const int32_t*>(profile_ops),
+                        profile_scores, reinterpret_cast<const int8_t*>(profile_ops),
                         incoming_gap_count, updated_mask.data(),
                         _mm256_set1_epi32(xdrop_cutoff - 1));
     } else {
@@ -517,7 +507,7 @@ inline void compute_updates(const DBGAlignerConfig &config,
 
 #endif
 
-    update_del_scores(config, update_scores, update_prevs, update_ops, node,
+    update_del_scores(config, update_scores, update_prevs, update_ops,
                       updated_mask.data(), length, xdrop_cutoff);
 }
 
@@ -690,7 +680,6 @@ void DefaultColumnExtender<NodeType>
                           incoming->scores.data(),
                           incoming->prev_nodes.data(),
                           incoming->ops.data(),
-                          incoming_node,
                           nullptr,
                           size,
                           xdrop_cutoff);
@@ -717,19 +706,15 @@ void DefaultColumnExtender<NodeType>
         // store the mask indicating which cells were updated
         // this is padded to ensure that the vectorized code doesn't access
         // out of bounds
-        AlignedVector<int32_t> updated_mask(end - begin + 9, false);
+        AlignedVector<int8_t> updated_mask(end - begin + 9, 0x0);
 
         assert(next_column.scores.size() == next_column.gap_scores.size());
         assert(incoming->scores.size() == incoming->gap_scores.size());
 
         compute_updates(
+            next_column,
+            begin,
             config_,
-            next_column.scores.data() + begin,
-            next_column.gap_scores.data() + begin,
-            next_column.prev_nodes.data() + begin,
-            next_column.gap_count.data() + begin,
-            next_column.gap_prev_nodes.data() + begin,
-            next_column.ops.data() + begin,
             incoming_node,
             next_node,
             incoming->scores.data() + begin,

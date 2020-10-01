@@ -33,8 +33,8 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         auto last_op = seed.get_cigar().back().first;
         table_init.scores[start_pos] = seed.get_score();
         table_init.ops[start_pos] = last_op;
-        table_init.prev_nodes[start_pos] = SequenceGraph::npos;
-        table_init.gap_prev_nodes[start_pos] = SequenceGraph::npos;
+        table_init.prev_nodes[start_pos] = 0;
+        table_init.gap_prev_nodes[start_pos] = 0;
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::INSERTION
                 ? table_init.scores[start_pos]
@@ -189,8 +189,23 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
     auto i = start_pos;
     Cigar::Operator op = column->second.ops.at(i);
-    NodeType prev_node = column->second.prev_nodes.at(i);
-    NodeType prev_gap_node = column->second.gap_prev_nodes.at(i);
+    NodeType prev_node;
+    switch (column->second.prev_nodes.at(i)) {
+        case 0: { prev_node = SequenceGraph::npos; } break;
+        case 0xFF: { prev_node = column->first; } break;
+        default: {
+            prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+        }
+    }
+
+    NodeType prev_gap_node;
+    switch (column->second.gap_prev_nodes.at(i)) {
+        case 0: { prev_gap_node = SequenceGraph::npos; } break;
+        case 0xFF: { prev_gap_node = column->first; } break;
+        default: {
+            prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+        }
+    }
 
     if (op == Cigar::INSERTION)
         prev_node = prev_gap_node;
@@ -250,8 +265,21 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
             if (op == Cigar::INSERTION)
                 gap_count = column->second.gap_count.at(i) - 1;
         }
-        prev_node = column->second.prev_nodes.at(i);
-        prev_gap_node = column->second.gap_prev_nodes.at(i);
+        switch (column->second.prev_nodes.at(i)) {
+            case 0: { prev_node = SequenceGraph::npos; } break;
+            case 0xFF: { prev_node = column->first; } break;
+            default: {
+                prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+            }
+        }
+
+        switch (column->second.gap_prev_nodes.at(i)) {
+            case 0: { prev_gap_node = SequenceGraph::npos; } break;
+            case 0xFF: { prev_gap_node = column->first; } break;
+            default: {
+                prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+            }
+        }
         if (op == Cigar::INSERTION)
             prev_node = prev_gap_node;
     }
