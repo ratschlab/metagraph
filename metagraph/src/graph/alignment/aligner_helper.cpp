@@ -262,9 +262,8 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
         score_track -= gap_diff;
 
     score_t correction = score_col.at(i) - score_track;
-    assert(correction >= 0);
-    if (correction > 0)
-        logger->trace("Fixing outdated score: {} -> {}", score_, score_ + correction);
+    if (correction != 0)
+        logger->warn("Fixing outdated score: {} -> {}", score_, score_ + correction);
 
     score_ -= score_col.at(i) - correction;
 
