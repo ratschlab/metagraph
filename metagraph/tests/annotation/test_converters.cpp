@@ -314,7 +314,105 @@ TEST(CoumnDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
     }
 }
 
+void test_column_diff(uint32_t k,
+                      uint32_t max_depth,
+                      const std::vector<std::string> &sequences,
+                      const std::vector<std::vector<std::string>> &annotations,
+                      const std::string &prefix) {
+    const std::string outfbase = test_dump_basename + prefix;
+    clean_column_diff_files(prefix);
+
+    auto graph = std::make_unique<graph::DBGSuccinct>(k);
+    for (const auto& seq : sequences) {
+        graph->add_sequence(seq);
+    }
+    graph->mask_dummy_kmers(1, false);
+    std::cout << "nodex " << graph->num_nodes();
+
+    auto initial_annotation = std::make_unique<ColumnCompressed<>>(graph->num_nodes());
+    std::vector<uint32_t> added_idx(graph->num_nodes());
+    std::unordered_set<std::string> all_labels;
+    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
+        const std::vector<std::string> &labels = annotations[anno_idx];
+        initial_annotation->add_labels({anno_idx}, labels);
+        std::for_each(labels.begin(), labels.end(), [&](auto l) { all_labels.insert(l); });
+    }
+
+    std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
+    source[0] = std::move(initial_annotation);
+
+    std::vector<std::unique_ptr<ColumnDiffAnnotator>> result
+            = convert_to_column_diff(*graph, source, outfbase, max_depth);
+    clean_column_diff_files(prefix);
+
+    ASSERT_EQ(1U, result.size());
+    ASSERT_EQ(all_labels.size(), result[0]->num_labels());
+    ASSERT_EQ(graph->num_nodes(), result[0]->num_objects());
+
+    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
+        ASSERT_THAT(result[0]->get(anno_idx),
+                    UnorderedElementsAreArray(annotations[anno_idx]));
+    }
+}
+
 TEST(CoumnDiff, ConvertFromColumnCompressed) {
+    test_column_diff(3, 5, { "ACGTCAC" },
+                     { { "Label0", "Label2", "Label8" },
+                       {},
+                       { "Label1", "Label2" },
+                       { "Label1", "Label2", "Label8" },
+                       { "Label2" } },
+                     "column.diff.convert");
+}
+
+TEST(ColumnDiff, ConvertFromColumnCompressed4Loops) {
+    std::vector<std::string> sequences = { std::string(100, 'A'), std::string(100, 'G'),
+                                           std::string(100, 'C'), std::string(100, 'T') };
+
+    test_column_diff(3, 5, sequences,
+                     { { "Lb0", "Lb2", "Lb8" }, {}, { "Lb9" }, { "Lb0", "Lb8", "Lb2" } },
+                     "column.diff.4loops");
+}
+
+TEST(ColumnDiff, ConvertFromColumnCompressed4PathsRandomLabels) {
+    std::mt19937 gen(12345);
+    std::uniform_int_distribution<> distrib(0, 2);
+
+
+    std::vector<std::vector<std::string>> options = {{"L1"}, {"L1", "L2"}, {"L3"}};
+    std::vector<std::vector<std::string>> annotations;
+    for (uint32_t anno_idx = 0; anno_idx < 24; ++anno_idx) {
+        annotations.push_back(options[distrib(gen)]);
+    }
+
+    test_column_diff(3, 5, { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" },
+                     annotations, "column.diff.4paths");
+}
+
+TEST(ColumnDiff, ConvertFromColumnCompressed2BigLoops) {
+    std::mt19937 gen(12345);
+    std::uniform_int_distribution<> distrib(0, 2);
+
+    std::vector<std::string> sequences
+            = { "ATCGGAAGAGCACACGTCTG"
+                "AACTCCAGACA"
+                "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+                "GTGAGGCGTCATGCATGCAT"
+                "TGTCTGGAGTT"
+                "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA" };
+
+
+    std::vector<std::vector<std::string>> options = {{"L1"}, {"L1", "L2"}, {"L2"}};
+    std::vector<std::vector<std::string>> annotations;
+    for (uint32_t anno_idx = 0; anno_idx < 104; ++anno_idx) {
+        annotations.push_back(options[distrib(gen)]);
+    }
+
+    test_column_diff(10, 3, sequences, annotations, "column.diff.2bigloops");
+}
+
+
+TEST(CoumnDiff, ConvertFromColumnCompressedWithMergesAndBifurcations) {
     const std::string outfbase = test_dump_basename + "column.diff.convert";
     const std::string succ_file = outfbase + ".succ";
     clean_column_diff_files("column.diff.convert");

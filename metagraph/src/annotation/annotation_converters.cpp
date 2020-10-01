@@ -1227,7 +1227,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
                         "annotation has {} entries",
-                        graph.num_nodes(), num_rows);
+                        graph.num_nodes(), sources[l_idx]->num_objects());
                 std::exit(1);
             }
 
