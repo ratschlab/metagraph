@@ -1156,11 +1156,12 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-std::vector<std::unique_ptr<ColumnDiffAnnotator>>
+[[clang::optnone]] std::vector<std::unique_ptr<ColumnDiffAnnotator>>
 convert_to_column_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
+#pragma clang optimize off
     if (sources.empty())
         return {};
 
@@ -1211,7 +1212,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
             pred_chunk_idx[i+1] = pred_chunk_idx[i];
             while (*pred_boundary_it == 0) {
                 ++pred_chunk_idx[i+1];
-                pred_chunk.push_back(*pred_it);
+                pred_chunk.push_back(
+                        graph::AnnotatedSequenceGraph::graph_to_anno_index(*pred_it));
                 ++pred_it;
                 ++pred_boundary_it;
             }
@@ -1246,8 +1248,8 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                     // check predecessor nodes and add them if they are different (not 1)
                     for (uint64_t p_idx = pred_chunk_idx[row_idx];
                          p_idx < pred_chunk_idx[row_idx + 1]; ++p_idx) {
-                        if (!(*source_col)[p_idx])
-                            indices.push_back(p_idx);
+                        if (!(*source_col)[pred_chunk[p_idx]])
+                            indices.push_back(pred_chunk[p_idx]);
                     }
                 });
                 targets[l_idx]->add_labels(indices, { label });
