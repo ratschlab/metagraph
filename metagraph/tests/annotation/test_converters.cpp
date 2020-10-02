@@ -516,7 +516,7 @@ TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
 // }
 
 TEST_F(ConvertFromColumnCompressed, to_GreedyBRWT) {
-    annotation = convert_to_greedy_BRWT<MultiBRWTAnnotator>(std::move(*initial_annotation));
+    annotation = convert_to_greedy_BRWT(std::move(*initial_annotation));
 }
 
 
