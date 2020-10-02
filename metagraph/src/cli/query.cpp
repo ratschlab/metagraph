@@ -829,14 +829,6 @@ int query_graph(Config *config) {
         aligner_config.reset(new align::DBGAlignerConfig(
             initialize_aligner_config(*graph, *config)
         ));
-
-        if (!graph->is_canonical_mode() && config->canonical) {
-            // wrap the primary graph into a canonical one
-            graph.reset(new CanonicalDBG(graph, true));
-            aligner = build_aligner(*graph, *aligner_config);
-        } else {
-            aligner = build_aligner(*graph, *aligner_config);
-        }
     }
 
     QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
