@@ -1077,8 +1077,10 @@ void build_successor(const graph::DBGSuccinct &graph,
             break;
         }
     }
-    if (!must_build)
+    if (!must_build) {
+        logger->trace("Using existing pred/succ/terminal files in {}", outfbase);
         return;
+    }
 
     using graph::boss::BOSS;
     const BOSS &boss = graph.get_boss();
@@ -1238,7 +1240,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                         = sources[l_idx]->get_matrix().data()[l_idx2];
                 source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(), [&](uint64_t row_idx) {
                     // check successor node and add current node if it's either terminal
-                    // or different from its successor
+                    // or if its successor is 0
                     uint64_t chunk_idx = row_idx - chunk;
                     bool v = succ_chunk[chunk_idx] != std::numeric_limits<uint64_t>::max()
                             ? !(*source_col)[succ_chunk[chunk_idx]]
@@ -1246,7 +1248,7 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
                     if (v)
                         indices.push_back(row_idx);
 
-                    // check predecessor nodes and add them if they are different (not 1)
+                    // check predecessor nodes and add them if they are zero
                     for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
                          p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
                         if (!(*source_col)[pred_chunk[p_idx]])

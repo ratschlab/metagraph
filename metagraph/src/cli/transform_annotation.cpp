@@ -395,7 +395,8 @@ int transform_annotation(Config *config) {
                         anno_batch.push_back(std::move(anno));
                     }
                     timer.reset();
-                    logger->trace("Starting converting column-batch...");
+                    logger->trace("Starting converting column-batch with {} columns ...",
+                                  file_batch.size());
                     std::vector<std::unique_ptr<ColumnDiffAnnotator>> column_diffs
                             = convert_to_column_diff(graph, anno_batch, config->infbase,
                                                      config->max_path_length);
