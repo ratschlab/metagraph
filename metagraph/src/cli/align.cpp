@@ -80,6 +80,8 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
 }
 
 std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
+    assert(!config.canonical || graph.is_canonical_mode());
+
     DBGAlignerConfig aligner_config = initialize_aligner_config(graph, config);
 
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
