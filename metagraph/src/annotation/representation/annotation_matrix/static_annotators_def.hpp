@@ -9,7 +9,6 @@
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/row_diff/column_diff.hpp"
-#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
@@ -30,8 +29,6 @@ typedef StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string> UniqueRowAnn
 
 typedef StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string> RbBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff, std::string> RowDiffAnnotator;
-
 typedef StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>, std::string> ColumnDiffAnnotator;
 
 
@@ -49,8 +46,6 @@ template <>
 inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
-template <>
-inline const std::string RowDiffAnnotator::kExtension = ".row_diff.annodbg";
 template <>
 inline const std::string ColumnDiffAnnotator::kExtension = ".column_diff.annodbg";
 } // namespace annot

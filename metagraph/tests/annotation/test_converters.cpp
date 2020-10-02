@@ -591,64 +591,6 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
     annotation = convert<RainbowfishAnnotator>(std::move(*initial_annotation));
 }
 
-TEST(ConvertFromRowCompressedEmpty, to_RowDiffAnnotation) {
-    RowCompressed<> empty_row_annotator(5);
-    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, {"ACGTCAG"});
-
-    std::unique_ptr<RowDiffAnnotator> empty_annotation
-            = convert_to_row_diff(*graph, std::move(empty_row_annotator));
-    EXPECT_EQ(0u, empty_annotation->num_labels());
-    EXPECT_EQ(5u, empty_annotation->num_objects());
-    EXPECT_EQ(0u, empty_annotation->num_relations());
-}
-
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotation) {
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
-}
-
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationCircular) {
-    // create a graph that only contains a cycle
-    graph = create_graph(2, {"ACGTAG"});
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
-}
-
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationTwoDisconnected) {
-    // create a graph that consists of 2 connected components
-    graph = create_graph(4, { "AAAACC", "ATTTT" });
-
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
-}
-
-// test row diff annotation on a graph with multiple disconnected cycles of size 1
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationCircularSmall) {
-    // create a graph that consists of 2 connected components
-    graph = create_graph(4, { "AAAA", "CCCC", "GGGG", "TTTT", "ACGT" });
-    graph->get_boss().erase_redundant_dummy_edges();
-    graph->mask_dummy_kmers(1, false);
-
-    annotation = convert_to_row_diff(*graph, std::move(*initial_annotation));
-}
-
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationMaxLength) {
-    for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
-        annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
-                                         max_path_length);
-    }
-}
-
-// test row diff annotation on a graph with multiple disconnected cycles of size > 1
-TEST_F(ConvertFromRowCompressed, to_RowDiffAnnotationDisconnectedCircular) {
-    // create a graph that consists of 2 connected components
-    graph = create_graph(3, { "ACAC", "CGCG", "TTT" });
-    graph->get_boss().erase_redundant_dummy_edges();
-    graph->mask_dummy_kmers(1, false);
-    for (uint32_t max_path_length = 1; max_path_length <= 3; ++max_path_length) {
-        annotation = convert_to_row_diff(*graph, std::move(*initial_annotation), 1,
-                                         max_path_length);
-    }
-}
-
-
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {
 //     RowCompressed<> empty_column_annotator(5);
 //     auto empty_annotation = convert_to_greedy_BRWT<MultiBRWTAnnotator>(

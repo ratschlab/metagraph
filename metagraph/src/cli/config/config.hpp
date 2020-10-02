@@ -176,7 +176,6 @@ class Config {
         BRWT,
         BinRelWT_sdsl,
         BinRelWT,
-        RowDiff,
         RowFlat,
         RBFish,
         RbBRWT,
