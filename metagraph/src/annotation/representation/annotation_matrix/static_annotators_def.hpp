@@ -31,6 +31,8 @@ typedef StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string> RbBRWT
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string> RowDiffAnnotator;
 
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> BRWTRowDiffAnnotator;
+
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
@@ -48,6 +50,8 @@ template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
 template <>
 inline const std::string RowDiffAnnotator::kExtension = ".row_diff.annodbg";
+template <>
+inline const std::string BRWTRowDiffAnnotator::kExtension = ".brwt_row_diff.annodbg";
 } // namespace annot
 } // namespace mtg
 

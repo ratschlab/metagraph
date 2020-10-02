@@ -202,9 +202,9 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
             assert(terminal_file.empty() || terminal_file == matrix.terminal_file());
             terminal_file = matrix.terminal_file();
 
-            matrix.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector>&& col){
-              labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
-              columns[offsets[i] + idx] = std::move(col);
+            matrix.diffs().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&col) {
+                labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
+                columns[offsets[i] + idx] = std::move(col);
             });
         } catch (...) {
             error_occurred = true;
@@ -233,6 +233,8 @@ template class StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string>;
 template class StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string>;
+
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>;
 
 } // namespace annot
 } // namespace mtg

@@ -31,42 +31,37 @@ std::unique_ptr<StaticAnnotation> convert(ColumnCompressed<Label>&& annotation);
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename);
 
-template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert_to_simple_BRWT(ColumnCompressed<Label>&& annotation,
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
 
-template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
-convert_col_diff_to_simple_BRWT(RowDiffAnnotator &&annotation,
-                                size_t grouping_arity = 2,
-                                size_t num_parallel_nodes = 1,
-                                size_t num_threads = 1);
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
+                       size_t grouping_arity = 2,
+                       size_t num_parallel_nodes = 1,
+                       size_t num_threads = 1);
 
-template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert_to_greedy_BRWT(ColumnCompressed<Label>&& annotation,
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
+                       size_t num_parallel_nodes = 1,
+                       size_t num_threads = 1,
+                       uint64_t num_rows_subsampled = 1'000'000);
+
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
 
 template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
-convert_col_compressed_to_BRWT(const std::vector<std::string> &annotation_files,
-                                  const std::string &linkage_matrix_file,
-                                  size_t num_parallel_nodes = 1,
-                                  size_t num_threads = 1,
-                                  const std::filesystem::path &tmp_dir = "");
-
-template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
-convert_col_diff_to_BRWT(const std::vector<std::string> &annotation_files,
-                         const std::string &linkage_matrix_file,
-                         size_t num_parallel_nodes = 1,
-                         size_t num_threads = 1,
-                         const std::filesystem::path &tmp_dir = "");
+std::unique_ptr<StaticAnnotation>
+convert_to_BRWT(const std::vector<std::string> &annotation_files,
+                const std::string &linkage_matrix_file,
+                size_t num_parallel_nodes = 1,
+                size_t num_threads = 1,
+                const std::filesystem::path &tmp_dir = "");
 
 template <class StaticAnnotation>
 void relax_BRWT(StaticAnnotation *annotation,
@@ -74,7 +69,7 @@ void relax_BRWT(StaticAnnotation *annotation,
                 size_t num_threads = 1);
 
 template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
+std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 

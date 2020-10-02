@@ -53,6 +53,8 @@ class RowDiff : public BinaryMatrix {
 
     const std::string& terminal_file() const { return terminal_file_; }
 
+    const graph::DBGSuccinct *graph() const { return graph_; }
+
     /**
      * Returns the number of set bits in the matrix.
      */
@@ -118,11 +120,6 @@ class RowDiff : public BinaryMatrix {
 
     void serialize(const std::string &name) const;
     bool load(const std::string &name);
-
-    using ColumnCallback = typename BaseMatrix::ColumnCallback;
-    void call_columns(const  ColumnCallback &callback) {
-        diffs_.call_columns(callback);
-    }
 
     const sdsl::rrr_vector<> &terminal() const { return terminal_; }
 

@@ -258,18 +258,20 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
                                               annotator.get_label_encoder());
 }
 
-template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
-convert_col_diff_to_BRWT(RowDiffAnnotator&& annotator,
-                BRWTBottomUpBuilder::Partitioner partitioning,
-                size_t num_parallel_nodes,
-                size_t num_threads) {
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
+                         BRWTBottomUpBuilder::Partitioner partitioning,
+                         size_t num_parallel_nodes,
+                         size_t num_threads) {
     // we are going to take the columns from the annotator and thus
     // have to replace them with empty columns to keep the structure valid
     std::vector<std::unique_ptr<bit_vector>> columns;
-    annotator.release_matrix().call_columns([&](uint64_t, std::unique_ptr<bit_vector> &&col) {
-        columns.push_back(std::move(col));
-    });
+    const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
+    std::string terminal_file = annotator.get_matrix().terminal_file();
+    annotator.release_matrix().diffs().call_columns(
+            [&](uint64_t, std::unique_ptr<bit_vector> &&col) {
+                columns.push_back(std::move(col));
+            });
 
     auto matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
@@ -278,16 +280,16 @@ convert_col_diff_to_BRWT(RowDiffAnnotator&& annotator,
                                        num_threads)
     );
 
-    return std::make_unique<StaticAnnotation>(std::move(matrix),
-                                              annotator.get_label_encoder());
+    return std::make_unique<BRWTRowDiffAnnotator>(
+            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix), terminal_file),
+            annotator.get_label_encoder());
 }
 
-template <>
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                        size_t num_parallel_nodes,
-                                                        size_t num_threads,
-                                                        uint64_t num_rows_subsampled) {
+convert_to_greedy_BRWT(ColumnCompressed<std::string> &&annotation,
+                       size_t num_parallel_nodes,
+                       size_t num_threads,
+                       uint64_t num_rows_subsampled) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         [num_threads,num_rows_subsampled](const auto &columns) {
@@ -300,12 +302,28 @@ convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
     );
 }
 
-template <>
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
+                       size_t num_parallel_nodes,
+                       size_t num_threads,
+                       uint64_t num_rows_subsampled) {
+    return convert_row_diff_to_BRWT(
+            std::move(annotation),
+            [num_threads,num_rows_subsampled](const auto &columns) {
+              std::vector<sdsl::bit_vector> subvectors
+                      = random_submatrix(columns, num_rows_subsampled, num_threads);
+              return greedy_matching(subvectors, num_threads);
+            },
+            num_parallel_nodes,
+            num_threads
+    );
+}
+
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                        size_t grouping_arity,
-                                                        size_t num_parallel_nodes,
-                                                        size_t num_threads) {
+convert_to_simple_BRWT(ColumnCompressed<std::string> &&annotation,
+                       size_t grouping_arity,
+                       size_t num_parallel_nodes,
+                       size_t num_threads) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
@@ -314,13 +332,12 @@ convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
     );
 }
 
-template <>
-std::unique_ptr<MultiBRWTAnnotator>
-convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(RowDiffAnnotator &&annotation,
-                                                                 size_t grouping_arity,
-                                                                 size_t num_parallel_nodes,
-                                                                 size_t num_threads) {
-    return convert_col_diff_to_BRWT<MultiBRWTAnnotator>(
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
+                                                      size_t grouping_arity,
+                                                      size_t num_parallel_nodes,
+                                                      size_t num_threads) {
+    return convert_row_diff_to_BRWT(
             std::move(annotation),
             BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
             num_parallel_nodes, num_threads);
@@ -403,7 +420,7 @@ convert_to_BRWT(
 }
 
 template <>
-std::unique_ptr<MultiBRWTAnnotator> convert_col_compressed_to_BRWT<MultiBRWTAnnotator>(
+std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::vector<std::string> &annotation_files,
         const std::string &linkage_matrix_file,
         size_t num_parallel_nodes,
@@ -433,14 +450,13 @@ std::unique_ptr<MultiBRWTAnnotator> convert_col_compressed_to_BRWT<MultiBRWTAnno
                     get_columns, std::move(column_names));
 }
 
-
-template <>
-std::unique_ptr<MultiBRWTAnnotator>
-convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                                             const std::string &linkage_matrix_file,
-                                             size_t num_parallel_nodes,
-                                             size_t num_threads,
-                                             const std::filesystem::path &tmp_path) {
+template<>
+std::unique_ptr<BRWTRowDiffAnnotator>
+convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation_files,
+                         const std::string &linkage_matrix_file,
+                         size_t num_parallel_nodes,
+                         size_t num_threads,
+                         const std::filesystem::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -451,7 +467,7 @@ convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &ann
                 logger->error("Could not load {}", fname);
                 std::exit(1);
             }
-            RowDiff<ColumnMajor> mat = annotator.release_matrix();
+            ColumnMajor mat = std::move(annotator.release_matrix().diffs());
             mat.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&column) {
                 std::string label = annotator.get_label_encoder().get_labels()[idx];
                 call_column(idx, std::move(column));
@@ -462,8 +478,13 @@ convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &ann
         }
     };
 
-    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads, tmp_path,
-                           get_columns, std::move(column_names));
+    std::unique_ptr<MultiBRWTAnnotator> annotator
+            = convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+                              tmp_path, get_columns, std::move(column_names));
+
+    return std::make_unique<BRWTRowDiffAnnotator>(
+            std::make_unique<RowDiff<BRWT>>(nullptr, annotator->release_matrix(), ""),
+            annotator->get_label_encoder());
 }
 
 

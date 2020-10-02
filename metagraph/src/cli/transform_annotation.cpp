@@ -418,7 +418,7 @@ int transform_annotation(Config *config) {
             }
             case Config::BRWT: {
                 auto brwt_annotator = config->infbase.size()
-                    ? convert_col_compressed_to_BRWT<MultiBRWTAnnotator>(
+                    ? convert_to_BRWT<MultiBRWTAnnotator>(
                         files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
@@ -426,12 +426,12 @@ int transform_annotation(Config *config) {
                             ? std::filesystem::path(config->outfbase).remove_filename()
                             : config->tmp_dir)
                     : (config->greedy_brwt
-                        ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
+                        ? convert_to_greedy_BRWT(
                             std::move(*annotator),
                             config->parallel_nodes,
                             get_num_threads(),
                             config->num_rows_subsampled)
-                        : convert_to_simple_BRWT<MultiBRWTAnnotator>(
+                        : convert_to_simple_BRWT(
                             std::move(*annotator),
                             config->arity_brwt,
                             config->parallel_nodes,
@@ -477,25 +477,26 @@ int transform_annotation(Config *config) {
             logger->error("Only conversion to brwt supported for row_diff");
             exit(1);
         }
-        std::unique_ptr<MultiBRWTAnnotator> brwt_annotator;
+        std::unique_ptr<BRWTRowDiffAnnotator> brwt_annotator;
         if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
             logger->trace("Loading annotation from disk...");
             auto annotator = std::make_unique<RowDiffAnnotator>();
             if (!annotator->merge_load(files))
                 std::exit(1);
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
-            brwt_annotator = convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(
-                    std::move(*annotator), config->arity_brwt,
-                    config->parallel_nodes, get_num_threads());
+            brwt_annotator = config->greedy_brwt
+                    ? convert_to_greedy_BRWT(std::move(*annotator), config->parallel_nodes,
+                                             get_num_threads(), config->num_rows_subsampled)
+                    : convert_to_simple_BRWT(std::move(*annotator), config->arity_brwt,
+                                             config->parallel_nodes, get_num_threads());
         } else {
             std::string tmp_dir = config->tmp_dir.empty()
                     ? std::filesystem::path(config->outfbase).remove_filename()
                     : config->tmp_dir;
             brwt_annotator
-                    = convert_col_diff_to_BRWT<MultiBRWTAnnotator>(files, config->infbase,
-                                                                   config->parallel_nodes,
-                                                                   get_num_threads(),
-                                                                   tmp_dir);
+                    = convert_to_BRWT<BRWTRowDiffAnnotator>(files, config->infbase,
+                                                            config->parallel_nodes,
+                                                            get_num_threads(), tmp_dir);
         }
         logger->trace("Annotation converted in {} sec", timer.elapsed());
 
