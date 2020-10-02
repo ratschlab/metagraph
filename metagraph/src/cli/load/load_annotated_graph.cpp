@@ -2,6 +2,7 @@
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
@@ -31,7 +32,14 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 = parse_annotation_type(config.infbase_annotators.at(0));
         // row_diff annotation is special, as it must know the graph structure
         if (input_anno_type == Config::AnnotationType::RowDiff) {
-            auto dbg_graph = dynamic_cast<DBGSuccinct *>(graph.get());
+            auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
+
+            if (!dbg_graph) {
+                auto canonical = dynamic_cast<CanonicalDBG *>(graph.get());
+                if (canonical)
+                    dbg_graph = dynamic_cast<const DBGSuccinct *>(&canonical->get_graph());
+            }
+
             if (!dbg_graph) {
                 logger->error(
                         "Only succinct de Bruijn graph representations are "
