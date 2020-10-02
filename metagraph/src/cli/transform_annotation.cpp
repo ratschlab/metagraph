@@ -55,7 +55,7 @@ int transform_annotation(Config *config) {
         = parse_annotation_type(files.at(0));
 
     if (input_anno_type != Config::ColumnCompressed
-        && input_anno_type != Config::ColumnDiff && files.size() > 1) {
+        && input_anno_type != Config::RowDiff && files.size() > 1) {
         logger->error("Conversion of multiple annotators is only "
                       "supported for ColumnCompressed and ColumnRowDiff");
         exit(1);
@@ -309,7 +309,7 @@ int transform_annotation(Config *config) {
         // from disk.
         if ((config->anno_type != Config::BRWT || !config->infbase.size())
             && config->anno_type != Config::RbBRWT
-            && config->anno_type != Config::ColumnDiff) {
+            && config->anno_type != Config::RowDiff) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -328,7 +328,7 @@ int transform_annotation(Config *config) {
                 assert(false);
                 break;
             }
-            case Config::ColumnDiff: {
+            case Config::RowDiff: {
                 size_t avail_mem_bytes = config->memory_available * 1e9;
                 logger->trace("Loading graph...");
                 graph::DBGSuccinct graph(2);
@@ -368,23 +368,23 @@ int transform_annotation(Config *config) {
                     timer.reset();
                     logger->trace("Starting converting column-batch with {} columns ...",
                                   file_batch.size());
-                    std::vector<std::unique_ptr<ColumnDiffAnnotator>> column_diffs
-                            = convert_to_column_diff(graph, anno_batch, config->infbase,
+                    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diffs
+                            = convert_to_row_diff(graph, anno_batch, config->infbase,
                                                      config->max_path_length);
                     logger->trace("Column-batch converted in {} sec", timer.elapsed());
 
                     logger->trace("Serializing columns...", config->outfbase);
                     timer.reset();
-                    assert(column_diffs.size() == file_batch.size());
+                    assert(row_diffs.size() == file_batch.size());
                     for(uint32_t idx = 0; idx < file_batch.size(); ++idx) {
                         using std::filesystem::path;
                         auto fname = path(file_batch[idx])
                                              .filename()
                                              .replace_extension()
                                              .replace_extension(
-                                                     ColumnDiffAnnotator::kExtension);
+                                                     RowDiffAnnotator::kExtension);
                         auto fpath = path(config->outfbase).remove_filename()/fname;
-                        column_diffs[idx]->serialize(fpath);
+                        row_diffs[idx]->serialize(fpath);
                         logger->trace("Serialized {}", fpath);
                     }
                     logger->trace("Serialization done in {} sec", timer.elapsed());
@@ -472,15 +472,15 @@ int transform_annotation(Config *config) {
             }
         }
 
-    } else if (input_anno_type == Config::ColumnDiff) {
+    } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::BRWT) {
-            logger->error("Only conversion to brwt supported for column_diff");
+            logger->error("Only conversion to brwt supported for row_diff");
             exit(1);
         }
         std::unique_ptr<MultiBRWTAnnotator> brwt_annotator;
         if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
             logger->trace("Loading annotation from disk...");
-            auto annotator = std::make_unique<ColumnDiffAnnotator>();
+            auto annotator = std::make_unique<RowDiffAnnotator>();
             if (!annotator->merge_load(files))
                 std::exit(1);
             logger->trace("Annotation loaded in {} sec", timer.elapsed());

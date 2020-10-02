@@ -260,7 +260,7 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
 
 template <class StaticAnnotation>
 typename std::unique_ptr<StaticAnnotation>
-convert_col_diff_to_BRWT(ColumnDiffAnnotator&& annotator,
+convert_col_diff_to_BRWT(RowDiffAnnotator&& annotator,
                 BRWTBottomUpBuilder::Partitioner partitioning,
                 size_t num_parallel_nodes,
                 size_t num_threads) {
@@ -316,7 +316,7 @@ convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
 
 template <>
 std::unique_ptr<MultiBRWTAnnotator>
-convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(ColumnDiffAnnotator &&annotation,
+convert_col_diff_to_simple_BRWT<MultiBRWTAnnotator>(RowDiffAnnotator &&annotation,
                                                                  size_t grouping_arity,
                                                                  size_t num_parallel_nodes,
                                                                  size_t num_threads) {
@@ -446,12 +446,12 @@ convert_col_diff_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &ann
 
     auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
         for (const auto &fname : annotation_files) {
-            ColumnDiffAnnotator annotator;
+            RowDiffAnnotator annotator;
             if (!annotator.merge_load({fname})) {
                 logger->error("Could not load {}", fname);
                 std::exit(1);
             }
-            ColumnDiff<ColumnMajor> mat = annotator.release_matrix();
+            RowDiff<ColumnMajor> mat = annotator.release_matrix();
             mat.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&column) {
                 std::string label = annotator.get_label_encoder().get_labels()[idx];
                 call_column(idx, std::move(column));
@@ -1158,8 +1158,8 @@ void build_successor(const graph::DBGSuccinct &graph,
 }
 
 template <typename Label>
-std::vector<std::unique_ptr<ColumnDiffAnnotator>>
-convert_to_column_diff(const graph::DBGSuccinct &graph,
+std::vector<std::unique_ptr<RowDiffAnnotator>>
+convert_to_row_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
@@ -1264,20 +1264,20 @@ convert_to_column_diff(const graph::DBGSuccinct &graph,
 
     assert(pred_boundary_it == pred_boundary.end());
 
-    std::vector<std::unique_ptr<ColumnDiffAnnotator>> result;
+    std::vector<std::unique_ptr<RowDiffAnnotator>> result;
 
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
         ColumnMajor matrix = targets[l_idx]->release_matrix();
         auto diff_annotation
-                = std::make_unique<ColumnDiff<ColumnMajor>>(&graph, std::move(matrix),
+                = std::make_unique<RowDiff<ColumnMajor>>(&graph, std::move(matrix),
                                                             outfbase + ".terminal");
-        result.push_back(std::make_unique<ColumnDiffAnnotator>(
+        result.push_back(std::make_unique<RowDiffAnnotator>(
                 std::move(diff_annotation), sources[l_idx]->get_label_encoder()));
     }
     return result;
 }
 
-template std::vector<std::unique_ptr<ColumnDiffAnnotator>> convert_to_column_diff(
+template std::vector<std::unique_ptr<RowDiffAnnotator>> convert_to_row_diff(
         const graph::DBGSuccinct &graph,
         const std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &sources,
         const std::string &outfbase,

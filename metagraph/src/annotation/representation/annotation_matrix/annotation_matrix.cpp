@@ -145,7 +145,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 // template specialization of merge_load
 template <>
-bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
+bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
         const std::vector<std::string> &filenames) {
     size_t num_threads = get_num_threads();
     std::atomic<bool> error_occurred = false;
@@ -191,7 +191,7 @@ bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
             common::logger->trace("Loading annotations from file {}", filenames[i]);
             LabelEncoder<std::string> label_encoder;
             std::ifstream instream(filenames[i], std::ios::binary);
-            binmat::ColumnDiff<binmat::ColumnMajor> matrix;
+            binmat::RowDiff<binmat::ColumnMajor> matrix;
             if (!label_encoder.load(instream) || !matrix.load(instream)) {
                 common::logger->error("Can't load {}", filenames[i]);
                 std::exit(1);
@@ -210,7 +210,7 @@ bool StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>>::merge_load(
             error_occurred = true;
         }
     }
-    matrix_ = std::make_unique<binmat::ColumnDiff<binmat::ColumnMajor>>(
+    matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
             nullptr, binmat::ColumnMajor(std::move(columns)), terminal_file);
     std::for_each(labels.begin(), labels.end(),
                   [&](const auto &l) { label_encoder_.insert_and_encode(l); });
@@ -232,7 +232,7 @@ template class StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string>;
 
 template class StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string>;
 
-template class StaticBinRelAnnotator<binmat::ColumnDiff<binmat::ColumnMajor>, std::string>;
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string>;
 
 } // namespace annot
 } // namespace mtg

@@ -40,7 +40,7 @@ convert_to_simple_BRWT(ColumnCompressed<Label>&& annotation,
 
 template <class StaticAnnotation>
 typename std::unique_ptr<StaticAnnotation>
-convert_col_diff_to_simple_BRWT(ColumnDiffAnnotator &&annotation,
+convert_col_diff_to_simple_BRWT(RowDiffAnnotator &&annotation,
                                 size_t grouping_arity = 2,
                                 size_t num_parallel_nodes = 1,
                                 size_t num_threads = 1);
@@ -94,8 +94,8 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               size_t num_threads = 1);
 
 template <typename Label>
-std::vector<std::unique_ptr<ColumnDiffAnnotator>>
-convert_to_column_diff(const graph::DBGSuccinct &graph,
+std::vector<std::unique_ptr<RowDiffAnnotator>>
+convert_to_row_diff(const graph::DBGSuccinct &graph,
                        const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
                        const std::string &outfbase,
                        uint32_t max_depth);

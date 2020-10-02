@@ -17,29 +17,32 @@ namespace annot {
 namespace binmat {
 
 /**
- * Row-major representation of annotations where rows are stored as differences vs a
- * predecessor row. The predecessor of a row is determined by a path in an external graph
- * structure, a #graph::DBGSuccinct, which has the property that rows on a path are likely
- * very similar.
+ * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
+ * successive nodes, rather than the full annotation.
+ * The successor of a node (that is the node to diff against) is determined by a path in
+ * an external graph structure, a #graph::DBGSuccinct, which has the property that rows
+ * on a path are likely identical or very similar.
+ *
+ * RowDiff sparsification can be applied to any BinaryMatrix instance.
  * The row-diff binary matrix is defined by three data structures:
- *   1. #diffs_ stores the concatenated diffs row by row. Since each row-diff has variable
- *      length, the boundary_ vector marks the end of each row-diff.
- *   2. boundary_ marks the end of a row diff in #diffs_
- *   3. terminal_ Rows marked as terminal are stored in full.
- * Retrieving data from ColumnDiff requires the associated #graph_. In order to get the i-th
- * row, we start traversing the node corresponding to i in #graph_ and accumulate the
- * diffs until we hit a terminal node, which is stored in full.
+ *   1. #diffs_ the underlying sparsified (diffed) #BinaryMatrix
+ *   2. #terminal_ rows marked as terminal are stored in full
+ *   3. #graph_ the graph that was used to determine adjacent rows for sparsification
+ * Retrieving data from RowDiff requires the associated #graph_. In order to get the
+ * annotation for  i-th row, we start traversing the node corresponding to i in #graph_
+ * and accumulate the values in #diffs until we hit a terminal node, which is stored in
+ * full.
  */
 //NOTE: Clang aggressively abuses the clause in the C++ standard (14.7.1/11) that allows
 // virtual methods in template classes to not be instantiated if unused and mistakenly
 // does not instantiate the virtual methods in this class, so I had to move definitions
-// to the header
+// to the header (gcc works fine)
  template <class BaseMatrix>
-class ColumnDiff : public BinaryMatrix {
+class RowDiff : public BinaryMatrix {
   public:
-    ColumnDiff() {}
+    RowDiff() {}
 
-    ColumnDiff(const graph::DBGSuccinct *graph,
+    RowDiff(const graph::DBGSuccinct *graph,
                BaseMatrix &&diffs,
                const std::string &terminal_file)
         : graph_(graph), diffs_(std::move(diffs)), terminal_file_(terminal_file) {

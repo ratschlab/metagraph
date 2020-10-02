@@ -1,4 +1,4 @@
-#include "column_diff.hpp"
+#include "row_diff.hpp"
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
@@ -7,14 +7,14 @@ namespace annot {
 namespace binmat {
 
 template <class BaseMatrix>
-void ColumnDiff<BaseMatrix>::serialize(const std::string &name) const {
+void RowDiff<BaseMatrix>::serialize(const std::string &name) const {
     std::ofstream f(name, ios::binary);
     serialize(f);
     f.close();
 }
 
 template <class BaseMatrix>
-bool ColumnDiff<BaseMatrix>::load(const std::string &name) {
+bool RowDiff<BaseMatrix>::load(const std::string &name) {
     std::ifstream f(name, ios::binary);
     bool result = load(f);
     f.close();
@@ -25,7 +25,7 @@ bool ColumnDiff<BaseMatrix>::load(const std::string &name) {
 }
 
 template
-class ColumnDiff<ColumnMajor>;
+class RowDiff<ColumnMajor>;
 
 } // namespace binmat
 } // namespace annot

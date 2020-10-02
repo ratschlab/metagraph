@@ -172,10 +172,10 @@ class Config {
     enum AnnotationType {
         ColumnCompressed = 1,
         RowCompressed,
-        ColumnDiff,
         BRWT,
         BinRelWT_sdsl,
         BinRelWT,
+        RowDiff,
         RowFlat,
         RBFish,
         RbBRWT,
