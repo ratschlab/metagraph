@@ -139,7 +139,11 @@ std::string process_search_request(const std::string &received_message,
 
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-    config.fast = json.get("fast", config.fast).asBool();
+    // TODO: make non-fast mode work with primary graphs
+    // config.fast = json.get("fast", config.fast).asBool();
+    config.fast = true;
+    // TODO: make the query graph canonical only when the graph is primary
+    config.canonical = true;
 
     std::unique_ptr<graph::align::IDBGAligner> aligner;
     if (json.get("align", false).asBool()) {
