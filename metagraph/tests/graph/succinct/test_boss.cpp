@@ -1113,7 +1113,8 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
             num_kmers += path.size();
         }, num_threads, 0, true);
 
-        EXPECT_EQ(2, num_sequences);
+        // There is no guarantee on the number of contigs in the primary mode
+        // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
     }

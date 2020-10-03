@@ -31,7 +31,6 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
 std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
-                      double discovery_fraction,
                       size_t num_threads,
                       bool canonical = false);
 
