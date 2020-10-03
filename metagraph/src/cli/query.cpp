@@ -464,6 +464,7 @@ int query_graph(Config *config) {
 
         if (!graph->is_canonical_mode() && config->canonical) {
             // TODO: check and wrap into canonical only if the graph is primary
+            // wrap the primary graph into a canonical one
             graph.reset(new CanonicalDBG(graph, true));
             aligner = build_aligner(*graph, *config);
         } else {
