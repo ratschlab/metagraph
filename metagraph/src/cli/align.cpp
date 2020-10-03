@@ -81,8 +81,9 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     return aligner_config;
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
-                                           const Config &config) {
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
+    assert(!config.canonical || graph.is_canonical_mode());
+
     return build_aligner(graph, initialize_aligner_config(graph, config));
 }
 
@@ -122,6 +123,10 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
+    std::ostream *out = config.outfbase.size()
+        ? new std::ofstream(config.outfbase)
+        : &std::cout;
+
     Timer data_reading_timer;
 
     seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
@@ -134,11 +139,11 @@ void map_sequences_in_file(const std::string &file,
                                     config.discovery_fraction);
 
             if (!config.filter_present) {
-                std::cout << found << "\n";
+                *out << found << "\n";
 
             } else if (found) {
-                std::cout << ">" << read_stream->name.s << "\n"
-                                 << read_stream->seq.s << "\n";
+                *out << ">" << read_stream->name.s << "\n"
+                            << read_stream->seq.s << "\n";
             }
 
             return;
@@ -177,10 +182,10 @@ void map_sequences_in_file(const std::string &file,
                 num_kmers - num_kmers * (1 - config.discovery_fraction);
             if (config.filter_present) {
                 if (num_discovered >= min_kmers_discovered)
-                    std::cout << ">" << read_stream->name.s << "\n"
-                                     << read_stream->seq.s << "\n";
+                    *out << ">" << read_stream->name.s << "\n"
+                                << read_stream->seq.s << "\n";
             } else {
-                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                *out << (num_discovered >= min_kmers_discovered) << "\n";
             }
             return;
         }
@@ -196,17 +201,17 @@ void map_sequences_in_file(const std::string &file,
                     return next != DeBruijnGraph::npos && next != prev;
                 }
             );
-            std::cout << read_stream->name.s << "\t"
-                      << num_discovered << "/" << num_kmers << "/"
-                      << num_unique_matching_kmers << "\n";
+            *out << read_stream->name.s << "\t"
+                 << num_discovered << "/" << num_kmers << "/"
+                 << num_unique_matching_kmers << "\n";
             return;
         }
 
         if (config.alignment_length == graph.get_k()) {
             for (size_t i = 0; i < graphindices.size(); ++i) {
                 assert(i + config.alignment_length <= read_stream->seq.l);
-                std::cout << std::string_view(read_stream->seq.s + i, config.alignment_length)
-                          << ": " << graphindices[i] << "\n";
+                *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
+                     << ": " << graphindices[i] << "\n";
             }
         } else {
             // map input subsequences to multiple nodes
@@ -217,7 +222,7 @@ void map_sequences_in_file(const std::string &file,
                 dbg->call_nodes_with_suffix_matching_longest_prefix(
                     subseq,
                     [&](auto node, auto) {
-                        std::cout << subseq << ": " << node << "\n";
+                        *out << subseq << ": " << node << "\n";
                     },
                     config.alignment_length
                 );
@@ -228,6 +233,9 @@ void map_sequences_in_file(const std::string &file,
 
     logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
                   file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
+
+    if (config.outfbase.size())
+        delete out;
 }
 
 
@@ -320,11 +328,11 @@ int align_to_graph(Config *config) {
                              << "\t*\t*\t*";
                     } else {
                         for (const auto &path : paths) {
-                            std::cout << "\t" << path;
+                            *out << "\t" << path;
                         }
                     }
 
-                    std::cout << "\n";
+                    *out << "\n";
                 } else {
                     Json::StreamWriterBuilder builder;
                     builder["indentation"] = "";

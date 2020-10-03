@@ -34,12 +34,13 @@ class TestingBase(unittest.TestCase):
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         return res
 
-    def _build_graph(self, input, output, k, repr):
-        construct_command = '{exe} build \
+    def _build_graph(self, input, output, k, repr, canonical=False, primary=False):
+        construct_command = '{exe} build {canonical} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             k=k,
             repr=repr,
+            canonical='--canonical' if canonical else '',
             outfile=output,
             input=input
         )
@@ -48,11 +49,39 @@ class TestingBase(unittest.TestCase):
                              stderr=PIPE)
         assert res.returncode == 0
 
+        if primary:
+            transform_command = '{exe} transform --to-fasta --primary-kmers \
+                    -o {outfile} {input}'.format(
+                exe=METAGRAPH,
+                k=k,
+                repr=repr,
+                outfile='{}.fasta.gz'.format(output),
+                input=output
+            )
 
-    def _annotate_graph(self, input, graph_path, output, anno_repr):
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
+            res = subprocess.run([transform_command], shell=True, stdout=PIPE,
+                                 stderr=PIPE)
+            assert res.returncode == 0
+
+            construct_command = '{exe} build \
+                    --graph {repr} -k {k} -o {outfile} {input}'.format(
+                exe=METAGRAPH,
+                k=k,
+                repr=repr,
+                outfile=output,
+                input='{}.fasta.gz'.format(output)
+            )
+
+            res = subprocess.run([construct_command], shell=True, stdout=PIPE,
+                                 stderr=PIPE)
+            assert res.returncode == 0
+
+
+    def _annotate_graph(self, input, graph_path, output, anno_repr, primary=False):
+        annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
                 --anno-type {anno_repr} -o {outfile} {input}'.format(
             exe=METAGRAPH,
+            fwd_and_rev='--fwd-and-reverse' if primary else '',
             graph=graph_path,
             anno_repr=anno_repr,
             outfile=output,

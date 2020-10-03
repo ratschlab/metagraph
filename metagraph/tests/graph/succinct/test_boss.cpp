@@ -1,3 +1,4 @@
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include <zlib.h>
@@ -945,6 +946,19 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
     }
 }
 
+TEST(BOSS, CallSequencesRowDiff_EmptyGraph) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 30; ++k) {
+            BOSS empty(k);
+
+            sdsl::bit_vector terminal;
+            empty.call_sequences_row_diff([&](const auto &, const std::optional<uint64_t> &) {
+                FAIL() << "Empty graph should not have any sequences!";
+            }, num_threads, 1, &terminal);
+        }
+    }
+}
+
 TEST(BOSS, CallPathsOneLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
@@ -1043,6 +1057,29 @@ TEST(BOSS, CallUnitigsTwoLoops) {
     }
 }
 
+TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A') });
+            BOSS graph(&constructor);
+
+            ASSERT_EQ(2u, graph.num_edges());
+
+            sdsl::bit_vector terminal;
+            std::atomic<size_t> num_sequences = 0;
+            graph.call_sequences_row_diff([&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &anchor) {
+              num_sequences++;
+              ASSERT_FALSE(anchor.has_value());
+              ASSERT_EQ(1U, path.size());
+              ASSERT_EQ(std::string(k, 'A'), graph.get_node_str(path[0]));
+            }, num_threads, 1, &terminal);
+
+            ASSERT_EQ(1, num_sequences);
+        }
+    }
+}
+
 TEST(BOSS, CallUnitigsTwoBigLoops) {
     for (size_t num_threads : { 1, 4 }) {
         size_t k = 10;
@@ -1080,6 +1117,44 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        size_t k = 10;
+        std::vector<std::string> sequences {
+                "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+                "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        };
+        BOSSConstructor constructor(k);
+        constructor.add_sequences(std::vector<std::string>(sequences));
+        BOSS graph(&constructor);
+
+        for (uint32_t max_length = 1; max_length <20; ++max_length) {
+            sdsl::bit_vector terminal;
+            std::atomic<size_t> num_sequences = 0;
+            std::atomic<size_t> visited_nodes = 0;
+            graph.call_sequences_row_diff(
+                    [&](const std::vector<uint64_t> &path,
+                        const std::optional<uint64_t> &anchor) {
+                        num_sequences++;
+                        visited_nodes += path.size();
+
+                        for (uint32_t idx = max_length; idx <= path.size(); idx += max_length) {
+                            ASSERT_TRUE(terminal[path[idx - 1]]);
+                        }
+                        ASSERT_TRUE(terminal[path.back()] ^ anchor.has_value());
+                    },
+                    num_threads, max_length, &terminal);
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+
+            ASSERT_EQ(2, num_sequences);
+            sdsl::bit_vector dummy = graph.mark_all_dummy_edges(1);
+            uint64_t count_dummy = 0;
+            for_each(dummy.begin() + 1, dummy.end(), [&](bool v) { count_dummy += v; });
+            ASSERT_EQ(graph.num_edges(), visited_nodes + count_dummy);
+        }
     }
 }
 
@@ -1135,6 +1210,63 @@ TEST(BOSS, CallUnitigsFourLoops) {
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
         }
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_FourLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'G'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'T')});
+            BOSS graph(&constructor);
+
+            sdsl::bit_vector terminal;
+            std::atomic<size_t> num_sequences = 0;
+            graph.call_sequences_row_diff(
+                    [&](const std::vector<uint64_t> &path,
+                        const std::optional<uint64_t> &anchor) {
+                        num_sequences++;
+                        ASSERT_EQ(path.size(), 1);
+                        ASSERT_FALSE(anchor.has_value());
+                    },
+                    num_threads, 1, &terminal);
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(4, num_sequences);
+        }
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_FourPaths) {
+    constexpr size_t k = 5;
+    BOSSConstructor constructor(k);
+    std::vector<std::string> sequences
+            = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
+    constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
+    BOSS graph(&constructor);
+    std::mutex mu;
+    for (size_t num_threads : { 1, 4 }) {
+        sdsl::bit_vector terminal;
+        std::atomic<size_t> num_sequences = 0;
+        std::vector<std::string> found_sequences(4);
+        graph.call_sequences_row_diff(
+                [&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &) {
+                  std::string sequence(path.size(), '\0');
+                  std::transform(path.begin(), path.end(), sequence.begin(),
+                                 [&](uint64_t edge) { return graph.decode(graph.get_W(edge)); });
+                  {
+                      std::unique_lock<std::mutex> lock(mu);
+                      found_sequences[num_sequences] = graph.get_node_str(path[0]) + sequence;
+                      num_sequences++;
+                  }
+                },
+                num_threads, 1, &terminal);
+
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(4, num_sequences);
+        ASSERT_THAT(found_sequences, ::testing::UnorderedElementsAreArray(sequences));
     }
 }
 
