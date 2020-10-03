@@ -2768,6 +2768,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
         for (edge_index idx : path) {
             std::ignore = idx;
             assert(idx == rep || !fetch_bit(visited.data(), idx, async));
+            set_bit(visited.data(), idx, async);
             ++progress_bar;
         }
 
