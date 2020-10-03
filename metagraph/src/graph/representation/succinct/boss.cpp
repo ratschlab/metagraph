@@ -2765,6 +2765,7 @@ void BOSS::call_sequences_row_diff(
         ++progress_bar;
 
         for (edge_index idx : path) {
+            std::ignore = idx;
             assert(!fetch_bit(visited.data(), idx, async));
             ++progress_bar;
         }
