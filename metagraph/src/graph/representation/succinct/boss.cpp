@@ -2361,7 +2361,7 @@ void call_paths(const BOSS &boss,
 void update_terminal_bits(
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
         uint64_t max_length,
-        edge_index *merge_edge,
+        edge_index *next_edge,
         std::vector<edge_index> &&path,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal) {
@@ -2382,23 +2382,23 @@ void update_terminal_bits(
     // mark the last node in the path as terminal if
     // 1. there are no outgoing edges, OR
     // 2. we merge into a node that is neither terminal nor near terminal
-    bool merge_terminal = merge_edge && fetch_bit(terminal->data(), *merge_edge);
-    bool merge_near_terminal = merge_terminal
-            || (merge_edge && fetch_bit(near_terminal->data(), *merge_edge));
-    const bool set_terminal = !merge_edge || !merge_near_terminal;
+    bool is_next_terminal = next_edge && fetch_bit(terminal->data(), *next_edge);
+    bool is_next_near_terminal = is_next_terminal
+            || (next_edge && fetch_bit(near_terminal->data(), *next_edge));
+    const bool set_terminal = !next_edge || !is_next_near_terminal;
     if (set_terminal) {
         set_bit(terminal->data(), path.back(), 1);
     }
     // if we set a terminal node or were lucky enough to merge right into a
     // terminal node, mark the last nodes as near terminal
-    if (set_terminal || merge_terminal) {
+    if (set_terminal || is_next_terminal) {
         for (uint64_t j = i; j < path.size() - 1; ++j) {
             set_bit(near_terminal->data(), path[j], async);
         }
     }
     std::optional<edge_index> anchor_edge;
-    if (merge_near_terminal) {
-        anchor_edge = *merge_edge;
+    if (is_next_near_terminal) {
+        anchor_edge = *next_edge;
     }
     callback(std::move(path), anchor_edge);
 }
