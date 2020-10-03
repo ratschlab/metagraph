@@ -28,6 +28,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
+    } else if (utils::ends_with(filename, annot::BRWTRowDiffAnnotator ::kExtension)) {
+        return Config::AnnotationType::BRWTRowDiff;
+
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
@@ -57,8 +60,7 @@ initialize_annotation(Config::AnnotationType anno_type,
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
-        case Config::ColumnCompressed:
-        case Config::RowDiff: {
+        case Config::ColumnCompressed: {
             annotation.reset(
                 new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached)
             );
@@ -68,8 +70,16 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RowCompressed<>(num_rows, row_compressed_sparse));
             break;
         }
+        case Config::RowDiff: {
+            annotation.reset(new annot::RowDiffAnnotator());
+            break;
+        }
         case Config::BRWT: {
             annotation.reset(new annot::MultiBRWTAnnotator());
+            break;
+        }
+        case Config::BRWTRowDiff: {
+            annotation.reset(new annot::BRWTRowDiffAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {

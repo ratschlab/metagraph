@@ -122,13 +122,12 @@ class BOSS {
      * to fetch paths without sentinels.
      */
     void call_paths(Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
+                    std::vector<TAlphabet>&&> callback,
                     size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
-                    bool trim_sentinels = false,
-                    bool select_last_edge = false) const;
+                    bool trim_sentinels = false) const;
 
     /**
      * Call contigs (dummy edges are skipped).
@@ -136,8 +135,7 @@ class BOSS {
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
-                        const bitmap *subgraph_mask = NULL,
-                        bool select_last_edge = false) const;
+                        const bitmap *subgraph_mask = NULL) const;
 
     /**
      * Generate contigs that cover the graph and invoke #callback for each contig.
