@@ -1482,7 +1482,7 @@ void traverse_dummy_edges(const BOSS &graph,
  * Traverse the entire dummy tree, detect all redundant
  * dummy source edges and return number of these edges.
  */
-uint64_t  traverse_dummy_edges(const BOSS &graph,
+uint64_t traverse_dummy_edges(const BOSS &graph,
                               sdsl::bit_vector *redundant_mask,
                               sdsl::bit_vector *traversed_mask,
                               size_t num_threads,
@@ -2361,7 +2361,7 @@ void call_paths(const BOSS &boss,
 void update_terminal_bits(
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
         uint64_t max_length,
-        edge_index *next_edge,
+        edge_index next_edge,
         std::vector<edge_index> &&path,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal) {
@@ -2382,9 +2382,9 @@ void update_terminal_bits(
     // mark the last node in the path as terminal if
     // 1. there are no outgoing edges, OR
     // 2. we merge into a node that is neither terminal nor near terminal
-    bool is_next_terminal = next_edge && fetch_bit(terminal->data(), *next_edge);
+    bool is_next_terminal = next_edge && fetch_bit(terminal->data(), next_edge);
     bool is_next_near_terminal = is_next_terminal
-            || (next_edge && fetch_bit(near_terminal->data(), *next_edge));
+            || (next_edge && fetch_bit(near_terminal->data(), next_edge));
     const bool set_terminal = !next_edge || !is_next_near_terminal;
     if (set_terminal) {
         set_bit(terminal->data(), path.back(), 1);
@@ -2398,7 +2398,7 @@ void update_terminal_bits(
     }
     std::optional<edge_index> anchor_edge;
     if (is_next_near_terminal) {
-        anchor_edge = *next_edge;
+        anchor_edge = next_edge;
     }
     callback(std::move(path), anchor_edge);
 }
@@ -2411,9 +2411,8 @@ void update_terminal_bits(
  */
 void call_paths_row_diff(
         const BOSS &boss,
-        std::vector<edge_index>&& edges,
+        edge_index edge,
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
-        ThreadPool &thread_pool,
         uint32_t max_length,
         sdsl::bit_vector *visited,
         sdsl::bit_vector *terminal,
@@ -2421,85 +2420,54 @@ void call_paths_row_diff(
         ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
-    std::vector<edge_index> out_edges; // stores all branch nodes along the path
-
     constexpr bool async = true;
 
-    // keep traversing until we have worked off all branches from the queue
-    while (!edges.empty()) {
-        edge_index edge = edges.back();
-        edges.pop_back();
+    if (fetch_bit(visited->data(), edge, async))
+        return;
 
-        if (fetch_bit(visited->data(), edge, async))
-            continue;
+    std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
+    auto not_dummy = std::find_if(sequence.begin(), sequence.end(),
+                                  [&](TAlphabet c) { return c != boss.kSentinelCode; });
+    uint32_t skip_count = not_dummy - sequence.begin();
 
-        std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
-        auto not_dummy = std::find_if(sequence.begin(), sequence.end(),
-                                      [&](TAlphabet c) { return c != boss.kSentinelCode; });
-        uint32_t skip_count = not_dummy - sequence.begin();
+    std::vector<edge_index> path;
+    path.reserve(100);
 
-        std::vector<edge_index> path;
-        path.reserve(100);
+    // traverse simple path until we reach its tail or a fork where the first edge
+    // has already been visited
+    while (!fetch_and_set_bit(visited->data(), edge, async)) {
+        assert(edge > 0);
+        ++progress_bar;
 
-        // traverse simple path until we reach its tail or a fork where the first edge
-        // has already been visited
-        while (!fetch_and_set_bit(visited->data(), edge, async)) {
-            assert(edge > 0);
-            ++progress_bar;
+        // visit the edge
+        TAlphabet d = boss.get_W(edge) % boss.alph_size;
 
-            // visit the edge
-            TAlphabet d = boss.get_W(edge) % boss.alph_size;
-
-            // stop the traversal on dummy sink nodes
-            if (d == boss.kSentinelCode)
-                break;
-
-            // don't add dummy source k-mers to the path
-            if (skip_count == 0) {
-                path.push_back(edge);
-            } else {
-                skip_count--;
-            }
-
-            // make one traversal step (this will pick the last outgoing edge)
-            edge = boss.fwd(edge, d);
-
-            out_edges.resize(0);
-            masked_call_outgoing(boss, edge, nullptr,
-                                 [&](edge_index e) { out_edges.push_back(e); });
-
-            // stop the traversal if there are no edges outgoing from the target or if
-            // the first outgoing edge was already visited
-            if (out_edges.empty() || fetch_bit(visited->data(), out_edges.front(), async))
-                break;
-
-            if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
-                thread_pool.force_enqueue(
-                        [=,&boss,&thread_pool,&progress_bar](std::vector<edge_index> &edges) {
-                            call_paths_row_diff(boss, std::move(edges), callback,
-                                                thread_pool, max_length, visited,
-                                                terminal, near_terminal, progress_bar);
-                        },
-                        std::vector<edge_index>(edges.begin() + TRAVERSAL_START_BATCH_SIZE / 2,
-                                          edges.end())
-                );
-
-                edges.resize(TRAVERSAL_START_BATCH_SIZE / 2);
-            }
+        // stop the traversal on dummy sink nodes
+        if (d == boss.kSentinelCode) {
+            edge = 0;
+            break;
         }
 
-        if (path.empty())
-            continue;
+        // don't add dummy source k-mers to the path
+        if (skip_count == 0) {
+            path.push_back(edge);
+        } else {
+            skip_count--;
+        }
 
-        // make sure no dummy kmers are in the path
-        assert(boss.get_node_seq(path.front()).front() != boss.kSentinelCode
-               && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
-
-        // mark terminal and near terminal nodes
-        edge_index *first_edge = out_edges.empty() ? nullptr : &out_edges.front();
-        update_terminal_bits(callback, max_length, first_edge, std::move(path), terminal,
-                        near_terminal);
+        // make one traversal step (this will pick the last outgoing edge)
+        edge = boss.fwd(edge, d);
     }
+
+    if (path.empty())
+        return;
+
+    // make sure no dummy kmers are in the path
+    assert(boss.get_node_seq(path.front()).front() != boss.kSentinelCode
+           && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
+
+    // mark terminal and near terminal nodes
+    update_terminal_bits(callback, max_length, edge, std::move(path), terminal, near_terminal);
 }
 
 // Returns new edges visited while fetching the path (only returns
@@ -2700,7 +2668,7 @@ void BOSS::call_sequences_row_diff(
 
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&, start]() {
-            call_paths_row_diff(*this, { start }, callback, thread_pool, max_length,
+            call_paths_row_diff(*this, start, callback, max_length,
                                 &visited, terminal, &near_terminal, progress_bar);
         });
     };
