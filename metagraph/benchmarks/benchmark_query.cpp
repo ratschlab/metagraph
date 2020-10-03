@@ -66,7 +66,6 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                 [&](kseq_t *stream) { call_sequence(stream->seq.s); }
             );
         },
-        0.0,
         1
     );
 }
