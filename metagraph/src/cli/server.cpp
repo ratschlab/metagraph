@@ -6,6 +6,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -139,17 +140,22 @@ std::string process_search_request(const std::string &received_message,
 
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-    config.fast = json.get("fast", config.fast).asBool();
+    // TODO: make non-fast mode work with primary graphs
+    // config.fast = json.get("fast", config.fast).asBool();
+    config.fast = true;
+    // TODO: make the query graph canonical only when the graph is primary
+    config.canonical = true;
 
     std::unique_ptr<graph::align::IDBGAligner> aligner;
+    std::unique_ptr<graph::CanonicalDBG> canonical_wrapper;
     if (json.get("align", false).asBool()) {
-        aligner = build_aligner(anno_graph.get_graph(), config);
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        auto &aligner_config = const_cast<graph::align::DBGAlignerConfig&>(aligner->get_config());
-        aligner_config.forward_and_reverse_complement = false;
+        // TODO: check and wrap into canonical only if the graph is primary
+        if (!anno_graph.get_graph().is_canonical_mode()) {
+            canonical_wrapper = std::make_unique<graph::CanonicalDBG>(anno_graph.get_graph(), true);
+            aligner = build_aligner(*canonical_wrapper, config);
+        } else {
+            aligner = build_aligner(anno_graph.get_graph(), config);
+        }
     }
 
     std::ostringstream oss;
@@ -199,12 +205,19 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
+    std::unique_ptr<graph::align::IDBGAligner> aligner;
+    std::unique_ptr<graph::CanonicalDBG> canonical_wrapper;
+    // TODO: check and wrap into canonical only if the graph is primary
+    if (!graph.is_canonical_mode()) {
+        canonical_wrapper = std::make_unique<graph::CanonicalDBG>(graph, true);
+        aligner = build_aligner(*canonical_wrapper, config);
+    } else {
+        aligner = build_aligner(graph, config);
+    }
 
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
-                = aligner->align(read_stream->seq.s);
+        const auto paths = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
