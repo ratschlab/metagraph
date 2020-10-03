@@ -2404,12 +2404,12 @@ void update_terminal_bits(
 }
 
 /**
- * Traverses all paths that can be visited starting from #edges and invokes
- * #callback at the end of each path.
+ * Traverses the path that can be visited starting from #edge and invokes
+ * #callback at the end.
  * A path ends when there are either no outgoing edges from the current node or if the
  * first node in a fork was already visited.
  */
-void call_paths_row_diff(
+void call_row_diff_path(
         const BOSS &boss,
         edge_index edge,
         const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
@@ -2666,10 +2666,11 @@ void BOSS::call_sequences_row_diff(
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
     constexpr bool async = true;
 
+    // TODO: Accumulate more edges and start each task for a bunch of nodes
     auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
         thread_pool.enqueue([&, start]() {
-            call_paths_row_diff(*this, start, callback, max_length,
-                                &visited, terminal, &near_terminal, progress_bar);
+            call_row_diff_path(*this, start, callback, max_length,
+                               &visited, terminal, &near_terminal, progress_bar);
         });
     };
 
