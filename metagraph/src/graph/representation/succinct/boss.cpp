@@ -1482,7 +1482,7 @@ void traverse_dummy_edges(const BOSS &graph,
  * Traverse the entire dummy tree, detect all redundant
  * dummy source edges and return number of these edges.
  */
-uint64_t traverse_dummy_edges(const BOSS &graph,
+uint64_t  traverse_dummy_edges(const BOSS &graph,
                               sdsl::bit_vector *redundant_mask,
                               sdsl::bit_vector *traversed_mask,
                               size_t num_threads,
@@ -1920,15 +1920,12 @@ class EdgeQueue {
 
 /*
  * Traverse graph from the specified (k+1)-mer/edge and call all paths reachable from it.
- * @param select_last_edge if true, at a bifurcation we always select the last edge (if
- * not visited), or we stop the sequence. Useful for diff-based annotations.
  */
 void call_paths(const BOSS &boss,
                 EdgeQueue&& edges,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
-                bool select_last_edge,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
@@ -2011,8 +2008,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,
                       const bitmap *subgraph_mask,
-                      bool trim_sentinels,
-                      bool select_last_edge) const {
+                      bool trim_sentinels) const {
     assert(!subgraph_mask || subgraph_mask->size() == W_->size());
 
     // keep track of the edges that have been reached
@@ -2045,7 +2041,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
         thread_pool.enqueue([&,start]() {
             ::mtg::graph::boss::call_paths(
                     *this, EdgeQueue(start), callback,
-                    split_to_unitigs, select_last_edge, kmers_in_single_form,
+                    split_to_unitigs, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
         });
@@ -2157,7 +2153,7 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
                                sequence.begin() + (rep - path.begin()) + get_k());
             ::mtg::graph::boss::call_paths(
                     *this, std::move(queue), callback,
-                    split_to_unitigs, select_last_edge, kmers_in_single_form,
+                    split_to_unitigs, kmers_in_single_form,
                     trim_sentinels, thread_pool, &visited, &fetched,
                     async, fetched_mutex, progress_bar, subgraph_mask);
         }
@@ -2203,7 +2199,6 @@ void call_paths(const BOSS &boss,
                 const BOSS::Call<std::vector<edge_index>&&,
                                  std::vector<TAlphabet>&&> &callback,
                 bool split_to_unitigs,
-                bool select_last_edge,
                 bool kmers_in_single_form,
                 bool trim_sentinels,
                 ThreadPool &thread_pool,
@@ -2303,9 +2298,6 @@ void call_paths(const BOSS &boss,
 
             edge_index next_edge = 0;
 
-            // masked_call_outgoing returns edges in reverse order, so the first returned
-            // edge is the last outgoing (lexicographically)
-            bool is_last_edge = true;
             // loop over the outgoing edges
             for (edge_index edge : out_edges) {
                 assert((!subgraph_mask || (*subgraph_mask)[edge]
@@ -2313,9 +2305,7 @@ void call_paths(const BOSS &boss,
                         && "k-mers not from subgraph are marked as visited");
 
                 if (!fetch_bit(visited.data(), edge, async)) {
-                    if (is_last_edge && select_last_edge) {
-                        next_edge = edge;
-                    } else if (!next_edge && !split_to_unitigs && !select_last_edge) {
+                    if (!next_edge && !split_to_unitigs) {
                         // save the edge for visiting if we extract contigs
                         next_edge = edge;
                     } else {
@@ -2323,7 +2313,6 @@ void call_paths(const BOSS &boss,
                         edges.emplace_back(edge, sequence.end() - boss.get_k(), sequence.end());
                     }
                 }
-                is_last_edge = false;
             }
 
             // stop traversing this sequence if the next edge was not selected
@@ -2339,7 +2328,7 @@ void call_paths(const BOSS &boss,
                     [=,&boss,&thread_pool,&fetched_mutex,&progress_bar](EdgeQueue &edges) {
                         ::mtg::graph::boss::call_paths(
                                 boss, std::move(edges), callback,
-                                split_to_unitigs, select_last_edge, kmers_in_single_form,
+                                split_to_unitigs, kmers_in_single_form,
                                 trim_sentinels, thread_pool, visited_ptr, fetched_ptr,
                                 async, fetched_mutex, progress_bar, subgraph_mask);
                     },
@@ -2385,7 +2374,7 @@ void update_terminal_bits(
         set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
-    if ( path.size() % max_length == 0 ) { // last node is terminal
+    if (path.size() % max_length == 0) { // last node is terminal
         callback(std::move(path), nullopt);
         return;
     }
@@ -2445,10 +2434,9 @@ void call_paths_row_diff(
             continue;
 
         std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
-        uint32_t skip_count = 0; // counts number of dummy k-mers to skip
-        while (skip_count < sequence.size() && sequence[skip_count] == boss.kSentinelCode) {
-            skip_count++;
-        }
+        auto not_dummy = std::find_if(sequence.begin(), sequence.end(),
+                                      [&](TAlphabet c) { return c != boss.kSentinelCode; });
+        uint32_t skip_count = not_dummy - sequence.begin();
 
         std::vector<edge_index> path;
         path.reserve(100);
@@ -2460,10 +2448,10 @@ void call_paths_row_diff(
             ++progress_bar;
 
             // visit the edge
-            TAlphabet w = boss.get_W(edge) % boss.alph_size;
+            TAlphabet d = boss.get_W(edge) % boss.alph_size;
 
             // stop the traversal on dummy sink nodes
-            if (w == boss.kSentinelCode)
+            if (d == boss.kSentinelCode)
                 break;
 
             // don't add dummy source k-mers to the path
@@ -2473,26 +2461,17 @@ void call_paths_row_diff(
                 skip_count--;
             }
 
-            // make one traversal step
-            edge = boss.fwd(edge, w);
+            // make one traversal step (this will pick the last outgoing edge)
+            edge = boss.fwd(edge, d);
 
             out_edges.resize(0);
             masked_call_outgoing(boss, edge, nullptr,
                                  [&](edge_index e) { out_edges.push_back(e); });
 
-            // loop over the outgoing edges (except the first)
-            for (uint32_t i = 1; i < out_edges.size(); ++i) {
-                if (!fetch_bit(visited->data(), out_edges[i], async)) {
-                    edges.push_back(out_edges[i]); // save the edge for visiting later
-                }
-            }
-
             // stop the traversal if there are no edges outgoing from the target or if
             // the first outgoing edge was already visited
             if (out_edges.empty() || fetch_bit(visited->data(), out_edges.front(), async))
                 break;
-
-            edge = out_edges.front();
 
             if (edges.size() >= TRAVERSAL_START_BATCH_SIZE - boss.alph_size) {
                 thread_pool.force_enqueue(
@@ -2684,8 +2663,7 @@ call_path(const BOSS &boss,
 void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                           size_t num_threads,
                           bool kmers_in_single_form,
-                          const bitmap *subgraph_mask,
-                          bool select_last_edge) const {
+                          const bitmap *subgraph_mask) const {
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
@@ -2698,7 +2676,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 
         callback(std::move(sequence), std::move(edges));
 
-    }, num_threads, false, kmers_in_single_form, subgraph_mask, true, select_last_edge);
+    }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
 }
 
 void BOSS::call_sequences_row_diff(
@@ -2787,8 +2765,8 @@ void BOSS::call_sequences_row_diff(
         ++progress_bar;
 
         for (edge_index idx : path) {
-            if (!fetch_and_set_bit(visited.data(), idx, async))
-                ++progress_bar;
+            assert(!fetch_bit(visited.data(), idx, async));
+            ++progress_bar;
         }
 
         std::optional<edge_index> anchor;
