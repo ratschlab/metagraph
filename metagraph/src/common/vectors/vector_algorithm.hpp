@@ -113,6 +113,7 @@ inline void unset_bit(uint64_t *v,
 inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
                                  uint64_t count = 1,
                                  int memorder = __ATOMIC_SEQ_CST) {
+#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
@@ -126,10 +127,19 @@ inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
                                         memorder /* order for exchange */,
                                         __ATOMIC_RELAXED /* order for compare */));
     return (exp_val & mask) >> (bit_pos & 0x7F);
+#else
+    std::ignore = memorder;
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    uint64_t old_val = vector[i];
+    vector[i] += count;
+    return old_val;
+#endif
 }
 
-inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val = 1,
+inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
                            int memorder = __ATOMIC_SEQ_CST) {
+#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
@@ -143,6 +153,14 @@ inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val 
                                         memorder /* order for exchange */,
                                         __ATOMIC_RELAXED /* order for compare */));
     return (exp_val & mask) >> (bit_pos & 0x7F);
+#else
+    std::ignore = memorder;
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    uint64_t old_val = vector[i];
+    vector[i] = val;
+    return old_val;
+#endif
 }
 
 
