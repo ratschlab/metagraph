@@ -2679,12 +2679,11 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
 }
 
-[[clang::optnone]] void BOSS::call_sequences_row_diff(
+void BOSS::call_sequences_row_diff(
         Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
         size_t num_threads,
         size_t max_length,
         sdsl::bit_vector *terminal) const {
-#pragma clang optimize off
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
