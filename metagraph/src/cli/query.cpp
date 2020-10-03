@@ -463,11 +463,8 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         if (!graph->is_canonical_mode() && config->canonical) {
-            // If the input graph is non-canonical and non-primary, and if there
-            // exist a pair of forward and reverse complement k-mers with different
-            // annotations, then we need to have a way of setting the second argument
-            // to false.
-            graph.reset(new CanonicalDBG(graph, config->kmers_in_single_form));
+            // TODO: check and wrap into canonical only if the graph is primary
+            graph.reset(new CanonicalDBG(graph, true));
             aligner = build_aligner(*graph, *config);
         } else {
             aligner = build_aligner(*graph, *config);

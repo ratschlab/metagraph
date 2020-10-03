@@ -149,14 +149,9 @@ std::string process_search_request(const std::string &received_message,
     std::unique_ptr<graph::align::IDBGAligner> aligner;
     std::unique_ptr<graph::CanonicalDBG> canonical_wrapper;
     if (json.get("align", false).asBool()) {
+        // TODO: check and wrap into canonical only if the graph is primary
         if (!anno_graph.get_graph().is_canonical_mode()) {
-            // If the input graph is non-canonical and non-primary, and if there
-            // exist a pair of forward and reverse complement k-mers with different
-            // annotations, then we need to have a way of setting the second argument
-            // to false.
-            canonical_wrapper = std::make_unique<graph::CanonicalDBG>(
-                anno_graph.get_graph(), config.kmers_in_single_form
-            );
+            canonical_wrapper = std::make_unique<graph::CanonicalDBG>(anno_graph.get_graph(), true);
             aligner = build_aligner(*canonical_wrapper, config);
         } else {
             aligner = build_aligner(anno_graph.get_graph(), config);
@@ -212,10 +207,9 @@ std::string process_align_request(const std::string &received_message,
 
     std::unique_ptr<graph::align::IDBGAligner> aligner;
     std::unique_ptr<graph::CanonicalDBG> canonical_wrapper;
+    // TODO: check and wrap into canonical only if the graph is primary
     if (!graph.is_canonical_mode()) {
-        canonical_wrapper = std::make_unique<graph::CanonicalDBG>(
-            graph, config.kmers_in_single_form
-        );
+        canonical_wrapper = std::make_unique<graph::CanonicalDBG>(graph, true);
         aligner = build_aligner(*canonical_wrapper, config);
     } else {
         aligner = build_aligner(graph, config);

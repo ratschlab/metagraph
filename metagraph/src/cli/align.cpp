@@ -216,9 +216,7 @@ void map_sequences_in_file(const std::string &file,
 
                 dbg->call_nodes_with_suffix(subseq,
                                             [&](auto node, auto) {
-                                                *out << subseq << ": "
-                                                     << node
-                                                     << "\n";
+                                                *out << subseq << ": " << node << "\n";
                                             },
                                             config.alignment_length);
             }

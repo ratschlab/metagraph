@@ -1027,7 +1027,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
-            fprintf(stderr, "\t   --primary-kmers\tindicate that the input graph has only primary k-mers [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
             fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
@@ -1063,7 +1062,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
-            fprintf(stderr, "\t   --primary-kmers\tindicate that the input graph has only primary k-mers [off]\n");
         } break;
     }
 
