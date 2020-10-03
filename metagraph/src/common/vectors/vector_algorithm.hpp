@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <cassert>
+#include <cstdlib>
 
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
@@ -531,6 +532,8 @@ template <int width = 0>
 inline sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
                                                   uint8_t var_width = 0,
                                                   size_t alignment = 8) {
+    assert(__builtin_popcountll(alignment) == 1);
+
     // This is a dirty hack to allow for reallocating an int_vector<width>'s
     // underlying storage
     struct int_vector_access {
@@ -548,8 +551,7 @@ inline sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val 
     free(v_cast.m_data);
 
     size_t capacity_bytes = (((((v_cast.m_size + 63) >> 6) << 3) + alignment - 1) / alignment) * alignment;
-    v_cast.m_data = (uint64_t*)std::aligned_alloc(alignment, capacity_bytes);
-    if (!v_cast.m_data)
+    if (posix_memalign((void**)&v_cast.m_data, alignment, capacity_bytes) || !v_cast.m_data)
         throw std::bad_alloc();
 
     memset(v_cast.m_data, 0, capacity_bytes);
