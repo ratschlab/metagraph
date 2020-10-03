@@ -2,6 +2,7 @@
 
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/threads/threading.hpp"
 #include "test_helpers.hpp"
 
 
@@ -811,6 +812,183 @@ TEST(select_support_scan_offset, vector_random) {
                     << ", rank: " << r - rank_offset;
             }
         }
+    }
+}
+
+std::vector<uint64_t> get_test_size_range() {
+    std::vector<uint64_t> result;
+    for (size_t size = 1; size <= 1'000; ++size) {
+        result.push_back(size);
+    }
+    for (size_t l = 10; l <= 21; ++l) {
+        result.push_back(1llu << l);
+        result.push_back((1llu << l) + 1);
+        result.push_back((1llu << l) - 1);
+    }
+    return result;
+}
+
+TEST(generate_subindex, empty) {
+    ThreadPool thread_pool(5);
+    sdsl::bit_vector ref;
+    bit_vector_stat col;
+    ASSERT_EQ(sdsl::bit_vector(0),
+        generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+}
+
+TEST(generate_subindex, ref0_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 0);
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(0),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 1);
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(size, 0),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 1);
+        bit_vector_stat col(sdsl::bit_vector(size, 1));
+        ASSERT_EQ(sdsl::bit_vector(size, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1first0_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[0] = 0;
+        sdsl::bit_vector ref = bv;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1last0_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[bv.size() - 1] = 0;
+        sdsl::bit_vector ref = bv;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        sdsl::bit_vector ref = bv;
+        bv[0] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv,
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        sdsl::bit_vector ref = bv;
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv,
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, empty) {
+    ThreadPool thread_pool(5);
+    bit_vector_stat ref;
+    bit_vector_stat col;
+    ASSERT_EQ(sdsl::bit_vector(0), generate_subindex(col, ref, thread_pool));
+}
+
+TEST(generate_subindex_sparse, ref0_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 0));
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(0), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 1));
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(size, 0), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 1));
+        bit_vector_stat col(sdsl::bit_vector(size, 1));
+        ASSERT_EQ(sdsl::bit_vector(size, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1first0_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[0] = 0;
+        bit_vector_stat ref(bv);
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1last0_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat ref(bv);
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bit_vector_stat ref(bv);
+        bv[0] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv, generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bit_vector_stat ref(bv);
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv, generate_subindex(col, ref, thread_pool));
     }
 }
 

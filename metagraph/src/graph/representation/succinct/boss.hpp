@@ -127,8 +127,7 @@ class BOSS {
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
                     const bitmap *subgraph_mask = NULL,
-                    bool trim_sentinels = false,
-                    bool select_last_edge = false) const;
+                    bool trim_sentinels = false) const;
 
     /**
      * Call contigs (dummy edges are skipped).
@@ -136,8 +135,25 @@ class BOSS {
     void call_sequences(Call<std::string&&, std::vector<edge_index>&&> callback,
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
-                        const bitmap *subgraph_mask = NULL,
-                        bool select_last_edge = false) const;
+                        const bitmap *subgraph_mask = NULL) const;
+
+    /**
+     * Generate contigs that cover the graph and invoke #callback for each contig.
+     * Traversal starts at dummy source edges, then at forks and in the end at cycles.
+     * A contig is terminated when we reach dead end or a fork where the first edge
+     * is visited, but not marked as being near a terminal edge.
+     *
+     * @param callback invoke this for each generated contig
+     * @param num_threads parallelize the graph traversal on this many threads
+     * @param max_length maximum distance between two terminal nodes; this is a soft
+     *        limit - in the worst case the distance between to terminal nodes can
+     *        be 2*max_length
+     */
+    void call_sequences_row_diff(
+            Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
+            size_t num_threads,
+            size_t max_length,
+            sdsl::bit_vector *terminal) const;
 
     /**
      * Call unitigs (dummy edges are skipped).

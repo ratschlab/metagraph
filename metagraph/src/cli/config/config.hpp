@@ -100,7 +100,7 @@ class Config {
 
     int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
-    int32_t alignment_xdrop = 30;
+    int32_t alignment_xdrop = 27;
 
     size_t alignment_queue_size = 20;
     size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
