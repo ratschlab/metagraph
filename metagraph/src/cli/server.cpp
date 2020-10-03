@@ -150,6 +150,10 @@ std::string process_search_request(const std::string &received_message,
     std::unique_ptr<graph::CanonicalDBG> canonical_wrapper;
     if (json.get("align", false).asBool()) {
         if (!anno_graph.get_graph().is_canonical_mode()) {
+            // If the input graph is non-canonical and non-primary, and if there
+            // exist a pair of forward and reverse complement k-mers with different
+            // annotations, then we need to have a way of setting the second argument
+            // to false.
             canonical_wrapper = std::make_unique<graph::CanonicalDBG>(
                 anno_graph.get_graph(), config.kmers_in_single_form
             );
