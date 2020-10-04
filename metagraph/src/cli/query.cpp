@@ -914,14 +914,14 @@ void QueryExecutor::query_fasta(const string &file,
 void QueryExecutor
 ::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                       const std::function<void(const std::string &)> &callback) {
-    auto begin = fasta_parser.begin();
+    auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
 
     std::atomic<size_t> seq_count = 0;
 
-    while (begin != end) {
+    while (it != end) {
         Timer batch_timer;
 
         uint64_t num_bytes_read = 0;
@@ -929,9 +929,9 @@ void QueryExecutor
         // are called.
         std::vector<std::pair<std::string, std::string>> seq_batch;
         num_bytes_read = 0;
-        for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
-            seq_batch.emplace_back(begin->name.s, begin->seq.s);
-            num_bytes_read += begin->seq.l;
+        for ( ; it != end && num_bytes_read <= batch_size; ++it) {
+            seq_batch.emplace_back(it->name.s, it->seq.s);
+            num_bytes_read += it->seq.l;
         }
 
         if (aligner_config_ && !config_.batch_align) {
