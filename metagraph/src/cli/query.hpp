@@ -17,7 +17,7 @@ namespace seq_io {
 namespace graph {
     class AnnotatedDBG;
     namespace align {
-        class IDBGAligner;
+        class DBGAlignerConfig;
     }
 }
 
@@ -28,23 +28,29 @@ class Config;
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
+/**
+ * Construct a query graph and augment it with neighboring paths around it
+ * if `config` is specified.
+ * @param anno_graph annotated de Bruijn graph (the index)
+ * @param call_sequences generate sequences to be queried against anno_graph
+ * @param num_threads number of threads to use
+ * @param canonical if true, the returned query graph is a canonical graph
+ * @param config a pointer to a Config to determine parameters of the hull
+ */
 std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      bool canonical = false);
+                      bool canonical = false,
+                      const Config *config = nullptr);
 
 
 class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
-                  const graph::align::IDBGAligner *aligner,
-                  ThreadPool &thread_pool)
-      : config_(config),
-        anno_graph_(anno_graph),
-        aligner_(aligner),
-        thread_pool_(thread_pool) {}
+                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
+                  ThreadPool &thread_pool);
 
     void query_fasta(const std::string &file_path,
                      const std::function<void(const std::string &)> &callback);
@@ -62,7 +68,7 @@ class QueryExecutor {
   private:
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
-    const graph::align::IDBGAligner *aligner_;
+    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
