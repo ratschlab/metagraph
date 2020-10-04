@@ -2,7 +2,6 @@
 #define __LOAD_ANNOTATED_GRAPH_HPP__
 
 #include <string>
-#include <vector>
 
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/masked_graph.hpp"
