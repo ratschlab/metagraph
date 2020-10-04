@@ -840,35 +840,41 @@ int query_graph(Config *config) {
     return 0;
 }
 
+void align_sequence(std::string &name, std::string &seq,
+                    const DeBruijnGraph &graph,
+                    const align::DBGAlignerConfig &aligner_config) {
+    auto alignments
+        = build_aligner(graph, aligner_config)->align(seq);
+
+    assert(alignments.size() <= 1 && "Only the best alignment is needed");
+
+    if (alignments.size()) {
+        auto &match = alignments[0];
+        // sequence for querying -- the best alignment
+        if (match.get_offset()) {
+            seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
+                    + match.get_sequence();
+        } else {
+            seq = const_cast<std::string&&>(match.get_sequence());
+        }
+
+        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                           match.get_score(), match.get_cigar().to_string());
+
+    } else {
+        // no alignment was found
+        // the original sequence will be queried
+        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                           0, fmt::format("{}S", seq.length()));
+    }
+}
+
 std::string query_sequence(size_t id, std::string name, std::string seq,
                            const AnnotatedDBG &anno_graph,
                            const Config &config,
                            const align::DBGAlignerConfig *aligner_config) {
     if (aligner_config) {
-        auto alignments
-            = build_aligner(anno_graph.get_graph(), *aligner_config)->align(seq);
-        assert(alignments.size() <= 1 && "Only the best alignment is needed");
-        if (alignments.size()) {
-            auto &match = alignments[0];
-            // sequence for querying -- the best alignment
-            if (match.get_offset()) {
-                seq = anno_graph.get_graph()
-                                .get_node_sequence(match[0])
-                                .substr(0, match.get_offset())
-                        + match.get_sequence();
-            } else {
-                seq = const_cast<std::string&&>(match.get_sequence());
-            }
-
-            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
-                               match.get_score(), match.get_cigar().to_string());
-
-        } else {
-            // no alignment was found
-            // the original sequence will be queried
-            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
-                               0, fmt::format("{}S", seq.length()));
-        }
+        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
     }
 
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
@@ -912,9 +918,8 @@ void QueryExecutor
     auto end = fasta_parser.end();
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
-    seq_io::FastaParser::iterator it;
 
-    size_t seq_count = 0;
+    std::atomic<size_t> seq_count = 0;
 
     while (begin != end) {
         Timer batch_timer;
@@ -922,38 +927,50 @@ void QueryExecutor
         uint64_t num_bytes_read = 0;
         // A generator that can be called multiple times until all sequences
         // are called.
-        StringGenerator generate_next_batch = [&](auto call_sequence) {
-            num_bytes_read = 0;
-            for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
-                call_sequence(it->seq.s);
-                num_bytes_read += it->seq.l;
+        std::vector<std::pair<std::string, std::string>> seq_batch;
+        num_bytes_read = 0;
+        for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
+            seq_batch.emplace_back(begin->name.s, begin->seq.s);
+            num_bytes_read += begin->seq.l;
+        }
+
+        if (aligner_config_ && !config_.batch_align) {
+            logger->trace("Aligning sequences from batch against the full graph...");
+            batch_timer.reset();
+
+            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+            for (size_t i = 0; i < seq_batch.size(); ++i) {
+                align_sequence(seq_batch[i].first, seq_batch[i].second,
+                               anno_graph_.get_graph(), *aligner_config_);
             }
-        };
+            logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
+            batch_timer.reset();
+        }
 
         auto query_graph = construct_query_graph(
             anno_graph_,
-            generate_next_batch,
+            [&](auto callback) {
+                for (const auto &[name, seq] : seq_batch) {
+                    callback(seq);
+                }
+            },
             get_num_threads(),
             anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
-            aligner_config_ ? &config_ : nullptr
+            aligner_config_ && config_.batch_align ? &config_ : NULL
         );
 
         logger->trace("Query graph constructed for batch of sequences"
                       " with {} bases from '{}' in {} sec",
                       num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
-
         batch_timer.reset();
 
-        for ( ; begin != it; ++begin) {
-            assert(begin != end);
-
-            thread_pool_.enqueue([&](const auto&... args) {
-                callback(query_sequence(args..., *query_graph,
-                                        config_, aligner_config_.get()));
-            }, seq_count++, std::string(begin->name.s), std::string(begin->seq.s));
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t i = 0; i < seq_batch.size(); ++i) {
+            callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
+                                    *query_graph, config_,
+                                    config_.batch_align ? aligner_config_.get() : NULL));
         }
 
-        thread_pool_.join();
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
     }
