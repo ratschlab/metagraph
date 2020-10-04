@@ -761,7 +761,6 @@ class TestQueryPrimary(unittest.TestCase):
             assert('objects: 45792' == params_str[1])
         assert('representation: ' + cls.anno_repr == params_str[3])
 
-    # Primary graphs don't support unbatched queries yet
     def test_query(self):
         query_command = '{exe} query --canonical -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
