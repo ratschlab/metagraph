@@ -324,7 +324,8 @@ int transform_annotation(Config *config) {
         assert(annotator);
 
         switch (config->anno_type) {
-            case Config::ColumnCompressed: {
+            case Config::ColumnCompressed:
+            case Config::BRWTRowDiff: {
                 assert(false);
                 break;
             }
@@ -473,7 +474,7 @@ int transform_annotation(Config *config) {
         }
 
     } else if (input_anno_type == Config::RowDiff) {
-        if (config->anno_type != Config::BRWT) {
+        if (config->anno_type != Config::BRWTRowDiff) {
             logger->error("Only conversion to brwt supported for row_diff");
             exit(1);
         }
