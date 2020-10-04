@@ -745,7 +745,7 @@ class TestQueryPrimary(unittest.TestCase):
             TEST_DATA_DIR + '/transcripts_100.fa',
             cls.anno_repr,
             cls.tempdir.name + '/annotation',
-            extra_params='--fwd-and-reverse'
+            extra_params='--canonical'
         )
 
         # check annotation

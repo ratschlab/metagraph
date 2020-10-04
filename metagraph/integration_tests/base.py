@@ -81,7 +81,7 @@ class TestingBase(unittest.TestCase):
         annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
                 --anno-type {anno_repr} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            fwd_and_rev='--fwd-and-reverse' if primary else '',
+            fwd_and_rev='--canonical' if primary else '',
             graph=graph_path,
             anno_repr=anno_repr,
             outfile=output,

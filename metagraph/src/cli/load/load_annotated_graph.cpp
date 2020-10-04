@@ -22,9 +22,13 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     if (config.canonical && !graph->is_canonical_mode())
         graph = std::make_shared<CanonicalDBG>(graph, true);
 
+    uint64_t max_index = graph->max_index();
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get()))
+        max_index = canonical->get_graph().max_index();
+
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
-            : initialize_annotation(config.anno_type, config, graph->max_index());
+            : initialize_annotation(config.anno_type, config, max_index);
 
     if (config.infbase_annotators.size()) {
         if (!annotation_temp->load(config.infbase_annotators.at(0))) {
