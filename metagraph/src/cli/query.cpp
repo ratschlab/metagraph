@@ -450,8 +450,8 @@ int query_graph(Config *config) {
 
     assert(config->infbase_annotators.size() == 1);
 
-    auto graph = load_critical_dbg(config->infbase);
-    auto anno_graph = initialize_annotated_dbg(graph, *config);
+    std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
+    std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 

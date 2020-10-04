@@ -1,5 +1,7 @@
 #include "load_annotated_graph.hpp"
 
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "common/logger.hpp"
 #include "load_graph.hpp"
@@ -20,11 +22,29 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
             : initialize_annotation(config.anno_type, config, graph->max_index());
 
-    if (config.infbase_annotators.size()
-            && !annotation_temp->load(config.infbase_annotators.at(0))) {
-        logger->error("Cannot load annotations for graph {}, file corrupted",
-                      config.infbase);
-        exit(1);
+    if (config.infbase_annotators.size()) {
+        if (!annotation_temp->load(config.infbase_annotators.at(0))) {
+            logger->error("Cannot load annotations for graph {}, file corrupted",
+                          config.infbase);
+            exit(1);
+        }
+        const Config::AnnotationType input_anno_type
+                = parse_annotation_type(config.infbase_annotators.at(0));
+        // row_diff annotation is special, as it must know the graph structure
+        if (input_anno_type == Config::AnnotationType::RowDiff) {
+            auto dbg_graph = dynamic_cast<DBGSuccinct *>(graph.get());
+            if (!dbg_graph) {
+                logger->error(
+                        "Only succinct de Bruijn graph representations are "
+                        "supported for row-diff annotations");
+                std::exit(1);
+            }
+            // this is really ugly, but the alternative is to add a set_graph method to
+            // all annotations
+            dynamic_cast<annot::binmat::RowDiff<annot::binmat::ColumnMajor> &>(
+                    const_cast<annot::binmat::BinaryMatrix &>(annotation_temp->get_matrix()))
+                    .set_graph(dbg_graph);
+        }
     }
 
     // load graph
