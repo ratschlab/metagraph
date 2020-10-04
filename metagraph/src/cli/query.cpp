@@ -12,11 +12,9 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -811,10 +809,6 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     auto graph = load_critical_dbg(config->infbase);
-
-    // TODO: check and wrap into canonical only if the graph is primary
-    if (config->canonical && !graph->is_canonical_mode())
-        graph = std::make_shared<CanonicalDBG>(graph, true);
 
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 

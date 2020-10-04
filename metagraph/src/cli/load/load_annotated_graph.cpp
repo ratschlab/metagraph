@@ -18,6 +18,10 @@ using mtg::common::logger;
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
+    // TODO: check and wrap into canonical only if the graph is primary
+    if (config.canonical && !graph->is_canonical_mode())
+        graph = std::make_shared<CanonicalDBG>(graph, true);
+
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
             : initialize_annotation(config.anno_type, config, graph->max_index());
