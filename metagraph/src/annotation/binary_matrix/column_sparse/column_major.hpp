@@ -47,7 +47,6 @@ class ColumnMajor : public BinaryMatrix {
     void call_columns(const ColumnCallback &callback);
 
   private:
-    ColumnMajor(const std::vector<std::unique_ptr<bit_vector>> *columns): columns_(columns) {}
     std::vector<std::unique_ptr<bit_vector>> data_;
     const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;
 };

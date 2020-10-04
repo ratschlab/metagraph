@@ -622,7 +622,7 @@ std::string Config::annotype_to_string(AnnotationType state) {
         case RowDiff:
             return "row_diff";
         case BRWTRowDiff:
-            return "row_diff";
+            return "brwt_row_diff";
         default:
             assert(false);
             return "Never happens";

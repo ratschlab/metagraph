@@ -378,7 +378,7 @@ parse_linkage_matrix(const std::string &filename) {
 
         } catch (const std::exception &e) {
             logger->error("Possibly invalid format of the linkage matrix."
-                          " Each line must contsin exactly 4 values:"
+                          " Each line must contain exactly 4 values:"
                           " <cluster 1> <cluster 2> <dist> <cluster 3>"
                           "\nException: {}", e.what());
             exit(1);
