@@ -295,6 +295,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
                     uint64_t old_val = atomic_set(counts, i, contigs[l].second[--j]);
+                    std::ignore = old_val;
                     assert(!old_val);
                 });
                 assert(!j);
