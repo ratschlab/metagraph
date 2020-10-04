@@ -73,11 +73,9 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
-    auto [counts, union_mask] = fill_count_vector(anno_graph,
-                                                  labels_in, labels_out,
-                                                  num_threads,
-                                                  update_in_place,
-                                                  init_counts);
+    auto fill_vector = fill_count_vector(anno_graph, labels_in, labels_out,
+                                         num_threads, update_in_place, init_counts);
+    auto &[counts, union_mask] = fill_vector;
 
     // counts is a double-width, interleaved vector where the significant bits
     // represent the out-label count and the least significant bits represent
@@ -113,7 +111,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         logger->trace("Filtering by node");
         update_masked_graph_by_node(*masked_graph, [&](node_index node) {
-            uint64_t count = counts[node];
+            uint64_t count = fill_vector.first[node];
             uint64_t in_count = count & int_mask;
             uint64_t out_count = count >> width;
             uint64_t sum = in_count + out_count;
@@ -133,6 +131,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     update_masked_graph_by_unitig(*masked_graph,
                                   [&](const auto &unitig, const auto &path)
                                       -> std::vector<std::pair<size_t, size_t>> {
+        auto &counts = fill_vector.first;
         sdsl::bit_vector in_mask(path.size(), false);
         sdsl::bit_vector out_mask(path.size(), false);
         sdsl::bit_vector other_mask(check_other ? path.size() : 0, false);
@@ -280,7 +279,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_set(counts, i, seq_counts[j++]);
+                atomic_set(counts, i, contigs[l].second[j++]);
             });
             assert(j == seq_counts.size());
         }
@@ -302,8 +301,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
                     j -= 2;
-                    atomic_set(counts, i * 2, seq_counts[j]);
-                    atomic_set(counts, i* 2 + 1, seq_counts[j + 1]);
+                    atomic_set(counts, i * 2, contigs[l].second[j]);
+                    atomic_set(counts, i* 2 + 1, contigs[l].second[j + 1]);
                 });
                 assert(!j);
                 seq_counts.width(width * 2);
