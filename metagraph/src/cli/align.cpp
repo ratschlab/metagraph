@@ -254,8 +254,8 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
-    if (config->canonical) {
-        logger->trace("Loading as canonical DBG");
+    if (config->canonical && !graph->is_canonical_mode()) {
+        logger->trace("Wrap as canonical DBG");
         // TODO: check and wrap into canonical only if the graph is primary
         graph.reset(new CanonicalDBG(graph, true));
     }

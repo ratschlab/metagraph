@@ -43,8 +43,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
 
             if (!dbg_graph) {
-                auto canonical = dynamic_cast<CanonicalDBG *>(graph.get());
-                if (canonical)
+                if (auto *canonical = dynamic_cast<CanonicalDBG *>(graph.get()))
                     dbg_graph = dynamic_cast<const DBGSuccinct *>(&canonical->get_graph());
             }
 

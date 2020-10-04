@@ -938,7 +938,8 @@ void QueryExecutor
             aligner_config_ ? &config_ : nullptr
         );
 
-        logger->trace("Query graph constructed for batch of {} base pairs from '{}' in {} sec",
+        logger->trace("Query graph constructed for batch of sequences"
+                      " with {} bases from '{}' in {} sec",
                       num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
 
         batch_timer.reset();
