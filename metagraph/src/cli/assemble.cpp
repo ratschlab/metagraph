@@ -15,8 +15,6 @@ namespace cli {
 
 using mtg::common::logger;
 
-const unsigned int NUM_THREADS_PER_TRAVERSAL = 4;
-
 int assemble(Config *config) {
     assert(config);
 
@@ -45,6 +43,8 @@ int assemble(Config *config) {
         std::mutex file_open_mutex;
         std::mutex write_mutex;
 
+        size_t num_threads_per_traversal = get_num_threads() / config->parallel_assemblies;
+
         call_masked_graphs(*anno_graph, config,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
                 std::lock_guard<std::mutex> file_lock(file_open_mutex);
@@ -58,7 +58,7 @@ int assemble(Config *config) {
                                            std::lock_guard<std::mutex> lock(write_mutex);
                                            writer.write(unitig);
                                        },
-                                       NUM_THREADS_PER_TRAVERSAL,
+                                       num_threads_per_traversal,
                                        config->min_tip_size,
                                        config->kmers_in_single_form);
                 } else {
@@ -66,12 +66,12 @@ int assemble(Config *config) {
                                              std::lock_guard<std::mutex> lock(write_mutex);
                                              writer.write(seq);
                                          },
-                                         NUM_THREADS_PER_TRAVERSAL,
+                                         num_threads_per_traversal,
                                          config->kmers_in_single_form);
                 }
             },
-            get_num_threads() / NUM_THREADS_PER_TRAVERSAL,
-            std::min(get_num_threads(), NUM_THREADS_PER_TRAVERSAL)
+            config->parallel_assemblies,
+            num_threads_per_traversal
         );
 
         return 0;

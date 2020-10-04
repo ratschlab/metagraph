@@ -142,6 +142,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--parallel-assemblies")) {
+            parallel_assemblies = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-path-length")) {
             max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -337,6 +339,9 @@ Config::Config(int argc, char *argv[]) {
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
         parallel_nodes = get_num_threads();
+
+    if (parallel_assemblies == static_cast<unsigned int>(-1))
+        parallel_assemblies = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;
@@ -902,6 +907,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --parallel-assemblies [INT] \tnumber of assembly experiments to run in parallel [n_threads]\n");
             fprintf(stderr, "\t   --label-mask-file [STR] \tfile describing labels to mask in and out and their relative fractions []\n");
             fprintf(stderr, "\t                       \t\tA k-mer is an in-k-mer if it has at least in_kmer_frac in-labels.\n");
             fprintf(stderr, "\t                       \t\tA k-mer is an out-k-mer if it has more than out_kmer_frac out-labels.\n");

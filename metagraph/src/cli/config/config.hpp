@@ -82,6 +82,7 @@ class Config {
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
+    unsigned int parallel_assemblies = -1;
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
