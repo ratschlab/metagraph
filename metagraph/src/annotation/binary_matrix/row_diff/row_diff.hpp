@@ -107,6 +107,9 @@ class RowDiff : public BinaryMatrix {
         terminal_file_ = std::string(len, '\0');
         f.read(terminal_file_.data(), len);
         common::logger->trace("Loading terminal nodes from {}", terminal_file_);
+        std::ifstream fterm(terminal_file_, ios::binary);
+        terminal_.load(fterm);
+        fterm.close();
 
         return diffs_.load(f);
     }
@@ -169,7 +172,7 @@ class RowDiff : public BinaryMatrix {
         }
     }
 
-    const graph::DBGSuccinct *graph_;
+    const graph::DBGSuccinct *graph_ = nullptr;
 
     BaseMatrix diffs_;
     sdsl::rrr_vector<> terminal_;
