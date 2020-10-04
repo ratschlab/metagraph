@@ -284,35 +284,23 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
             assert(j == seq_counts.size());
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
         if (masked_canonical) {
-            // reshape to normal width
-            counts.width(width);
-
             #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
             for (size_t l = 0; l < contigs.size(); ++l) {
                 auto &[seq, seq_counts] = contigs[l];
-                seq_counts.width(width);
                 reverse_complement(seq.begin(), seq.end());
 
                 // counts stores counts for in labels and out labels interleaved,
                 // so to add values properly, it should be reshaped first
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    j -= 2;
-                    atomic_set(counts, i * 2, contigs[l].second[j]);
-                    atomic_set(counts, i* 2 + 1, contigs[l].second[j + 1]);
+                    atomic_set(counts, i, contigs[l].second[--j]);
                 });
                 assert(!j);
-                seq_counts.width(width * 2);
             }
-
-            __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-            // reshape back
-            counts.width(width * 2);
         }
+
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
         logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
     }
