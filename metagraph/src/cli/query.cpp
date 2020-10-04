@@ -812,8 +812,9 @@ int query_graph(Config *config) {
 
     auto graph = load_critical_dbg(config->infbase);
 
+    // TODO: check and wrap into canonical only if the graph is primary
     if (config->canonical && !graph->is_canonical_mode())
-        graph = std::make_shared<CanonicalDBG>(graph, config->kmers_in_single_form);
+        graph = std::make_shared<CanonicalDBG>(graph, true);
 
     auto anno_graph = initialize_annotated_dbg(graph, *config);
 
@@ -827,7 +828,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(*graph, *config)
+            initialize_aligner_config(graph->get_k(), *config)
         ));
     }
 

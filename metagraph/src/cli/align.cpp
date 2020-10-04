@@ -22,7 +22,7 @@ using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
 
-DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Config &config) {
+DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     assert(config.alignment_num_alternative_paths);
 
     DBGAlignerConfig aligner_config;
@@ -47,10 +47,10 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
 
     if (!aligner_config.min_seed_length)
-        aligner_config.min_seed_length = graph.get_k();
+        aligner_config.min_seed_length = k;
 
     if (!aligner_config.max_seed_length)
-        aligner_config.max_seed_length = graph.get_k();
+        aligner_config.max_seed_length = k;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -84,7 +84,7 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
 std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
     assert(!config.canonical || graph.is_canonical_mode());
 
-    return build_aligner(graph, initialize_aligner_config(graph, config));
+    return build_aligner(graph, initialize_aligner_config(graph.get_k(), config));
 }
 
 std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
@@ -256,7 +256,8 @@ int align_to_graph(Config *config) {
 
     if (config->canonical) {
         logger->trace("Loading as canonical DBG");
-        graph.reset(new CanonicalDBG(graph, config->kmers_in_single_form));
+        // TODO: check and wrap into canonical only if the graph is primary
+        graph.reset(new CanonicalDBG(graph, true));
     }
 
     Timer timer;

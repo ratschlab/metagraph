@@ -36,7 +36,7 @@ Json::Value adjust_for_types(const std::string &v) {
 
     try {
         return Json::Value(std::stof(v));
-    } catch(...) {};
+    } catch(...) {}
 
     return Json::Value(v);
 }
@@ -149,7 +149,7 @@ std::string process_search_request(const std::string &received_message,
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
         aligner_config.reset(new graph::align::DBGAlignerConfig(
-            initialize_aligner_config(anno_graph.get_graph(), config)
+            initialize_aligner_config(anno_graph.get_graph().get_k(), config)
         ));
     }
 
