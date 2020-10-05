@@ -144,13 +144,11 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
     __uint128_t inc = __uint128_t(count) << shift;
     __uint128_t exp_val = *limb;
 
-#ifdef __CX16__
     do {
         new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
+#ifdef __CX16__
     } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
 #else
-    do {
-        new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
     } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
                                            true /* weak compare and exchange */,
                                            memorder /* order for exchange */,
@@ -183,13 +181,11 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
     __uint128_t val_shift = __uint128_t(val) << shift;
     __uint128_t exp_val = *limb;
 
-#ifdef __CX16__
     do {
         new_val = val_shift | (exp_val & (~mask));
+#ifdef __CX16__
     } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
 #else
-    do {
-        new_val = val_shift | (exp_val & (~mask));
     } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
                                            true /* weak compare and exchange */,
                                            memorder /* order for exchange */,
