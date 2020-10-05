@@ -76,10 +76,11 @@ class DBGSuccinct : public DeBruijnGraph {
     // of the string |str|, and call these nodes. If more than |max_num_allowed_matches|
     // are found, or if the maximal prefix is shorter than |min_match_length|, return
     // without calling.
-    void call_nodes_with_suffix(std::string_view str,
-                                std::function<void(node_index, uint64_t /* match length */)> callback,
-                                size_t min_match_length = 1,
-                                size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+    void call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view str,
+            std::function<void(node_index, uint64_t /* match length */)> callback,
+            size_t min_match_length = 1,
+            size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()

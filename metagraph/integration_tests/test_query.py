@@ -745,7 +745,7 @@ class TestQueryPrimary(unittest.TestCase):
             TEST_DATA_DIR + '/transcripts_100.fa',
             cls.anno_repr,
             cls.tempdir.name + '/annotation',
-            extra_params='--fwd-and-reverse'
+            extra_params='--canonical'
         )
 
         # check annotation
@@ -761,48 +761,47 @@ class TestQueryPrimary(unittest.TestCase):
             assert('objects: 45792' == params_str[1])
         assert('representation: ' + cls.anno_repr == params_str[3])
 
-    # Primary graphs don't support unbatched queries yet
-    # def test_query(self):
-    #     query_command = '{exe} query --canonical -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
-    #         exe=METAGRAPH,
-    #         graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-    #         annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-    #         input=TEST_DATA_DIR + '/transcripts_1000.fa'
-    #     )
-    #     res = subprocess.run(query_command.split(), stdout=PIPE)
-    #     self.assertEqual(res.returncode, 0)
-    #     self.assertEqual(len(res.stdout), 137269)
+    def test_query(self):
+        query_command = '{exe} query --canonical -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 137269)
 
-    #     query_command = '{exe} query --canonical --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
-    #         exe=METAGRAPH,
-    #         graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-    #         annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-    #         input=TEST_DATA_DIR + '/transcripts_1000.fa'
-    #     )
-    #     res = subprocess.run(query_command.split(), stdout=PIPE)
-    #     self.assertEqual(res.returncode, 0)
-    #     self.assertEqual(len(res.stdout), 137093)
+        query_command = '{exe} query --canonical --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 137093)
 
-    # def test_query_with_align(self):
-    #     query_command = '{exe} query --canonical --align -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
-    #         exe=METAGRAPH,
-    #         graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-    #         annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-    #         input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-    #     )
-    #     res = subprocess.run(query_command.split(), stdout=PIPE)
-    #     self.assertEqual(res.returncode, 0)
-    #     self.assertEqual(len(res.stdout), 12839)
+    def test_query_with_align(self):
+        query_command = '{exe} query --canonical --align -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
+        )
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 12839)
 
-    #     query_command = '{exe} query --canonical --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
-    #         exe=METAGRAPH,
-    #         graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-    #         annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-    #         input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-    #     )
-    #     res = subprocess.run(query_command.split(), stdout=PIPE)
-    #     self.assertEqual(res.returncode, 0)
-    #     self.assertEqual(len(res.stdout), 12969)
+        query_command = '{exe} query --canonical --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
+        )
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 12969)
 
     def test_batch_query(self):
         query_command = '{exe} query --canonical --fast -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(

@@ -22,7 +22,9 @@ using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
 
-DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Config &config) {
+DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
+    assert(config.alignment_num_alternative_paths);
+
     DBGAlignerConfig aligner_config;
 
     aligner_config.queue_size = config.alignment_queue_size;
@@ -45,10 +47,10 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
 
     if (!aligner_config.min_seed_length)
-        aligner_config.min_seed_length = graph.get_k();
+        aligner_config.min_seed_length = k;
 
     if (!aligner_config.max_seed_length)
-        aligner_config.max_seed_length = graph.get_k();
+        aligner_config.max_seed_length = k;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -82,8 +84,11 @@ DBGAlignerConfig initialize_aligner_config(const DeBruijnGraph &graph, const Con
 std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
     assert(!config.canonical || graph.is_canonical_mode());
 
-    DBGAlignerConfig aligner_config = initialize_aligner_config(graph, config);
+    return build_aligner(graph, initialize_aligner_config(graph.get_k(), config));
+}
 
+std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
+                                           const DBGAlignerConfig &aligner_config) {
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < graph.get_k()) {
@@ -156,7 +161,7 @@ void map_sequences_in_file(const std::string &file,
             // TODO: make more efficient
             // TODO: canonicalization
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                dbg->call_nodes_with_suffix(
+                dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.empty())
@@ -214,11 +219,13 @@ void map_sequences_in_file(const std::string &file,
                 // TODO: make more efficient
                 std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-                dbg->call_nodes_with_suffix(subseq,
-                                            [&](auto node, auto) {
-                                                *out << subseq << ": " << node << "\n";
-                                            },
-                                            config.alignment_length);
+                dbg->call_nodes_with_suffix_matching_longest_prefix(
+                    subseq,
+                    [&](auto node, auto) {
+                        *out << subseq << ": " << node << "\n";
+                    },
+                    config.alignment_length
+                );
             }
         }
 
@@ -247,9 +254,10 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
-    if (config->canonical) {
-        logger->trace("Loading as canonical DBG");
-        graph.reset(new CanonicalDBG(graph, config->kmers_in_single_form));
+    if (config->canonical && !graph->is_canonical_mode()) {
+        logger->trace("Wrap as canonical DBG");
+        // TODO: check and wrap into canonical only if the graph is primary
+        graph.reset(new CanonicalDBG(graph, true));
     }
 
     Timer timer;
