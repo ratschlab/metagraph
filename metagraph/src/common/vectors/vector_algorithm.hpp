@@ -120,7 +120,7 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
     if (shift + width <= 128) {
         const __uint128_t *limb = &reinterpret_cast<const __uint128_t*>(vector.data())[bit_pos >> 7];
         uint64_t mask = (1llu << width) - 1;
-        return (__atomic_load_16(limb, __ATOMIC_SEQ_CST) >> shift) & mask;
+        return (__atomic_load_n(limb, __ATOMIC_SEQ_CST) >> shift) & mask;
     }
 
 #endif
