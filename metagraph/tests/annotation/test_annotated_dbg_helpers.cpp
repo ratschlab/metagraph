@@ -16,11 +16,11 @@ template <class Graph, class Annotation>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels,
-                                               BuildMode mode) {
+                                               DBGMode mode) {
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences, mode);
     auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
-    assert(!canonical || mode == BuildMode::WRAPPER);
+    assert(!canonical || mode == DBGMode::CANONICAL_WRAPPER);
 
     uint64_t max_index = canonical ? canonical->get_graph().max_index() : graph->max_index();
 
@@ -48,17 +48,17 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     return anno_graph;
 }
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::ColumnCompressed<>>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
 
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
-template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, BuildMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DBGMode);
 
 
 } // namespace test

@@ -160,7 +160,7 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                                  double other_label_fraction,
                                  const std::unordered_set<std::string> &ref_kmers,
                                  bool add_complement,
-                                 BuildMode mode) {
+                                 DBGMode mode) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -225,12 +225,13 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
-    std::vector<std::pair<bool, BuildMode>> params {
-        { true, BuildMode::BASE },
-        { false, BuildMode::CANONICAL },
-        { true, BuildMode::CANONICAL },
-        { false, BuildMode::WRAPPER },
-        { true, BuildMode::WRAPPER },
+    std::vector<std::pair<bool, DBGMode>> params {
+        { true, DBGMode::NORMAL },
+        { false, DBGMode::CANONICAL },
+        { true, DBGMode::CANONICAL },
+        { false, DBGMode::CANONICAL_WRAPPER },
+        { true, DBGMode::CANONICAL_WRAPPER },
+        { true, DBGMode::PRIMARY },
     };
     for (const auto &[add_complement, mode] : params) {
         for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {

@@ -32,7 +32,7 @@ template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels,
-                                               BuildMode mode = BASE);
+                                               DBGMode mode = NORMAL);
 
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
