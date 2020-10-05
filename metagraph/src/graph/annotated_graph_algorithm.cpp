@@ -74,7 +74,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // Construct initial masked graph from union of labels in labels_in
     auto fill_vector = fill_count_vector(anno_graph, labels_in, labels_out,
-                                         num_threads, update_in_place, init_counts);
+                                         num_threads, init_counts);
     auto &[counts, union_mask] = fill_vector;
 
     // counts is a double-width, interleaved vector where the significant bits
@@ -318,15 +318,23 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
                   size_t num_threads,
-                  bool update_in_place,
                   const sdsl::int_vector<> *init_counts) {
-    // at this stage, the width of counts is twice what it should be, since
-    // the intention is to store the in label and out label counts interleaved
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
+
+    // TODO: find a way to avoid this hack
+    // Since call_unitigs/sequences on a masked DBGSuccinct makes a copy of the
+    // mask before traversal, we can safely update the mask in the callback
+    bool update_in_place = static_cast<bool>(
+        std::dynamic_pointer_cast<const DBGSuccinct>(graph)
+    );
+
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::bit_vector indicator(graph->max_index() + 1, false);
+
+    // at this stage, the width of counts is twice what it should be, since
+    // the intention is to store the in label and out label counts interleaved
     sdsl::int_vector<> counts = aligned_int_vector(graph->max_index() + 1, 0, width * 2, 16);
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();

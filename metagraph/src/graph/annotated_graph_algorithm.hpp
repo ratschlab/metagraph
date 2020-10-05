@@ -40,7 +40,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                   const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
                   size_t num_threads,
-                  bool update_in_place,
                   const sdsl::int_vector<> *init_counts = nullptr);
 
 
