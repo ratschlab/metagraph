@@ -88,6 +88,21 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
+/**
+ * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive
+ * nodes rather than the actual annotation.
+ * Since adjacent nodes in a graph have a high probability of sharing annotations, storing
+ * diffs rather than the full annotation results in a sparser matrix.
+ * @param graph the graph used for selecting adjacent nodes
+ * @param sources list of annotations in #ColumnCompressed format. Typically, each source
+ * contains a single column, but this is not a requirement
+ * @param outfbase directory where the pred/succ/term vectors that determine the diff
+ * succession will be dumped
+ * @param max_depth maximum distance between terminal nodes, i.e. nodes whose annotation
+ * is fully stored
+ * @return the sparsified columns, wrapped in a static annotator that contains a #RowDiff
+ * that wraps the column in #ColumnMajor format
+ */
 template <typename Label>
 std::vector<std::unique_ptr<RowDiffAnnotator>>
 convert_to_row_diff(const graph::DBGSuccinct &graph,

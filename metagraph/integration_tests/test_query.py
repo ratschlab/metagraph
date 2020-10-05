@@ -489,11 +489,11 @@ class TestQuery(unittest.TestCase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-     input_values=product(
-         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
-         ANNO_TYPES
-     ),
-     class_name_func=get_test_class_name
+    input_values=product(
+        list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
+        ANNO_TYPES
+    ),
+    class_name_func=get_test_class_name
 )
 class TestQueryCanonical(unittest.TestCase):
     @classmethod

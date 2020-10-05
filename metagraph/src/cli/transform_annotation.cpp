@@ -324,13 +324,16 @@ int transform_annotation(Config *config) {
         assert(annotator);
 
         switch (config->anno_type) {
-            case Config::ColumnCompressed:
-            case Config::BRWTRowDiff: {
+            case Config::ColumnCompressed: {
                 assert(false);
                 break;
             }
+            case Config::BRWTRowDiff: {
+                logger->error("Convert to row_diff first, and then to brwt_row_diff");
+                return 0;
+
+            }
             case Config::RowDiff: {
-                size_t avail_mem_bytes = config->memory_available * 1e9;
                 logger->trace("Loading graph...");
                 graph::DBGSuccinct graph(2);
                 bool result = graph.load(config->infbase);
@@ -338,6 +341,9 @@ int transform_annotation(Config *config) {
                     logger->error("Cannot load graph from {}", config->infbase);
                     std::exit(1);
                 }
+
+                // load as many columns as we can fit in memory, and convert them
+                size_t avail_mem_bytes = config->memory_available * 1e9;
                 avail_mem_bytes -= std::filesystem::file_size(config->infbase);
 
                 for (uint32_t i = 0; i < files.size();) {
