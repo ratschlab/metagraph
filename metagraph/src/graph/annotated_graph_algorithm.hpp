@@ -47,14 +47,15 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
 // return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
 // the parameters specified by config.
-MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                                        const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                                        const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                                        const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_post,
-                                        const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_post,
-                                        const DifferentialAssemblyConfig &config,
-                                        size_t num_threads = 1,
-                                        const sdsl::int_vector<> *init_counts = nullptr);
+MaskedDeBruijnGraph
+mask_nodes_by_label(const AnnotatedDBG &anno_graph,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_post,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_post,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads = 1,
+                    const sdsl::int_vector<> *init_counts = nullptr);
 
 } // namespace graph
 } // namespace mtg
