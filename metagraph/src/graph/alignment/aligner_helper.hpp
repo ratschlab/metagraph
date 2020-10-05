@@ -1,13 +1,13 @@
 #ifndef __ALIGNER_HELPER_HPP__
 #define __ALIGNER_HELPER_HPP__
 
+#include <cassert>
 #include <array>
 #include <memory>
 #include <numeric>
 #include <ostream>
 #include <string>
 #include <vector>
-#include <cassert>
 
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
@@ -122,6 +122,7 @@ class Cigar {
 };
 
 
+// TODO: move to a separate header file aligner_config.hpp
 class DBGAlignerConfig {
   public:
     typedef int32_t score_t;

@@ -55,6 +55,7 @@ class ConvertFromRowCompressed : public ::testing::Test {
         EXPECT_THAT(annotation->get(2), UnorderedElementsAre("Label1", "Label2"));
         EXPECT_THAT(annotation->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
         EXPECT_THAT(annotation->get(4), UnorderedElementsAre("Label2"));
+
     }
 };
 
@@ -234,7 +235,7 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
     clean_row_diff_files("column.diff.empty");
 }
 
-TEST(CoumnDiff, ConvertFromColumnCompressedSameLabels) {
+TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
     const std::string outfbase = test_dump_basename + "column.diff.convert";
     const std::string succ_file = outfbase + ".succ";
     clean_row_diff_files("column.diff.convert");

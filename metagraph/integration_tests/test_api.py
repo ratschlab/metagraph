@@ -7,21 +7,23 @@ from subprocess import Popen
 import socket
 import requests
 from metagraph.client import GraphClientJson, MultiGraphClient
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
 
 
 class TestAPIBase(TestingBase):
     @classmethod
-    def setUpClass(cls, fasta_path):
+    def setUpClass(cls, fasta_path, canonical=False, primary=False):
         super().setUpClass()
 
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
-        cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct')
-        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
+        cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct',
+                         canonical=canonical, primary=primary)
+        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column',
+                            primary=primary)
 
         cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
@@ -49,10 +51,12 @@ class TestAPIBase(TestingBase):
         return Popen(shlex.split(construct_command))
 
 
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
+                           canonical=True, primary=(cls.mode == 'primary'))
 
     def setUp(self) -> None:
         self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
@@ -183,15 +187,17 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret[0]['seq_description'], '')
 
 
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_cols = 98
+    sample_query_expected_cols = 99
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
+                           canonical=True, primary=(cls.mode == 'primary'))
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
@@ -248,15 +254,17 @@ class TestAPIClient(TestAPIBase):
         self.assertEqual(len(align_res), 0)
 
 
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_cols = 98
+    sample_query_expected_cols = 99
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa')
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
+                           canonical=True, primary=(cls.mode == 'primary'))
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
@@ -298,6 +306,7 @@ class TestAPIJson(TestAPIBase):
         self.assertEqual(graph_props["k"], 6)
 
 
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -308,7 +317,8 @@ class TestAPIClientWithProperties(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa')
+        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa',
+                           canonical=True, primary=(cls.mode == 'primary'))
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)

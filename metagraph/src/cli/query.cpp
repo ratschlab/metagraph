@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
+#include <fmt/format.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -13,12 +14,12 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
-#include "align.hpp"
+#include "cli/align.hpp"
 
 
 namespace mtg {
@@ -32,7 +33,23 @@ using namespace mtg::annot::binmat;
 using namespace mtg::graph;
 
 using mtg::common::logger;
+using mtg::graph::boss::BOSS;
+using mtg::graph::boss::BOSSConstructor;
 
+typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
+
+
+QueryExecutor::QueryExecutor(const Config &config,
+                             const graph::AnnotatedDBG &anno_graph,
+                             std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
+                             ThreadPool &thread_pool)
+      : config_(config),
+        anno_graph_(anno_graph),
+        aligner_config_(std::move(aligner_config)),
+        thread_pool_(thread_pool) {
+    if (aligner_config_ && aligner_config_->forward_and_reverse_complement)
+        throw std::runtime_error("Error: align_both_strands must be off when querying");
+}
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          const std::string &sequence,
@@ -98,6 +115,147 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     }
 
     return output;
+}
+
+void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
+                                 const std::string_view contig,
+                                 const std::vector<node_index> &nodes_in_full,
+                                 const std::function<void(std::string&&,
+                                                          node_index)> &callback,
+                                 size_t sub_k,
+                                 size_t max_num_nodes_per_suffix) {
+    assert(sub_k < dbg_succ.get_k());
+    assert(nodes_in_full.size() == contig.length() - dbg_succ.get_k() + 1);
+
+    for (size_t prev_match_len = 0, i = 0; i < nodes_in_full.size(); ++i) {
+        if (!nodes_in_full[i]) {
+            // if prefix[i:i+prev_match_len] was a match on the previous step, then
+            // prefix[i+1:i+prev_match_len] of length prev_match_len-1 must be a match on this step
+            size_t cur_match_len = prev_match_len ? prev_match_len - 1 : 0;
+            // TODO: call first |max_num_nodes_per_suffix| matches
+            //       and, if there are too many of them, discard them here
+            // TODO: test if this heuristic works and we need to discard large ranges at all
+            dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
+                std::string_view(&contig[i], dbg_succ.get_k()),
+                [&](node_index node, size_t match_len) {
+                    assert(match_len >= cur_match_len);
+                    cur_match_len = match_len;
+                    callback(dbg_succ.get_node_sequence(node), node);
+                },
+                std::max(sub_k, prev_match_len), // new match must be at least as long as previous
+                max_num_nodes_per_suffix
+            );
+            prev_match_len = cur_match_len;
+        } else {
+            prev_match_len = dbg_succ.get_k();
+        }
+    }
+}
+
+struct HullPathContext {
+    std::string last_kmer;
+    node_index last_node;
+    size_t depth; // not equal to path.size() if the path is cut off
+    size_t fork_count;
+};
+
+// Expand the query graph by traversing around its nodes which are forks in the
+// full graph.
+// |continue_traversal| is given a node and the distrance traversed so far and
+// returns whether traversal should continue.
+template <class ContigCallback>
+void call_hull_sequences(const DeBruijnGraph &full_dbg,
+                         std::string kmer,
+                         const ContigCallback &callback,
+                         const std::function<bool(std::string_view seq,
+                                                  node_index last_node,
+                                                  size_t depth,
+                                                  size_t fork_count)> &continue_traversal) {
+    // DFS from branching points
+    node_index node = full_dbg.kmer_to_node(kmer);
+    if (!node)
+        return;
+
+    kmer.erase(kmer.begin());
+    kmer.push_back('$');
+    std::vector<HullPathContext> paths_to_extend;
+    full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+        if (c == '$')
+            return;
+
+        kmer.back() = c;
+        assert(full_dbg.kmer_to_node(kmer) == next_node);
+        if (continue_traversal(kmer, next_node, 1, 0)) {
+            paths_to_extend.emplace_back(HullPathContext{
+                .last_kmer = kmer,
+                .last_node = next_node,
+                .depth = 1,
+                .fork_count = 0
+            });
+        } else {
+            callback(kmer, std::vector<node_index>{ next_node });
+        }
+    });
+
+    while (paths_to_extend.size()) {
+        HullPathContext hull_path = std::move(paths_to_extend.back());
+        paths_to_extend.pop_back();
+
+        std::string &seq = hull_path.last_kmer;
+        std::vector<node_index> path = { hull_path.last_node };
+        size_t depth = hull_path.depth;
+        size_t fork_count = hull_path.fork_count;
+
+        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
+
+        bool extend = true;
+        while (extend && full_dbg.has_single_outgoing(path.back())) {
+            full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
+                if (c == '$')
+                    return;
+
+                path.push_back(node);
+                seq.push_back(c);
+            });
+            depth++;
+            extend = continue_traversal(seq, path.back(), depth, fork_count);
+        }
+
+        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
+        assert(path == map_sequence_to_nodes(full_dbg, seq));
+
+        callback(seq, path);
+
+        if (!extend)
+            continue;
+
+        // a fork or a sink has been reached before the path has reached max depth
+        assert(!full_dbg.has_single_outgoing(path.back()));
+
+        node = path.back();
+        path.resize(0);
+        seq.erase(seq.begin(), seq.end() - full_dbg.get_k() + 1);
+        seq.push_back('$');
+
+        // schedule further traversals
+        full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+            if (c == '$')
+                return;
+
+            seq.back() = c;
+            assert(full_dbg.kmer_to_node(seq) == next_node);
+            if (continue_traversal(seq, next_node, depth + 1, fork_count + 1)) {
+                paths_to_extend.emplace_back(HullPathContext{
+                    .last_kmer = seq,
+                    .last_node = next_node,
+                    .depth = depth + 1,
+                    .fork_count = fork_count + 1
+                });
+            } else {
+                callback(seq, std::vector<node_index>{ next_node });
+            }
+        });
+    }
 }
 
 /**
@@ -225,6 +383,182 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     );
 }
 
+void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
+                                   size_t sub_k,
+                                   size_t max_num_nodes_per_suffix,
+                                   std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
+                                   bool check_reverse_complement) {
+    std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < contigs->size(); ++i) {
+        const auto &[contig, path] = (*contigs)[i];
+        std::vector<std::pair<std::string, node_index>> added_nodes;
+        auto callback = [&](std::string&& kmer, node_index node) {
+            assert(node == full_dbg.kmer_to_node(kmer));
+
+            if (full_dbg.is_canonical_mode())
+                full_dbg.map_to_nodes(kmer, [&](node_index cn) { node = cn; });
+
+            added_nodes.emplace_back(std::move(kmer), node);
+        };
+        call_suffix_match_sequences(full_dbg, contig, path,
+                                    callback, sub_k, max_num_nodes_per_suffix);
+
+        if (check_reverse_complement) {
+            std::string rev_contig = contig;
+            reverse_complement(rev_contig);
+            call_suffix_match_sequences(full_dbg, rev_contig,
+                                        map_sequence_to_nodes(full_dbg, rev_contig),
+                                        callback, sub_k, max_num_nodes_per_suffix);
+        }
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < added_nodes.size(); ++j) {
+                contig_buffer.emplace_back(
+                    std::move(added_nodes[j].first),
+                    std::vector<node_index>{ added_nodes[j].second }
+                );
+            }
+        }
+    }
+
+    for (auto&& pair : contig_buffer) {
+        contigs->emplace_back(std::move(pair));
+    }
+}
+
+void add_hull_contigs(const DeBruijnGraph &full_dbg,
+                      const DeBruijnGraph &batch_graph,
+                      size_t max_hull_forks,
+                      size_t max_hull_depth,
+                      std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
+    tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
+
+    std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < contigs->size(); ++i) {
+        const auto &[contig, path] = (*contigs)[i];
+        std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
+        // TODO: combine these two callbacks into one?
+        auto callback = [&](const std::string &sequence,
+                            const std::vector<node_index> &path) {
+            added_paths.emplace_back(sequence, path);
+            if (full_dbg.is_canonical_mode()) {
+                added_paths.back().second.resize(0);
+                full_dbg.map_to_nodes(sequence,
+                    [&](node_index cn) { added_paths.back().second.push_back(cn); }
+                );
+            }
+        };
+        auto continue_traversal = [&](std::string_view seq,
+                                      node_index last_node,
+                                      size_t depth,
+                                      size_t fork_count) {
+            if (fork_count > max_hull_forks || depth >= max_hull_depth)
+                return false;
+
+            // if the last node is already in the graph, cut off traversal
+            // since this node will be covered in another traversal
+            if (batch_graph.find(seq.substr(seq.length() - batch_graph.get_k()))) {
+                return false;
+            }
+
+            // when a node which has already been accessed is visited,
+            // only continue traversing if the previous access was in a
+            // longer path (i.e., it cut off earlier)
+            bool extend;
+            // TODO: check the number of forks too (shorter paths may have more forks)
+            #pragma omp critical
+            {
+                auto [it, inserted]
+                    = distance_traversed_until_node.emplace(last_node, depth);
+
+                extend = inserted || depth < it->second;
+
+                if (!inserted && depth < it->second)
+                    it.value() = depth;
+            }
+            return extend;
+        };
+
+        for (size_t j = 0; j < path.size(); ++j) {
+            if (!path[j]) {
+                // If a node is unmatched, start expansion from all the nodes
+                // adjacent to it.
+                std::string kmer = contig.substr(j, full_dbg.get_k());
+                // forward expansion from the incoming nodes
+                batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
+                    [&](node_index next) {
+                        call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                            callback, continue_traversal);
+                    }
+                );
+                if (batch_graph.is_canonical_mode()) {
+                    // In canonical graphs, (incoming to forward) is equivalent
+                    // to (outgoing from rev-comp), so the following code invokes
+                    // backward expansion.
+                    reverse_complement(kmer);
+                    batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
+                        [&](node_index next) {
+                            call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
+                                                callback, continue_traversal);
+                        }
+                    );
+                }
+                // TODO: For non-canonical graphs, also expand backwards from
+                //       the outgoing nodes?
+            }
+        }
+
+        std::string last_kmer = contig.substr(contig.length() - full_dbg.get_k(), full_dbg.get_k());
+        if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
+            call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+
+        if (batch_graph.is_canonical_mode()) {
+            last_kmer = contig.substr(0, full_dbg.get_k());
+            reverse_complement(last_kmer);
+            if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
+                call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+        }
+
+        #pragma omp critical
+        {
+            for (auto&& pair : added_paths) {
+                assert(pair.second.size() == pair.first.length() - full_dbg.get_k() + 1);
+                contig_buffer.emplace_back(std::move(pair));
+            }
+        }
+    }
+
+    for (auto&& pair : contig_buffer) {
+        contigs->emplace_back(std::move(pair));
+    }
+}
+
+template <class Graph, class Contigs>
+void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
+    for (const auto &[contig, nodes_in_full] : contigs) {
+        size_t begin = 0;
+        size_t end;
+        do {
+            end = std::find(nodes_in_full.begin() + begin,
+                            nodes_in_full.end(),
+                            DeBruijnGraph::npos)
+                    - nodes_in_full.begin();
+
+            if (begin != end) {
+                graph.add_sequence(std::string_view(
+                    contig.data() + begin, end - begin + k - 1
+                ));
+            }
+            begin = end + 1;
+        } while (end < nodes_in_full.size());
+    }
+}
+
 /**
  * Construct a de Bruijn graph from the query sequences
  * fetched in |call_sequences|.
@@ -250,19 +584,50 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      bool canonical) {
+                      bool canonical,
+                      const Config *config) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     canonical |= full_dbg.is_canonical_mode();
+
+    size_t sub_k = full_dbg.get_k();
+    size_t max_hull_forks = 0;
+    size_t max_hull_depth = 0;
+    size_t max_num_nodes_per_suffix = 1;
+    double max_hull_depth_per_seq_char = 0.0;
+    if (config) {
+        if (config->alignment_min_seed_length > full_dbg.get_k()) {
+            logger->warn("Can't match suffixes longer than k={}."
+                         " The value of k={} will be used.",
+                         full_dbg.get_k(), full_dbg.get_k());
+        }
+        if (config->alignment_min_seed_length
+                && config->alignment_min_seed_length < full_dbg.get_k()) {
+            if (!dbg_succ) {
+                logger->error("Matching suffixes of k-mers only supported for DBGSuccinct");
+                exit(1);
+            }
+            sub_k = config->alignment_min_seed_length;
+        }
+
+        max_hull_forks = config->max_hull_forks;
+        max_hull_depth = config->max_hull_depth;
+        max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
+        max_num_nodes_per_suffix = config->alignment_max_num_seeds_per_locus;
+    }
 
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), false);
+    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(),
+                                                       canonical && max_hull_forks);
+    size_t max_input_sequence_length = 0;
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
-    if (kPrefilterWithBloom && dbg_succ) {
+    logger->trace("[Query graph construction] Building the batch graph...");
+
+    if (kPrefilterWithBloom && dbg_succ && sub_k == full_dbg.get_k()) {
         if (dbg_succ->get_bloom_filter())
             logger->trace(
                     "[Query graph construction] Started indexing k-mers pre-filtered "
@@ -274,172 +639,165 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                 sequence,
                 get_missing_kmer_skipper(dbg_succ->get_bloom_filter(), sequence)
             );
+            if (max_input_sequence_length < sequence.length())
+                max_input_sequence_length = sequence.length();
         });
     } else {
         call_sequences([&](const std::string &sequence) {
             graph_init->add_sequence(sequence);
+            if (max_input_sequence_length < sequence.length())
+                max_input_sequence_length = sequence.length();
         });
     }
 
-    std::shared_ptr<DeBruijnGraph> graph = std::move(graph_init);
+    max_hull_depth = std::min(
+        max_hull_depth,
+        static_cast<size_t>(max_hull_depth_per_seq_char * max_input_sequence_length)
+    );
 
-    logger->trace("[Query graph construction] k-mer indexing took {} sec", timer.elapsed());
+    logger->trace("[Query graph construction] Batch graph contains {} k-mers"
+                  " and took {} sec to construct",
+                  graph_init->num_nodes(), timer.elapsed());
     timer.reset();
 
     // pull contigs from query graph
-    std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> contigs;
+    std::vector<std::pair<std::string, std::vector<node_index>>> contigs;
     std::mutex seq_mutex;
-    graph->call_sequences([&](auto&&... contig_args) {
-                              std::lock_guard<std::mutex> lock(seq_mutex);
-                              contigs.emplace_back(std::move(contig_args)...);
-                          },
-                          get_num_threads(),
-                          canonical);  // pull only primary contigs when building canonical query graph
+    graph_init->call_sequences([&](const std::string &contig, const auto &) {
+                                   std::lock_guard<std::mutex> lock(seq_mutex);
+                                   contigs.emplace_back(contig, std::vector<node_index>{});
+                               },
+                               get_num_threads(),
+                               canonical);  // pull only primary contigs when building canonical query graph
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
 
-    // map contigs onto the full graph
-    std::vector<uint64_t> index_in_full_graph;
+    logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
+    // map from nodes in query graph to full graph
+    #pragma omp parallel for num_threads(get_num_threads())
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
+        full_dbg.map_to_nodes(contigs[i].first,
+                              [&](node_index node) { contigs[i].second.push_back(node); });
+    }
+    logger->trace("[Query graph construction] Contigs mapped to the full graph in {} sec",
+                  timer.elapsed());
+    timer.reset();
 
-    if (canonical) {
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            std::string &contig = contigs[i].first;
-            auto &nodes_in_full = contigs[i].second;
+    size_t original_size = contigs.size();
 
-            if (full_dbg.is_canonical_mode()) {
-                size_t j = 0;
-                full_dbg.map_to_nodes(contig,
-                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-                );
-            } else {
-                size_t j = 0;
-                // TODO: if a k-mer is found, don't search its reverse-complement
-                // TODO: add `primary/canonical` mode to DBGSuccinct?
-                full_dbg.map_to_nodes_sequentially(contig,
-                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-                );
-                reverse_complement(contig.begin(), contig.end());
-                full_dbg.map_to_nodes_sequentially(contig,
-                    [&](auto node_in_full) {
-                        --j;
-                        if (node_in_full)
-                            nodes_in_full[j] = node_in_full;
-                    }
-                );
-                reverse_complement(contig.begin(), contig.end());
-                assert(j == 0);
-            }
-        }
-
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
+    // add nodes with suffix matches to the query
+    if (sub_k < full_dbg.get_k()) {
+        assert(dbg_succ);
+        logger->trace("[Query graph construction] Adding k-mers with matching "
+                      "suffixes of length {}...", sub_k);
         timer.reset();
 
-        // construct canonical graph storing all k-mers found in the full graph
-        graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), true);
+        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
+                                      &contigs, canonical);
 
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &nodes_in_full = contigs[i].second;
-            size_t j = 0;
-            graph_init->add_sequence(contig, [&]() { return nodes_in_full[j++] == 0; });
-        }
+        logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
+                      contigs.size() - original_size, timer.elapsed());
+    }
 
-        graph = std::move(graph_init);
-
-        logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
-                      timer.elapsed());
+    if (max_hull_forks) {
+        logger->trace("[Query graph augmentation] Computing query graph hull...");
+        logger->trace("[Query graph augmentation] max traversal distance: {}, max fork count: {}",
+                      max_hull_depth, max_hull_forks);
         timer.reset();
 
-        index_in_full_graph.assign(graph->max_index() + 1, 0);
-
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &nodes_in_full = contigs[i].second;
-
-            size_t j = 0;
-            graph->map_to_nodes(contig, [&](auto node) {
-                index_in_full_graph[node] = nodes_in_full[j++];
-            });
-            assert(j == nodes_in_full.size());
+        // add k-mers with sub_k-suffix matches
+        for (size_t i = original_size; i < contigs.size(); ++i) {
+            graph_init->add_sequence(contigs[i].first);
         }
 
-        logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
-                      timer.elapsed());
-        timer.reset();
+        size_t hull_contigs_begin = contigs.size();
+
+        add_hull_contigs(full_dbg, *graph_init, max_hull_forks, max_hull_depth, &contigs);
+
+        logger->trace("[Query graph augmentation] Augmented the batch graph with {} contigs in {} sec",
+                      contigs.size() - hull_contigs_begin, timer.elapsed());
+    }
+
+    graph_init.reset();
+
+    logger->trace("[Query graph construction] Building the query graph...");
+    timer.reset();
+    std::shared_ptr<DeBruijnGraph> graph;
+
+    // restrict nodes to those in the full graph
+    if (sub_k < full_dbg.get_k()) {
+        BOSSConstructor constructor(full_dbg.get_k() - 1, canonical, 0, "", num_threads);
+        add_to_graph(constructor, contigs, full_dbg.get_k());
+
+        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), canonical);
 
     } else {
-        index_in_full_graph.assign(graph->max_index() + 1, 0);
-
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &path = contigs[i].second;
-
-            size_t j = 0;
-            full_dbg.map_to_nodes(contig, [&](auto node_in_full) {
-                index_in_full_graph[path[j++]] = node_in_full;
-            });
-            assert(j == path.size());
-        }
-
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
-        timer.reset();
+        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), canonical);
+        add_to_graph(*graph, contigs, full_dbg.get_k());
     }
+
+    logger->trace("[Query graph construction] Query graph contains {} k-mers"
+                  " and took {} sec to construct",
+                  graph->num_nodes(), timer.elapsed());
+    timer.reset();
+
+    logger->trace("[Query graph construction] Mapping the contigs back to the query graph...");
+
+    std::vector<node_index> index_in_full_graph(graph->max_index() + 1);
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        const std::string &contig = contigs[i].first;
+        const std::vector<node_index> &nodes_in_full = contigs[i].second;
+        assert(nodes_in_full.size() == contig.length() - full_dbg.get_k() + 1);
+        size_t j = 0;
+        // nodes in the query graph hull may overlap
+        graph->map_to_nodes(contig, [&](node_index node) {
+            __atomic_store_n(&index_in_full_graph[node], nodes_in_full[j++],
+                             __ATOMIC_RELAXED);
+        });
+        assert(j == nodes_in_full.size());
+    }
+
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
+                  timer.elapsed());
 
     contigs = decltype(contigs)();
 
     assert(!index_in_full_graph.at(0));
 
     // convert to annotation indexes: remove 0 and shift
+    size_t num_objects = 0;
     for (size_t i = 1; i < index_in_full_graph.size(); ++i) {
         if (index_in_full_graph[i]) {
             index_in_full_graph[i - 1]
                 = AnnotatedDBG::graph_to_anno_index(index_in_full_graph[i]);
+            ++num_objects;
         } else {
+            assert(canonical);
             index_in_full_graph[i - 1] = -1;  // npos
         }
     }
     index_in_full_graph.pop_back();
 
+    logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",
+                  num_objects);
+
     // initialize fast query annotation
     // copy annotations from the full graph to the query graph
-    auto annotation = slice_annotation(full_annotation,
-                                       index_in_full_graph,
-                                       num_threads);
+    auto annotation = slice_annotation(full_annotation, index_in_full_graph, num_threads);
 
-    logger->trace("[Query graph construction] Query annotation constructed in {} sec",
-                  timer.elapsed());
+    logger->trace("[Query graph construction] Query annotation with {} labels"
+                  " and {} set bits constructed in {} sec",
+                  annotation->num_labels(), annotation->num_relations(), timer.elapsed());
     timer.reset();
 
     // build annotated graph from the query graph and copied annotations
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
-}
-
-
-std::string get_alignment_header_and_swap_query(const std::string &name,
-                                                std::string *query_seq,
-                                                align::QueryAlignment<> *matches) {
-    std::string header;
-
-    if (matches->size()) {
-        // sequence for querying -- the best alignment
-        *query_seq = const_cast<std::string&&>((*matches)[0].get_sequence());
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                             name, *query_seq, (*matches)[0].get_score(),
-                             (*matches)[0].get_cigar().to_string());
-
-    } else {
-        // no alignment was found
-        // the original sequence `query_seq` will be queried
-        header = fmt::format(ALIGNED_SEQ_HEADER_FORMAT,
-                             name, *query_seq, 0,
-                             fmt::format("{}S", query_seq->length()));
-    }
-
-    return header;
 }
 
 
@@ -451,33 +809,24 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
+
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
     Timer timer;
 
-    std::unique_ptr<align::IDBGAligner> aligner;
+    std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
                 && "only the best alignment is used in query");
 
-        if (!graph->is_canonical_mode() && config->canonical) {
-            // wrap the primary graph into a canonical one
-            graph.reset(new CanonicalDBG(graph, true));
-            aligner = build_aligner(*graph, *config);
-        } else {
-            aligner = build_aligner(*graph, *config);
-        }
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        auto &aligner_config = const_cast<align::DBGAlignerConfig&>(aligner->get_config());
-        aligner_config.forward_and_reverse_complement = false;
+        aligner_config.reset(new align::DBGAlignerConfig(
+            initialize_aligner_config(graph->get_k(), *config)
+        ));
     }
 
-    QueryExecutor executor(*config, *anno_graph, aligner.get(), thread_pool);
+    QueryExecutor executor(*config, *anno_graph, std::move(aligner_config), thread_pool);
 
     // iterate over input files
     for (const auto &file : files) {
@@ -491,11 +840,43 @@ int query_graph(Config *config) {
     return 0;
 }
 
-inline std::string query_sequence(size_t id,
-                                  const std::string &name,
-                                  const std::string &seq,
-                                  const AnnotatedDBG &anno_graph,
-                                  const Config &config) {
+void align_sequence(std::string &name, std::string &seq,
+                    const DeBruijnGraph &graph,
+                    const align::DBGAlignerConfig &aligner_config) {
+    auto alignments
+        = build_aligner(graph, aligner_config)->align(seq);
+
+    assert(alignments.size() <= 1 && "Only the best alignment is needed");
+
+    if (alignments.size()) {
+        auto &match = alignments[0];
+        // sequence for querying -- the best alignment
+        if (match.get_offset()) {
+            seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
+                    + match.get_sequence();
+        } else {
+            seq = const_cast<std::string&&>(match.get_sequence());
+        }
+
+        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                           match.get_score(), match.get_cigar().to_string());
+
+    } else {
+        // no alignment was found
+        // the original sequence will be queried
+        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                           0, fmt::format("{}S", seq.length()));
+    }
+}
+
+std::string query_sequence(size_t id, std::string name, std::string seq,
+                           const AnnotatedDBG &anno_graph,
+                           const Config &config,
+                           const align::DBGAlignerConfig *aligner_config) {
+    if (aligner_config) {
+        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
+    }
+
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
@@ -520,25 +901,10 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue(
-            [&](size_t id, const std::string &name, std::string &seq) {
-                if (!aligner_) {
-                    callback(query_sequence(id, name, seq, anno_graph_, config_));
-                    return;
-                }
-
-                // query the alignment matches against the annotator
-                auto matches = aligner_->align(seq);
-
-                std::string seq_header
-                    = get_alignment_header_and_swap_query(name, &seq, &matches);
-
-                callback(query_sequence(id, seq_header, seq, anno_graph_, config_));
-            },
-            seq_count++,
-            std::string(kseq.name.s),
-            std::string(kseq.seq.s)
-        );
+        thread_pool_.enqueue([&](const auto&... args) {
+            callback(query_sequence(args..., anno_graph_,
+                                    config_, aligner_config_.get()));
+        }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
     // wait while all threads finish processing the current file
@@ -548,107 +914,63 @@ void QueryExecutor::query_fasta(const string &file,
 void QueryExecutor
 ::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                       const std::function<void(const std::string &)> &callback) {
-    auto begin = fasta_parser.begin();
+    auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
-    seq_io::FastaParser::iterator it;
 
-    size_t seq_count = 0;
-    while (begin != end) {
+    std::atomic<size_t> seq_count = 0;
+
+    while (it != end) {
         Timer batch_timer;
 
-        std::vector<std::tuple<size_t, std::string, std::string>> named_alignments;
         uint64_t num_bytes_read = 0;
+        // A generator that can be called multiple times until all sequences
+        // are called.
+        std::vector<std::pair<std::string, std::string>> seq_batch;
+        num_bytes_read = 0;
+        for ( ; it != end && num_bytes_read <= batch_size; ++it) {
+            seq_batch.emplace_back(it->name.s, it->seq.s);
+            num_bytes_read += it->seq.l;
+        }
 
-        StringGenerator generate_batch = [&](auto call_sequence) {
-            num_bytes_read = 0;
+        if (aligner_config_ && !config_.batch_align) {
+            logger->trace("Aligning sequences from batch against the full graph...");
+            batch_timer.reset();
 
-            if (!aligner_) {
-                // basic query regime
-                // the query graph is constructed directly from the input sequences
-                for (it = begin; it != end && num_bytes_read <= batch_size; ++it) {
-                    call_sequence(it->seq.s);
-                    num_bytes_read += it->seq.l;
-                }
-                return;
+            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+            for (size_t i = 0; i < seq_batch.size(); ++i) {
+                align_sequence(seq_batch[i].first, seq_batch[i].second,
+                               anno_graph_.get_graph(), *aligner_config_);
             }
-            // Query with alignment to graph
-
-            // Check if this isn't the first invocation,
-            // if the sequences have already been aligned and
-            // if the results are stored in |named_alignments|.
-            if (named_alignments.size()) {
-                for (const auto &[id, name, seq] : named_alignments) {
-                    call_sequence(seq);
-                }
-                return;
-            }
-
-            std::mutex sequence_mutex;
-            for ( ; begin != end && num_bytes_read <= batch_size; ++begin) {
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, std::string &seq) {
-                        // Align the sequence, then add the best match
-                        // in the graph to the query graph.
-                        auto matches = aligner_->align(seq);
-
-                        std::string seq_header
-                            = get_alignment_header_and_swap_query(name, &seq, &matches);
-
-                        std::lock_guard<std::mutex> lock(sequence_mutex);
-
-                        named_alignments.emplace_back(id, std::move(seq_header),
-                                                      std::move(seq));
-
-                        call_sequence(std::get<2>(named_alignments.back()));
-                    },
-                    seq_count++,
-                    std::string(begin->name.s),
-                    std::string(begin->seq.s)
-                );
-
-                num_bytes_read += begin->seq.l;
-            }
-            thread_pool_.join();
-        };
+            logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
+            batch_timer.reset();
+        }
 
         auto query_graph = construct_query_graph(
             anno_graph_,
-            generate_batch,
+            [&](auto callback) {
+                for (const auto &[name, seq] : seq_batch) {
+                    callback(seq);
+                }
+            },
             get_num_threads(),
-            anno_graph_.get_graph().is_canonical_mode() || config_.canonical
+            anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
+            aligner_config_ && config_.batch_align ? &config_ : NULL
         );
 
-        logger->trace("Query graph constructed for batch of {} bytes from '{}' in {} sec",
+        logger->trace("Query graph constructed for batch of sequences"
+                      " with {} bases from '{}' in {} sec",
                       num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
-
         batch_timer.reset();
 
-        if (!aligner_) {
-            for ( ; begin != it; ++begin) {
-                assert(begin != end);
-
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq, *query_graph, config_));
-                    },
-                    seq_count++, std::string(begin->name.s),
-                    std::string(begin->seq.s)
-                );
-            }
-        } else {
-            for (auto&& [id, name, seq] : named_alignments) {
-                thread_pool_.enqueue(
-                    [&](size_t id, const std::string &name, const std::string &seq) {
-                        callback(query_sequence(id, name, seq, *query_graph, config_));
-                    },
-                    id, std::move(name), std::move(seq)
-                );
-            }
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t i = 0; i < seq_batch.size(); ++i) {
+            callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
+                                    *query_graph, config_,
+                                    config_.batch_align ? aligner_config_.get() : NULL));
         }
 
-        thread_pool_.join();
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
     }

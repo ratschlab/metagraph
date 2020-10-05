@@ -240,6 +240,12 @@ inline void update_del_scores(const DBGAlignerConfig &config,
 
 #ifdef __AVX2__
 
+inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
+    __m128i orig = _mm_loadu_si64(mem_addr);
+    a = _mm_blendv_epi8(orig, a, mask);
+    _mm_storeu_si64(mem_addr, a);
+}
+
 inline void compute_HE_avx2(size_t length,
                             __m128i prev_node,
                             __m256i gap_opening_penalty,
@@ -262,6 +268,7 @@ inline void compute_HE_avx2(size_t length,
 
     __m128i insert_p = _mm_set1_epi8(Cigar::INSERTION);
     for (size_t i = 1; i < length; i += 8) {
+        // store score updates
         // load previous values for cells to update
         __m256i H_orig = _mm256_loadu_si256((__m256i*)&update_scores[i]);
 
@@ -284,19 +291,24 @@ inline void compute_HE_avx2(size_t length,
             gap_extension_penalty
         );
         __m256i update_score = _mm256_max_epi32(update_score_open, update_score_extend);
+        __m128i update_gap_prev = prev_node;
 
         // compute updated gap size count
-        __m256i count_orig = _mm256_loadu_si256((__m256i*)&incoming_gap_count[i]);
-        __m256i update_count = _mm256_and_si256(
-            count_orig,
-            _mm256_cmpeq_epi32(update_score, update_score_extend)
+        __m256i is_extend = _mm256_cmpeq_epi32(update_score, update_score_extend);
+        __m256i incoming_count = _mm256_add_epi32(
+            _mm256_set1_epi32(1),
+            _mm256_and_si256(_mm256_loadu_si256((__m256i*)&incoming_gap_count[i]), is_extend)
         );
-        update_count = _mm256_add_epi32(update_count, _mm256_set1_epi32(1));
 
-        __m256i gap_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
-        __m256i gap_cmp = _mm256_cmpgt_epi32(update_score, gap_orig);
-        update_score = _mm256_blendv_epi8(gap_orig, update_score, gap_cmp);
-        update_count = _mm256_blendv_epi8(count_orig, update_count, gap_cmp);
+        __m256i update_gap_scores_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
+        __m256i update_gap_count_orig = _mm256_loadu_si256((__m256i*)&update_gap_count[i]);
+        __m128i update_gap_prevs_orig = _mm_loadu_si64(&update_gap_prevs[i]);
+        __m256i gap_updated = _mm256_cmpgt_epi32(update_score, update_gap_scores_orig);
+        __m128i gap_updated_small = mm256_cvtepi32_epi8(gap_updated);
+
+        update_score = _mm256_blendv_epi8(update_gap_scores_orig, update_score, gap_updated);
+        incoming_count = _mm256_blendv_epi8(update_gap_count_orig, incoming_count, gap_updated);
+        update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, gap_updated_small);
 
         // compute score for cell update. check if inserting a gap improves the update
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
@@ -312,30 +324,28 @@ inline void compute_HE_avx2(size_t length,
         if (!_mm256_movemask_epi8(both_cmp))
             continue;
 
-        // update scores
-        _mm256_storeu_si256((__m256i*)&update_scores[i], H);
-        _mm256_storeu_si256((__m256i*)&update_gap_scores[i], update_score);
-
-        _mm256_storeu_si256((__m256i*)&update_gap_count[i], update_count);
-
-        __m128i profile_op = _mm_loadu_si64(&profile_ops[i]);
-        __m128i update_op = _mm_loadu_si64(&update_ops[i]);
-        __m128i update_cmp_small = mm256_cvtepi32_epi8(update_cmp);
         __m128i both_cmp_small = mm256_cvtepi32_epi8(both_cmp);
+        __m128i update_cmp_small = mm256_cvtepi32_epi8(update_cmp);
 
-        profile_op = _mm_blendv_epi8(profile_op, insert_p, update_cmp_small);
-        update_op = _mm_blendv_epi8(update_op, profile_op, both_cmp_small);
-        _mm_storeu_si64(&update_ops[i], update_op);
+        // update scores
+        _mm256_maskstore_epi32(&update_scores[i], both_cmp, H);
 
-        __m128i mask = _mm_or_si128(_mm_loadu_si64(&updated_mask[i]), both_cmp_small);
-        _mm_storeu_si64(&updated_mask[i], mask);
+        _mm256_storeu_si256((__m256i*)&update_gap_scores[i],
+                            _mm256_blendv_epi8(update_gap_scores_orig, update_score, both_cmp));
+        _mm256_storeu_si256((__m256i*)&update_gap_count[i],
+                            _mm256_blendv_epi8(update_gap_count_orig, incoming_count, both_cmp));
 
-        __m128i score_node = _mm_loadu_si64(&update_prevs[i]);
-        _mm_storeu_si64(&update_prevs[i],
-                        _mm_blendv_epi8(score_node, prev_node, both_cmp_small));
-        __m128i score_gap_node = _mm_loadu_si64(&update_gap_prevs[i]);
-        _mm_storeu_si64(&update_gap_prevs[i],
-                        _mm_blendv_epi8(score_gap_node, prev_node, both_cmp_small));
+        update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, both_cmp_small);
+        _mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
+
+        __m128i update_op = _mm_blendv_epi8(_mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
+        mm_maskstorel_epi8(&update_ops[i], both_cmp_small, update_op);
+
+        __m128i updated_mask_orig = _mm_loadu_si64(&updated_mask[i]);
+        _mm_storeu_si64(&updated_mask[i], _mm_or_si128(updated_mask_orig, both_cmp_small));
+
+        __m128i update_prev = _mm_blendv_epi8(prev_node, update_gap_prev, update_cmp_small);
+        mm_maskstorel_epi8((int8_t*)&update_prevs[i], both_cmp_small, update_prev);
     }
 }
 
@@ -377,6 +387,7 @@ inline void compute_HE(size_t length,
             int32_t update_score_open = incoming_scores[i] + gap_opening_penalty;
             int32_t update_score_extend = incoming_gap_scores[i] + gap_extension_penalty;
             int32_t update_score = std::max(update_score_open, update_score_extend);
+            int8_t update_gap_prev = prev_node;
 
             // compute updated gap size count
             int32_t incoming_count = 1 + (update_score == update_score_extend
@@ -386,6 +397,7 @@ inline void compute_HE(size_t length,
             if (update_score <= update_gap_scores[i]) {
                 update_score = update_gap_scores[i];
                 incoming_count = update_gap_count[i];
+                update_gap_prev = update_gap_prevs[i];
             }
 
             // compute score for cell update. check if inserting a gap improves the update
@@ -407,13 +419,11 @@ inline void compute_HE(size_t length,
             update_scores[i] = H;
             update_gap_scores[i] = update_score;
             update_gap_count[i] = incoming_count;
-
-            if (both_cmp)
-                update_gap_prevs[i] = prev_node;
+            update_gap_prevs[i] = update_gap_prev;
 
             update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
             updated_mask[i] = 0xFF;
-            update_prevs[i] = prev_node;
+            update_prevs[i] = update_cmp ? update_gap_prev : prev_node;
         }
     }
 }

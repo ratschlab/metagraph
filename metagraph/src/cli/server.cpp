@@ -35,7 +35,7 @@ Json::Value adjust_for_types(const std::string &v) {
 
     try {
         return Json::Value(std::stof(v));
-    } catch(...) {};
+    } catch(...) {}
 
     return Json::Value(v);
 }
@@ -141,15 +141,11 @@ std::string process_search_request(const std::string &received_message,
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
 
-    std::unique_ptr<graph::align::IDBGAligner> aligner;
+    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
-        aligner = build_aligner(anno_graph.get_graph(), config);
-
-        // the fwd_and_reverse argument in the aligner config returns the best of
-        // the forward and reverse complement alignments, rather than both.
-        // so, we want to prevent it from doing this
-        auto &aligner_config = const_cast<graph::align::DBGAlignerConfig&>(aligner->get_config());
-        aligner_config.forward_and_reverse_complement = false;
+        aligner_config.reset(new graph::align::DBGAlignerConfig(
+            initialize_aligner_config(anno_graph.get_graph().get_k(), config)
+        ));
     }
 
     std::ostringstream oss;
@@ -165,7 +161,7 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, aligner.get(), dummy_pool);
+    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
 
     engine.query_fasta(tf.name(),
         [&](const std::string &res) {
@@ -192,6 +188,13 @@ std::string process_align_request(const std::string &received_message,
         "max_alternative_alignments",
         (uint64_t)config.alignment_num_alternative_paths).asInt();
 
+    if (!config.alignment_num_alternative_paths) {
+        // TODO: better throw an exception and send an error response to the client
+        logger->warn("[Server] Got invalid value of alignment_num_alternative_paths = {}."
+                     " The default value of 1 will be used instead...", config.alignment_num_alternative_paths);
+        config.alignment_num_alternative_paths = 1;
+    }
+
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
@@ -203,8 +206,7 @@ std::string process_align_request(const std::string &received_message,
 
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const graph::align::QueryAlignment<graph::align::IDBGAligner::node_index> paths
-                = aligner->align(read_stream->seq.s);
+        const auto paths = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
         align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
@@ -244,25 +246,24 @@ std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) 
     return Json::writeString(builder, root);
 }
 
-std::string process_stats_request(const graph::DeBruijnGraph &graph,
-                                  const graph::AnnotatedDBG &anno_graph,
+std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
                                   const std::string &graph_filename,
                                   const std::string &annotation_filename) {
     Json::Value root;
 
     Json::Value graph_stats;
     graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
-    graph_stats["k"] = (uint64_t) graph.get_k();
-    graph_stats["nodes"] = graph.num_nodes();
-    graph_stats["is_canonical_mode"] = graph.is_canonical_mode();
+    graph_stats["k"] = static_cast<uint64_t>(anno_graph.get_graph().get_k());
+    graph_stats["nodes"] = anno_graph.get_graph().num_nodes();
+    graph_stats["is_canonical_mode"] = anno_graph.get_graph().is_canonical_mode();
     root["graph"] = graph_stats;
 
     Json::Value annotation_stats;
     const auto &annotation = anno_graph.get_annotation();
     annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
-    annotation_stats["labels"] = (uint64_t) annotation.num_labels();
-    annotation_stats["objects"] = (uint64_t) annotation.num_objects();
-    annotation_stats["relations"] = (uint64_t) annotation.num_relations();
+    annotation_stats["labels"] = static_cast<uint64_t>(annotation.num_labels());
+    annotation_stats["objects"] = static_cast<uint64_t>(annotation.num_objects());
+    annotation_stats["relations"] = static_cast<uint64_t>(annotation.num_relations());
 
     root["annotation"] = annotation_stats;
 
@@ -303,14 +304,14 @@ int run_server(Config *config) {
 
     logger->info("[Server] Loading graph...");
 
-    auto graph = graph_loader.enqueue([&]() {
-        auto graph = load_critical_dbg(config->infbase);
-        logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
-        return graph;
-    }).share();
+    // TODO: set canonical only if the graph is primary
+    config->canonical = true;
 
     auto anno_graph = graph_loader.enqueue([&]() {
-        auto anno_graph = initialize_annotated_dbg(graph.get(), *config);
+        auto graph = load_critical_dbg(config->infbase);
+        logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+
+        auto anno_graph = initialize_annotated_dbg(graph, *config);
         logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
         return anno_graph;
     }).share();
@@ -332,9 +333,9 @@ int run_server(Config *config) {
 
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
-        if (check_data_ready(graph, response)) {
+        if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &content) {
-                return process_align_request(content, *graph.get(), *config);
+                return process_align_request(content, anno_graph.get()->get_graph(), *config);
             });
         }
     };
@@ -352,7 +353,7 @@ int run_server(Config *config) {
                                             shared_ptr<HttpServer::Request> request) {
         if (check_data_ready(anno_graph, response)) {
             process_request(response, request, [&](const std::string &) {
-                return process_stats_request(*graph.get(), *anno_graph.get(), config->infbase,
+                return process_stats_request(*anno_graph.get(), config->infbase,
                                              config->infbase_annotators.front());
             });
         }
