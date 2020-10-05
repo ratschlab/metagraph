@@ -110,6 +110,26 @@ inline void unset_bit(uint64_t *v,
     }
 }
 
+inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
+                             std::mutex &backup_mutex) {
+#ifdef MODE_TI
+    size_t width = vector.width();
+    uint64_t bit_pos = i * width;
+    uint8_t shift = bit_pos & 0x7F;
+
+    if (shift + width <= 128) {
+        const __uint128_t *limb = &reinterpret_cast<const __uint128_t*>(vector.data())[bit_pos >> 7];
+        uint64_t mask = (1llu << width) - 1;
+        return (__atomic_load_16(limb, __ATOMIC_SEQ_CST) >> shift) & mask;
+    }
+
+#endif
+
+    std::lock_guard<std::mutex> lock(backup_mutex);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return vector[i];
+}
+
 inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
                                      uint64_t count,
                                      std::mutex &backup_mutex) {

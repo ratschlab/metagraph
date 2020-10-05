@@ -403,22 +403,27 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask));
 
         std::mutex count_mutex;
+        std::atomic_thread_fence(std::memory_order_release);
         masked_graph.update_mask([&](const auto &callback) {
             masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
                 auto it = path.rbegin();
                 auto rev = seq;
                 reverse_complement(rev.begin(), rev.end());
                 graph->map_to_nodes_sequentially(rev, [&](node_index i) {
-                    std::lock_guard<std::mutex> lock(count_mutex);
                     assert(i != DeBruijnGraph::npos);
                     assert(it != path.rend());
                     callback(i, true);
-                    counts[i * 2] += counts[*it * 2];
-                    counts[i * 2 + 1] += counts[*it * 2 + 1];
+                    atomic_fetch_and_add(counts, i * 2,
+                                         atomic_fetch(counts, *it * 2, count_mutex),
+                                         count_mutex);
+                    atomic_fetch_and_add(counts, i * 2 + 1,
+                                         atomic_fetch(counts, *it * 2 + 1, count_mutex),
+                                         count_mutex);
                     ++it;
                 });
             }, num_threads);
         }, update_in_place);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
     }
