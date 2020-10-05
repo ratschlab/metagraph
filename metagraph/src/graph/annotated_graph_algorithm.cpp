@@ -279,7 +279,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_set(counts, i, contigs[l].second[j++]);
+                atomic_exchange(counts, i, contigs[l].second[j++], __ATOMIC_RELAXED);
             });
             assert(j == seq_counts.size());
         }
@@ -294,7 +294,9 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 // so to add values properly, it should be reshaped first
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    uint64_t old_val = atomic_set(counts, i, contigs[l].second[--j]);
+                    uint64_t old_val = atomic_exchange(counts, i,
+                                                       contigs[l].second[--j],
+                                                       __ATOMIC_RELAXED);
                     std::ignore = old_val;
                     assert(!old_val);
                 });
@@ -364,7 +366,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_increment(counts, i);
+                atomic_fetch_and_add(counts, i, __ATOMIC_RELAXED);
             });
         });
 
@@ -378,7 +380,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_increment(counts, i * 2 + 1);
+                atomic_fetch_and_add(counts, i * 2 + 1, __ATOMIC_RELAXED);
             });
         });
 
@@ -395,23 +397,32 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
         MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask));
 
-        std::mutex count_mutex;
         masked_graph.update_mask([&](const auto &callback) {
             masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
                 auto it = path.rbegin();
                 auto rev = seq;
                 reverse_complement(rev.begin(), rev.end());
                 graph->map_to_nodes_sequentially(rev, [&](node_index i) {
-                    std::lock_guard<std::mutex> lock(count_mutex);
                     assert(i != DeBruijnGraph::npos);
                     assert(it != path.rend());
-                    callback(i, true);
-                    counts[i * 2] += counts[*it * 2];
-                    counts[i * 2 + 1] += counts[*it * 2 + 1];
+                    if (i != *it) {
+                        callback(i, true);
+                        atomic_fetch_and_add(
+                            counts, i * 2,
+                            atomic_fetch(counts, *it * 2, __ATOMIC_RELAXED),
+                            __ATOMIC_RELAXED
+                        );
+                        atomic_fetch_and_add(
+                            counts, i * 2 + 1,
+                            atomic_fetch(counts, *it * 2 + 1, __ATOMIC_RELAXED),
+                            __ATOMIC_RELAXED
+                        );
+                    }
                     ++it;
                 });
+                assert(it == path.rend());
             }, num_threads);
-        }, update_in_place);
+        }, update_in_place, num_threads > 1, __ATOMIC_RELAXED);
 
         union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
     }

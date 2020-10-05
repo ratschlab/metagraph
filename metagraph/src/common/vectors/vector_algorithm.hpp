@@ -110,23 +110,42 @@ inline void unset_bit(uint64_t *v,
     }
 }
 
-inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
-                                 uint64_t count = 1,
-                                 int memorder = __ATOMIC_SEQ_CST) {
-#ifdef MODE_TI
+inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
+                             int memorder = __ATOMIC_SEQ_CST) {
+#if defined(MODE_TI) and defined(__CX16__)
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
+    uint8_t shift = bit_pos & 0x7F;
+    auto *limb = &reinterpret_cast<const __uint128_t*>(vector.data())[bit_pos >> 7];
+    __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
+    return (__atomic_load_16(limb, memorder) & mask) >> shift;
+#else
+    std::ignore = memorder;
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    return vector[i];
+#endif
+}
+
+inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
+                                     int64_t count = 1,
+                                     int memorder = __ATOMIC_SEQ_CST) {
+#if defined(MODE_TI) and defined(__CX16__)
+    size_t width = vector.width();
+    uint64_t bit_pos = i * width;
+    uint8_t shift = bit_pos & 0x7F;
     __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
+    __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
     __uint128_t new_val;
-    __uint128_t inc = __uint128_t(count) << (bit_pos & 0x7F);
-    __uint128_t exp_val = *limb;
+    __uint128_t inc = __uint128_t(count) << shift;
+    __uint128_t exp_val = __atomic_load_n(limb, memorder);
     do {
         new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
-                                        memorder /* order for exchange */,
-                                        __ATOMIC_RELAXED /* order for compare */));
-    return (exp_val & mask) >> (bit_pos & 0x7F);
+    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
+                                           true /* weak compare and exchange */,
+                                           memorder /* order for exchange */,
+                                           __ATOMIC_RELAXED /* order for compare */));
+    return (exp_val & mask) >> shift;
 #else
     std::ignore = memorder;
     static std::mutex mu;
@@ -137,22 +156,24 @@ inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
 #endif
 }
 
-inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
-                           int memorder = __ATOMIC_SEQ_CST) {
-#ifdef MODE_TI
+inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
+                                int memorder = __ATOMIC_SEQ_CST) {
+#if defined(MODE_TI) and defined(__CX16__)
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
+    uint8_t shift = bit_pos & 0x7F;
     __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
+    __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
     __uint128_t new_val;
-    __uint128_t val_shift = __uint128_t(val) << (bit_pos & 0x7F);
-    __uint128_t exp_val = *limb;
+    __uint128_t val_shift = __uint128_t(val) << shift;
+    __uint128_t exp_val = __atomic_load_n(limb, memorder);
     do {
         new_val = val_shift | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
-                                        memorder /* order for exchange */,
-                                        __ATOMIC_RELAXED /* order for compare */));
-    return (exp_val & mask) >> (bit_pos & 0x7F);
+    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
+                                           true /* weak compare and exchange */,
+                                           memorder /* order for exchange */,
+                                           __ATOMIC_RELAXED /* order for compare */));
+    return (exp_val & mask) >> shift;
 #else
     std::ignore = memorder;
     static std::mutex mu;
