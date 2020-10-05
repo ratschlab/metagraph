@@ -115,4 +115,99 @@ BENCHMARK_TEMPLATE(BM_BRWTQueryRows, 3000000, 100, 30, 2, false, 0)
     ->Unit(benchmark::kMillisecond)
     ->DenseRange(0, 10, 1);
 
+
+template <size_t rows_arg = 300000,
+          size_t cols_arg = 100,
+          size_t unique_arg = 10,
+          size_t arity_arg = 2,
+          bool greedy_arg = true,
+          size_t relax_arg = 2>
+static void BM_BRWTQueryColumns(benchmark::State& state) {
+    DataGenerator generator;
+    generator.set_seed(42);
+
+    auto density_arg = std::vector<double>(unique_arg, state.range(0) / 100.);
+    auto generated_columns = generator.generate_random_columns(
+        rows_arg,
+        unique_arg,
+        get_densities(unique_arg, density_arg),
+        std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
+    );
+
+    std::unique_ptr<annot::binmat::BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
+        std::move(generated_columns),
+        arity_arg,
+        greedy_arg,
+        relax_arg
+    );
+
+    std::vector<uint64_t> indexes;
+    call_ones(generator.generate_random_column(matrix->num_columns(), 1. / 10),
+        [&](uint64_t i) { indexes.push_back(i); }
+    );
+
+    for (auto _ : state) {
+        std::atomic<uint64_t> j;
+        #pragma omp parallel for num_threads(3)
+        for (size_t i = 0; i < indexes.size(); ++i) {
+            for (auto t : matrix->get_column(indexes[i])) {
+                j.fetch_add(t, memory_order_relaxed);
+            }
+        }
+        ++j;
+    }
+}
+
+BENCHMARK_TEMPLATE(BM_BRWTQueryColumns, 3000000, 100, 30, 2, false, 0)
+    ->Unit(benchmark::kMillisecond)
+    ->DenseRange(0, 10, 1);
+
+template <size_t rows_arg = 300000,
+          size_t cols_arg = 100,
+          size_t unique_arg = 10,
+          size_t arity_arg = 2,
+          bool greedy_arg = true,
+          size_t relax_arg = 2>
+static void BM_BRWTSliceColumns(benchmark::State& state) {
+    DataGenerator generator;
+    generator.set_seed(42);
+
+    auto density_arg = std::vector<double>(unique_arg, state.range(0) / 100.);
+    auto generated_columns = generator.generate_random_columns(
+        rows_arg,
+        unique_arg,
+        get_densities(unique_arg, density_arg),
+        std::vector<uint32_t>(unique_arg, cols_arg / unique_arg)
+    );
+
+    std::unique_ptr<annot::binmat::BinaryMatrix> matrix = experiments::generate_brwt_from_rows(
+        std::move(generated_columns),
+        arity_arg,
+        greedy_arg,
+        relax_arg
+    );
+
+    std::vector<uint64_t> indexes;
+    call_ones(generator.generate_random_column(matrix->num_columns(), 1. / 10),
+        [&](uint64_t i) { indexes.push_back(i); }
+    );
+
+    for (auto _ : state) {
+        std::atomic<uint64_t> j;
+        #pragma omp parallel num_threads(3)
+        #pragma omp single
+        {
+            matrix->slice_columns(indexes, [&](auto i, auto&& bitmap) {
+                j.fetch_add(i, memory_order_seq_cst);
+                bitmap.call_ones([&](auto t) { j.fetch_add(t, memory_order_relaxed); });
+            });
+        }
+        ++j;
+    }
+}
+
+BENCHMARK_TEMPLATE(BM_BRWTSliceColumns, 3000000, 100, 30, 2, false, 0)
+    ->Unit(benchmark::kMillisecond)
+    ->DenseRange(0, 10, 1);
+
 } // namespace

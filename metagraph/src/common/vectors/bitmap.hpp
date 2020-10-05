@@ -201,6 +201,11 @@ class bitmap_generator : public bitmap {
                      size_t size,
                      size_t num_set_bits = -1) noexcept;
 
+    bitmap_generator(bitmap&& base,
+                     std::function<uint64_t(uint64_t)>&& index_transformer,
+                     size_t size,
+                     size_t num_set_bits = -1) noexcept;
+
     bool operator[](uint64_t) const { throw std::runtime_error("Not implemented"); }
     uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("Not implemented"); }
 
