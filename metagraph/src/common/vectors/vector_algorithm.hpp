@@ -112,7 +112,7 @@ inline void unset_bit(uint64_t *v,
 
 inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
                              int memorder = __ATOMIC_SEQ_CST) {
-#if defined(MODE_TI) and defined(__CX16__)
+#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -133,7 +133,8 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
     // TODO: GCC doesn't support using the cmpxchg16b instruction with __atomic
     // builtins. For now, __sync_bool_compare_and_swap is used
     std::ignore = memorder;
-#if defined(MODE_TI) and defined(__CX16__)
+
+#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -142,9 +143,20 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
     __uint128_t new_val;
     __uint128_t inc = __uint128_t(count) << shift;
     __uint128_t exp_val = *limb;
+
+#ifdef __CX16__
     do {
         new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
     } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
+#else
+    do {
+        new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
+    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
+                                           true /* weak compare and exchange */,
+                                           memorder /* order for exchange */,
+                                           __ATOMIC_RELAXED /* order for compare */));
+#endif
+
     return (exp_val & mask) >> shift;
 #else
     static std::mutex mu;
@@ -160,7 +172,8 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
     // TODO: GCC doesn't support using the cmpxchg16b instruction with __atomic
     // builtins. For now, __sync_bool_compare_and_swap is used
     std::ignore = memorder;
-#if defined(MODE_TI) and defined(__CX16__)
+
+#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -169,12 +182,22 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
     __uint128_t new_val;
     __uint128_t val_shift = __uint128_t(val) << shift;
     __uint128_t exp_val = *limb;
+
+#ifdef __CX16__
     do {
         new_val = val_shift | (exp_val & (~mask));
     } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
+#else
+    do {
+        new_val = val_shift | (exp_val & (~mask));
+    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
+                                           true /* weak compare and exchange */,
+                                           memorder /* order for exchange */,
+                                           __ATOMIC_RELAXED /* order for compare */));
+#endif
+
     return (exp_val & mask) >> shift;
 #else
-    std::ignore = memorder;
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
     uint64_t old_val = vector[i];
