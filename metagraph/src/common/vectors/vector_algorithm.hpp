@@ -130,6 +130,9 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
 inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
                                      int64_t count = 1,
                                      int memorder = __ATOMIC_SEQ_CST) {
+    // TODO: GCC doesn't support using the cmpxchg16b instruction with __atomic
+    // builtins. For now, __sync_bool_compare_and_swap is used
+    std::ignore = memorder;
 #if defined(MODE_TI) and defined(__CX16__)
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
@@ -138,16 +141,12 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
     __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
     __uint128_t new_val;
     __uint128_t inc = __uint128_t(count) << shift;
-    __uint128_t exp_val = __atomic_load_n(limb, memorder);
+    __uint128_t exp_val = *limb;
     do {
         new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
-                                           true /* weak compare and exchange */,
-                                           memorder /* order for exchange */,
-                                           __ATOMIC_RELAXED /* order for compare */));
+    } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
     return (exp_val & mask) >> shift;
 #else
-    std::ignore = memorder;
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
     uint64_t old_val = vector[i];
@@ -158,6 +157,9 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
 
 inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
                                 int memorder = __ATOMIC_SEQ_CST) {
+    // TODO: GCC doesn't support using the cmpxchg16b instruction with __atomic
+    // builtins. For now, __sync_bool_compare_and_swap is used
+    std::ignore = memorder;
 #if defined(MODE_TI) and defined(__CX16__)
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
@@ -166,13 +168,10 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
     __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
     __uint128_t new_val;
     __uint128_t val_shift = __uint128_t(val) << shift;
-    __uint128_t exp_val = __atomic_load_n(limb, memorder);
+    __uint128_t exp_val = *limb;
     do {
         new_val = val_shift | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange_16(limb, &exp_val, new_val,
-                                           true /* weak compare and exchange */,
-                                           memorder /* order for exchange */,
-                                           __ATOMIC_RELAXED /* order for compare */));
+    } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
     return (exp_val & mask) >> shift;
 #else
     std::ignore = memorder;
