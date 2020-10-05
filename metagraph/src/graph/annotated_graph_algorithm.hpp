@@ -35,6 +35,16 @@ struct DifferentialAssemblyConfig {
     bool add_complement = false;
 };
 
+// Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().max_index().
+// For an index i, the int_vector will contain a packed integer representing the
+// number of labels in labels_in and labels_out which the k-mer of index i is
+// annotated with. The least significant half of each integer represents the count
+// from labels_in, while the most significant half represents the count from
+// labels_out.
+// If a non-null pointer is passed as init_counts, those counts will be prepended
+// to the elements in the returned int_vector.
+// The bitmap indicates the positions in the returned int_vector whose values are
+// greater than those respective values in init_counts.
 std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
