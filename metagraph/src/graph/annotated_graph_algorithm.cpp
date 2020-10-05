@@ -272,14 +272,17 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         );
 
         logger->trace("Reconstructing count vector");
+        std::atomic_thread_fence(std::memory_order_release);
         counts = aligned_int_vector(graph_ptr->max_index() + 1, 0, width * 2, 16);
+
+        std::mutex vector_backup_mutex;
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l = 0; l < contigs.size(); ++l) {
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_set(counts, i, contigs[l].second[j++]);
+                atomic_exchange(counts, i, contigs[l].second[j++], vector_backup_mutex);
             });
             assert(j == seq_counts.size());
         }
@@ -294,7 +297,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 // so to add values properly, it should be reshaped first
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    uint64_t old_val = atomic_set(counts, i, contigs[l].second[--j]);
+                    uint64_t old_val = atomic_exchange(counts, i, contigs[l].second[--j],
+                                                       vector_backup_mutex);
                     std::ignore = old_val;
                     assert(!old_val);
                 });
@@ -302,7 +306,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
             }
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
     }
@@ -356,34 +360,37 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         label_out_codes[i] = label_encoder.encode(labels_out[i]);
     }
 
+    std::mutex vector_backup_mutex;
     #pragma omp parallel num_threads(num_threads)
     #pragma omp single
     {
+        std::atomic_thread_fence(std::memory_order_release);
         bool async = num_threads > 1;
         binmat.slice_columns(label_in_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_increment(counts, i);
+                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex);
             });
         });
 
         #pragma omp taskwait
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         // correct the width of counts, making it single-width
         counts.width(width);
+        std::atomic_thread_fence(std::memory_order_release);
 
         binmat.slice_columns(label_out_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_increment(counts, i * 2 + 1);
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex);
             });
         });
 
         #pragma omp taskwait
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(
@@ -476,6 +483,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
     size_t kept_nodes = 0;
     size_t total_nodes = masked_graph.num_nodes();
 
+    std::atomic_thread_fence(std::memory_order_release);
     masked_graph.update_mask([&](const auto &callback) {
         masked_graph.call_nodes([&](node_index node) {
             if (keep_node(node)) {
@@ -485,6 +493,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
             }
         });
     }, update_in_place, parallel, memorder);
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 }

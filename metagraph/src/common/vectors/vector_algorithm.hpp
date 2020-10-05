@@ -110,57 +110,68 @@ inline void unset_bit(uint64_t *v,
     }
 }
 
-inline uint64_t atomic_increment(sdsl::int_vector<> &vector, uint64_t i,
-                                 uint64_t count = 1,
-                                 int memorder = __ATOMIC_SEQ_CST) {
+inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
+                                     uint64_t count,
+                                     std::mutex &backup_mutex) {
+    // TODO: support adding negatives
 #ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
-    __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
-    __uint128_t new_val;
-    __uint128_t inc = __uint128_t(count) << (bit_pos & 0x7F);
-    __uint128_t exp_val = *limb;
-    do {
-        new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
-                                        memorder /* order for exchange */,
-                                        __ATOMIC_RELAXED /* order for compare */));
-    return (exp_val & mask) >> (bit_pos & 0x7F);
-#else
-    std::ignore = memorder;
-    static std::mutex mu;
-    std::lock_guard<std::mutex> lock(mu);
+    uint8_t shift = bit_pos & 0x7F;
+
+    if (shift + width <= 128) {
+        __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+        __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
+        __uint128_t inc = __uint128_t(count) << shift;
+        __uint128_t exp_val;
+        __uint128_t new_val;
+        do {
+            exp_val = *limb;
+            new_val = ((exp_val + inc) & mask) | (exp_val & (~mask));
+        } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
+
+        return (exp_val & mask) >> shift;
+    }
+
+#endif
+
+    std::lock_guard<std::mutex> lock(backup_mutex);
+    std::atomic_thread_fence(std::memory_order_acquire);
     uint64_t old_val = vector[i];
     vector[i] += count;
+    std::atomic_thread_fence(std::memory_order_release);
     return old_val;
-#endif
 }
 
-inline uint64_t atomic_set(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
-                           int memorder = __ATOMIC_SEQ_CST) {
+inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
+                                std::mutex &backup_mutex) {
 #ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
-    __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-    __uint128_t mask = ((__uint128_t(1) << width) - 1) << (bit_pos & 0x7F);
-    __uint128_t new_val;
-    __uint128_t val_shift = __uint128_t(val) << (bit_pos & 0x7F);
-    __uint128_t exp_val = *limb;
-    do {
-        new_val = val_shift | (exp_val & (~mask));
-    } while (!__atomic_compare_exchange(limb, &exp_val, &new_val, true,
-                                        memorder /* order for exchange */,
-                                        __ATOMIC_RELAXED /* order for compare */));
-    return (exp_val & mask) >> (bit_pos & 0x7F);
-#else
-    std::ignore = memorder;
-    static std::mutex mu;
-    std::lock_guard<std::mutex> lock(mu);
+    uint8_t shift = bit_pos & 0x7F;
+
+    if (shift + width <= 128) {
+        __uint128_t *limb = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+        __uint128_t mask = ((__uint128_t(1) << width) - 1) << shift;
+        __uint128_t val_shift = __uint128_t(val) << shift;
+        __uint128_t exp_val;
+        __uint128_t new_val;
+        do {
+            exp_val = *limb;
+            new_val = val_shift | (exp_val & (~mask));
+        } while (!__sync_bool_compare_and_swap(limb, exp_val, new_val));
+
+        return (exp_val & mask) >> shift;
+    }
+
+#endif
+
+    std::lock_guard<std::mutex> lock(backup_mutex);
+    std::atomic_thread_fence(std::memory_order_acquire);
     uint64_t old_val = vector[i];
     vector[i] = val;
+    std::atomic_thread_fence(std::memory_order_release);
     return old_val;
-#endif
 }
 
 
