@@ -256,8 +256,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
 
                         for (size_t k = 0; k < child_columns_ptr->size() - 1; ++k) {
                             callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
-                                     bitmap_generator(std::vector<uint64_t>(set_bits),
-                                                      num_rows()));
+                                     bitmap_generator(std::move(set_bits), num_rows()));
                         }
 
                         callback(assignments_.get(child_node, child_columns_ptr->back()),
