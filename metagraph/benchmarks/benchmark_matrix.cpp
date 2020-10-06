@@ -150,6 +150,7 @@ static void BM_BRWTQueryColumns(benchmark::State& state) {
         std::atomic<uint64_t> j;
         #pragma omp parallel for num_threads(3)
         for (size_t i = 0; i < indexes.size(); ++i) {
+            j.fetch_add(i, memory_order_seq_cst);
             for (auto t : matrix->get_column(indexes[i])) {
                 j.fetch_add(t, memory_order_relaxed);
             }
