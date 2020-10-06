@@ -246,18 +246,24 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                     // if there are multiple column ids corresponding to the same leaf
                     // node, then this branch avoids doing redundant select1 calls
                     const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
+                    size_t num_nonzero_rows = nonzero_rows->num_set_bits();
                     if (num_nonzero_rows) {
-                        bitmap_set slice(num_rows());
+                        std::vector<uint64_t> set_bits;
+                        set_bits.reserve(num_nonzero_rows);
                         nonzero_rows->call_ones([&](auto i) {
-                            slice.add_one(nonzero_rows->select1(i + 1));
+                            set_bits.push_back(nonzero_rows->select1(i + 1));
                         });
                         for (size_t k = 0; k + 1 < child_columns_ptr->size(); ++k) {
                             callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
-                                     bitmap_set(slice));
+                                     bitmap_generator([s=set_bits](const auto &callback) {
+                                         std::for_each(s.begin(), s.end(), callback);
+                                     }, num_rows(), num_nonzero_rows));
                         }
 
                         callback(assignments_.get(child_node, child_columns_ptr->back()),
-                                 std::move(slice));
+                                 bitmap_generator([s=std::move(set_bits)](const auto &callback) {
+                                     std::for_each(s.begin(), s.end(), callback);
+                                 }, num_rows(), num_nonzero_rows));
                     }
                 } else {
                     child_nodes_[child_node]->slice_columns(*child_columns_ptr,
@@ -265,7 +271,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                             size_t num_set_bits = rows.num_set_bits();
                             callback(assignments_.get(child_node, j),
                                      bitmap_generator(std::move(rows), [&](uint64_t i) {
-                                        return nonzero_rows_->select1(i + 1);
+                                         return nonzero_rows_->select1(i + 1);
                                      }, num_rows(), num_set_bits));
                         }
                     );
