@@ -202,7 +202,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
                                              shared_background_labels,
                                              diff_config, num_threads_per_graph),
                      line_split[0]);
-        }, std::string(line));
+        }, std::move(line));
     }
 
     thread_pool.join();
