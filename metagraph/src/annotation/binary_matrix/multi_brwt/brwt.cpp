@@ -253,7 +253,8 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                         nonzero_rows->call_ones([&](auto i) {
                             set_bits.push_back(nonzero_rows->select1(i + 1));
                         });
-                        for (size_t k = 0; k + 1 < child_columns_ptr->size(); ++k) {
+
+                        for (size_t k = 0; k < child_columns_ptr->size() - 1; ++k) {
                             callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
                                      bitmap_generator(std::vector<uint64_t>(set_bits),
                                                       num_rows()));
@@ -265,10 +266,11 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
                 } else {
                     child_nodes_[child_node]->slice_columns(*child_columns_ptr,
                         [&](Column j, bitmap&& rows) {
+                            size_t num_set_bits = rows.num_set_bits();
                             callback(assignments_.get(child_node, j),
                                      bitmap_generator(std::move(rows), [&](uint64_t i) {
                                          return nonzero_rows_->select1(i + 1);
-                                     }));
+                                     }, num_rows(), num_set_bits));
                         }
                     );
                 }

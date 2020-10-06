@@ -203,7 +203,9 @@ class bitmap_generator : public bitmap {
 
     bitmap_generator(bitmap&& base,
                      std::function<uint64_t(uint64_t)>&& index_transformer
-                         = [](auto i) { return i; }) noexcept;
+                         = [](auto i) { return i; },
+                     size_t size = -1,
+                     size_t num_set_bits = -1) noexcept;
 
     bool operator[](uint64_t) const { throw std::runtime_error("Not implemented"); }
     uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("Not implemented"); }
