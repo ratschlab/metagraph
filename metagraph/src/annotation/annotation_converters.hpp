@@ -110,6 +110,9 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                        const std::string &outfbase,
                        uint32_t max_depth);
 
+void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
+                                        const std::string &outfbase);
+
 } // namespace annot
 } // namespace mtg
 

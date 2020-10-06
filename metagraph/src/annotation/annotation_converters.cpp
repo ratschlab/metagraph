@@ -1304,5 +1304,27 @@ template std::vector<std::unique_ptr<RowDiffAnnotator>> convert_to_row_diff(
         const std::string &outfbase,
         uint32_t max_depth);
 
+void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
+                                        const std::string &outfbase) {
+    //#pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint32_t i = 0; i < files.size(); ++i) {
+        std::string file = files[i];
+        RowDiffAnnotator input_anno;
+        input_anno.load(file);
+
+        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(), RowDiffAnnotator::kExtension);
+        std::string out_path
+                = (std::filesystem::path(outfbase).remove_filename() / outname).string()
+                + "_row_diff" + ColumnCompressed<std::string>::kExtension;
+        std::ofstream outstream(out_path, std::ios::binary);
+        logger->trace("Transforming {} to {}", file, out_path);
+
+        serialize_number(outstream, input_anno.num_objects());
+        input_anno.get_label_encoder().serialize(outstream);
+        input_anno.get_matrix().diffs().serialize(outstream);
+        outstream.close();
+    }
+}
+
 } // namespace annot
 } // namespace mtg
