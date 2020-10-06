@@ -28,7 +28,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annot::BRWTRowDiffAnnotator ::kExtension)) {
+    } else if (utils::ends_with(filename, annot::BRWTRowDiffAnnotator::kExtension)) {
         return Config::AnnotationType::BRWTRowDiff;
 
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
