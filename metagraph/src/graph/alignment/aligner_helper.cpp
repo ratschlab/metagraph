@@ -423,8 +423,11 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
         for (size_t i = 0; i < trim_left; ++i) {
             size_t indegree = 0;
-            graph.call_incoming_kmers(rev_nodes[0], [&](NodeType prev, char) {
+            graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
                 ++indegree;
+
+                // TODO: there are multiple possible reverse complements, which
+                // do we pick? Currently we pick the first one
                 if (indegree > 1)
                     return;
 
