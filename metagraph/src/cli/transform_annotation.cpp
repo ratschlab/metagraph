@@ -483,7 +483,7 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::BRWTRowDiff
             && config->anno_type != Config::ColumnCompressed) {
             logger->error(
-                    "Only conversion to column compressed and brwt supported for "
+                    "Only conversion to column compressed and brwt_rowdiff supported for "
                     "row_diff");
             exit(1);
         }
@@ -593,11 +593,25 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    auto annotator = std::make_unique<MultiBRWTAnnotator>();
+    const std::string& fname = files.at(0);
+
+    std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
+    Config::AnnotationType anno_type = parse_annotation_type(fname);
+    switch(anno_type) {
+        case Config::BRWT:
+            annotator = std::make_unique<MultiBRWTAnnotator>();
+            break;
+        case Config::BRWTRowDiff:
+            annotator = std::make_unique<BRWTRowDiffAnnotator>();
+            break;
+        default:
+            logger->error("Relaxation only supported for BRWT and BRWTRowDiff");
+            exit(1);
+    }
 
     logger->trace("Loading annotator...");
 
-    if (!annotator->load(files.at(0))) {
+    if (!annotator->load(fname)) {
         logger->error("Cannot load annotations from file '{}'", files.at(0));
         exit(1);
     }
@@ -605,9 +619,11 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    relax_BRWT<MultiBRWTAnnotator>(annotator.get(),
-                                   config->relax_arity_brwt,
-                                   get_num_threads());
+    const binmat::BRWT &matrix = anno_type == Config::BRWT
+            ? dynamic_cast<MultiBRWTAnnotator *>(annotator.get())->get_matrix()
+            : dynamic_cast<BRWTRowDiffAnnotator *>(annotator.get())->get_matrix().diffs();
+    relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
+               get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

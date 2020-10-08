@@ -63,10 +63,7 @@ convert_to_BRWT(const std::vector<std::string> &annotation_files,
                 size_t num_threads = 1,
                 const std::filesystem::path &tmp_dir = "");
 
-template <class StaticAnnotation>
-void relax_BRWT(StaticAnnotation *annotation,
-                size_t relax_max_arity,
-                size_t num_threads = 1);
+void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads = 1);
 
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation>

@@ -487,15 +487,9 @@ convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation
             annotator->get_label_encoder());
 }
 
-
-template <>
-void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
-                                    size_t relax_max_arity,
-                                    size_t num_threads) {
+void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
     if (relax_max_arity > 1)
-        BRWTOptimizer::relax(const_cast<BRWT*>(&annotation->get_matrix()),
-                             relax_max_arity,
-                             num_threads);
+        BRWTOptimizer::relax(annotation, relax_max_arity, num_threads);
 }
 
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
