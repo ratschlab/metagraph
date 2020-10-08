@@ -1194,7 +1194,7 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
         if (sources[i]->num_labels() == 0)
             continue;
         constexpr uint64_t num_elements = 1'000'000;
-        targets_size[i] = std::vector<uint64>(sources[i]->num_labels(), 0);
+        targets_size[i].assign(sources[i]->num_labels(), 0U);
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
             std::filesystem::path tmp_dir
                     = tmp_path/("col_" + std::to_string(i) + "_" + std::to_string(j));
