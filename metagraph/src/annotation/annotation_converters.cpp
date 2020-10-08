@@ -12,6 +12,7 @@
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/sorted_sets/sorted_set_disk.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
@@ -1175,24 +1176,34 @@ void build_successor(const graph::DBGSuccinct &graph,
 template <typename Label>
 std::vector<std::unique_ptr<RowDiffAnnotator>>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
-                       const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
+                       std::vector<std::unique_ptr<ColumnCompressed<Label>>> &&sources,
                        const std::string &outfbase,
                        uint32_t max_depth) {
     if (sources.empty())
         return {};
 
-    std::vector<std::unique_ptr<ColumnCompressed<>>> targets;
-    targets.reserve(sources.size());
-    for (const auto& source : sources) {
-        if (source->num_labels() == 0)
-            continue;
-        targets.push_back(std::make_unique<ColumnCompressed<>>(source->num_objects(),
-                                                               source->num_labels()));
-        const_cast<LabelEncoder<Label> &>(targets.back()->get_label_encoder())
-                = source->get_label_encoder();
-    }
-
     build_successor(graph, outfbase, max_depth, get_num_threads());
+
+    // accumulate the indices for the set bits in each column into a #SortedSetDisk
+    using SSD = common::SortedSetDisk<uint64_t>;
+    std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
+    std::vector<std::vector<uint64_t>> targets_size(sources.size());
+    std::filesystem::path tmp_path = std::filesystem::path(outfbase).remove_filename()/"tmp_col";
+    std::filesystem::remove_all(tmp_path);
+    for (uint64_t i = 0; i < sources.size(); ++i) {
+        if (sources[i]->num_labels() == 0)
+            continue;
+        constexpr uint64_t num_elements = 1'000'000;
+        targets_size[i] = std::vector<uint64>(sources[i]->num_labels(), 0);
+        for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
+            std::filesystem::path tmp_dir
+                    = tmp_path/("col_" + std::to_string(i) + "_" + std::to_string(j));
+            std::filesystem::create_directories(tmp_dir);
+            auto sorted_set = std::make_unique<SSD>(get_num_threads(), num_elements, tmp_dir,
+                                                    std::numeric_limits<uint64_t>::max());
+            targets[i].push_back(std::move(sorted_set));
+        }
+    }
 
     uint64_t num_rows = graph.num_nodes();
 
@@ -1250,7 +1261,6 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
 
             for (uint64_t l_idx2 = 0; l_idx2 < sources[l_idx]->num_labels(); ++l_idx2) {
                 std::vector<uint64_t> indices;
-                const Label &label = sources[l_idx]->get_all_labels()[l_idx2];
                 const std::unique_ptr<bit_vector> &source_col
                         = sources[l_idx]->get_matrix().data()[l_idx2];
                 source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(), [&](uint64_t row_idx) {
@@ -1270,7 +1280,8 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
                             indices.push_back(pred_chunk[p_idx]);
                     }
                 });
-                targets[l_idx]->add_labels(indices, { label });
+                targets[l_idx][l_idx2]->insert(indices.begin(), indices.end());
+                targets_size[l_idx][l_idx2] += indices.size();
             }
         }
 
@@ -1281,20 +1292,43 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
 
     std::vector<std::unique_ptr<RowDiffAnnotator>> result;
 
+    std::vector<LabelEncoder<std::string>> label_encoders;
+    std::for_each(sources.begin(), sources.end(), [&](auto& source) {
+        label_encoders.push_back(source->get_label_encoder());
+    });
+
+    // free memory occupied by sources
+    std::vector<std::unique_ptr<ColumnCompressed<Label>>>().swap(sources);
+
+    logger->trace("Generating row_diff columns...");
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
-        ColumnMajor matrix = targets[l_idx]->release_matrix();
-        auto diff_annotation
-                = std::make_unique<RowDiff<ColumnMajor>>(&graph, std::move(matrix),
-                                                            outfbase + ".terminal");
-        result.push_back(std::make_unique<RowDiffAnnotator>(
-                std::move(diff_annotation), sources[l_idx]->get_label_encoder()));
+        std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
+        for (uint64_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
+            auto call_ones = [&](const std::function<void(uint64_t)>& call) {
+                auto &queue = targets[l_idx][l_idx2]->data(true);
+                for (auto &it = queue.begin(); it != queue.end(); ++it) {
+                    call(*it);
+                }
+            };
+            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, num_rows,
+                                                              targets_size[l_idx][l_idx2]);
+        }
+        ColumnMajor matrix(std::move(columns));
+        auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
+                &graph, std::move(matrix),outfbase + ".terminal");
+        result.push_back(std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
+                                                            label_encoders[l_idx]));
     }
+
+    std::filesystem::remove_all(tmp_path);
+
     return result;
 }
 
 template std::vector<std::unique_ptr<RowDiffAnnotator>> convert_to_row_diff(
         const graph::DBGSuccinct &graph,
-        const std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &sources,
+        std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &&sources,
         const std::string &outfbase,
         uint32_t max_depth);
 

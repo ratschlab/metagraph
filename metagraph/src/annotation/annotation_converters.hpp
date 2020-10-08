@@ -103,7 +103,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
 template <typename Label>
 std::vector<std::unique_ptr<RowDiffAnnotator>>
 convert_to_row_diff(const graph::DBGSuccinct &graph,
-                       const std::vector<std::unique_ptr<ColumnCompressed<Label>>> &sources,
+                       std::vector<std::unique_ptr<ColumnCompressed<Label>>> &&sources,
                        const std::string &outfbase,
                        uint32_t max_depth);
 

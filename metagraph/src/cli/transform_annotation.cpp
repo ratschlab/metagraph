@@ -376,8 +376,8 @@ int transform_annotation(Config *config) {
                     logger->trace("Starting converting column-batch with {} columns ...",
                                   file_batch.size());
                     std::vector<std::unique_ptr<RowDiffAnnotator>> row_diffs
-                            = convert_to_row_diff(graph, anno_batch, config->infbase,
-                                                     config->max_path_length);
+                            = convert_to_row_diff(graph, std::move(anno_batch),
+                                                  config->infbase, config->max_path_length);
                     logger->trace("Column-batch converted in {} sec", timer.elapsed());
 
                     logger->trace("Serializing columns...", config->outfbase);
