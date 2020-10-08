@@ -152,8 +152,7 @@ class GraphClient:
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
         json_obj, err = self._json_client.align(sequence, discovery_threshold,
-                                                max_alternative_alignments,
-                                                max_num_nodes_per_seq_char)
+                                                max_alternative_alignments, max_num_nodes_per_seq_char)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
