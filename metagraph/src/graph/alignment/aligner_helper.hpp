@@ -536,7 +536,8 @@ class DPTable {
                 + sizeof(Cigar::Operator) * ops.capacity()
                 + sizeof(uint8_t) * prev_nodes.capacity()
                 + sizeof(uint8_t) * gap_prev_nodes.capacity()
-                + sizeof(int32_t) * gap_count.capacity();
+                + sizeof(int32_t) * gap_count.capacity()
+                + sizeof(NodeType) * incoming_nodes.capacity();
         }
 
         size_t size() const { return size_; }
