@@ -10,7 +10,6 @@ import requests
 DEFAULT_TOP_LABELS = 10000
 DEFAULT_DISCOVERY_THRESHOLD = 0.7
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
-DEFAULT_MAX_RAM_PER_ALIGNMENT = 700.0
 
 JsonDict = Dict[str, Any]
 JsonStrList = List[str]
@@ -33,7 +32,6 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
                max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         if discovery_threshold < 0.0 or discovery_threshold > 1.0:
             raise ValueError(
@@ -43,7 +41,6 @@ class GraphClientJson:
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "align": align,
-                      "max_ram_per_alignment": max_ram_per_alignment,
                       "max_num_nodes_per_seq_char": max_num_nodes_per_seq_char}
 
         return self._json_seq_query(sequence, param_dict, "search")
@@ -51,10 +48,8 @@ class GraphClientJson:
     def align(self, sequence: Union[str, Iterable[str]],
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
-              max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
         params = {'max_alternative_alignments': max_alternative_alignments,
-                  'max_ram_per_alignment': max_ram_per_alignment,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
                   'discovery_fraction': discovery_threshold}
         return self._json_seq_query(sequence, params, "align")
@@ -111,12 +106,9 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
                max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        # TODO: detect if max_ram_per_alignment is too low
         (json_obj, err) = self._json_client.search(sequence, top_labels,
                                                    discovery_threshold, align,
-                                                   max_ram_per_alignment,
                                                    max_num_nodes_per_seq_char)
 
         if err:
@@ -158,12 +150,9 @@ class GraphClient:
     def align(self, sequence: Union[str, Iterable[str]],
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
-              max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        # TODO: detect if max_ram_per_alignment is too low
         json_obj, err = self._json_client.align(sequence, discovery_threshold,
                                                 max_alternative_alignments,
-                                                max_ram_per_alignment,
                                                 max_num_nodes_per_seq_char)
 
         if err:
@@ -213,17 +202,14 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
                max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> \
             Dict[str, pd.DataFrame]:
 
         result = {}
         for label, graph_client in self.graphs.items():
-            # TODO: detect if max_ram_per_alignment is too low
             result[label] = graph_client.search(sequence, top_labels,
                                                 discovery_threshold,
                                                 align,
-                                                max_ram_per_alignment,
                                                 max_num_nodes_per_seq_char)
 
         return result
@@ -231,16 +217,13 @@ class MultiGraphClient:
     def align(self, sequence: Union[str, Iterable[str]],
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
-              max_ram_per_alignment: float = DEFAULT_MAX_RAM_PER_ALIGNMENT,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for label, graph_client in self.graphs.items():
             # TODO: do this async
-            # TODO: detect if max_ram_per_alignment is too low
             result[label] = graph_client.align(sequence, discovery_threshold,
                                                max_alternative_alignments,
-                                               max_ram_per_alignment,
                                                max_num_nodes_per_seq_char)
 
         return result
