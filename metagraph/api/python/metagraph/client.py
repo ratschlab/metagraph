@@ -63,9 +63,8 @@ class GraphClientJson:
         if isinstance(sequence, str):
             fasta_str = f">query\n{sequence}"
         else:
-            seqs = list(sequence)
             fasta_str = '\n'.join(
-                [f">{i}\n{seq}" for (i, seq) in enumerate(seqs)])
+                [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
@@ -85,7 +84,11 @@ class GraphClientJson:
         else:
             ret = requests.get(url=url)
 
-        json_obj = ret.json()
+        try:
+            json_obj = ret.json()
+        except:
+            return {}, str(ret.status_code) + " " + str(ret)
+
         if not ret.ok:
             error_msg = json_obj[
                 'error'] if 'error' in json_obj.keys() else str(json_obj)

@@ -204,6 +204,7 @@ std::string process_align_request(const std::string &received_message,
 
     std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
 
+    // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
         const auto paths = aligner->align(read_stream->seq.s);
