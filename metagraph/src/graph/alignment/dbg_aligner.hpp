@@ -7,10 +7,9 @@
 #include <numeric>
 #include <vector>
 
-#include <priority_deque.hpp>
-
 #include "aligner_helper.hpp"
 #include "aligner_methods.hpp"
+#include "aligner_aggregator.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -333,33 +332,19 @@ template <class Seeder, class Extender, class AlignmentCompare>
 inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_aggregate(DBGQueryAlignment &paths,
                   const AlignmentGenerator &alignment_generator) const {
-    assert(config_.num_alternative_paths);
-    boost::container::priority_deque<DBGAlignment,
-                                     std::vector<DBGAlignment>,
-                                     AlignmentCompare> path_queue;
-
-    alignment_generator(
-        [&](DBGAlignment&& alignment) {
-            if (path_queue.size() < config_.num_alternative_paths) {
-                // add to the queue
-                path_queue.emplace(std::move(alignment));
-            } else if (alignment.get_score() > path_queue.minimum().get_score()) {
-                // if the queue is full and the current alignment is better,
-                // replace the bottom element and bubble it up the heap
-                path_queue.update(path_queue.begin(), std::move(alignment));
-            }
-        },
-        [&](const DBGAlignment &) {
-            return path_queue.size() ? path_queue.minimum().get_score()
-                                     : config_.min_path_score;
-        }
+    AlignmentAggregator<node_index, AlignmentCompare> path_queue(
+        paths.get_query(), paths.get_query_reverse_complement(), config_
     );
 
-    while (path_queue.size()) {
-        assert(path_queue.maximum().is_valid(graph_, &config_));
-        paths.emplace_back(path_queue.maximum());
-        path_queue.pop_maximum();
-    }
+    alignment_generator(
+        [&](DBGAlignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
+        [&](const DBGAlignment &seed) { return path_queue.get_min_path_score(seed); }
+    );
+
+    path_queue.call_alignments([&](auto&& alignment) {
+        assert(alignment.is_valid(graph_, &config_));
+        paths.emplace_back(std::move(alignment));
+    });
 }
 
 } // namespace align
