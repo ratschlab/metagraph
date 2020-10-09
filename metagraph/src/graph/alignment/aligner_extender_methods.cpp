@@ -22,9 +22,6 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::initialize_query(const std::string_view query) {
     this->query = query;
-    max_num_nodes = config_.max_nodes_per_seq_char < std::numeric_limits<double>::max()
-                        ? std::ceil(config_.max_nodes_per_seq_char * query.size())
-                        : std::numeric_limits<size_t>::max();
 
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
@@ -571,6 +568,25 @@ void DefaultColumnExtender<NodeType>
 
     if (columns_to_update.empty())
         return;
+
+    const auto &first_column = dp_table.begin()->second;
+
+    max_num_nodes = std::numeric_limits<size_t>::max();
+    if (config_.max_ram_per_alignment < std::numeric_limits<double>::max()) {
+        // ram_per_alignment = mb_per_column * max_num_nodes
+        double mb_per_column = static_cast<double>(first_column.bytes_taken()) / 1024 / 1024;
+        max_num_nodes = std::ceil(config_.max_ram_per_alignment / mb_per_column);
+    }
+
+    if (config_.max_nodes_per_seq_char < std::numeric_limits<double>::max()) {
+        max_num_nodes = std::min(max_num_nodes,
+            static_cast<size_t>(std::ceil(config_.max_nodes_per_seq_char
+                * static_cast<double>(size)))
+        );
+    }
+
+    if (max_num_nodes < first_column.size())
+        logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
 
     extend_main(callback, min_path_score);
 }

@@ -294,9 +294,8 @@ class TestAPIJson(TestAPIBase):
         res_list, _ = self.graph_client.search([self.sample_query] * repetitions)
         self.assertEqual(len(res_list), repetitions)
 
-        # testing if results are in the same order as the queries
-        for i in range(0, repetitions):
-            self.assertEqual(res_list[i]['seq_description'], str(i))
+        # testing if the returned query indices range from 0 to n - 1
+        self.assertEqual(sorted(range(0, repetitions)), sorted([int(a['seq_description']) for a in res_list]))
 
     def test_api_stats(self):
         res = self.graph_client.stats()[0]

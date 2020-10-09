@@ -81,11 +81,11 @@ build-libmaus:
 
 build-metagraph:
 	[ -d $(BUILD_DIR_HOST_DOCKER) ] || mkdir -p $(BUILD_DIR_HOST_DOCKER)
-	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) && cmake $(CODE_BASE)/metagraph && make -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
+	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) && cmake -DBUILD_KMC=OFF $(CODE_BASE)/metagraph && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
 
 build-metagraph-static:
 	[ -d $(BUILD_DIR_STATIC_HOST_DOCKER) ] || mkdir -p $(BUILD_DIR_STATIC_HOST_DOCKER)
-	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR_STATIC) && cd $(BUILD_DIR_STATIC) && cmake -DBUILD_STATIC=ON $(CODE_BASE)/metagraph && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1)) metagraph'
+	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR_STATIC) && cd $(BUILD_DIR_STATIC) && cmake -DBUILD_STATIC=ON -DBUILD_KMC=OFF $(CODE_BASE)/metagraph && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
 
 api-integration-tests:
 	$(EXEC_CMD) 'cd $(BUILD_DIR) && ./integration_tests --test_filter="test_api*"'
