@@ -246,6 +246,7 @@ inline auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 auto rev = path;
                 rev.reverse_complement(graph_, paths.get_query_reverse_complement());
                 if (rev.empty()) {
+                    mtg::common::logger->trace("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
                         alignment_callback(std::move(path));
 
@@ -283,10 +284,14 @@ inline auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 // If the path originated from a backwards alignment (forward alignment
                 // of a reverse complement) and did not skip the first characters
                 // (so it is unable to be reversed), change back to the forward orientation
-                if (!path.get_offset() && path.get_orientation()) {
-                    path.reverse_complement(seeder.get_graph(), paths.get_query());
-                    if (path.empty())
-                        return;
+                if (path.get_orientation()) {
+                    auto forward_path = path;
+                    forward_path.reverse_complement(seeder.get_graph(), paths.get_query());
+                    if (!forward_path.empty()) {
+                        path = std::move(forward_path);
+                    } else {
+                        mtg::common::logger->trace("Backwards alignment cannot be reversed, returning");
+                    }
                 }
 
                 assert(path.is_valid(graph_, &config_));
