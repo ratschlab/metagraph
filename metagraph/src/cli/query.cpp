@@ -800,7 +800,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
 }
 
-
 int query_graph(Config *config) {
     assert(config);
 
@@ -846,20 +845,41 @@ void align_sequence(std::string &name, std::string &seq,
     auto alignments
         = build_aligner(graph, aligner_config)->align(seq);
 
-    assert(alignments.size() <= 1 && "Only the best alignment is needed");
-
     if (alignments.size()) {
-        auto &match = alignments[0];
-        // sequence for querying -- the best alignment
-        if (match.get_offset()) {
-            seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
-                    + match.get_sequence();
-        } else {
-            seq = const_cast<std::string&&>(match.get_sequence());
-        }
+        if (aligner_config.chain_alignments && alignments.size() > 1) {
+            align::Alignment<>::score_t score = 0;
+            std::string concat;
+            concat.reserve(seq.size());
+            std::string cigar;
 
-        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
-                           match.get_score(), match.get_cigar().to_string());
+            size_t last = 0;
+            for (const auto &path : alignments) {
+                if (last < path.get_clipping()) {
+                    last += path.get_clipping() - last;
+                    concat += std::string(path.get_clipping() - last, '$');
+                }
+                concat += const_cast<std::string&&>(path.get_sequence());
+                last += path.get_query().size();
+                score += path.get_score();
+                cigar += path.get_cigar().to_string() + ",";
+            }
+            cigar.pop_back();
+            std::swap(seq, concat);
+            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq, score, cigar);
+
+        } else {
+            auto &match = alignments[0];
+            // sequence for querying -- the best alignment
+            if (match.get_offset()) {
+                seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
+                        + match.get_sequence();
+            } else {
+                seq = const_cast<std::string&&>(match.get_sequence());
+            }
+
+            name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
+                               match.get_score(), match.get_cigar().to_string());
+        }
 
     } else {
         // no alignment was found

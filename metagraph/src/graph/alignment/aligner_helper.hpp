@@ -36,6 +36,8 @@ class Cigar {
     typedef std::array<Operator, 128> OperatorTableRow;
     typedef std::array<OperatorTableRow, 128> OperatorTable;
     typedef std::pair<Operator, LengthType> value_type;
+    typedef typename std::vector<value_type>::iterator iterator;
+    typedef typename std::vector<value_type>::const_iterator const_iterator;
 
     static OperatorTable char_to_op;
     static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
@@ -47,6 +49,9 @@ class Cigar {
     // a specification of the CIGAR string format.
     // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
     explicit Cigar(const std::string &cigar_str);
+
+    explicit Cigar(const_iterator begin, const_iterator end)
+          : cigar_(begin, end) { }
 
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
@@ -65,9 +70,6 @@ class Cigar {
         assert(cigar_.size());
         cigar_.pop_back();
     }
-
-    typedef typename std::vector<value_type>::iterator iterator;
-    typedef typename std::vector<value_type>::const_iterator const_iterator;
 
     // This is essentially just a vector, so there's no reason not to have it editable
     iterator begin() { return cigar_.begin(); }
@@ -119,6 +121,137 @@ class Cigar {
     std::vector<value_type> cigar_;
 
     static OperatorTable initialize_opt_table();
+};
+
+class CigarOpIterator {
+  public:
+    typedef Cigar::Operator value_type;
+    typedef const Cigar::Operator& reference;
+    typedef const Cigar::Operator* pointer;
+    typedef int difference_type;
+    typedef std::random_access_iterator_tag iterator_category;
+
+    CigarOpIterator(const Cigar &cigar) : CigarOpIterator(cigar, cigar.begin()) {}
+    CigarOpIterator(const Cigar &cigar, size_t offset)
+          : CigarOpIterator(cigar) {
+        while (offset) {
+            if (offset >= it_->second) {
+                offset -= it_->second;
+                ++it_;
+            } else {
+                pos_ = offset;
+                offset = 0;
+            }
+        }
+    }
+
+    CigarOpIterator(const Cigar &cigar, Cigar::const_iterator it, size_t offset = 0)
+          : cigar_(&cigar), it_(it), pos_(offset) {
+        assert(cigar_->begin() <= it);
+        assert(it <= cigar_->end());
+        assert(!offset || (it != cigar_->end() && pos_ < it->second));
+    }
+
+    CigarOpIterator& next_op() {
+        assert(it_ != cigar_->end());
+        pos_ = 0;
+        ++it_;
+        assert(it_ == cigar_->end() || it_->second);
+        return *this;
+    }
+
+    CigarOpIterator& prev_op() {
+        assert(it_ != cigar_->begin());
+        --it_;
+        pos_ = it_->second;
+        assert(pos_);
+        return *this;
+    }
+
+    CigarOpIterator& operator++() {
+        ++pos_;
+
+        if (pos_ == it_->second)
+            return next_op();
+
+        return *this;
+    }
+
+    CigarOpIterator& operator+=(difference_type i) {
+        if (i > 0) {
+            while (pos_ + i >= it_->second) {
+                i -= it_->second - pos_;
+                next_op();
+            }
+            pos_ += i;
+        } else if (i < 0) {
+            return operator-=(-i);
+        }
+
+        return *this;
+    }
+
+    CigarOpIterator& operator--() {
+        if (!pos_)
+            prev_op();
+
+        --pos_;
+        return *this;
+    }
+
+    CigarOpIterator& operator-=(difference_type i) {
+        if (i > 0) {
+            while (i - pos_ > 0) {
+                i -= pos_;
+                prev_op();
+            }
+            pos_ -= i;
+
+        } else if (i < 0) {
+            return operator+=(-i);
+        }
+
+        return *this;
+    }
+
+    bool operator==(const CigarOpIterator &other) const {
+        return cigar_ == other.cigar_ && it_ == other.it_ && pos_ == other.pos_;
+    }
+
+    bool operator!=(const CigarOpIterator &other) const {
+        return !(*this == other);
+    }
+
+    reference operator*() const { return it_->first; }
+
+    bool operator<(const CigarOpIterator &other) const {
+        assert(cigar_ == other.cigar_);
+        return it_ < other.it_ || (it_ == other.it_ && pos_ < other.pos_);
+    }
+
+    bool operator<=(const CigarOpIterator &other) const {
+        assert(cigar_ == other.cigar_);
+        return it_ < other.it_ || (it_ == other.it_ && pos_ <= other.pos_);
+    }
+
+    bool operator>(const CigarOpIterator &other) const {
+        assert(cigar_ == other.cigar_);
+        return it_ > other.it_ || (it_ == other.it_ && pos_ > other.pos_);
+    }
+
+    bool operator>=(const CigarOpIterator &other) const {
+        assert(cigar_ == other.cigar_);
+        return it_ > other.it_ || (it_ == other.it_ && pos_ >= other.pos_);
+    }
+
+    size_t count_left() const { return it_->second - pos_; }
+    size_t offset() const { return pos_; }
+    Cigar::const_iterator get_it() const { return it_; }
+
+  private:
+    const Cigar *cigar_;
+    Cigar::const_iterator it_;
+    size_t pos_;
 };
 
 
@@ -178,6 +311,7 @@ class DBGAlignerConfig {
     int8_t gap_extension_penalty;
 
     bool forward_and_reverse_complement = false;
+    bool chain_alignments = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;
@@ -209,6 +343,12 @@ class DPTable;
 
 template <typename NodeType>
 class SuffixSeeder;
+
+template <typename NodeType = SequenceGraph::node_index>
+class AlignmentPrefix;
+
+template <typename NodeType = SequenceGraph::node_index>
+class AlignmentSuffix;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
@@ -257,6 +397,9 @@ class Alignment {
               NodeType *start_node,
               const Alignment &seed);
 
+    Alignment(const AlignmentPrefix<NodeType> &alignment_prefix);
+    Alignment(const AlignmentSuffix<NodeType> &alignment_suffix);
+
     void append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }
@@ -266,6 +409,12 @@ class Alignment {
     bool empty() const { return nodes_.empty(); }
 
     score_t get_score() const { return score_; }
+
+    static std::pair<Alignment, Alignment>
+    get_best_overlap(const Alignment &first, const Alignment &second,
+                     const DeBruijnGraph &graph,
+                     const DBGAlignerConfig &config);
+
     uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
 
     const std::string_view get_query() const {
@@ -409,6 +558,153 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
         << alignment.get_cigar().to_string() << "\t"
         << alignment.get_offset();
 
+    return out;
+}
+
+template <typename NodeType>
+class AlignmentSuffix {
+  public:
+    AlignmentSuffix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config)
+          : alignment_(&alignment),
+            config_(config),
+            begin_it_(alignment_->get_query().data()),
+            end_it_(alignment_->get_query_end()),
+            ref_begin_it_(alignment_->get_sequence().data()),
+            ref_end_it_(ref_begin_it_ + alignment_->get_sequence().size()),
+            cigar_begin_(alignment_->get_cigar(), alignment_->get_clipping()),
+            cigar_end_(alignment_->get_cigar(),
+                       alignment_->get_cigar().end()
+                          - static_cast<bool>(alignment_->get_end_clipping())),
+            cigar_it_(cigar_begin_),
+            score_(alignment_->get_score()),
+            trim_(0) {
+        assert(cigar_begin_ <= cigar_end_);
+        assert(cigar_it_ <= cigar_end_);
+    }
+
+    AlignmentSuffix& operator++();
+    AlignmentSuffix& operator--();
+
+    auto get_score() const { return score_; }
+    std::string_view get_query() const {
+        return std::string_view(begin_it_, end_it_ - begin_it_);
+    }
+
+    std::string_view get_sequence() const {
+        return std::string_view(ref_begin_it_, ref_end_it_ - ref_begin_it_);
+    }
+
+    Cigar::Operator get_front_op() const { return *cigar_it_; }
+    const CigarOpIterator& get_op_it() const {
+        assert(cigar_begin_ <= cigar_it_);
+        assert(cigar_it_ <= cigar_end_);
+        return cigar_it_;
+    }
+
+    bool eof() const { return cigar_it_ == cigar_end_; }
+    bool reof() const { return cigar_it_ == cigar_begin_; }
+
+    const Alignment<NodeType>& data() const { return *alignment_; }
+
+    size_t get_trim() const { return trim_; }
+
+  private:
+    typedef typename Alignment<NodeType>::score_t score_t;
+    const Alignment<NodeType> *alignment_;
+    DBGAlignerConfig config_;
+    const char *begin_it_;
+    const char *end_it_;
+    const char *ref_begin_it_;
+    const char *ref_end_it_;
+    CigarOpIterator cigar_begin_;
+    CigarOpIterator cigar_end_;
+    CigarOpIterator cigar_it_;
+    score_t score_;
+    size_t trim_;
+};
+
+template <typename NodeType>
+std::ostream& operator<<(std::ostream &out, const AlignmentSuffix<NodeType> &suffix) {
+    out << Alignment<NodeType>(suffix);
+    return out;
+}
+
+template <typename NodeType>
+class AlignmentPrefix {
+  public:
+    AlignmentPrefix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config,
+                    const DeBruijnGraph &graph)
+          : alignment_(&alignment),
+            graph_(&graph),
+            config_(config),
+            begin_it_(alignment_->get_query().data()),
+            end_it_(alignment_->get_query_end()),
+            ref_begin_it_(alignment_->get_sequence().data()),
+            ref_end_it_(ref_begin_it_ + alignment_->get_sequence().size()),
+            cigar_rbegin_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar(), alignment_->get_cigar().end()))),
+            cigar_rend_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar()))),
+            cigar_it_(cigar_rbegin_),
+            score_(alignment_->get_score()),
+            trim_(0), offset_(0), prefix_node_(DeBruijnGraph::npos),
+            node_it_(alignment_->end()) {
+        cigar_rbegin_ += alignment_->get_end_clipping();
+        cigar_rend_ -= alignment_->get_clipping();
+        cigar_it_ = cigar_rbegin_;
+
+        assert(cigar_rbegin_ <= cigar_rend_);
+        assert(cigar_it_ <= cigar_rend_);
+    }
+
+    AlignmentPrefix& operator++();
+    AlignmentPrefix& operator--();
+
+    auto get_score() const { return score_; }
+    std::string_view get_query() const {
+        return std::string_view(begin_it_, end_it_ - begin_it_);
+    }
+
+    std::string_view get_sequence() const {
+        return std::string_view(ref_begin_it_, ref_end_it_ - ref_begin_it_);
+    }
+
+    Cigar::Operator get_back_op() const { return *cigar_it_; }
+    typename std::vector<NodeType>::const_iterator get_node_end_it() const { return node_it_; }
+
+    bool eof() const {
+        return cigar_it_ == cigar_rend_ || (offset_ && !prefix_node_);
+    }
+    bool reof() const { return cigar_it_ == cigar_rbegin_; }
+
+    const Alignment<NodeType>& data() const { return *alignment_; }
+
+    size_t get_trim() const { return trim_; }
+    size_t get_offset() const { return offset_; }
+    DeBruijnGraph::node_index get_prefix_node() const { return prefix_node_; }
+
+    const DeBruijnGraph& get_graph() const { return *graph_; }
+
+  private:
+    typedef typename Alignment<NodeType>::score_t score_t;
+    const Alignment<NodeType> *alignment_;
+    const DeBruijnGraph *graph_;
+    DBGAlignerConfig config_;
+    const char *begin_it_;
+    const char *end_it_;
+    const char *ref_begin_it_;
+    const char *ref_end_it_;
+    std::reverse_iterator<CigarOpIterator> cigar_rbegin_;
+    std::reverse_iterator<CigarOpIterator> cigar_rend_;
+    std::reverse_iterator<CigarOpIterator> cigar_it_;
+    score_t score_;
+    size_t trim_;
+    size_t offset_;
+    DeBruijnGraph::node_index prefix_node_;
+    typename std::vector<NodeType>::const_iterator node_it_;
+};
+
+template <typename NodeType>
+std::ostream& operator<<(std::ostream &out, const AlignmentPrefix<NodeType> &prefix) {
+    out << Alignment<NodeType>(prefix);
     return out;
 }
 

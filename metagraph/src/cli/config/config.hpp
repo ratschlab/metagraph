@@ -95,6 +95,7 @@ class Config {
 
     // Alignment options
     bool alignment_edit_distance = false;
+    bool alignment_chain_alignments = true;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;

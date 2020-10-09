@@ -46,6 +46,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
+    aligner_config.chain_alignments = config.alignment_chain_alignments;
 
     if (!aligner_config.min_seed_length)
         aligner_config.min_seed_length = k;
@@ -68,6 +69,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact k-mer match fraction: {}", aligner_config.exact_kmer_match_fraction);
+    logger->trace("\t Chain alignments: {}", aligner_config.chain_alignments);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
@@ -330,9 +332,14 @@ int align_to_graph(Config *config) {
                         *out << "\t*\t*\t" << config->alignment_min_path_score
                              << "\t*\t*\t*";
                     } else {
+                        size_t sum = 0;
                         for (const auto &path : paths) {
+                            sum += path.get_score();
                             *out << "\t" << path;
                         }
+
+                        if (config->alignment_chain_alignments)
+                            *out << "\t" << sum;
                     }
 
                     *out << "\n";
