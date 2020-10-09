@@ -157,34 +157,42 @@ std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string>
 
 void clean_row_diff_files(const std::string &graph_name) {
     std::string outfbase = test_dump_basename + graph_name;
-    // TODO - update extension if needed
     for (const auto &suf :
-         { ".succ", ".pred", ".pred_boundary", ".terminal", "row_diff.column.annodbg" }) {
+         { ".succ", ".pred", ".pred_boundary", ".terminal", "row_diff.annodbg",
+           "dbg", "edgemask", "column.annodbg", "row_diff.annodbg" }) {
         std::filesystem::remove(outfbase + suf);
     }
 }
 
 TEST(RowDiff, succ) {
-    std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
-
-    const std::string outfbase = test_dump_basename + "column.diff.succ";
-    const std::string succ_file = outfbase + ".succ";
-    const std::string pred_file = outfbase + ".pred";
-    const std::string pred_boundary_file = outfbase + ".pred_boundary";
-    const std::vector<std::vector<uint64_t>> expected_succ
-            = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
-    const std::vector<std::vector<uint64_t>> expected_pred
-            = { {}, { 3, 2, 4 }, { 3, 5, 2, 4 } };
-    const std::vector<std::vector<bool>> expected_boundary
-            = { { 1, 1, 1, 1, 1 }, { 0, 1, 1, 1, 0, 1, 0, 1 }, { 0, 1, 1, 0, 1, 0, 1, 0, 1 } };
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ/";
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
-        clean_row_diff_files("column.diff.succ");
+        std::filesystem::remove_all(dst_dir);
+        std::filesystem::create_directories(dst_dir);
 
-        std::vector<std::unique_ptr<ColumnCompressed<>>> empty_source(1);
-        empty_source[0] = std::make_unique<ColumnCompressed<>>(5);
+        const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+        const std::string succ_file = graph_fname + ".succ";
+        const std::string pred_file = graph_fname + ".pred";
+        const std::string pred_boundary_file = graph_fname + ".pred_boundary";
+        const std::vector<std::vector<uint64_t>> expected_succ
+                = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
+        const std::vector<std::vector<uint64_t>> expected_pred
+                = { {}, { 3, 2, 4 }, { 3, 5, 2, 4 } };
+        const std::vector<std::vector<bool>> expected_boundary = {
+            { 1, 1, 1, 1, 1 }, { 0, 1, 1, 1, 0, 1, 0, 1 }, { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
+        };
 
-        convert_to_row_diff(*graph, std::move(empty_source), outfbase, max_depth);
+        std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+        graph->serialize(graph_fname);
+
+        ColumnCompressed<> source_annot(5);
+        source_annot.add_labels({ 0, 1, 2, 3, 4 }, { "Label1" });
+        std::string annot_fname
+                = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+        source_annot.serialize(annot_fname);
+
+        convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
         ASSERT_TRUE(std::filesystem::exists(pred_file));
@@ -215,107 +223,134 @@ TEST(RowDiff, succ) {
         }
     }
 
-    clean_row_diff_files("column.diff.succ");
+    std::filesystem::remove_all(dst_dir);
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
-    std::vector<std::unique_ptr<ColumnCompressed<>>> empty_source(1);
-    empty_source[0] = std::make_unique<ColumnCompressed<>>(5);
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty/";
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
+
+    std::string annot_fname
+            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    ColumnCompressed<>(5).serialize(annot_fname);
 
     std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
+    const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+    graph->serialize(graph_fname);
 
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir);
 
-    clean_row_diff_files("column.diff.empty");
-    std::string outfbase = test_dump_basename + "column.diff.empty";
-    std::vector<std::unique_ptr<RowDiffAnnotator>> result
-            = convert_to_row_diff<std::string>(*graph, std::move(empty_source), outfbase, 1);
+    const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffAnnotator::kExtension);
+    ASSERT_TRUE(std::filesystem::exists(dest_fname));
+    RowDiffAnnotator annotator;
+    annotator.load(dest_fname);
 
-    ASSERT_EQ(1u, result.size());
-    ASSERT_EQ(0u, result[0]->num_objects());
-    ASSERT_EQ(0u, result[0]->num_relations());
-    ASSERT_EQ(0u, result[0]->num_labels());
+    ASSERT_EQ(0u, annotator.num_objects());
+    ASSERT_EQ(0u, annotator.num_relations());
+    ASSERT_EQ(0u, annotator.num_labels());
 
-    clean_row_diff_files("column.diff.empty");
+    std::filesystem::remove_all(dst_dir);
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
-    const std::string outfbase = test_dump_basename + "column.diff.convert";
-    const std::string succ_file = outfbase + ".succ";
-    clean_row_diff_files("column.diff.convert");
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_same_labels/";
+    const std::string graph_fname
+            = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+    const std::string annot_fname
+            = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
+    const std::string dest_fname
+            = dst_dir/(std::string("ACGTCAG") + RowDiffAnnotator::kExtension);
 
-    std::vector<std::vector<std::string>> label_groups
-            = { { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" } };
+    std::vector<std::vector<std::string>> label_groups = {
+            { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" }
+    };
+
+    const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
+
     for (const auto &labels : label_groups) {
-        auto graph = std::make_unique<graph::DBGSuccinct>(3);
-        graph->add_sequence("ACGTCAC");
-        graph->mask_dummy_kmers(1, false);
-
-        const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
-
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
-            auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
-            initial_annotation->add_labels({ 0, 1, 2, 3, 4 }, labels);
+            std::filesystem::remove_all(dst_dir);
+            std::filesystem::create_directories(dst_dir);
 
-            std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
-            source[0] = std::move(initial_annotation);
+            std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAC" });
+            graph->serialize(graph_fname);
 
-            std::vector<std::unique_ptr<RowDiffAnnotator>> result
-                    = convert_to_row_diff(*graph, std::move(source), outfbase, max_depth);
-            clean_row_diff_files("column.diff.convert");
+            ColumnCompressed source_annot(5);
+            source_annot.add_labels({ 0, 1, 2, 3, 4 }, labels);
+            source_annot.serialize(annot_fname);
 
-            ASSERT_EQ(1U, result.size());
+            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
 
-            ASSERT_EQ(labels.size(), result[0]->num_labels());
-            ASSERT_EQ(5u, result[0]->num_objects());
+            ASSERT_TRUE(std::filesystem::exists(dest_fname));
+            RowDiffAnnotator annotator;
+            annotator.load(dest_fname);
+            const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                    .set_graph(graph.get());
+
+            ASSERT_EQ(labels.size(), annotator.num_labels());
+            ASSERT_EQ(5u, annotator.num_objects());
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
-                      result[0]->num_relations());
+                      annotator.num_relations()) << "Labels " << labels.size() << " Depth: " << max_depth;
 
-            for (uint32 i = 0; i < result[0]->num_objects(); ++i) {
-                ASSERT_THAT(result[0]->get(i), ContainerEq(labels));
+            for (uint32 i = 0; i < annotator.num_objects(); ++i) {
+                ASSERT_THAT(annotator.get(i), ContainerEq(labels));
             }
         }
     }
+    std::filesystem::remove_all(dst_dir);
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
-    const std::string outfbase = test_dump_basename + "column.diff.convert";
-    const std::string succ_file = outfbase + ".succ";
-    clean_row_diff_files("column.diff.convert");
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_multi_col/";
+    const std::string graph_fname
+            = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
 
     std::vector<std::vector<std::string>> label_groups
             = { { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" } };
+
     for (const auto &labels : label_groups) {
-        auto graph = std::make_unique<graph::DBGSuccinct>(3);
-        graph->add_sequence("ACGTCAC");
-        graph->mask_dummy_kmers(1, false);
-
-        const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
-
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
-            std::vector<std::unique_ptr<ColumnCompressed<>>> sources;
+            std::vector<std::string> annot_fnames;
+            std::filesystem::remove_all(dst_dir);
+            std::filesystem::create_directories(dst_dir);
+
+            std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAC" });
+            graph->serialize(graph_fname);
+
+            const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
+
+            std::vector<std::string> sources;
             for (const std::string &label : labels) {
-                auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
-                initial_annotation->add_labels({ 0, 1, 2, 3, 4 }, { label });
-                sources.push_back(std::move(initial_annotation));
+                ColumnCompressed source_annot(5);
+                source_annot.add_labels({ 0, 1, 2, 3, 4 }, { label });
+                const std::string annot_fname
+                        = dst_dir/(label + ColumnCompressed<>::kExtension);
+                source_annot.serialize(annot_fname);
+                annot_fnames.push_back(annot_fname);
             }
 
-            std::vector<std::unique_ptr<RowDiffAnnotator>> result
-                    = convert_to_row_diff(*graph, std::move(sources), outfbase, max_depth);
-            clean_row_diff_files("column.diff.convert");
+            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir);
 
-            ASSERT_EQ(labels.size(), result.size());
-            for (uint32_t i = 0; i < result.size(); ++i) {
-                ASSERT_EQ(1, result[i]->num_labels());
-                ASSERT_EQ(5u, result[i]->num_objects());
-                EXPECT_EQ(expected_relations[max_depth - 1],
-                          result[i]->num_relations());
+            for (uint32_t i = 0; i < labels.size(); ++i) {
+                std::string rd_anno = dst_dir/(labels[i] + RowDiffAnnotator::kExtension);
+                ASSERT_TRUE(std::filesystem::exists(rd_anno));
+                RowDiffAnnotator annotator;
+                annotator.load(rd_anno);
+                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                        .set_graph(graph.get());
 
-                for (uint32 idx = 0; idx < result[i]->num_objects(); ++idx) {
-                    ASSERT_THAT(result[i]->get(idx), ElementsAre(labels[i]));
+                ASSERT_EQ(1, annotator.num_labels());
+                ASSERT_EQ(5u, annotator.num_objects());
+                EXPECT_EQ(expected_relations[max_depth - 1], annotator.num_relations());
+
+                for (uint32 idx = 0; idx < annotator.num_objects(); ++idx) {
+                    ASSERT_THAT(annotator.get(idx), ElementsAre(labels[i]));
                 }
             }
         }
     }
+    std::filesystem::remove_all(dst_dir);
 }
 
 void test_row_diff(uint32_t k,
@@ -323,42 +358,56 @@ void test_row_diff(uint32_t k,
                    const std::vector<std::string> &sequences,
                    const std::vector<std::vector<std::string>> &annotations,
                    const std::string &prefix) {
-    const std::string outfbase = test_dump_basename + prefix;
-    clean_row_diff_files(prefix);
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/prefix;
+    const std::string graph_fname
+            = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
+    const std::string annot_fname
+            = dst_dir/(std::string("anno") + ColumnCompressed<>::kExtension);
+    const std::string dest_fname
+            = dst_dir/(std::string("anno") + RowDiffAnnotator::kExtension);
+
+
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
 
     auto graph = std::make_unique<graph::DBGSuccinct>(k);
     for (const auto& seq : sequences) {
         graph->add_sequence(seq);
     }
     graph->mask_dummy_kmers(1, false);
+    graph->serialize(graph_fname);
 
-    auto initial_annotation = std::make_unique<ColumnCompressed<>>(graph->num_nodes());
+    ColumnCompressed initial_annotation(graph->num_nodes());
     std::vector<uint32_t> added_idx(graph->num_nodes());
     std::unordered_set<std::string> all_labels;
     for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
         const std::vector<std::string> &labels = annotations[anno_idx];
-        initial_annotation->add_labels({anno_idx}, labels);
+        initial_annotation.add_labels({anno_idx}, labels);
         std::for_each(labels.begin(), labels.end(), [&](auto l) { all_labels.insert(l); });
     }
 
-    std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
-    source[0] = std::move(initial_annotation);
+    initial_annotation.serialize(annot_fname);
 
-    std::vector<std::unique_ptr<RowDiffAnnotator>> result
-            = convert_to_row_diff(*graph, std::move(source), outfbase, max_depth);
-    clean_row_diff_files(prefix);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
 
-    ASSERT_EQ(1U, result.size());
-    ASSERT_EQ(all_labels.size(), result[0]->num_labels());
-    ASSERT_EQ(graph->num_nodes(), result[0]->num_objects());
+    ASSERT_TRUE(std::filesystem::exists(dest_fname));
+    RowDiffAnnotator annotator;
+    annotator.load(dest_fname);
+    const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+            .set_graph(graph.get());
+
+    ASSERT_EQ(all_labels.size(), annotator.num_labels());
+    ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
 
     for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        ASSERT_THAT(result[0]->get(anno_idx),
+        ASSERT_THAT(annotator.get(anno_idx),
                     UnorderedElementsAreArray(annotations[anno_idx]));
     }
+
+    std::filesystem::remove_all(dst_dir);
 }
 
-TEST(CoumnDiff, ConvertFromColumnCompressed) {
+TEST(RowDiff, ConvertFromColumnCompressed) {
     test_row_diff(3, 5, { "ACGTCAC" },
                      { { "Label0", "Label2", "Label8" },
                        {},
@@ -412,45 +461,6 @@ TEST(RowDiff, ConvertFromColumnCompressed2BigLoops) {
     }
 
     test_row_diff(10, 3, sequences, annotations, "column.diff.2bigloops");
-}
-
-
-TEST(CoumnDiff, ConvertFromColumnCompressedWithMergesAndBifurcations) {
-    const std::string outfbase = test_dump_basename + "column.diff.convert";
-    const std::string succ_file = outfbase + ".succ";
-    clean_row_diff_files("column.diff.convert");
-
-    auto initial_annotation = std::make_unique<ColumnCompressed<>>(5);
-    initial_annotation->add_labels({ 0 }, {"Label0", "Label2", "Label8"});
-    initial_annotation->add_labels({ 2 }, {"Label1", "Label2"});
-    initial_annotation->add_labels({ 3 }, {"Label1", "Label2", "Label8"});
-    initial_annotation->add_labels({ 4 }, {"Label2"});
-
-    std::vector<std::unique_ptr<ColumnCompressed<>>> source(1);
-    source[0] = std::move(initial_annotation);
-
-    auto graph = std::make_unique<graph::DBGSuccinct>(3);
-    graph->add_sequence("ACGTCAC");
-    graph->mask_dummy_kmers(1, false);
-
-    constexpr uint32_t max_depth = 5;
-    std::vector<std::unique_ptr<RowDiffAnnotator>> result
-            = convert_to_row_diff(*graph, std::move(source), outfbase, max_depth);
-    clean_row_diff_files("column.diff.convert");
-
-    ASSERT_EQ(1U, result.size());
-
-    ASSERT_EQ(4u, result[0]->num_labels());
-    ASSERT_EQ(5u, result[0]->num_objects());
-    // we added 9 relations, and after sparsification we have 12 (because in our
-    // test graph there is no correlation between annotation and vicinity)
-    ASSERT_EQ(12u, result[0]->num_relations());
-
-    ASSERT_THAT(result[0]->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
-    ASSERT_THAT(result[0]->get(1), UnorderedElementsAre());
-    ASSERT_THAT(result[0]->get(2), UnorderedElementsAre("Label1", "Label2"));
-    ASSERT_THAT(result[0]->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
-    ASSERT_THAT(result[0]->get(4), UnorderedElementsAre("Label2"));
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {

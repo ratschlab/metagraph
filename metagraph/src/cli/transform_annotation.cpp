@@ -334,69 +334,9 @@ int transform_annotation(Config *config) {
 
             }
             case Config::RowDiff: {
-                logger->trace("Loading graph...");
-                graph::DBGSuccinct graph(2);
-                bool result = graph.load(config->infbase);
-                if (!result) {
-                    logger->error("Cannot load graph from {}", config->infbase);
-                    std::exit(1);
-                }
-
-                // load as many columns as we can fit in memory, and convert them
-                size_t avail_mem_bytes = config->memory_available * 1e9;
-                avail_mem_bytes -= std::filesystem::file_size(config->infbase);
-
-                for (uint32_t i = 0; i < files.size();) {
-                    logger->trace("Loading columns for batch-conversion...");
-                    size_t cur_mem_bytes = avail_mem_bytes;
-                    std::vector<std::string> file_batch;
-                    for (; i < files.size(); ++i) {
-                        // *2 in order to account for constructing the sparsified column
-                        size_t file_size = 2 * std::filesystem::file_size(files[i]);
-                        if (file_size > avail_mem_bytes) {
-                            logger->warn(
-                                    "Not enough memory to process {}, requires {} MB",
-                                    files[i], file_size/1e6);
-                            continue;
-                        }
-                        if (file_size > cur_mem_bytes) {
-                            break;
-                        }
-                        cur_mem_bytes -= file_size;
-                        file_batch.push_back(files[i]);
-                    }
-
-                    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> anno_batch;
-                    for(const auto& fname : file_batch) {
-                        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-                        anno->merge_load({fname});
-                        anno_batch.push_back(std::move(anno));
-                    }
-                    timer.reset();
-                    logger->trace("Starting converting column-batch with {} columns ...",
-                                  file_batch.size());
-                    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diffs
-                            = convert_to_row_diff(graph, std::move(anno_batch),
-                                                  config->infbase, config->max_path_length);
-                    logger->trace("Column-batch converted in {} sec", timer.elapsed());
-
-                    logger->trace("Serializing columns...", config->outfbase);
-                    timer.reset();
-                    assert(row_diffs.size() == file_batch.size());
-                    for(uint32_t idx = 0; idx < file_batch.size(); ++idx) {
-                        using std::filesystem::path;
-                        auto fname = path(file_batch[idx])
-                                             .filename()
-                                             .replace_extension()
-                                             .replace_extension(
-                                                     RowDiffAnnotator::kExtension);
-                        auto fpath = path(config->outfbase).remove_filename()/fname;
-                        row_diffs[idx]->serialize(fpath);
-                        logger->trace("Serialized {}", fpath);
-                    }
-                    logger->trace("Serialization done in {} sec", timer.elapsed());
-                }
-
+                auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
+                convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
+                                    config->max_path_length, out_dir);
                 break;
             }
             case Config::RowCompressed: {

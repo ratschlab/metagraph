@@ -1173,22 +1173,29 @@ void build_successor(const graph::DBGSuccinct &graph,
     fterm.close();
 }
 
-template <typename Label>
-std::vector<std::unique_ptr<RowDiffAnnotator>>
-convert_to_row_diff(const graph::DBGSuccinct &graph,
-                       std::vector<std::unique_ptr<ColumnCompressed<Label>>> &&sources,
-                       const std::string &outfbase,
-                       uint32_t max_depth) {
-    if (sources.empty())
-        return {};
 
-    build_successor(graph, outfbase, max_depth, get_num_threads());
+void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
+                               const std::string &graph_fname,
+                               const std::vector<std::string> &source_files,
+                               const std::filesystem::path &dest_dir,
+                               uint32_t max_depth) {
+    if (source_files.empty())
+        return;
+
+    build_successor(graph, graph_fname, max_depth, get_num_threads());
+
+    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
+    for(const auto& fname : source_files) {
+        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
+        anno->merge_load({fname});
+        sources.push_back(std::move(anno));
+    }
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
     using SSD = common::SortedSetDisk<uint64_t>;
     std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
     std::vector<std::vector<uint64_t>> targets_size(sources.size());
-    std::filesystem::path tmp_path = std::filesystem::path(outfbase).remove_filename()/"tmp_col";
+    std::filesystem::path tmp_path = std::filesystem::path(dest_dir).remove_filename()/"tmp_col";
     std::filesystem::remove_all(tmp_path);
     for (uint64_t i = 0; i < sources.size(); ++i) {
         if (sources[i]->num_labels() == 0)
@@ -1207,11 +1214,11 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
 
     uint64_t num_rows = graph.num_nodes();
 
-    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::in, 1024*1024);
-    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::in, 1024*1024);
+    sdsl::int_vector_buffer succ(graph_fname + ".succ", std::ios::in, 1024*1024);
+    sdsl::int_vector_buffer pred(graph_fname + ".pred", std::ios::in, 1024*1024);
     sdsl::rrr_vector pred_boundary;
 
-    std::ifstream fpred_boundary(outfbase + ".pred_boundary");
+    std::ifstream fpred_boundary(graph_fname + ".pred_boundary");
     pred_boundary.load(fpred_boundary);
     fpred_boundary.close();
 
@@ -1251,7 +1258,8 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
-            if(sources[l_idx]->num_objects() != graph.num_nodes()) {
+            if (sources[l_idx]->num_labels()
+                && sources[l_idx]->num_objects() != graph.num_nodes()) {
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
                         "annotation has {} entries",
@@ -1290,15 +1298,13 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
 
     assert(pred_boundary_it == pred_boundary.end());
 
-    std::vector<std::unique_ptr<RowDiffAnnotator>> result;
-
     std::vector<LabelEncoder<std::string>> label_encoders;
     std::for_each(sources.begin(), sources.end(), [&](auto& source) {
         label_encoders.push_back(source->get_label_encoder());
     });
 
     // free memory occupied by sources
-    std::vector<std::unique_ptr<ColumnCompressed<Label>>>().swap(sources);
+    std::vector<std::unique_ptr<ColumnCompressed<>>>().swap(sources);
 
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -1316,21 +1322,64 @@ convert_to_row_diff(const graph::DBGSuccinct &graph,
         }
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                &graph, std::move(matrix),outfbase + ".terminal");
-        result.push_back(std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
-                                                            label_encoders[l_idx]));
+                &graph, std::move(matrix), graph_fname + ".terminal");
+        RowDiffAnnotator annotator(std::move(diff_annotation), label_encoders[l_idx]);
+        auto fname = std::filesystem::path(source_files[l_idx])
+                .filename()
+                .replace_extension()
+                .replace_extension(
+                        RowDiffAnnotator::kExtension);
+        auto fpath = dest_dir/fname;
+        annotator.serialize(fpath);
+        logger->trace("Serialized {}", fpath);
     }
 
     std::filesystem::remove_all(tmp_path);
-
-    return result;
 }
 
-template std::vector<std::unique_ptr<RowDiffAnnotator>> convert_to_row_diff(
-        const graph::DBGSuccinct &graph,
-        std::vector<std::unique_ptr<ColumnCompressed<std::string>>> &&sources,
-        const std::string &outfbase,
-        uint32_t max_depth);
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string& graph_fname,
+                         size_t mem_bytes,
+                         uint32_t max_path_length,
+                         const std::filesystem::path &dest_dir) {
+    logger->trace("Loading graph...");
+    graph::DBGSuccinct graph(2);
+    bool result = graph.load(graph_fname);
+    if (!result) {
+        logger->error("Cannot load graph from {}", graph_fname);
+        std::exit(1);
+    }
+
+    mem_bytes -= std::filesystem::file_size(graph_fname);
+    // load as many columns as we can fit in memory, and convert them
+    for (uint32_t i = 0; i < files.size();) {
+        logger->trace("Loading columns for batch-conversion...");
+        size_t cur_mem_bytes = mem_bytes;
+        std::vector<std::string> file_batch;
+        for (; i < files.size(); ++i) {
+            // *2 in order to account for constructing the sparsified column
+            size_t file_size = 2 * std::filesystem::file_size(files[i]);
+            if (file_size > mem_bytes) {
+                logger->warn(
+                        "Not enough memory to process {}, requires {} MB",
+                        files[i], file_size/1e6);
+                continue;
+            }
+            if (file_size > cur_mem_bytes) {
+                break;
+            }
+            cur_mem_bytes -= file_size;
+            file_batch.push_back(files[i]);
+        }
+
+        Timer timer;
+        logger->trace("Starting converting column-batch with {} columns ...",
+                      file_batch.size());
+        convert_batch_to_row_diff(graph, graph_fname, file_batch, dest_dir, max_path_length);
+        logger->trace("Column-batch converted in {} sec", timer.elapsed());
+    }
+
+}
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase) {

@@ -90,22 +90,24 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * nodes rather than the actual annotation.
  * Since adjacent nodes in a graph have a high probability of sharing annotations, storing
  * diffs rather than the full annotation results in a sparser matrix.
- * @param graph the graph used for selecting adjacent nodes
- * @param sources list of annotations in #ColumnCompressed format. Typically, each source
+ * @param files annotations in #ColumnCompressed format. Typically, each source
  * contains a single column, but this is not a requirement
- * @param outfbase directory where the pred/succ/term vectors that determine the diff
+ * @param graph the graph used for selecting adjacent nodes
+ * @param graph_path directory where the pred/succ/term vectors that determine the diff
  * succession will be dumped
- * @param max_depth maximum distance between terminal nodes, i.e. nodes whose annotation
+ * @param mem_bytes available memory for loading columns; the function will load as many
+ * columns as can fit in memory in one go and transform the entire batch, then repeat with
+ * the next batch until all input files are exhausted
+ * @param max_path_length maximum distance between terminal nodes, i.e. nodes whose annotation
  * is fully stored
- * @return the sparsified columns, wrapped in a static annotator that contains a #RowDiff
- * that wraps the column in #ColumnMajor format
+ * @param out_dir directory where the transformed columns will be dumped. Filenames are
+ * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  */
-template <typename Label>
-std::vector<std::unique_ptr<RowDiffAnnotator>>
-convert_to_row_diff(const graph::DBGSuccinct &graph,
-                       std::vector<std::unique_ptr<ColumnCompressed<Label>>> &&sources,
-                       const std::string &outfbase,
-                       uint32_t max_depth);
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string& graph_fname,
+                         size_t mem_bytes,
+                         uint32_t max_path_length,
+                         const std::filesystem::path &dest_dir);
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
