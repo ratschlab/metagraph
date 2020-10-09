@@ -112,7 +112,7 @@ inline void unset_bit(uint64_t *v,
 
 inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
                              std::mutex &backup_mutex) {
-#ifdef MODE_TI
+#if 0
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -126,15 +126,15 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
 #endif
 
     std::lock_guard<std::mutex> lock(backup_mutex);
-    std::atomic_thread_fence(std::memory_order_acquire);
+    // std::atomic_thread_fence(std::memory_order_acquire);
     return vector[i];
 }
 
 inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
                                      uint64_t count,
                                      std::mutex &backup_mutex) {
+#if 0
     // TODO: support adding negatives
-#ifdef MODE_TI
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -156,16 +156,16 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
 #endif
 
     std::lock_guard<std::mutex> lock(backup_mutex);
-    std::atomic_thread_fence(std::memory_order_acquire);
+    // std::atomic_thread_fence(std::memory_order_acquire);
     uint64_t old_val = vector[i];
     vector[i] += count;
-    std::atomic_thread_fence(std::memory_order_release);
+    // std::atomic_thread_fence(std::memory_order_release);
     return old_val;
 }
 
 inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
                                 std::mutex &backup_mutex) {
-#ifdef MODE_TI
+#if 0
     size_t width = vector.width();
     uint64_t bit_pos = i * width;
     uint8_t shift = bit_pos & 0x7F;
@@ -187,10 +187,10 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
 #endif
 
     std::lock_guard<std::mutex> lock(backup_mutex);
-    std::atomic_thread_fence(std::memory_order_acquire);
+    // std::atomic_thread_fence(std::memory_order_acquire);
     uint64_t old_val = vector[i];
     vector[i] = val;
-    std::atomic_thread_fence(std::memory_order_release);
+    // std::atomic_thread_fence(std::memory_order_release);
     return old_val;
 }
 
