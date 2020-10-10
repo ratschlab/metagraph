@@ -1190,6 +1190,9 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         anno->merge_load({fname});
         sources.push_back(std::move(anno));
     }
+    logger->trace("Done loading {} annotations", sources.size());
+
+    ProgressBar ssds(sources.size(), "Create ssds", std::cerr, !common::get_verbose());
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
     using SSD = common::SortedSetDisk<uint64_t>;
@@ -1210,6 +1213,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                                                     std::numeric_limits<uint64_t>::max());
             targets[i].push_back(std::move(sorted_set));
         }
+        ++ssds;
     }
 
     uint64_t num_rows = graph.num_nodes();
