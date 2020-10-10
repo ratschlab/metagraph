@@ -41,16 +41,12 @@ struct DifferentialAssemblyConfig {
 // annotated with. The least significant half of each integer represents the count
 // from labels_in, while the most significant half represents the count from
 // labels_out.
-// If a non-null pointer is passed as init_counts, those counts will be prepended
-// to the elements in the returned int_vector.
-// The bitmap indicates the positions in the returned int_vector whose values are
-// greater than those respective values in init_counts.
+// The returned bitmap is a binarization of the int_vector
 std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                   const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                  size_t num_threads,
-                  const sdsl::int_vector<> *init_counts = nullptr);
+                  size_t num_threads);
 
 
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
@@ -63,8 +59,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_post,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_post,
                     const DifferentialAssemblyConfig &config,
-                    size_t num_threads = 1,
-                    const sdsl::int_vector<> *init_counts = nullptr);
+                    size_t num_threads = 1);
 
 } // namespace graph
 } // namespace mtg

@@ -57,8 +57,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                         const std::vector<Label> &labels_in_post,
                                         const std::vector<Label> &labels_out_post,
                                         const DifferentialAssemblyConfig &config,
-                                        size_t num_threads,
-                                        const sdsl::int_vector<> *init_counts) {
+                                        size_t num_threads) {
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -73,8 +72,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
-    auto fill_vector = fill_count_vector(anno_graph, labels_in, labels_out,
-                                         num_threads, init_counts);
+    auto fill_vector = fill_count_vector(anno_graph, labels_in, labels_out, num_threads);
     auto &[counts, union_mask] = fill_vector;
 
     // counts is a double-width, interleaved vector where the significant bits
@@ -321,8 +319,7 @@ std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
 fill_count_vector(const AnnotatedDBG &anno_graph,
                   const std::vector<Label> &labels_in,
                   const std::vector<Label> &labels_out,
-                  size_t num_threads,
-                  const sdsl::int_vector<> *init_counts) {
+                  size_t num_threads) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -343,13 +340,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
-
-    if (init_counts) {
-        assert(init_counts->size() == graph->max_index() + 1);
-        call_nonzeros(*init_counts, [&](uint64_t i, uint64_t val) {
-            counts[i] = val;
-        });
-    }
 
     std::vector<uint64_t> label_in_codes(labels_in.size());
     std::vector<uint64_t> label_out_codes(labels_out.size());

@@ -53,8 +53,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        const std::vector<std::string> &label_mask_in_post,
                        const std::vector<std::string> &label_mask_out_post,
                        const DifferentialAssemblyConfig &diff_config,
-                       size_t num_threads,
-                       const sdsl::int_vector<> *init_counts = nullptr) {
+                       size_t num_threads) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
@@ -85,7 +84,7 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
         anno_graph,
         label_mask_in, label_mask_out,
         label_mask_in_post, label_mask_out_post,
-        diff_config, num_threads, init_counts
+        diff_config, num_threads
     ));
 }
 
