@@ -1203,7 +1203,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     for (uint64_t i = 0; i < sources.size(); ++i) {
         if (sources[i]->num_labels() == 0)
             continue;
-        const uint64_t num_elements = std::min(1'000'00ULL, sources[i]->num_relations());
+        const uint64_t num_elements
+                = std::min((uint64_t)1'000'000, sources[i]->num_relations());
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
             std::filesystem::path tmp_dir
@@ -1369,7 +1370,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                         files[i], file_size/1e6);
                 continue;
             }
-            if (file_size > cur_mem_bytes) {
+            if (file_size > cur_mem_bytes || file_batch.size() >= 15'000) {
                 break;
             }
             cur_mem_bytes -= file_size;
