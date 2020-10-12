@@ -360,7 +360,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex);
+                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex, __ATOMIC_RELAXED);
             });
         });
 
@@ -375,7 +375,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex);
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, __ATOMIC_RELAXED);
             });
         });
 
@@ -406,10 +406,12 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                         callback(i, true);
                         atomic_fetch_and_add(counts, i * 2,
                                              atomic_fetch(counts, *it * 2, count_mutex),
-                                             count_mutex);
+                                             count_mutex,
+                                             __ATOMIC_RELAXED);
                         atomic_fetch_and_add(counts, i * 2 + 1,
                                              atomic_fetch(counts, *it * 2 + 1, count_mutex),
-                                             count_mutex);
+                                             count_mutex,
+                                             __ATOMIC_RELAXED);
                     }
                     ++it;
                 });
