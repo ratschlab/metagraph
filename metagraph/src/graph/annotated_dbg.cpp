@@ -15,11 +15,13 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 
-typedef std::pair<std::string, size_t> StringCountPair;
-
 
 namespace mtg {
 namespace graph {
+
+typedef AnnotatedDBG::Label Label;
+typedef std::pair<Label, size_t> StringCountPair;
+
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
@@ -37,8 +39,8 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
 
 void AnnotatedSequenceGraph
-::annotate_sequence(const std::string &sequence,
-                    const std::vector<std::string> &labels) {
+::annotate_sequence(std::string_view sequence,
+                    const std::vector<Label> &labels) {
     assert(check_compatibility());
 
     std::vector<row_index> indices;
@@ -55,7 +57,7 @@ void AnnotatedSequenceGraph
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (force_fast_) {
-        auto row_major = dynamic_cast<annot::RowCompressed<std::string>*>(annotator_.get());
+        auto row_major = dynamic_cast<annot::RowCompressed<Label>*>(annotator_.get());
         if (row_major) {
             row_major->add_labels_fast(indices, labels);
             return;
@@ -65,8 +67,8 @@ void AnnotatedSequenceGraph
     annotator_->add_labels(indices, labels);
 }
 
-std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
-                                                  double presence_ratio) const {
+std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
+                                            double presence_ratio) const {
     assert(presence_ratio >= 0.);
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
@@ -99,7 +101,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     return get_labels(index_counts.values_container(), min_count);
 }
 
-std::vector<std::string>
+std::vector<Label>
 AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                          size_t min_count) const {
     assert(check_compatibility());
@@ -110,7 +112,7 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
         std::max(min_count, size_t(1))
     );
 
-    std::vector<std::string> labels;
+    std::vector<Label> labels;
     labels.reserve(code_counts.size());
 
     const auto &label_encoder = annotator_->get_label_encoder();
@@ -123,7 +125,7 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
     return labels;
 }
 
-std::vector<std::string>
+std::vector<Label>
 AnnotatedSequenceGraph::get_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
@@ -132,7 +134,7 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
 }
 
 std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::string &sequence,
+AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
                              double presence_ratio) const {
     assert(presence_ratio >= 0.);
@@ -168,8 +170,8 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     return top_labels;
 }
 
-std::vector<std::pair<std::string, sdsl::bit_vector>>
-AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
+std::vector<std::pair<Label, sdsl::bit_vector>>
+AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double presence_ratio) const {
     assert(presence_ratio >= 0.);
@@ -182,7 +184,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     if (presence_ratio == 1.) {
-        std::vector<std::pair<std::string, sdsl::bit_vector>> presence_vectors;
+        std::vector<std::pair<Label, sdsl::bit_vector>> presence_vectors;
 
         auto label_counts = get_top_labels(sequence, num_top_labels, presence_ratio);
         presence_vectors.reserve(label_counts.size());
@@ -255,7 +257,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
         vector.resize(num_top_labels);
     }
 
-    std::vector<std::pair<std::string, sdsl::bit_vector>> results;
+    std::vector<std::pair<Label, sdsl::bit_vector>> results;
     results.reserve(vector.size());
 
     for (const auto &[code, mask_count] : vector) {
@@ -277,7 +279,7 @@ AnnotatedDBG::get_top_label_signatures(const std::string &sequence,
     auto top_labels = get_top_labels(sequence, num_top_labels, presence_ratio);
     assert(top_labels.size() == results.size());
 
-    std::unordered_map<std::string, uint64_t> check(top_labels.begin(), top_labels.end());
+    std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());
     for (const auto &[label, mask] : results) {
         auto find = check.find(label);
         assert(find != check.end());
@@ -326,11 +328,11 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     return label_counts;
 }
 
-bool AnnotatedSequenceGraph::label_exists(const std::string &label) const {
+bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
     return annotator_->label_exists(label);
 }
 
-bool AnnotatedSequenceGraph::has_label(node_index index, const std::string &label) const {
+bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
@@ -338,7 +340,7 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const std::string &labe
 }
 
 void AnnotatedSequenceGraph
-::call_annotated_nodes(const std::string &label,
+::call_annotated_nodes(const Label &label,
                        std::function<void(node_index)> callback) const {
     assert(check_compatibility());
 

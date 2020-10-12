@@ -16,7 +16,8 @@ namespace graph {
 
 class AnnotatedSequenceGraph {
   public:
-    typedef annot::MultiLabelEncoded<std::string> Annotator;
+    typedef std::string Label;
+    typedef annot::MultiLabelEncoded<Label> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -26,18 +27,18 @@ class AnnotatedSequenceGraph {
 
     virtual ~AnnotatedSequenceGraph() {}
 
-    virtual std::vector<std::string> get_labels(node_index index) const;
+    virtual std::vector<Label> get_labels(node_index index) const;
 
-    virtual bool has_label(node_index index, const std::string &label) const;
+    virtual bool has_label(node_index index, const Label &label) const;
 
     // thread-safe, can be called from multiple threads concurrently
-    virtual void annotate_sequence(const std::string &sequence,
-                                   const std::vector<std::string> &labels);
+    virtual void annotate_sequence(std::string_view sequence,
+                                   const std::vector<Label> &labels);
 
-    virtual void call_annotated_nodes(const std::string &label,
+    virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
 
-    virtual bool label_exists(const std::string &label) const;
+    virtual bool label_exists(const Label &label) const;
 
     virtual bool check_compatibility() const;
 
@@ -65,10 +66,6 @@ class AnnotatedSequenceGraph {
 
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
-    typedef annot::MultiLabelEncoded<std::string> Annotator;
-    using node_index = DeBruijnGraph::node_index;
-    using row_index = Annotator::Index;
-
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                  std::unique_ptr<Annotator>&& annotation,
                  bool force_fast = false);
@@ -80,25 +77,25 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     /*********************** Special queries **********************/
 
     // return labels that occur at least in |presence_ratio| k-mers
-    std::vector<std::string> get_labels(const std::string &sequence,
-                                        double presence_ratio) const;
+    std::vector<Label> get_labels(std::string_view sequence,
+                                  double presence_ratio) const;
 
-    std::vector<std::string> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
-                                        size_t min_count) const;
+    std::vector<Label> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
+                                  size_t min_count) const;
 
     // return top |num_top_labels| labels with their counts
-    std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::string &sequence,
+    std::vector<std::pair<Label, size_t>>
+    get_top_labels(std::string_view sequence,
                    size_t num_top_labels,
                    double presence_ratio = 0.0) const;
 
-    std::vector<std::pair<std::string, size_t>>
+    std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                    size_t num_top_labels,
                    size_t min_count = 0) const;
 
-    std::vector<std::pair<std::string, sdsl::bit_vector>>
-    get_top_label_signatures(const std::string &sequence,
+    std::vector<std::pair<Label, sdsl::bit_vector>>
+    get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double presence_ratio = 0.0) const;
 
