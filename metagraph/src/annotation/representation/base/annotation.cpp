@@ -177,7 +177,8 @@ void MultiLabelAnnotation<IndexType, LabelType>
     std::ignore = indices;
     std::ignore = labels;
     std::ignore = counts;
-    throw std::runtime_error("Adding label counts is not implemented");
+    logger->error("Adding label counts is not implemented for this annotator");
+    exit(1);
 }
 
 template class MultiLabelEncoded<std::string>;

@@ -179,6 +179,8 @@ void add_kmer_counts(const std::string &file,
             callback(read_stream->seq.s, labels,
                      std::vector<uint32_t>(kmer_counts, kmer_counts + read_stream->seq.l - k + 1));
 
+            total_seqs++;
+
             if (logger->level() <= spdlog::level::level_enum::trace
                                             && total_seqs % 10000 == 0) {
                 logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
