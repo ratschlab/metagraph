@@ -1121,6 +1121,7 @@ void build_successor(const graph::DBGSuccinct &graph,
     std::vector<bool> pred_boundary;
     sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
 
+    // TODO: parallelize this
     for(uint64_t i = 1; i <= graph.num_nodes(); ++i) {
         uint64_t boss_idx = graph.kmer_to_boss_index(i);
         if (dummy[boss_idx] || terminal[boss_idx]) {
