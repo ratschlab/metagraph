@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <sdsl/enc_vector.hpp>
+
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
@@ -20,7 +22,8 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
+const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
+const uint8_t kCountWidth = 8;
 
 
 template <typename Label>
@@ -73,6 +76,42 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 }
 
 template <typename Label>
+void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
+                                               const VLabels &labels,
+                                               const std::vector<uint32_t> &counts) {
+    assert(indices.size() == counts.size());
+
+    const auto &columns = get_matrix().data();
+
+    if (relation_counts_.size() != columns.size())
+        relation_counts_.resize(columns.size());
+
+    for (const auto &label : labels) {
+        const auto j = label_encoder_.insert_and_encode(label);
+
+        if (!relation_counts_[j].size()) {
+            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountWidth);
+
+        } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
+            logger->error("Binary relation matrix was changed while adding relation counts");
+            exit(1);
+        }
+
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
+                uint64_t count = std::min(counts[i], (uint32_t)sdsl::bits::lo_set[kCountWidth]);
+                sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
+                ref = std::min((uint64_t)ref, sdsl::bits::lo_set[kCountWidth] - count) + count;
+
+            } else {
+                logger->warn("Trying to add count {} for non-annotated object {}",
+                             counts[i], indices[i]);
+            }
+        }
+    }
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
         return get_column(label)[i];
@@ -107,6 +146,44 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
         assert(column.get());
         column->serialize(outstream);
     }
+
+    if (!relation_counts_.size())
+        return;
+
+    outstream.close();
+
+    outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
+                   std::ios::binary);
+    if (!outstream.good())
+        throw std::ofstream::failure("Bad stream");
+
+    uint64_t num_counts = 0;
+    uint64_t sum_counts = 0;
+
+    for (size_t j = 0; j < relation_counts_.size(); ++j) {
+        if (!relation_counts_[j].size()) {
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountWidth).serialize(outstream);;
+
+        } else if (relation_counts_[j].size() != bitmatrix_[j]->num_set_bits()) {
+            logger->error("Binary relation matrix was changed while adding relation counts");
+            exit(1);
+
+        } else {
+            for (uint64_t v : relation_counts_[j]) {
+                num_counts++;
+                sum_counts += v;
+            }
+
+            relation_counts_[j].serialize(outstream);;
+        }
+    }
+
+    for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountWidth).serialize(outstream);
+    }
+
+    logger->info("Num relation counts: {}", num_counts);
+    logger->info("Total relation count: {}", sum_counts);
 }
 
 template <typename Label>
