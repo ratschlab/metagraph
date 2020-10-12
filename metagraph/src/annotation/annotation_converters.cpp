@@ -7,6 +7,7 @@
 
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
