@@ -274,8 +274,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         }
     };
 
-    auto it = ++child_columns_map.begin();
-    for ( ; it != child_columns_map.end(); ++it) {
+    for (auto it = ++child_columns_map.begin(); it != child_columns_map.end(); ++it) {
         auto child_node = it->first;
         auto *child_columns_ptr = &it->second;
         #pragma omp task firstprivate(child_node, child_columns_ptr)
