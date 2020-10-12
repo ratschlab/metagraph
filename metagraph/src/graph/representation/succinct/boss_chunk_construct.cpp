@@ -416,6 +416,7 @@ concatenate_chunks(const std::filesystem::path &dir,
 
     assert(checkpoint->checkpoint() >= 4);
     if (checkpoint->checkpoint() > 4) {
+        logger->info("Skipping concatenating chunks...");
         return { real_split_by_W, dummy_sink_name };
     }
 
