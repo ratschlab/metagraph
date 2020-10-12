@@ -147,15 +147,14 @@ static void BM_BRWTQueryColumns(benchmark::State& state) {
     );
 
     for (auto _ : state) {
-        std::atomic<uint64_t> j;
+        uint64_t j;
         #pragma omp parallel for num_threads(3)
         for (size_t i = 0; i < indexes.size(); ++i) {
-            j.fetch_add(i, memory_order_seq_cst);
+            j += i;
             for (auto t : matrix->get_column(indexes[i])) {
-                j.fetch_add(t, memory_order_relaxed);
+                j += t;
             }
         }
-        ++j;
     }
 }
 
@@ -194,16 +193,15 @@ static void BM_BRWTSliceColumns(benchmark::State& state) {
     );
 
     for (auto _ : state) {
-        std::atomic<uint64_t> j;
+        uint64_t j;
         #pragma omp parallel num_threads(3)
         #pragma omp single
         {
             matrix->slice_columns(indexes, [&](auto i, auto&& bitmap) {
-                j.fetch_add(i, memory_order_seq_cst);
-                bitmap.call_ones([&](auto t) { j.fetch_add(t, memory_order_relaxed); });
+                j += i;
+                bitmap.call_ones([&](auto t) { j += t; });
             });
         }
-        ++j;
     }
 }
 
