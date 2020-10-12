@@ -169,6 +169,17 @@ MultiLabelEncoded<LabelType>
     return label_counts;
 }
 
+template <typename IndexType, typename LabelType>
+void MultiLabelAnnotation<IndexType, LabelType>
+::add_label_counts(const std::vector<Index> &indices,
+                   const VLabels &labels,
+                   const std::vector<uint32_t> &counts) {
+    std::ignore = indices;
+    std::ignore = labels;
+    std::ignore = counts;
+    throw std::runtime_error("Adding label counts is not implemented");
+}
+
 template class MultiLabelEncoded<std::string>;
 
 template class LabelEncoder<std::string>;

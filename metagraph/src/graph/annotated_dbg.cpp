@@ -67,6 +67,33 @@ void AnnotatedSequenceGraph
     annotator_->add_labels(indices, labels);
 }
 
+void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
+                                   const std::vector<Label> &labels,
+                                   std::vector<uint32_t>&& kmer_counts) {
+    assert(check_compatibility());
+    assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
+
+    std::vector<row_index> indices;
+    indices.reserve(sequence.size());
+    size_t end = 0;
+
+    graph_->map_to_nodes(sequence, [&](node_index i) {
+        if (i > 0) {
+            kmer_counts[indices.size()] = kmer_counts[end++];
+            indices.push_back(graph_to_anno_index(i));
+        }
+    });
+
+    kmer_counts.resize(end);
+
+    if (!indices.size())
+        return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    annotator_->add_label_counts(indices, labels, kmer_counts);
+}
+
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                             double presence_ratio) const {
     assert(presence_ratio >= 0.);

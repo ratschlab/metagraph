@@ -234,28 +234,32 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     thread_pool.join();
 
-    // add k-mer counts
-    for (const auto &file : files) {
-        add_kmer_counts(
-            file,
-            anno_graph->get_graph(),
-            forward_and_reverse,
-            config.filename_anno,
-            config.annotate_sequence_headers,
-            config.fasta_anno_comment_delim,
-            config.fasta_header_delimiter,
-            config.anno_labels,
-            [&](std::string sequence,
-                        std::vector<std::string> labels,
-                        const std::vector<uint32_t> kmer_counts) {
-                thread_pool.enqueue(
-                    [&](const auto&... ) {
-                        // anno_graph->add_kmer_counts(args...);
-                    },
-                    std::move(sequence), std::move(labels), std::move(kmer_counts)
-                );
-            }
-        );
+    if (config.count_kmers) {
+        // add k-mer counts
+        for (const auto &file : files) {
+            add_kmer_counts(
+                file,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence,
+                            std::vector<std::string> labels,
+                            std::vector<uint32_t> kmer_counts) {
+                    thread_pool.enqueue(
+                        [&](std::string &sequence,
+                                std::vector<std::string> &labels,
+                                std::vector<uint32_t> &kmer_counts) {
+                            anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
+                        },
+                        std::move(sequence), std::move(labels), std::move(kmer_counts)
+                    );
+                }
+            );
+        }
     }
 
     anno_graph->get_annotation().serialize(annotator_filename);
