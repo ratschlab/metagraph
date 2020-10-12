@@ -142,7 +142,7 @@ class Config {
 
     size_t disk_cap_bytes = 20e9; // 20GB default
 
-    uint32_t phase = 2; // build phase; 1 = generate kmers, 2 = complete build
+    uint32_t phase = 3; // 1 = collect kmers, 2 = generate kmers, 3 = complete build
 
     enum IdentityType {
         NO_IDENTITY = -1,

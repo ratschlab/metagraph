@@ -129,9 +129,17 @@ int build_graph(Config *config) {
                 logger->info("Skipping parsing sequences from input file(s)");
             }
 
+            if (checkpoint.phase() == 1) {
+                checkpoint.set_kmer_dir(config->tmp_dir);
+                checkpoint.set_checkpoint(1);
+                logger->info("Finished building phase 1");
+                return 0;
+            }
+
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
 
-            if (checkpoint.phase() < 2) { // phase 1 stops after generating dummy k-mers
+            if (checkpoint.phase() == 2) { // phase 2 stops after generating dummy k-mers
+                logger->info("Finished building phase 2");
                 assert(next_chunk == nullptr);
                 logger->info(
                         "Phase 1 successfully finished. Remove '--phase 1' from your "

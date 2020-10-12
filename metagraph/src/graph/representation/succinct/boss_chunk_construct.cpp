@@ -705,12 +705,21 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
         std::vector<std::string> file_names;
-        for (const auto &path : std::filesystem::directory_iterator(checkpoint->kmer_dir())) {
-            if (path.is_regular_file()
-                && path.path().filename().string().find("chunk_", 0) == 0
-                && path.path().filename().extension() == "") {
-                logger->trace("Found chunk: {}", path.path().string());
-                file_names.push_back(path.path().string());
+        namespace fs = std::filesystem;
+        for (const auto & entry : fs::directory_iterator(checkpoint->kmer_dir())) {
+            logger->trace("Checking {}", fs::canonical(entry.path()).string());
+            if (!entry.is_directory()
+                || fs::canonical(entry.path()).filename().string().rfind("temp_kmers") != 0) {
+                logger->trace("Not ok!");
+                continue;
+            }
+            for (const auto &path : fs::directory_iterator(entry.path())) {
+                if (path.is_regular_file()
+                    && path.path().filename().string().find("chunk_", 0) == 0
+                    && path.path().filename().extension() == "") {
+                    logger->trace("Found chunk: {}", path.path().string());
+                    file_names.push_back(path.path().string());
+                }
             }
         }
         if (file_names.empty()) {
@@ -929,8 +938,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE);
         recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
-        if (checkpoint_.phase() == 1) {
-            logger->info("Phase 1 finished");
+        if (checkpoint_.phase() == 2) {
+            logger->info("Phase 2 finished");
             queue.reset();
             return nullptr;
         }
