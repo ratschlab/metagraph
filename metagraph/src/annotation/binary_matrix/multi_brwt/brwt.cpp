@@ -5,9 +5,10 @@
 
 #include <omp.h>
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
-#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -213,14 +214,16 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         return;
     }
 
-    VectorMap<uint32_t, std::vector<Column>> child_columns_map;
+    tsl::hopscotch_map<uint32_t, std::vector<Column>> child_columns_map;
     for (size_t i = 0; i < column_ids.size(); ++i) {
         assert(column_ids[i] < num_columns());
         auto child_node = assignments_.group(column_ids[i]);
         auto child_column = assignments_.rank(column_ids[i]);
 
-        auto [it, inserted] = child_columns_map.emplace(child_node,
-                                                        std::vector<Column>{});
+        auto it = child_columns_map.find(child_node);
+        if (it == child_columns_map.end())
+            it = child_columns_map.emplace(child_node, std::vector<Column>{}).first;
+
         it.value().push_back(child_column);
     }
 
