@@ -197,6 +197,12 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::string &annotator_filename) {
     auto anno_graph = initialize_annotated_dbg(graph, config);
 
+    bool forward_and_reverse = config.forward_and_reverse;
+    if (graph->is_canonical_mode()) {
+        logger->trace("Annotating canonical graph");
+        forward_and_reverse = false;
+    }
+
     Timer timer;
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
@@ -207,7 +213,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             file,
             config.refpath,
             anno_graph->get_graph(),
-            config.forward_and_reverse,
+            forward_and_reverse,
             config.min_count,
             config.max_count,
             config.filename_anno,
@@ -233,7 +239,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         add_kmer_counts(
             file,
             anno_graph->get_graph(),
-            config.forward_and_reverse,
+            forward_and_reverse,
             config.filename_anno,
             config.annotate_sequence_headers,
             config.fasta_anno_comment_delim,
@@ -349,9 +355,6 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     const auto graph = load_critical_dbg(config->infbase);
-
-    if (graph->is_canonical_mode() || config->canonical)
-        config->forward_and_reverse = false;
 
     if (!config->separately) {
         annotate_data(graph, *config, files, config->outfbase);
