@@ -124,6 +124,109 @@ bsub -J "relax_brwt_5M" \
         2>&1"
 ```
 
+## Transform to primary
+```bash
+bsub -J "BIGSI_to_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/transform_to_primary.lsf \
+     -W 12:00 \
+     -n 18 -R "rusage[mem=5600] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform -v \
+            --to-fasta --primary-kmers \
+            -o ~/metagenome/data/BIGSI/graph_primary \
+            ~/metagenome/data/BIGSI/graph.dbg \
+            -p 18 \
+            2>&1"
+
+bsub -J "BIGSI_primary_build" \
+     -oo ~/metagenome/data/BIGSI/logs/build_primary.lsf \
+     -W 12:00 \
+     -n 36 -R "rusage[mem=6000] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph build -v \
+            -k 31 \
+            --mem-cap-gb 100 \
+            -o ~/metagenome/data/BIGSI/graph_primary \
+            ~/metagenome/data/BIGSI/graph_primary.fasta.gz \
+            --disk-swap ~/metagenome/scratch/ \
+            --disk-cap-gb 1000 \
+            -p 36 \
+            2>&1"
+
+
+mkdir temp
+cd temp
+find ~/metagenome/data/BIGSI/data/ -name "*fasta.gz" > files_to_annotate.txt
+split -l 5000 files_to_annotate.txt
+cd ..
+
+cd temp
+for list in x*; do
+    bsub -J "annotate_${list}_primary" \
+         -oo ~/metagenome/data/BIGSI/logs/annotate_${list}_primary.lsf \
+         -W 48:00 \
+         -n 15 -R "rusage[mem=5000] span[hosts=1]" \
+        "cat ${list} \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph annotate -v \
+                -i ~/metagenome/data/BIGSI/graph_primary.dbg \
+                --fwd-and-reverse \
+                --parallel 15 \
+                --anno-filename \
+                --separately \
+                -o ~/metagenome/data/BIGSI/annotation/columns_primary \
+                2>&1"; \
+done
+cd ..
+
+
+find ~/metagenome/data/BIGSI/annotation/columns_primary/ -name "*.column.annodbg" > columns_primary.txt
+
+# bsub -J "build_rbbrwt_relax20_primary" \
+#      -oo ~/metagenome/data/BIGSI/logs/build_rbbrwt_primary.lsf \
+#      -W 120:00 \
+#      -n 36 -R "rusage[mem=13000] span[hosts=1]" \
+#     "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+#         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+#             --anno-type rb_brwt --relax-arity 20 \
+#             -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
+#             -p 36 \
+#             2>&1"
+
+
+bsub -J "cluster" \
+     -oo ~/metagenome/data/BIGSI/logs/cluster_columns_primary.lsf \
+     -W 360:00 \
+     -n 48 -R "rusage[mem=42500] span[hosts=1]" \
+    "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+        | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+            --linkage \
+            --subsample 5000000 \
+            -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            --parallel 96 \
+            2>&1";
+
+bsub -J "build_brwt_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/build_brwt_primary.lsf \
+     -W 72:00 \
+     -n 48 -R "rusage[mem=20000] span[hosts=1]" \
+    "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+        | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+            --anno-type brwt \
+            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
+            -p 48 --parallel-nodes 48 \
+            2>&1"
+
+bsub -J "relax_brwt_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/relax_brwt_primary.lsf \
+     -W 72:00 \
+     -n 36 -R "rusage[mem=17000] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph relax_brwt -v \
+        -p 36 \
+        --relax-arity 16 \
+        -o /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_primary.relaxed \
+        /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_primary.brwt.annodbg \
+        2>&1"
+```
+
 ## Generate subsets
 ```bash
 cat temp/files_to_annotate.txt | shuf > subsets/files_shuffled.txt
