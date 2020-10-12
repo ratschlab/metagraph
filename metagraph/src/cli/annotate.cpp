@@ -200,7 +200,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     auto anno_graph = initialize_annotated_dbg(graph, config);
 
     bool forward_and_reverse = config.forward_and_reverse;
-    if (graph->is_canonical_mode()) {
+    if (anno_graph->get_graph().is_canonical_mode()) {
         logger->trace("Annotating canonical graph");
         forward_and_reverse = false;
     }
