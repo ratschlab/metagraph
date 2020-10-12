@@ -251,7 +251,7 @@ int annotate_graph(Config *config) {
 
     const auto graph = load_critical_dbg(config->infbase);
 
-    if (graph->is_canonical_mode())
+    if (graph->is_canonical_mode() || config->canonical)
         config->forward_and_reverse = false;
 
     if (!config->separately) {
