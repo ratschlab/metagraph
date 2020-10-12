@@ -22,7 +22,7 @@ namespace boss {
  * 5. Concatenate dummy sink and real k-mers
  * 6. Generate dummy-2+ source k-mers
  * Checkpoints 1 and 6 are exposed to the client as phase 1 and 2, so that users can
- * break down graph construction into stages. The following two phases are currently
+ * break down graph construction into stages. The following three phases are currently
  * supported:
  * Phase 1: kmer collection. This phase stops after having collected, sorted and de-duped
  * k-mers from all the input files. If you have a large amount of input files, you can
