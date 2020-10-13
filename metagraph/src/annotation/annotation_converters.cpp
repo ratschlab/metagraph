@@ -14,6 +14,7 @@
 #include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/sorted_sets/sorted_set_disk.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
@@ -1204,7 +1205,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     if (source_files.empty())
         return;
 
-    uint32_t num_threads = get_num_threads() == 0 ? 1 : get_num_threads();
+    uint32_t num_threads = get_num_threads();
     build_successor(graph, graph_fname, max_depth, num_threads);
 
     std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
@@ -1221,8 +1222,11 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     using SSD = common::SortedSetDisk<uint64_t>;
     std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
     std::vector<std::vector<uint64_t>> targets_size(sources.size());
-    std::filesystem::path tmp_path = std::filesystem::path(dest_dir).remove_filename()/"tmp_col";
+    const std::filesystem::path tmp_path = utils::create_temp_dir(
+            std::filesystem::path(dest_dir).remove_filename(), "col");
     std::filesystem::remove_all(tmp_path);
+    logger->trace("Using temporary directory {}", tmp_path);
+
     for (uint64_t i = 0; i < sources.size(); ++i) {
         if (sources[i]->num_labels() == 0)
             continue;
@@ -1230,8 +1234,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                 = std::min((uint64_t)1'000'000, sources[i]->num_relations());
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
-            std::filesystem::path tmp_dir
-                    = tmp_path/("col_" + std::to_string(i) + "_" + std::to_string(j));
+            const std::filesystem::path tmp_dir = tmp_path/(std::to_string(i / 100))
+                    /("/col_" + std::to_string(i) + "_" + std::to_string(j));
             std::filesystem::create_directories(tmp_dir);
             auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
                                                     std::numeric_limits<uint64_t>::max());
@@ -1361,7 +1365,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         annotator.serialize(fpath);
         logger->trace("Serialized {}", fpath);
     }
-
+    logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
 }
 
