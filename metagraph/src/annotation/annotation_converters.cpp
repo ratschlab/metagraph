@@ -1234,8 +1234,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                 = std::min((uint64_t)1'000'000, sources[i]->num_relations());
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
-            const std::filesystem::path tmp_dir = tmp_path/(std::to_string(i / 100))
-                    /("/col_" + std::to_string(i) + "_" + std::to_string(j));
+            const std::filesystem::path tmp_dir = tmp_path/std::to_string(i / 100)
+                    /("col_" + std::to_string(i) + "_" + std::to_string(j));
             std::filesystem::create_directories(tmp_dir);
             auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
                                                     std::numeric_limits<uint64_t>::max());
