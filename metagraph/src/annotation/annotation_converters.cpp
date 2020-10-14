@@ -1082,7 +1082,7 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
-void build_successor(const graph::DBGSuccinct &graph,
+bool build_successor(const graph::DBGSuccinct &graph,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
@@ -1096,7 +1096,7 @@ void build_successor(const graph::DBGSuccinct &graph,
     }
     if (!must_build) {
         logger->trace("Using existing pred/succ/terminal files in {}", outfbase);
-        return;
+        return false;
     }
 
     using graph::boss::BOSS;
@@ -1194,76 +1194,48 @@ void build_successor(const graph::DBGSuccinct &graph,
     sdsl::rrr_vector rterm(term);
     rterm.serialize(fterm);
     fterm.close();
+    return true;
 }
 
+using CallOnes = std::function<void(const bit_vector &source_col,
+                                    uint64_t row_idx,
+                                    uint64_t start_idx,
+                                    uint64_t source_idx,
+                                    uint64_t col_idx,
+                                    const std::vector<uint64_t> &succ_chunk,
+                                    const std::vector<uint64_t> &pred_chunk,
+                                    const std::vector<uint64_t> &pred_chunk_idx)>;
 
-void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
-                               const std::string &graph_fname,
-                               const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir,
-                               uint32_t max_depth) {
-    if (source_files.empty())
-        return;
+constexpr uint64_t chunk_size = 1 << 20;
 
-    uint32_t num_threads = get_num_threads();
-    build_successor(graph, graph_fname, max_depth, num_threads);
-
-    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
-    for(const auto& fname : source_files) {
-        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-        anno->merge_load({fname});
-        sources.push_back(std::move(anno));
-    }
-    logger->trace("Done loading {} annotations", sources.size());
-
-    ProgressBar ssds(sources.size(), "Create ssds", std::cerr, !common::get_verbose());
-
-    // accumulate the indices for the set bits in each column into a #SortedSetDisk
-    using SSD = common::SortedSetDisk<uint64_t>;
-    std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
-    std::vector<std::vector<uint64_t>> targets_size(sources.size());
-    const std::filesystem::path tmp_path = utils::create_temp_dir(
-            std::filesystem::path(dest_dir).remove_filename(), "col");
-    std::filesystem::remove_all(tmp_path);
-    logger->trace("Using temporary directory {}", tmp_path);
-
-    for (uint64_t i = 0; i < sources.size(); ++i) {
-        if (sources[i]->num_labels() == 0)
-            continue;
-        const uint64_t num_elements
-                = std::min((uint64_t)1'000'000, sources[i]->num_relations());
-        targets_size[i].assign(sources[i]->num_labels(), 0U);
-        for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
-            const std::filesystem::path tmp_dir = tmp_path/std::to_string(i / 100)
-                    /("col_" + std::to_string(i) + "_" + std::to_string(j));
-            std::filesystem::create_directories(tmp_dir);
-            auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
-                                                    std::numeric_limits<uint64_t>::max());
-            targets[i].push_back(std::move(sorted_set));
-        }
-        ++ssds;
-    }
-
-    uint64_t num_rows = graph.num_nodes();
+void traverse_anno_chunked(const std::string &name,
+                   const graph::DBGSuccinct &graph,
+                   const std::string &graph_fname,
+                   const std::vector<std::unique_ptr<annot::ColumnCompressed<>>> &sources,
+                   const std::function<void()> &before_chunk,
+                   const CallOnes &call_ones,
+                   const std::function<void(uint64_t start, uint64_t size)> &after_chunk) {
+    const uint32_t num_threads = get_num_threads();
+    const uint64_t num_rows = graph.num_nodes();
 
     sdsl::int_vector_buffer succ(graph_fname + ".succ", std::ios::in, 1024*1024);
     sdsl::int_vector_buffer pred(graph_fname + ".pred", std::ios::in, 1024*1024);
-    sdsl::rrr_vector pred_boundary;
 
+    sdsl::rrr_vector pred_boundary;
     std::ifstream fpred_boundary(graph_fname + ".pred_boundary");
     pred_boundary.load(fpred_boundary);
     fpred_boundary.close();
 
     assert(succ.size() == num_rows);
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
-           == pred.size());
-    constexpr uint64_t chunk_size = 1 << 20;
+                   == pred.size());
     std::vector<uint64_t> succ_chunk;
     std::vector<uint64_t> pred_chunk_idx;
+
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
-    ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
-    for(uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
+    ProgressBar progress_bar(num_rows, name, std::cerr, !common::get_verbose());
+    for (uint64_t chunk = 0; chunk < num_rows; chunk += chunk_size) {
         succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
         pred_chunk_idx.resize(std::min(chunk_size, num_rows - chunk) + 1);
         pred_chunk_idx[0] = 0;
@@ -1271,13 +1243,15 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         std::vector<uint64_t> pred_chunk;
         pred_chunk.reserve(succ_chunk.size() * 1.1);
 
+        before_chunk();
+
         for (uint64_t idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
             succ_chunk[i] = succ[idx] == 0
-                    ? std::numeric_limits<uint64_t>::max()
-                    : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
-            pred_chunk_idx[i+1] = pred_chunk_idx[i];
+                            ? std::numeric_limits<uint64_t>::max()
+                            : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
+            pred_chunk_idx[i + 1] = pred_chunk_idx[i];
             while (*pred_boundary_it == 0) {
-                ++pred_chunk_idx[i+1];
+                ++pred_chunk_idx[i + 1];
                 pred_chunk.push_back(
                         graph::AnnotatedSequenceGraph::graph_to_anno_index(*pred_it));
                 ++pred_it;
@@ -1291,44 +1265,167 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
             if (sources[l_idx]->num_labels()
-                && sources[l_idx]->num_objects() != graph.num_nodes()) {
+                    && sources[l_idx]->num_objects() != graph.num_nodes()) {
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
                         "annotation has {} entries",
                         graph.num_nodes(), sources[l_idx]->num_objects());
                 std::exit(1);
             }
-
             for (uint64_t l_idx2 = 0; l_idx2 < sources[l_idx]->num_labels(); ++l_idx2) {
-                std::vector<uint64_t> indices;
                 const std::unique_ptr<bit_vector> &source_col
                         = sources[l_idx]->get_matrix().data()[l_idx2];
-                source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(), [&](uint64_t row_idx) {
-                    // check successor node and add current node if it's either terminal
-                    // or if its successor is 0
-                    uint64_t chunk_idx = row_idx - chunk;
-                    bool v = succ_chunk[chunk_idx] != std::numeric_limits<uint64_t>::max()
-                            ? !(*source_col)[succ_chunk[chunk_idx]]
-                            : 1;
-                    if (v)
-                        indices.push_back(row_idx);
-
-                    // check predecessor nodes and add them if they are zero
-                    for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
-                         p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
-                        if (!(*source_col)[pred_chunk[p_idx]])
-                            indices.push_back(pred_chunk[p_idx]);
-                    }
-                });
-                targets[l_idx][l_idx2]->insert(indices.begin(), indices.end());
-                targets_size[l_idx][l_idx2] += indices.size();
+                source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(),
+                                               [&](uint64_t row_idx) {
+                                                   call_ones(*source_col, row_idx, chunk,
+                                                             l_idx, l_idx2, succ_chunk,
+                                                             pred_chunk, pred_chunk_idx);
+                                               });
             }
         }
+        after_chunk(chunk, succ_chunk.size());
 
         progress_bar += succ_chunk.size();
     }
-
     assert(pred_boundary_it == pred_boundary.end());
+}
+
+
+void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
+                               const std::string &graph_fname,
+                               const std::vector<std::string> &source_files,
+                               const std::filesystem::path &dest_dir,
+                               uint32_t max_depth) {
+    if (source_files.empty())
+        return;
+
+    uint32_t num_threads = get_num_threads();
+    const bool build_terminal = build_successor(graph, graph_fname, max_depth, num_threads);
+
+    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
+    for(const auto& fname : source_files) {
+        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
+        anno->merge_load({fname});
+        sources.push_back(std::move(anno));
+    }
+    logger->trace("Done loading {} annotations", sources.size());
+
+    sdsl::rrr_vector terminal;
+    std::ifstream f(graph_fname + ".terminal", std::ios::binary);
+    terminal.load(f);
+    f.close();
+
+    if (build_terminal) {
+        sdsl::bit_vector new_terminal(terminal.size());
+
+        // total number of set bits in the original and sparsified rows
+        std::vector<std::atomic<uint32_t>> orig_ones(chunk_size);
+        std::vector<std::atomic<uint32_t>> sparse_ones(chunk_size);
+
+        traverse_anno_chunked(
+                "Anchor opt", graph, graph_fname, sources,
+                [&]() {
+                    std::fill(orig_ones.begin(), orig_ones.end(), 0);
+                    std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
+                },
+                [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk,
+                    uint64_t, uint64_t, const std::vector<uint64_t> &succ_chunk,
+                    const std::vector<uint64_t> &, const std::vector<uint64_t> &) {
+                    if (terminal[row_idx])
+                        return;
+
+                    // if successor is not set, add it to the diff
+                    const uint64_t chunk_idx = row_idx - chunk;
+                    if (!source_col[succ_chunk[chunk_idx]])
+                        sparse_ones[row_idx]++;
+
+                    orig_ones[row_idx]++;
+                },
+                [&](uint64_t chunk_start, uint64_t chunk_size) {
+                    for (uint64_t i = 0; i < chunk_size; ++i) {
+                        if (sparse_ones[i] > 2 && sparse_ones[i] / 2 > orig_ones[i]) {
+                            new_terminal[i + chunk_start] = 1;
+                        } else {
+                            new_terminal[i + chunk_start] = terminal[i + chunk_start];
+                        }
+                    }
+                });
+
+        // overwrite the terminal bit vector with the optimized one
+        std::ofstream fterm(graph_fname + ".terminal");
+        terminal = sdsl::rrr_vector(new_terminal);
+        terminal.serialize(fterm);
+        fterm.close();
+    }
+
+    // accumulate the indices for the set bits in each column into a #SortedSetDisk
+    using SSD = common::SortedSetDisk<uint64_t>;
+    std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
+    std::vector<std::vector<uint64_t>> targets_size(sources.size());
+    const std::filesystem::path tmp_path = utils::create_temp_dir(
+            std::filesystem::path(dest_dir).remove_filename(), "col");
+    std::filesystem::remove_all(tmp_path);
+    logger->trace("Using temporary directory {}", tmp_path);
+
+    // stores the set rows for each of the sources, per chunk
+    std::vector<std::vector<std::vector<uint64_t>>> set_rows(sources.size());
+
+    for (uint64_t i = 0; i < sources.size(); ++i) {
+        if (sources[i]->num_labels() == 0)
+            continue;
+        const uint64_t num_elements
+                = std::min((uint64_t)1'000'000, sources[i]->num_relations());
+        targets_size[i].assign(sources[i]->num_labels(), 0U);
+        set_rows[i].resize(sources[i]->num_labels());
+        for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
+            const std::filesystem::path tmp_dir = tmp_path/std::to_string(i / 100)
+                    /("col_" + std::to_string(i) + "_" + std::to_string(j));
+            std::filesystem::create_directories(tmp_dir);
+            auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
+                                                    std::numeric_limits<uint64_t>::max());
+            targets[i].push_back(std::move(sorted_set));
+        }
+    }
+
+    traverse_anno_chunked(
+            "Compute diffs", graph, graph_fname, sources,
+            [&]() {
+                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+                    for (uint32_t col_idx = 0; col_idx < set_rows[source_idx].size();
+                         ++col_idx) {
+                        set_rows[source_idx][col_idx].resize(0);
+                    }
+                }
+            },
+            [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk,
+                uint64_t source_idx, uint64_t col_idx, const std::vector<uint64_t> &succ_chunk,
+                const std::vector<uint64_t> &pred_chunk,
+                const std::vector<uint64_t> &pred_chunk_idx) {
+
+                const uint64_t chunk_idx = row_idx - chunk;
+                // check successor node and add current node if it's either terminal
+                // or if its successor is 0
+                if (terminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
+                    set_rows[source_idx][col_idx].push_back(row_idx);
+
+                // check non-terminal predecessor nodes and add them if they are zero
+                for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
+                     p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
+                    if (!source_col[pred_chunk[p_idx]] && !terminal[pred_chunk[p_idx]])
+                        set_rows[source_idx][col_idx].push_back(pred_chunk[p_idx]);
+                }
+            },
+            [&](uint64_t /* start */, uint64_t /* chunk_size */) {
+                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+                    for (uint32_t col_idx = 0; col_idx < set_rows[source_idx].size(); ++col_idx) {
+                        targets[source_idx][col_idx]->insert(
+                                set_rows[source_idx][col_idx].begin(),
+                                set_rows[source_idx][col_idx].end());
+                        targets_size[source_idx][col_idx]
+                                += set_rows[source_idx][col_idx].size();
+                    }
+                }
+            });
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     std::for_each(sources.begin(), sources.end(), [&](auto& source) {
@@ -1349,7 +1446,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                     call(*it);
                 }
             };
-            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, num_rows,
+            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, graph.num_nodes(),
                                                               targets_size[l_idx][l_idx2]);
         }
         ColumnMajor matrix(std::move(columns));
