@@ -124,10 +124,12 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
         // element fits in an aligned word
         const uint64_t *word = &vector.data()[bit_pos >> 6];
         return (__atomic_load_n(word, memorder) >> (bit_pos & 0x3F)) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
     } else if ((bit_pos & 0x7F) + width <= 128) {
         // element fits in an aligned double word
         const __uint128_t *word = &reinterpret_cast<const __uint128_t*>(vector.data())[bit_pos >> 7];
         return (__atomic_load_n(word, memorder) >> (bit_pos & 0x7F)) & mask;
+#endif
     } else {
         uint8_t shift = bit_pos & 0x7;
         const uint8_t *word = &reinterpret_cast<const uint8_t*>(vector.data())[bit_pos >> 3];
@@ -169,11 +171,14 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
         uint64_t *word = &vector.data()[bit_pos >> 6];
         uint8_t shift = bit_pos & 0x3F;
         return (__atomic_fetch_add(word, count << shift, memorder) >> shift) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
     } else if ((bit_pos & 0x7F) + width <= 128) {
         // element fits in an aligned double word
         __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
         uint8_t shift = bit_pos & 0x7F;
+        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
         return (__sync_fetch_and_add(word, __uint128_t(count) << shift) >> shift) & mask;
+#endif
     } else {
         uint8_t shift = bit_pos & 0x7;
         uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
@@ -221,6 +226,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
             desired = val | (inv_mask & exp);
         } while (!__atomic_compare_exchange(word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
         return (exp >> shift) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
     } else if ((bit_pos & 0x7F) + width <= 128) {
         // element fits in an aligned double word
         __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
@@ -229,11 +235,13 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t
         __uint128_t exp;
         __uint128_t inv_mask = ~(__uint128_t(mask) << shift);
         __uint128_t big_val = __uint128_t(val) << shift;
+        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
         do {
             exp = *word;
             desired = big_val | (inv_mask & exp);
         } while (!__sync_bool_compare_and_swap(word, exp, desired));
         return (exp >> shift) & mask;
+#endif
     } else {
         uint8_t shift = bit_pos & 0x7;
         uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
