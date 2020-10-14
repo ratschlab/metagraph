@@ -5,9 +5,10 @@
 
 #include <omp.h>
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
-#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -213,7 +214,7 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         return;
     }
 
-    VectorMap<uint32_t, std::vector<Column>> child_columns_map;
+    tsl::hopscotch_map<uint32_t, std::vector<Column>> child_columns_map;
     for (size_t i = 0; i < column_ids.size(); ++i) {
         assert(column_ids[i] < num_columns());
         auto child_node = assignments_.group(column_ids[i]);
@@ -226,58 +227,61 @@ void BRWT::slice_columns(const std::vector<Column> &column_ids,
         it.value().push_back(child_column);
     }
 
-    for (const auto &pair : child_columns_map) {
-        const auto &child_node = pair.first;
-        const auto &child_columns = pair.second;
-        auto *child_columns_ptr = &child_columns;
-        #pragma omp task firstprivate(child_node, child_columns_ptr)
-        {
-            if (num_nonzero_rows == nonzero_rows_->size()) {
-                child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                    [&](Column j, bitmap&& rows) {
-                        callback(assignments_.get(child_node, j), std::move(rows));
-                    }
-                );
-            } else {
-                const BRWT *child_node_brwt = dynamic_cast<const BRWT*>(
-                    child_nodes_[child_node].get()
-                );
-                if (child_node_brwt
-                        && child_columns_ptr->size() > 1
-                        && !child_node_brwt->child_nodes_.size()) {
-                    // if there are multiple column ids corresponding to the same leaf
-                    // node, then this branch avoids doing redundant select1 calls
-                    const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
-                    size_t num_nonzero_rows = nonzero_rows->num_set_bits();
-                    if (num_nonzero_rows) {
-                        std::vector<uint64_t> set_bits;
-                        set_bits.reserve(num_nonzero_rows);
-                        nonzero_rows->call_ones([&](auto i) {
-                            set_bits.push_back(nonzero_rows->select1(i + 1));
-                        });
+    auto process = [&](auto child_node, auto *child_columns_ptr) {
+        if (num_nonzero_rows == nonzero_rows_->size()) {
+            child_nodes_[child_node]->slice_columns(*child_columns_ptr,
+                [&](Column j, bitmap&& rows) {
+                    callback(assignments_.get(child_node, j), std::move(rows));
+                }
+            );
+        } else {
+            const BRWT *child_node_brwt = dynamic_cast<const BRWT*>(
+                child_nodes_[child_node].get()
+            );
+            if (child_node_brwt
+                    && child_columns_ptr->size() > 1
+                    && !child_node_brwt->child_nodes_.size()) {
+                // if there are multiple column ids corresponding to the same leaf
+                // node, then this branch avoids doing redundant select1 calls
+                const auto *nonzero_rows = child_node_brwt->nonzero_rows_.get();
+                size_t num_nonzero_rows = nonzero_rows->num_set_bits();
+                if (num_nonzero_rows) {
+                    std::vector<uint64_t> set_bits;
+                    set_bits.reserve(num_nonzero_rows);
+                    nonzero_rows->call_ones([&](auto i) {
+                        set_bits.push_back(nonzero_rows->select1(i + 1));
+                    });
 
-                        for (size_t k = 0; k < child_columns_ptr->size() - 1; ++k) {
-                            callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
-                                     bitmap_generator(std::move(set_bits), num_rows()));
-                        }
-
-                        callback(assignments_.get(child_node, child_columns_ptr->back()),
+                    for (size_t k = 0; k < child_columns_ptr->size() - 1; ++k) {
+                        callback(assignments_.get(child_node, (*child_columns_ptr)[k]),
                                  bitmap_generator(std::move(set_bits), num_rows()));
                     }
-                } else {
-                    child_nodes_[child_node]->slice_columns(*child_columns_ptr,
-                        [&](Column j, bitmap&& rows) {
-                            size_t num_set_bits = rows.num_set_bits();
-                            callback(assignments_.get(child_node, j),
-                                     bitmap_generator(std::move(rows), [&](uint64_t i) {
-                                         return nonzero_rows_->select1(i + 1);
-                                     }, num_rows(), num_set_bits));
-                        }
-                    );
+
+                    callback(assignments_.get(child_node, child_columns_ptr->back()),
+                             bitmap_generator(std::move(set_bits), num_rows()));
                 }
+            } else {
+                child_nodes_[child_node]->slice_columns(*child_columns_ptr,
+                    [&](Column j, bitmap&& rows) {
+                        size_t num_set_bits = rows.num_set_bits();
+                        callback(assignments_.get(child_node, j),
+                                 bitmap_generator(std::move(rows), [&](uint64_t i) {
+                                     return nonzero_rows_->select1(i + 1);
+                                 }, num_rows(), num_set_bits));
+                    }
+                );
             }
         }
+    };
+
+    for (auto it = ++child_columns_map.begin(); it != child_columns_map.end(); ++it) {
+        auto child_node = it->first;
+        auto *child_columns_ptr = &it->second;
+        #pragma omp task firstprivate(child_node, child_columns_ptr)
+        process(child_node, child_columns_ptr);
     }
+
+    process(child_columns_map.begin()->first, &child_columns_map.begin()->second);
 
     #pragma omp taskwait
 }

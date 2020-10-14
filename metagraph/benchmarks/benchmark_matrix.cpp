@@ -147,7 +147,7 @@ static void BM_BRWTQueryColumns(benchmark::State& state) {
     );
 
     for (auto _ : state) {
-        uint64_t j;
+        uint64_t j = 0;
         #pragma omp parallel for num_threads(3)
         for (size_t i = 0; i < indexes.size(); ++i) {
             j += i;
@@ -193,7 +193,7 @@ static void BM_BRWTSliceColumns(benchmark::State& state) {
     );
 
     for (auto _ : state) {
-        uint64_t j;
+        uint64_t j = 0;
         #pragma omp parallel num_threads(3)
         #pragma omp single
         {
