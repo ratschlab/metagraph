@@ -1397,9 +1397,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                         files[i], file_size/1e6);
                 continue;
             }
-            if (file_size > cur_mem_bytes || file_batch.size() >= 15'000) {
+            if (file_size > cur_mem_bytes || file_batch.size() >= 15'000)
                 break;
-            }
+
             cur_mem_bytes -= file_size;
             file_batch.push_back(files[i]);
         }
@@ -1415,7 +1415,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase) {
-    //#pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (uint32_t i = 0; i < files.size(); ++i) {
         std::string file = files[i];
         RowDiffAnnotator input_anno;
