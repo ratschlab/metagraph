@@ -260,7 +260,7 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
                                               annotator.get_label_encoder());
 }
 
-std::unique_ptr<BRWTRowDiffAnnotator>
+std::unique_ptr<RowDiffBRWTAnnotator>
 convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
@@ -270,7 +270,7 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
     std::string anchors_filename = annotator.get_matrix().anchors_filename();
     std::vector<std::unique_ptr<bit_vector>> columns
-            = annotator.release_matrix().diffs().release_columns();
+            = annotator.release_matrix()->diffs().release_columns();
 
     auto matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
@@ -279,7 +279,7 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
                                        num_threads)
     );
 
-    return std::make_unique<BRWTRowDiffAnnotator>(
+    return std::make_unique<RowDiffBRWTAnnotator>(
             std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix), anchors_filename),
             annotator.get_label_encoder());
 }
@@ -301,7 +301,7 @@ convert_to_greedy_BRWT(ColumnCompressed<std::string> &&annotation,
     );
 }
 
-std::unique_ptr<BRWTRowDiffAnnotator>
+std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
                        size_t num_parallel_nodes,
                        size_t num_threads,
@@ -331,7 +331,7 @@ convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
     );
 }
 
-std::unique_ptr<BRWTRowDiffAnnotator> convert_to_simple_BRWT(RowDiffAnnotator&& annotation,
+std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffAnnotator&& annotation,
                                                              size_t grouping_arity,
                                                              size_t num_parallel_nodes,
                                                              size_t num_threads) {
@@ -449,8 +449,8 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
 }
 
 template<>
-std::unique_ptr<BRWTRowDiffAnnotator>
-convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation_files,
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
                          const std::string &linkage_matrix_file,
                          size_t num_parallel_nodes,
                          size_t num_threads,
@@ -466,7 +466,7 @@ convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation
                 std::exit(1);
             }
             std::vector<std::unique_ptr<bit_vector>> cols
-                    = std::move(annotator.release_matrix().diffs().release_columns());
+                    = std::move(annotator.release_matrix()->diffs().release_columns());
             for (uint32_t idx = 0; idx < cols.size(); ++idx) {
                 std::string label = annotator.get_label_encoder().get_labels()[idx];
                 call_column(idx, std::move(cols[idx]));
@@ -481,8 +481,9 @@ convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation
             = convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
                               tmp_path, get_columns, std::move(column_names));
 
-    return std::make_unique<BRWTRowDiffAnnotator>(
-            std::make_unique<RowDiff<BRWT>>(nullptr, annotator->release_matrix(), ""),
+    return std::make_unique<RowDiffBRWTAnnotator>(
+            std::make_unique<RowDiff<BRWT>>(
+                    nullptr, std::move(*annotator->release_matrix().release()), ""),
             annotator->get_label_encoder());
 }
 
@@ -1260,8 +1261,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
-            const std::filesystem::path tmp_dir = tmp_path/std::to_string(i / 100)
-                    /fmt::format("col_{}_{}", i, j);
+            const std::filesystem::path tmp_dir
+                    = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
             auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
                                                     std::numeric_limits<uint64_t>::max());

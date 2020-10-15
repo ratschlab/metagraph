@@ -179,7 +179,7 @@ class Config {
         BinRelWT_sdsl,
         BinRelWT,
         RowDiff,
-        BRWTRowDiff,
+        RowDiffBRWT,
         RowFlat,
         RBFish,
         RbBRWT,

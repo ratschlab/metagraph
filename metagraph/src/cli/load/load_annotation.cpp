@@ -28,8 +28,8 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
-    } else if (utils::ends_with(filename, annot::BRWTRowDiffAnnotator::kExtension)) {
-        return Config::AnnotationType::BRWTRowDiff;
+    } else if (utils::ends_with(filename, annot::RowDiffBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffBRWT;
 
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
@@ -78,8 +78,8 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::MultiBRWTAnnotator());
             break;
         }
-        case Config::BRWTRowDiff: {
-            annotation.reset(new annot::BRWTRowDiffAnnotator());
+        case Config::RowDiffBRWT: {
+            annotation.reset(new annot::RowDiffBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {

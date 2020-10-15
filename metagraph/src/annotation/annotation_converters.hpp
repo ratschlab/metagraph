@@ -37,7 +37,7 @@ convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
 
-std::unique_ptr<BRWTRowDiffAnnotator>
+std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
@@ -49,7 +49,7 @@ convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
 
-std::unique_ptr<BRWTRowDiffAnnotator>
+std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,

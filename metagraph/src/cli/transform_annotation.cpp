@@ -328,8 +328,8 @@ int transform_annotation(Config *config) {
                 assert(false);
                 break;
             }
-            case Config::BRWTRowDiff: {
-                logger->error("Convert to row_diff first, and then to brwt_row_diff");
+            case Config::RowDiffBRWT: {
+                logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
 
             }
@@ -420,15 +420,15 @@ int transform_annotation(Config *config) {
         }
 
     } else if (input_anno_type == Config::RowDiff) {
-        if (config->anno_type != Config::BRWTRowDiff
+        if (config->anno_type != Config::RowDiffBRWT
             && config->anno_type != Config::ColumnCompressed) {
             logger->error(
-                    "Only conversion to `column` and `brwt_row_diff` supported for "
+                    "Only conversion to `column` and `row_diff_brwt` supported for "
                     "row_diff");
             exit(1);
         }
-        if (config->anno_type == Config::BRWTRowDiff) {
-            std::unique_ptr<BRWTRowDiffAnnotator> brwt_annotator;
+        if (config->anno_type == Config::RowDiffBRWT) {
+            std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
             if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
                 logger->trace("Loading annotation from disk...");
                 auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
@@ -446,7 +446,7 @@ int transform_annotation(Config *config) {
                         ? std::filesystem::path(config->outfbase).remove_filename()
                         : config->tmp_dir;
                 brwt_annotator
-                        = convert_to_BRWT<BRWTRowDiffAnnotator>(files, config->infbase,
+                        = convert_to_BRWT<RowDiffBRWTAnnotator>(files, config->infbase,
                                                                 config->parallel_nodes,
                                                                 get_num_threads(), tmp_dir);
             }
@@ -541,11 +541,11 @@ int relax_multi_brwt(Config *config) {
         case Config::BRWT:
             annotator = std::make_unique<MultiBRWTAnnotator>();
             break;
-        case Config::BRWTRowDiff:
-            annotator = std::make_unique<BRWTRowDiffAnnotator>();
+        case Config::RowDiffBRWT:
+            annotator = std::make_unique<RowDiffBRWTAnnotator>();
             break;
         default:
-            logger->error("Relaxation only supported for BRWT and BRWTRowDiff");
+            logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
             exit(1);
     }
 
@@ -561,7 +561,7 @@ int relax_multi_brwt(Config *config) {
 
     const binmat::BRWT &matrix = anno_type == Config::BRWT
             ? dynamic_cast<MultiBRWTAnnotator *>(annotator.get())->get_matrix()
-            : dynamic_cast<BRWTRowDiffAnnotator *>(annotator.get())->get_matrix().diffs();
+            : dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())->get_matrix().diffs();
     relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
                get_num_threads());
 

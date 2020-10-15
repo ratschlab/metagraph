@@ -42,7 +42,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 = parse_annotation_type(config.infbase_annotators.at(0));
         // row_diff annotation is special, as it must know the graph structure
         if (input_anno_type == Config::AnnotationType::RowDiff
-            || input_anno_type == Config::AnnotationType::BRWTRowDiff) {
+            || input_anno_type == Config::AnnotationType::RowDiffBRWT) {
             auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
 
             if (!dbg_graph) {

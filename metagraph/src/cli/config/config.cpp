@@ -633,8 +633,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "rb_brwt";
         case RowDiff:
             return "row_diff";
-        case BRWTRowDiff:
-            return "brwt_row_diff";
+        case RowDiffBRWT:
+            return "row_diff_brwt";
         default:
             assert(false);
             return "Never happens";
@@ -660,8 +660,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RbBRWT;
     } else if (string == "row_diff") {
         return AnnotationType::RowDiff;
-    } else if (string == "brwt_row_diff") {
-        return AnnotationType::BRWTRowDiff;
+    } else if (string == "row_diff_brwt") {
+        return AnnotationType::RowDiffBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);

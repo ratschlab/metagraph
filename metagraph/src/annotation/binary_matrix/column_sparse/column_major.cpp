@@ -134,10 +134,6 @@ uint64_t ColumnMajor::num_relations() const {
     return num_set_bits;
 }
 
-std::vector<std::unique_ptr<bit_vector>>&& ColumnMajor::release_columns() {
-    return std::move(data_);
-}
-
 } // namespace binmat
 } // namespace annot
 } // namespace mtg

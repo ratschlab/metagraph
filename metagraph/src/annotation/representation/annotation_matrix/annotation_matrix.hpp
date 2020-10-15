@@ -42,7 +42,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     const BinaryMatrixType& get_matrix() const override { return *matrix_; };
 
-    BinaryMatrixType&& release_matrix()  { return std::move(*matrix_); };
+    std::unique_ptr<BinaryMatrixType> release_matrix()  { return std::move(matrix_); };
 
     std::string file_extension() const override;
 

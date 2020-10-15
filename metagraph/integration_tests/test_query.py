@@ -23,7 +23,7 @@ graph_file_extension = {'succinct': '.dbg',
 anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
-                       'brwt_row_diff': '.brwt_row_diff.annodbg',
+                       'row_diff_brwt': '.row_diff_brwt.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'rbfish': '.rbfish.annodbg',
@@ -38,13 +38,13 @@ def product(graph_types, anno_types):
     result  = []
     for graph in graph_types:
         for anno in anno_types:
-            if graph == 'succinct' or (anno != 'row_diff' and anno != 'brwt_row_diff'):
+            if graph == 'succinct' or (anno != 'row_diff' and anno != 'row_diff_brwt'):
                 result.append((graph, anno))
     return result
 
 def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, extra_params=''):
     target_anno = anno_repr
-    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'brwt_row_diff'}:
+    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'row_diff_brwt'}:
         target_anno = anno_repr
         anno_repr = 'column'
     elif anno_repr in {'flat', 'rbfish'}:
@@ -65,7 +65,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
 
     if target_anno != anno_repr:
         final_anno = target_anno
-        if final_anno == 'brwt_row_diff':
+        if final_anno == 'row_diff_brwt':
             target_anno = 'row_diff'
 
         annotate_command = '{exe} transform_anno \
@@ -82,7 +82,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         res = subprocess.run([annotate_command], shell=True)
         assert(res.returncode == 0)
         os.remove(output_filename + anno_file_extension[anno_repr])
-        if final_anno == 'brwt_row_diff':
+        if final_anno == 'row_diff_brwt':
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
                                f'{output_filename}.row_diff.annodbg'
             res = subprocess.run([annotate_command], shell=True)
