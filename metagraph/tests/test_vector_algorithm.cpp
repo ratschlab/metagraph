@@ -123,162 +123,7 @@ TEST(IntVector, call_nonzeros_sparse) {
     }
 }
 
-TEST(IntVector, call_nonzeros_sparse_atomic) {
-    for (size_t w = 1; w <= 64; ++w) {
-        sdsl::int_vector<> vector_relaxed = aligned_int_vector(200, 0, w, 16);
-        sdsl::int_vector<> vector_seq_cst = aligned_int_vector(200, 0, w, 16);
-        sdsl::int_vector<> vector(200, 0, w);
-        ASSERT_LT(65u, vector.size());
-        std::atomic<size_t> counter = 0;
-
-        std::mutex mu;
-        std::mutex mu2;
-        #pragma omp parallel for num_threads(3) schedule(dynamic)
-        for (size_t j = 0; j < 3; ++j) {
-            for (size_t i = j; i < vector.size(); i += 3) {
-                if (i % 130 == 1) {
-                    uint64_t val = (++counter) % w;
-                    EXPECT_EQ(0u, atomic_exchange(vector_relaxed, i, val, mu, __ATOMIC_RELAXED));
-                    EXPECT_EQ(0u, atomic_exchange(vector_seq_cst, i, val, mu));
-                    std::lock_guard<std::mutex> lock(mu2);
-                    vector[i] = val;
-                }
-            }
-        }
-
-        for (size_t i = 0; i < vector.size(); ++i) {
-            EXPECT_EQ(vector[i], atomic_fetch(vector_relaxed, i, mu, __ATOMIC_ACQUIRE));
-            EXPECT_EQ(vector[i], atomic_fetch(vector_seq_cst, i, mu));
-        }
-
-        for (size_t begin = 0; begin < vector.size(); ++begin) {
-            for (size_t end = begin; end < vector.size(); ++end) {
-                uint64_t it = begin;
-                call_nonzeros(vector, begin, end, [&](auto i, auto count) {
-                    EXPECT_LE(begin, i);
-                    EXPECT_GT(end, i);
-                    while (vector[it] == 0) {
-                        EXPECT_GT(i, it);
-                        ++it;
-                        ASSERT_GT(end, it);
-                    }
-
-                    EXPECT_EQ(vector[i], count);
-                    EXPECT_EQ(it++, i);
-                });
-                for (; it < end; ++it) {
-                    EXPECT_EQ(0u, vector[it]);
-                }
-            }
-        }
-    }
-}
-
-TEST(IntVector, call_nonzeros_sparse_atomic_add) {
-    for (size_t w = 1; w <= 64; ++w) {
-        sdsl::int_vector<> vector_relaxed = aligned_int_vector(200, 0, w, 16);
-        sdsl::int_vector<> vector_seq_cst = aligned_int_vector(200, 0, w, 16);
-        sdsl::int_vector<> vector(200, 0, w);
-        ASSERT_LT(65u, vector.size());
-
-        std::mutex mu;
-        std::mutex mu2;
-        #pragma omp parallel for num_threads(3) schedule(dynamic)
-        for (size_t j = 0; j < 3; ++j) {
-            for (size_t i = j; i < vector.size(); i += 3) {
-                if (i % 130 == 1) {
-                    EXPECT_EQ(0u, atomic_fetch_and_add(vector_relaxed, i, 1, mu, __ATOMIC_RELAXED));
-                    EXPECT_EQ(0u, atomic_fetch_and_add(vector_seq_cst, i, 1, mu));
-                    std::lock_guard<std::mutex> lock(mu2);
-                    ++vector[i];
-                }
-            }
-        }
-
-        for (size_t i = 0; i < vector.size(); ++i) {
-            EXPECT_EQ(vector[i], atomic_fetch(vector_relaxed, i, mu, __ATOMIC_ACQUIRE));
-            EXPECT_EQ(vector[i], atomic_fetch(vector_seq_cst, i, mu));
-        }
-
-        for (size_t begin = 0; begin < vector.size(); ++begin) {
-            for (size_t end = begin; end < vector.size(); ++end) {
-                uint64_t it = begin;
-                call_nonzeros(vector, begin, end, [&](auto i, auto count) {
-                    EXPECT_LE(begin, i);
-                    EXPECT_GT(end, i);
-                    while (vector[it] == 0) {
-                        EXPECT_GT(i, it);
-                        ++it;
-                        ASSERT_GT(end, it);
-                    }
-
-                    EXPECT_EQ(vector[i], count);
-                    EXPECT_EQ(it++, i);
-                });
-                for (; it < end; ++it) {
-                    EXPECT_EQ(0u, vector[it]);
-                }
-            }
-        }
-    }
-}
-
 TEST(IntVector, call_nonzeros_sparse_every_4) {
-    for (size_t w = 1; w <= 64; ++w) {
-        sdsl::int_vector<> vector_relaxed = aligned_int_vector(1000, 0, w, 16);
-        sdsl::int_vector<> vector_seq_cst = aligned_int_vector(1000, 0, w, 16);
-        sdsl::int_vector<> vector(1000, 0, w);
-        ASSERT_LT(65u, vector.size());
-        std::atomic<size_t> counter = 0;
-
-        std::mutex mu;
-        std::mutex mu2;
-        #pragma omp parallel for num_threads(3) schedule(dynamic)
-        for (size_t j = 0; j < 3; ++j) {
-            for (size_t i = j; i < vector.size(); i += 3) {
-                if (i % 130 == 1) {
-                    uint64_t val = (++counter) % w;
-                    EXPECT_EQ(0u, atomic_exchange(vector_relaxed, i, val, mu, __ATOMIC_RELAXED));
-                    EXPECT_EQ(0u, atomic_exchange(vector_seq_cst, i, val, mu));
-                    std::lock_guard<std::mutex> lock(mu2);
-                    vector[i] = val;
-                }
-            }
-        }
-
-        for (size_t i = 0; i < vector.size(); ++i) {
-            EXPECT_EQ(vector[i], atomic_fetch(vector_relaxed, i, mu, __ATOMIC_ACQUIRE));
-            EXPECT_EQ(vector[i], atomic_fetch(vector_seq_cst, i, mu));
-        }
-
-        for (size_t begin = 0; begin < vector.size(); begin += vector.size() / 4) {
-            for (size_t end = begin; end < vector.size(); ++end) {
-                uint64_t it = begin;
-                call_nonzeros(vector, begin, end, [&](auto i, auto count) {
-                    EXPECT_LE(begin, i);
-                    EXPECT_GT(end, i);
-                    while (vector[it] == 0) {
-                        EXPECT_GT(i, it);
-                        ++it;
-                        ASSERT_GT(end, it);
-                    }
-
-                    EXPECT_EQ(vector[i], count);
-                    EXPECT_EQ(it++, i);
-                });
-                for (; it < end; ++it) {
-                    EXPECT_EQ(0u, vector[it]) << vector.size()
-                                              << "\n" << begin
-                                              << " " << end
-                                              << "\n" << w
-                                              << "\n" << vector;
-                }
-            }
-        }
-    }
-}
-
-TEST(IntVector, call_nonzeros_sparse_every_4_atomic) {
     for (size_t w = 1; w <= 64; ++w) {
         sdsl::int_vector<> vector(1000, 0, w);
         ASSERT_LT(65u, vector.size());
@@ -310,6 +155,119 @@ TEST(IntVector, call_nonzeros_sparse_every_4_atomic) {
                                               << "\n" << w
                                               << "\n" << vector;
                 }
+            }
+        }
+    }
+}
+
+TEST(IntVector, atomic_exchange_and_fetch_sparse) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(200, 0, w, 16);
+            sdsl::int_vector<> vector(200, 0, w);
+            ASSERT_LT(65u, vector.size());
+            std::atomic<size_t> counter = 0;
+
+            std::mutex mu;
+            std::mutex mu2;
+            #pragma omp parallel for num_threads(3) schedule(dynamic)
+            for (size_t j = 0; j < 3; ++j) {
+                for (size_t i = j; i < vector.size(); i += 3) {
+                    if (i % 130 == 1) {
+                        uint64_t val = (++counter) % w;
+                        EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+                        std::lock_guard<std::mutex> lock(mu2);
+                        vector[i] = val;
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < vector.size(); ++i) {
+                EXPECT_EQ(vector[i], atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+            }
+        }
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_sparse) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(200, 0, w, 16);
+            sdsl::int_vector<> vector(200, 0, w);
+            ASSERT_LT(65u, vector.size());
+
+            std::mutex mu;
+            std::mutex mu2;
+            #pragma omp parallel for num_threads(3) schedule(dynamic)
+            for (size_t j = 0; j < 3; ++j) {
+                for (size_t i = j; i < vector.size(); i += 3) {
+                    if (i % 130 == 1) {
+                        EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
+                        std::lock_guard<std::mutex> lock(mu2);
+                        ++vector[i];
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < vector.size(); ++i) {
+                EXPECT_EQ(vector[i], atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+            }
+        }
+    }
+}
+
+TEST(IntVector, atomic_exchange_and_fetch_sparse_every_4) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(1000, 0, w, 16);
+            sdsl::int_vector<> vector(1000, 0, w);
+            ASSERT_LT(65u, vector.size());
+            std::atomic<size_t> counter = 0;
+
+            std::mutex mu;
+            std::mutex mu2;
+            #pragma omp parallel for num_threads(3) schedule(dynamic)
+            for (size_t j = 0; j < 3; ++j) {
+                for (size_t i = j; i < vector.size(); i += 3) {
+                    if (i % 130 == 1) {
+                        uint64_t val = (++counter) % w;
+                        EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+                        std::lock_guard<std::mutex> lock(mu2);
+                        vector[i] = val;
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < vector.size(); ++i) {
+                EXPECT_EQ(vector[i], atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+            }
+        }
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_sparse_every_4) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(1000, 0, w, 16);
+            sdsl::int_vector<> vector(1000, 0, w);
+            ASSERT_LT(65u, vector.size());
+            std::atomic<size_t> counter = 0;
+
+            std::mutex mu;
+            std::mutex mu2;
+            #pragma omp parallel for num_threads(3) schedule(dynamic)
+            for (size_t j = 0; j < 3; ++j) {
+                for (size_t i = j; i < vector.size(); i += 3) {
+                    if (i % 130 == 1) {
+                        EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
+                        std::lock_guard<std::mutex> lock(mu2);
+                        ++vector[i];
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < vector.size(); ++i) {
+                EXPECT_EQ(vector[i], atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
             }
         }
     }
