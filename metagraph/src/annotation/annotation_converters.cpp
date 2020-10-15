@@ -267,13 +267,10 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
                          size_t num_threads) {
     // we are going to take the columns from the annotator and thus
     // have to replace them with empty columns to keep the structure valid
-    std::vector<std::unique_ptr<bit_vector>> columns;
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
     std::string anchors_filename = annotator.get_matrix().anchors_filename();
-    annotator.release_matrix().diffs().call_columns(
-            [&](uint64_t, std::unique_ptr<bit_vector> &&col) {
-                columns.push_back(std::move(col));
-            });
+    std::vector<std::unique_ptr<bit_vector>> columns
+            = annotator.release_matrix().diffs().release_columns();
 
     auto matrix = std::make_unique<BRWT>(
             BRWTBottomUpBuilder::build(std::move(columns),
@@ -468,14 +465,15 @@ convert_to_BRWT<BRWTRowDiffAnnotator>(const std::vector<std::string> &annotation
                 logger->error("Could not load {}", fname);
                 std::exit(1);
             }
-            ColumnMajor mat = std::move(annotator.release_matrix().diffs());
-            mat.call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&column) {
+            std::vector<std::unique_ptr<bit_vector>> cols
+                    = std::move(annotator.release_matrix().diffs().release_columns());
+            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
                 std::string label = annotator.get_label_encoder().get_labels()[idx];
-                call_column(idx, std::move(column));
+                call_column(idx, std::move(cols[idx]));
 
                 std::lock_guard<std::mutex> lock(mu);
                 column_names.emplace_back(idx, label);
-            });
+            };
         }
     };
 
@@ -1263,7 +1261,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         set_rows[i].resize(sources[i]->num_labels());
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
             const std::filesystem::path tmp_dir = tmp_path/std::to_string(i / 100)
-                    /("col_" + std::to_string(i) + "_" + std::to_string(j));
+                    /fmt::format("col_{}_{}", i, j);
             std::filesystem::create_directories(tmp_dir);
             auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
                                                     std::numeric_limits<uint64_t>::max());

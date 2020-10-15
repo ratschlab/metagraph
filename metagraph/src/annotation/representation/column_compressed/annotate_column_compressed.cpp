@@ -542,7 +542,7 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 template <typename Label>
 const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
-    annotation_matrix_view_.point_to(bitmatrix_);
+    annotation_matrix_view_.update_pointer(bitmatrix_);
     return annotation_matrix_view_;
 }
 

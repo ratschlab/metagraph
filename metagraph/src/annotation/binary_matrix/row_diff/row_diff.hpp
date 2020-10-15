@@ -161,6 +161,7 @@ class RowDiff : public BinaryMatrix {
         }
         Vector<uint64_t> diff1;
         std::swap(*result, diff1);
+        result->reserve(std::max(diff1.size(), diff2.size()));
         uint64_t idx1 = 0;
         uint64_t idx2 = 0;
         while (idx1 < diff1.size() && idx2 < diff2.size()) {

@@ -431,15 +431,15 @@ int transform_annotation(Config *config) {
             std::unique_ptr<BRWTRowDiffAnnotator> brwt_annotator;
             if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
                 logger->trace("Loading annotation from disk...");
-                auto annotator = std::make_unique<RowDiffAnnotator>();
-                if (!annotator->merge_load(files))
+                auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                if (!row_diff_anno->merge_load(files))
                     std::exit(1);
                 logger->trace("Annotation loaded in {} sec", timer.elapsed());
                 brwt_annotator = config->greedy_brwt
-                        ? convert_to_greedy_BRWT(std::move(*annotator),
+                        ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
                                                  config->parallel_nodes, get_num_threads(),
                                                  config->num_rows_subsampled)
-                        : convert_to_simple_BRWT(std::move(*annotator), config->arity_brwt,
+                        : convert_to_simple_BRWT(std::move(*row_diff_anno), config->arity_brwt,
                                                  config->parallel_nodes, get_num_threads());
             } else {
                 std::string tmp_dir = config->tmp_dir.empty()

@@ -202,10 +202,11 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
             assert(anchors_filename.empty() || anchors_filename == matrix.anchors_filename());
             anchors_filename = matrix.anchors_filename();
 
-            matrix.diffs().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&col) {
+            std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
+            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
                 labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
-                columns[offsets[i] + idx] = std::move(col);
-            });
+                columns[offsets[i] + idx] = std::move(cols[idx]);
+            };
         } catch (...) {
             error_occurred = true;
         }

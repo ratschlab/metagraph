@@ -33,18 +33,16 @@ class ColumnMajor : public BinaryMatrix {
     // number of ones in the matrix
     uint64_t num_relations() const override;
 
-    void point_to(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+    void update_pointer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
         columns_ = &columns;
     }
 
     const auto& data() const { return *columns_; }
 
-    using ColumnCallback = std::function<void(uint64_t, std::unique_ptr<bit_vector> &&)>;
     /**
-     * Calls #callback on each of the columns. Note that this function "consumes" the
-     * columns and leaves the object empty.
+     * Returns the columns vector and pilfers the existing columns.
      */
-    void call_columns(const ColumnCallback &callback);
+    std::vector<std::unique_ptr<bit_vector>>&& release_columns();
 
   private:
     std::vector<std::unique_ptr<bit_vector>> data_;
