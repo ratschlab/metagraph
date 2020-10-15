@@ -890,18 +890,6 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(!(*valid_edges_)[0]);
 }
 
-const bit_vector* DBGSuccinct::get_mask() const {
-    return valid_edges_.get();
-}
-
-void DBGSuccinct::reset_mask() {
-    valid_edges_.reset();
-}
-
-bit_vector* DBGSuccinct::release_mask() {
-    return valid_edges_.release();
-}
-
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
