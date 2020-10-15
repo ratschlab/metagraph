@@ -236,7 +236,12 @@ int assemble(Config *config) {
         std::mutex file_open_mutex;
         std::mutex write_mutex;
 
-        size_t num_threads_per_traversal = get_num_threads() / config->parallel_assemblies;
+        size_t num_parallel_assemblies = std::max(
+            1u, std::min(config->parallel_assemblies, get_num_threads())
+        );
+        size_t num_threads_per_traversal = std::max(
+            size_t(1), get_num_threads() / num_parallel_assemblies
+        );
 
         call_masked_graphs(*anno_graph, config,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
@@ -263,7 +268,7 @@ int assemble(Config *config) {
                                          config->kmers_in_single_form);
                 }
             },
-            config->parallel_assemblies,
+            num_parallel_assemblies,
             num_threads_per_traversal
         );
 
