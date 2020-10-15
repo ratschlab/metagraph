@@ -115,8 +115,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
         kmers_in_graph_ = std::move(mask);
     }
 
-    typedef std::function<void(const std::function<void(node_index, bool)>&)> GenerateNodes;
-    virtual void update_mask(const GenerateNodes &generate_nodes,
+    typedef std::function<void(const std::function<void(node_index, bool /* new value */)>&)> GenerateNodeUpdates;
+    virtual void update_mask(const GenerateNodeUpdates &generate_nodes,
                              bool in_place = false,
                              bool async = false,
                              int memorder = __ATOMIC_SEQ_CST);

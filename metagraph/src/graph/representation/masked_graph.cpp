@@ -243,7 +243,7 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     return DeBruijnGraph::operator==(other);
 }
 
-void MaskedDeBruijnGraph::update_mask(const GenerateNodes &generate_nodes,
+void MaskedDeBruijnGraph::update_mask(const GenerateNodeUpdates &generate_nodes,
                                       bool in_place, bool async, int memorder) {
     std::mutex set_mutex;
     auto *mask_updateable = dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
