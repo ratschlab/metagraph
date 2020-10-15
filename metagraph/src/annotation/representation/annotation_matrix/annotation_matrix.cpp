@@ -179,7 +179,7 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
     std::vector<std::string> labels(offsets.back());
     std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
 
-    std::string terminal_file;
+    std::string anchors_filename;
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
@@ -199,8 +199,8 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
             if (!label_encoder.size())
                 common::logger->warn("No labels in {}", filenames[i]);
 
-            assert(terminal_file.empty() || terminal_file == matrix.terminal_file());
-            terminal_file = matrix.terminal_file();
+            assert(anchors_filename.empty() || anchors_filename == matrix.anchors_filename());
+            anchors_filename = matrix.anchors_filename();
 
             matrix.diffs().call_columns([&](uint64_t idx, std::unique_ptr<bit_vector> &&col) {
                 labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
@@ -211,7 +211,7 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
         }
     }
     matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
-            nullptr, binmat::ColumnMajor(std::move(columns)), terminal_file);
+            nullptr, binmat::ColumnMajor(std::move(columns)), anchors_filename);
     std::for_each(labels.begin(), labels.end(),
                   [&](const auto &l) { label_encoder_.insert_and_encode(l); });
 

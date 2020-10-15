@@ -2002,8 +2002,7 @@ void assert_no_leftovers(const BOSS& boss, const sdsl::bit_vector& visited) {
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void BOSS::call_paths(Call<std::vector<edge_index>&&,
-                           std::vector<TAlphabet>&&> callback,
+void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&> callback,
                       size_t num_threads,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,

@@ -16,6 +16,11 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
+bool build_successor(const graph::DBGSuccinct &graph,
+                     const std::string &outfbase,
+                     uint32_t max_length,
+                     uint32_t num_threads);
+
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
  * successive nodes, rather than the full annotation.
@@ -37,21 +42,21 @@ namespace binmat {
 // virtual methods in template classes to not be instantiated if unused and mistakenly
 // does not instantiate the virtual methods in this class, so I had to move definitions
 // to the header (gcc works fine)
- template <class BaseMatrix>
+template <class BaseMatrix>
 class RowDiff : public BinaryMatrix {
   public:
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph,
                BaseMatrix &&diffs,
-               const std::string &terminal_file)
-        : graph_(graph), diffs_(std::move(diffs)), terminal_file_(terminal_file) {
-        load_terminal(terminal_file_, &terminal_);
+               const std::string &anchors_filename)
+        : graph_(graph), diffs_(std::move(diffs)), anchors_filename_(anchors_filename) {
+        load_terminal(anchors_filename_, &terminal_);
     }
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
-    const std::string& terminal_file() const { return terminal_file_; }
+    const std::string& anchors_filename() const { return anchors_filename_; }
 
     const graph::DBGSuccinct *graph() const { return graph_; }
 
@@ -65,9 +70,11 @@ class RowDiff : public BinaryMatrix {
 
     bool get(Row row, Column column) const override {
         SetBitPositions set_bits = get_row(row);
-        SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
+        SetBitPositions::iterator v
+                = std::lower_bound(set_bits.begin(), set_bits.end(), column);
         return v != set_bits.end() && *v == column;
     }
+
 
     /**
      * Returns the given column.
@@ -104,10 +111,10 @@ class RowDiff : public BinaryMatrix {
     bool load(std::istream &f) override {
         uint64_t len;
         f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
-        terminal_file_ = std::string(len, '\0');
-        f.read(terminal_file_.data(), len);
-        common::logger->trace("Loading terminal nodes from {}", terminal_file_);
-        std::ifstream fterm(terminal_file_, ios::binary);
+        anchors_filename_ = std::string(len, '\0');
+        f.read(anchors_filename_.data(), len);
+        common::logger->trace("Loading terminal nodes from {}", anchors_filename_);
+        std::ifstream fterm(anchors_filename_, ios::binary);
         terminal_.load(fterm);
         fterm.close();
 
@@ -115,14 +122,14 @@ class RowDiff : public BinaryMatrix {
     }
 
     void serialize(std::ostream &f) const override {
-        uint64_t len = terminal_file_.size();
+        uint64_t len = anchors_filename_.size();
         f.write(reinterpret_cast<char *>(&len), sizeof(uint64_t));
-        f.write(terminal_file_.c_str(), len);
+        f.write(anchors_filename_.c_str(), len);
         diffs_.serialize(f);
     };
 
-    void serialize(const std::string &name) const;
-    bool load(const std::string &name);
+    void serialize(const std::string &filename) const;
+    bool load(const std::string &filename);
 
     const sdsl::rrr_vector<> &terminal() const { return terminal_; }
 
@@ -135,7 +142,7 @@ class RowDiff : public BinaryMatrix {
     static void load_terminal(const std::string &filename, sdsl::rrr_vector<> *terminal) {
         std::ifstream f(filename, ios::binary);
         if (!f.good()) {
-            common::logger->error("Could not open terminal file {}", filename);
+            common::logger->error("Could not open anchor file {}", filename);
             std::exit(1);
         }
         terminal->load(f);
@@ -143,6 +150,8 @@ class RowDiff : public BinaryMatrix {
     }
 
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
+        assert(std::is_sorted(result->begin(), result->end())
+               && std::is_sorted(diff2.begin(), diff2.end()));
         if (diff2.empty()) {
             return;
         }
@@ -155,20 +164,16 @@ class RowDiff : public BinaryMatrix {
                 idx1++;
                 idx2++;
             } else if (diff1[idx1] < diff2[idx2]) {
-                result->push_back(diff1[idx1]);
-                idx1++;
+                result->push_back(diff1[idx1++]);
             } else {
-                result->push_back(diff2[idx2]);
-                idx2++;
+                result->push_back(diff2[idx2++]);
             }
         }
         while (idx1 < diff1.size()) {
-            result->push_back(diff1[idx1]);
-            idx1++;
+            result->push_back(diff1[idx1++]);
         }
         while (idx2 < diff2.size()) {
-            result->push_back(diff2[idx2]);
-            idx2++;
+            result->push_back(diff2[idx2++]);
         }
     }
 
@@ -177,7 +182,7 @@ class RowDiff : public BinaryMatrix {
     BaseMatrix diffs_;
     sdsl::rrr_vector<> terminal_;
 
-    std::string terminal_file_;
+    std::string anchors_filename_;
 };
 
 } // namespace binmat

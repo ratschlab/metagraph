@@ -423,11 +423,11 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::BRWTRowDiff
             && config->anno_type != Config::ColumnCompressed) {
             logger->error(
-                    "Only conversion to column compressed and brwt_rowdiff supported for "
+                    "Only conversion to `column` and `brwt_row_diff` supported for "
                     "row_diff");
             exit(1);
         }
-        if(config->anno_type == Config::BRWTRowDiff) {
+        if (config->anno_type == Config::BRWTRowDiff) {
             std::unique_ptr<BRWTRowDiffAnnotator> brwt_annotator;
             if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
                 logger->trace("Loading annotation from disk...");
@@ -533,7 +533,7 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    const std::string& fname = files.at(0);
+    const std::string &fname = files.at(0);
 
     std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
     Config::AnnotationType anno_type = parse_annotation_type(fname);

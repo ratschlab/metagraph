@@ -34,13 +34,6 @@ ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
 NUM_THREADS = 4
 
-def product(graph_types, anno_types):
-    result  = []
-    for graph in graph_types:
-        for anno in anno_types:
-            if graph == 'succinct' or (anno != 'row_diff' and anno != 'brwt_row_diff'):
-                result.append((graph, anno))
-    return result
 
 def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, extra_params=''):
     target_anno = anno_repr
@@ -92,10 +85,10 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=product(
+    input_values=list(itertools.product(
         GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    ),
+    )) + [('succinct', 'row_diff'), ('succinct', 'row_diff_brwt')],
     class_name_func=get_test_class_name
 )
 class TestQuery(unittest.TestCase):
@@ -501,10 +494,10 @@ class TestQuery(unittest.TestCase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=product(
+    input_values=list(itertools.product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    ),
+    )) + [('succinct', 'row_diff'), ('succinct', 'row_diff_brwt')],
     class_name_func=get_test_class_name
 )
 class TestQueryCanonical(unittest.TestCase):
@@ -684,10 +677,10 @@ class TestQueryCanonical(unittest.TestCase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=product(
+    input_values=list(itertools.product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    ),
+    )) + [('succinct', 'row_diff'), ('succinct', 'row_diff_brwt')],
     class_name_func=get_test_class_name
 )
 class TestQueryPrimary(unittest.TestCase):
