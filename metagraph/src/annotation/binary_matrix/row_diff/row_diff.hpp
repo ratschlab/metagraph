@@ -1,6 +1,8 @@
 #pragma once
 
 #include <fstream>
+#include <string>
+#include <vector>
 
 #include <sdsl/enc_vector.hpp>
 #include <sdsl/bit_vectors.hpp>
@@ -8,8 +10,10 @@
 #include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "common/logger.hpp"
 #include "common/vector.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 namespace mtg {
