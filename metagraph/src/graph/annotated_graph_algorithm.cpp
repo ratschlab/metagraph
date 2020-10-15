@@ -498,6 +498,5 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
     logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 }
 
-
 } // namespace graph
 } // namespace mtg

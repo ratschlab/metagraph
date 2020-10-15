@@ -111,7 +111,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
 
-    // If a mask is defined, return a const pointer to it. Otherwise, return nullptr
+    // Return a pointer to the mask, or NULL if not initialized
     virtual const bit_vector* get_mask() const final { return valid_edges_.get(); }
 
     virtual void reset_mask() final { valid_edges_.reset(); }

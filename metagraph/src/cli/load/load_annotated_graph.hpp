@@ -16,7 +16,6 @@ initialize_annotated_dbg(std::shared_ptr<graph::DeBruijnGraph> graph,
 
 std::unique_ptr<graph::AnnotatedDBG> initialize_annotated_dbg(const Config &config);
 
-
 } // namespace cli
 } // namespace mtg
 
