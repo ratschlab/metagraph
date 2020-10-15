@@ -155,15 +155,6 @@ std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string>
     return graph;
 }
 
-void clean_row_diff_files(const std::string &graph_name) {
-    std::string outfbase = test_dump_basename + graph_name;
-    for (const auto &suf :
-         { ".succ", ".pred", ".pred_boundary", ".terminal", "row_diff.annodbg",
-           "dbg", "edgemask", "column.annodbg", "row_diff.annodbg" }) {
-        std::filesystem::remove(outfbase + suf);
-    }
-}
-
 TEST(RowDiff, succ) {
     const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ/";
 
