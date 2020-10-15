@@ -251,7 +251,6 @@ TEST(IntVector, atomic_fetch_and_add_sparse_every_4) {
             sdsl::int_vector<> vector_atomic = aligned_int_vector(1000, 0, w, 16);
             sdsl::int_vector<> vector(1000, 0, w);
             ASSERT_LT(65u, vector.size());
-            std::atomic<size_t> counter = 0;
 
             std::mutex mu;
             std::mutex mu2;
