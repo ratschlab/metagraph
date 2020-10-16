@@ -2671,11 +2671,12 @@ void BOSS::call_sequences_row_diff(
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
     constexpr bool async = true;
 
-    // TODO: Accumulate more edges and start each task for a bunch of nodes
-    auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
+    auto enqueue_start = [&](ThreadPool &thread_pool, const std::vector<edge_index> &start) {
         thread_pool.enqueue([&, start]() {
-            call_row_diff_path(*this, start, callback, max_length, &visited, terminal,
-                               &near_terminal, dummy, progress_bar);
+            for (const auto& edge : start) {
+                call_row_diff_path(*this, edge, callback, max_length, &visited, terminal,
+                                   &near_terminal, dummy, progress_bar);
+            }
         });
     };
 
@@ -2683,13 +2684,16 @@ void BOSS::call_sequences_row_diff(
     //  .____
     for (edge_index i = succ_last(1); i >= 1; --i) {
         if (!fetch_bit(visited.data(), i, async))
-            enqueue_start(thread_pool, i);
+            enqueue_start(thread_pool, {i});
     }
 
     // then all forks
     //  ____.____
     //       \___
     uint64_t last_processed = 0;
+    constexpr uint32_t batch_size = 128;
+    std::vector<uint64_t> to_visit;
+    to_visit.reserve(batch_size);
     auto process_fork = [&](edge_index i) {
         if (i <= last_processed)
             return; // this fork was already processed
@@ -2699,11 +2703,18 @@ void BOSS::call_sequences_row_diff(
             return; // single outgoing edge, so not a fork
         }
         for (; i <= last_processed; ++i) {
-            if (!fetch_bit(visited.data(), i, async))
-                enqueue_start(thread_pool, i);
+            if (!fetch_bit(visited.data(), i, async)) {
+                to_visit.push_back(i);
+                if (to_visit.size() == batch_size) {
+                    enqueue_start(thread_pool, to_visit);
+                    to_visit.resize(0);
+                }
+            }
+
         }
     };
     call_zeros(visited, process_fork, async);
+    enqueue_start(thread_pool, to_visit);
 
     thread_pool.join();
 
