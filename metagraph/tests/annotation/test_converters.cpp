@@ -397,12 +397,11 @@ void test_row_diff(uint32_t k,
     std::filesystem::remove_all(dst_dir);
 }
 
-[[clang::optnone]] void test_row_diff_separate_columns(uint32_t k,
+void test_row_diff_separate_columns(uint32_t k,
                                     uint32_t max_depth,
                                     const std::vector<std::string> &sequences,
                                     const std::vector<std::vector<std::string>> &annotations,
                                     const std::string &prefix) {
-#pragma clang optimize off
     const auto dst_dir = std::filesystem::path(test_dump_basename)/prefix;
     const std::string graph_fname
             = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
@@ -469,7 +468,6 @@ TEST(RowDiff, ConvertFromColumnCompressedOneToFiveLabels) {
 }
 
 TEST(RowDiff, ConvertFromColumnCompressed) {
-    common::logger->set_level(spdlog::level::trace);
     const std::vector<std::vector<std::string>> annotations
             = { { "Label0", "Label2", "Label8" },
                 {},
