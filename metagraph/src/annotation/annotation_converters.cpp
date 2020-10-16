@@ -1256,8 +1256,9 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     for (uint64_t i = 0; i < sources.size(); ++i) {
         if (sources[i]->num_labels() == 0)
             continue;
-        const uint64_t num_elements
-                = std::min((uint64_t)1'000'000, sources[i]->num_relations());
+        uint64_t num_elements
+                = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
+                           std::min((uint64_t)1'000'000, sources[i]->num_relations()));
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
         for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {

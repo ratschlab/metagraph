@@ -369,7 +369,6 @@ void test_row_diff(uint32_t k,
     graph->serialize(graph_fname);
 
     ColumnCompressed initial_annotation(graph->num_nodes());
-    std::vector<uint32_t> added_idx(graph->num_nodes());
     std::unordered_set<std::string> all_labels;
     for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
         const std::vector<std::string> &labels = annotations[anno_idx];
@@ -398,23 +397,98 @@ void test_row_diff(uint32_t k,
     std::filesystem::remove_all(dst_dir);
 }
 
+[[clang::optnone]] void test_row_diff_separate_columns(uint32_t k,
+                                    uint32_t max_depth,
+                                    const std::vector<std::string> &sequences,
+                                    const std::vector<std::vector<std::string>> &annotations,
+                                    const std::string &prefix) {
+#pragma clang optimize off
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/prefix;
+    const std::string graph_fname
+            = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
+    std::vector<std::string> annot_fnames;
+
+    std::filesystem::remove_all(dst_dir);
+    std::filesystem::create_directories(dst_dir);
+
+    auto graph = std::make_unique<graph::DBGSuccinct>(k);
+    for (const auto& seq : sequences) {
+        graph->add_sequence(seq);
+    }
+    graph->mask_dummy_kmers(1, false);
+    graph->serialize(graph_fname);
+
+    std::map<std::string, std::vector<uint64_t>> col_annotations;
+    for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
+        for(const auto& label : annotations[anno_idx]) {
+            col_annotations[label].push_back(anno_idx);
+        }
+    }
+
+    for (const auto& [label, indices] : col_annotations) {
+        ColumnCompressed initial_annotation(graph->num_nodes());
+        initial_annotation.add_labels(indices, {label});
+        std::string annot_fname
+                = dst_dir/("anno_" + label + ColumnCompressed<>::kExtension);
+        annot_fnames.push_back(annot_fname);
+        initial_annotation.serialize(annot_fname);
+    }
+
+    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir);
+
+    for (const auto& [label, indices] : col_annotations) {
+        const std::string dest_fname
+                = dst_dir/("anno_" + label + RowDiffAnnotator::kExtension);
+        ASSERT_TRUE(std::filesystem::exists(dest_fname));
+        RowDiffAnnotator annotator;
+        annotator.load(dest_fname);
+        const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                .set_graph(graph.get());
+
+        ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
+
+        std::vector<uint64_t> actual_indices;
+        annotator.call_objects(label,
+                               [&](uint64_t index) { actual_indices.push_back(index); });
+        ASSERT_THAT(indices, UnorderedElementsAreArray(indices));
+    }
+
+    std::filesystem::remove_all(dst_dir);
+}
+
+TEST(RowDiff, ConvertFromColumnCompressedOneToFiveLabels) {
+    const std::vector<std::vector<std::string>> annotations
+            = { { "Label0" },
+                { "Label1", "Label2" },
+                { "Label1", "Label2", "Label3" },
+                { "Label1", "Label2", "Label3", "Label4" },
+                { "Label1", "Label2", "Label3", "Label4", "Label5" } };
+    test_row_diff(3, 5, { "ACGTCAC" }, annotations, "column.diff.convert");
+    test_row_diff_separate_columns(3, 5, { "ACGTCAC" }, annotations,
+                                   "column.diff.convert");
+}
+
 TEST(RowDiff, ConvertFromColumnCompressed) {
-    test_row_diff(3, 5, { "ACGTCAC" },
-                     { { "Label0", "Label2", "Label8" },
-                       {},
-                       { "Label1", "Label2" },
-                       { "Label1", "Label2", "Label8" },
-                       { "Label2" } },
-                     "column.diff.convert");
+    common::logger->set_level(spdlog::level::trace);
+    const std::vector<std::vector<std::string>> annotations
+            = { { "Label0", "Label2", "Label8" },
+                {},
+                { "Label1", "Label2" },
+                { "Label1", "Label2", "Label8" },
+                { "Label2" } };
+    test_row_diff(3, 5, { "ACGTCAC" }, annotations, "column.diff.convert");
+    test_row_diff_separate_columns(3, 5, { "ACGTCAC" }, annotations,
+                                   "column.diff.convert");
 }
 
 TEST(RowDiff, ConvertFromColumnCompressed4Loops) {
     std::vector<std::string> sequences = { std::string(100, 'A'), std::string(100, 'G'),
                                            std::string(100, 'C'), std::string(100, 'T') };
+    const std::vector<std::vector<std::string>> annotations
+            = { { "Lb0", "Lb2", "Lb8" }, {}, { "Lb9" }, { "Lb0", "Lb8", "Lb2" } };
 
-    test_row_diff(3, 5, sequences,
-                     { { "Lb0", "Lb2", "Lb8" }, {}, { "Lb9" }, { "Lb0", "Lb8", "Lb2" } },
-                     "column.diff.4loops");
+    test_row_diff(3, 5, sequences, annotations, "column.diff.4loops");
+    test_row_diff_separate_columns(3, 5, sequences, annotations, "column.diff.4loops");
 }
 
 TEST(RowDiff, ConvertFromColumnCompressed4PathsRandomLabels) {
@@ -422,14 +496,14 @@ TEST(RowDiff, ConvertFromColumnCompressed4PathsRandomLabels) {
     std::uniform_int_distribution<> distrib(0, 2);
 
 
-    std::vector<std::vector<std::string>> options = {{"L1"}, {"L1", "L2"}, {"L3"}};
+    std::vector<std::vector<std::string>> options = { { "L1" }, { "L1", "L2" }, { "L3" } };
     std::vector<std::vector<std::string>> annotations;
     for (uint32_t anno_idx = 0; anno_idx < 24; ++anno_idx) {
         annotations.push_back(options[distrib(gen)]);
     }
-
-    test_row_diff(3, 5, { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" },
-                     annotations, "column.diff.4paths");
+    const std::vector<std::string> sequences = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
+    test_row_diff(3, 5, sequences, annotations, "column.diff.4paths");
+    test_row_diff_separate_columns(3, 5, sequences, annotations, "column.diff.4paths");
 }
 
 TEST(RowDiff, ConvertFromColumnCompressed2BigLoops) {
@@ -452,6 +526,7 @@ TEST(RowDiff, ConvertFromColumnCompressed2BigLoops) {
     }
 
     test_row_diff(10, 3, sequences, annotations, "column.diff.2bigloops");
+    test_row_diff_separate_columns(10, 3, sequences, annotations, "column.diff.2bigloops");
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {
