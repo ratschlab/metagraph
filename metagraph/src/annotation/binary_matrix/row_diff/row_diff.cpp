@@ -57,6 +57,24 @@ bool build_successor(const graph::DBGSuccinct &graph,
     boss.call_sequences_row_diff([&](const vector<uint64_t> &, std::optional<uint64_t>) {},
                                  num_threads, max_length, &terminal, &dummy);
 
+    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
+    sdsl::bit_vector term(graph.num_nodes(), 0);
+    for (uint64_t i = 1; i < terminal.size(); ++i) {
+        if (terminal[i]) {
+            uint64_t graph_idx = graph.boss_to_kmer_index(i);
+            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_idx);
+            assert(anno_index < graph.num_nodes());
+            term[anno_index] = 1;
+        }
+    }
+
+    std::ofstream fterm(outfbase + ".terminal", ios::binary);
+    sdsl::rrr_vector rterm(term);
+    rterm.serialize(fterm);
+    fterm.close();
+    common::logger->trace("Anchor nodes written to {}.terminal", outfbase);
+
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
     sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
@@ -76,7 +94,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
         std::vector<std::vector<uint64_t>> succ_buf(num_threads);
         std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
 
-#pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+        #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
         for (uint32_t chunk = 0; chunk < std::max((uint32_t)1, num_threads); ++ chunk) {
             uint64_t start = batch * batch_size + chunk * chunk_size + 1;
             for (uint64_t i = start;
@@ -129,23 +147,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
     rpred_boundary.serialize(fpred_boundary);
     fpred_boundary.close();
 
-    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
-    sdsl::bit_vector term(graph.num_nodes(), 0);
-    for (uint64_t i = 1; i < terminal.size(); ++i) {
-        if (terminal[i]) {
-            uint64_t graph_idx = graph.boss_to_kmer_index(i);
-            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_idx);
-            assert(anno_index < graph.num_nodes());
-            term[anno_index] = 1;
-        }
-    }
-
-    std::ofstream fterm(outfbase + ".terminal", ios::binary);
-    sdsl::rrr_vector rterm(term);
-    rterm.serialize(fterm);
-    fterm.close();
-    common::logger->trace("Successfully computed terminal/pred/succ nodes.");
+    common::logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
     return true;
 }
 
