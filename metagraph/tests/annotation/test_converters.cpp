@@ -204,7 +204,7 @@ TEST(RowDiff, succ) {
             EXPECT_EQ(expected_pred[idx][i], pred[i]) << max_depth << " " << i;
         }
 
-        sdsl::rrr_vector boundary;
+        sdsl::bit_vector boundary;
         std::ifstream fpred_boundary(pred_boundary_file, std::ios::binary);
         boundary.load(fpred_boundary);
 

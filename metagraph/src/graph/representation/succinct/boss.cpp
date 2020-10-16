@@ -2673,7 +2673,7 @@ void BOSS::call_sequences_row_diff(
 
     auto enqueue_start = [&](ThreadPool &thread_pool, const std::vector<edge_index> &start) {
         thread_pool.enqueue([&, start]() {
-            for (const auto& edge : start) {
+            for (auto edge : start) {
                 call_row_diff_path(*this, edge, callback, max_length, &visited, terminal,
                                    &near_terminal, dummy, progress_bar);
             }
@@ -2684,7 +2684,7 @@ void BOSS::call_sequences_row_diff(
     //  .____
     for (edge_index i = succ_last(1); i >= 1; --i) {
         if (!fetch_bit(visited.data(), i, async))
-            enqueue_start(thread_pool, {i});
+            enqueue_start(thread_pool, { i });
     }
 
     // then all forks

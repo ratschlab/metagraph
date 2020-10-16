@@ -39,7 +39,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
     for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             common::logger->trace(
-                    "Building and writing successor/predecessor/terminal files to {}.*",
+                    "Building and writing successor, predecessor and terminal files to {}.*",
                     outfbase);
             must_build = true;
             break;
@@ -78,7 +78,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
     sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
-    std::vector<bool> pred_boundary;
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, 1024 * 1024);
     sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
 
     // traverse BOSS table in parallel processing num_threads chunks of size 1'000'000
@@ -89,13 +89,13 @@ bool build_successor(const graph::DBGSuccinct &graph,
     ProgressBar progress_bar(batch_count, "Compute successors", std::cerr,
                              !common::get_verbose());
 
-    for(uint64_t batch = 0; batch < batch_count; ++batch) {
+    for (uint64_t batch = 0; batch < batch_count; ++batch) {
         std::vector<std::vector<uint64_t>> pred_buf(num_threads);
         std::vector<std::vector<uint64_t>> succ_buf(num_threads);
         std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
 
         #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
-        for (uint32_t chunk = 0; chunk < std::max((uint32_t)1, num_threads); ++ chunk) {
+        for (uint32_t chunk = 0; chunk < std::max((uint32_t)1, num_threads); ++chunk) {
             uint64_t start = batch * batch_size + chunk * chunk_size + 1;
             for (uint64_t i = start;
                  i < std::min(graph.num_nodes() + 1, start + chunk_size); ++i) {
@@ -141,11 +141,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
     }
     succ.close();
     pred.close();
-
-    std::ofstream fpred_boundary(outfbase + ".pred_boundary");
-    sdsl::rrr_vector rpred_boundary(to_sdsl(pred_boundary));
-    rpred_boundary.serialize(fpred_boundary);
-    fpred_boundary.close();
+    pred_boundary.close();
 
     common::logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
     return true;
