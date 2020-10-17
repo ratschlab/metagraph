@@ -94,12 +94,6 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < graph.get_k()) {
-        // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
-        }
-
         // Use the seeder that seeds to node suffixes
         return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
 

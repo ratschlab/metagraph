@@ -1,6 +1,7 @@
 #include "aligner_methods.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -79,9 +80,16 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
 
 template <typename NodeType>
 SuffixSeeder<NodeType>::SuffixSeeder(const DeBruijnGraph &graph,
-                                     const DBGAlignerConfig &config) {
-    if (!dynamic_cast<const DBGSuccinct*>(&graph))
-        throw std::runtime_error("Only implemented for DBGSuccinct");
+                                     const DBGAlignerConfig &config)
+      : dbg_succ_(dynamic_cast<const DBGSuccinct*>(&graph)) {
+    if (!dbg_succ_) {
+        auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+        if (canonical)
+            dbg_succ_ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+
+        if (!dbg_succ_)
+            throw std::runtime_error("Only implemented for DBGSuccinct");
+    }
 
     if (config.max_seed_length > graph.get_k()) {
         base_seeder_ = std::make_unique<UniMEMSeeder<NodeType>>(graph, config);
@@ -93,7 +101,7 @@ SuffixSeeder<NodeType>::SuffixSeeder(const DeBruijnGraph &graph,
 template <typename NodeType>
 void SuffixSeeder<NodeType>
 ::initialize(std::string_view query, bool orientation) {
-    const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
+    const auto &graph = *dbg_succ_;
     const auto &config = get_config();
     auto &query_nodes = get_query_nodes();
     auto &offsets = get_offsets();
@@ -120,11 +128,18 @@ void SuffixSeeder<NodeType>
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
 
+    auto *canonical = dynamic_cast<const CanonicalDBG*>(&get_graph());
+    std::string rev_comp_query;
+    if (canonical) {
+        rev_comp_query = query;
+        reverse_complement(rev_comp_query.begin(), rev_comp_query.end());
+    }
+
     auto process_suffix_match = [&](size_t i, NodeType alt_node, size_t seed_length) {
         assert(alt_node != DeBruijnGraph::npos);
         assert(seed_length < k);
         assert(i + seed_length + 1 == query.size()
-            || graph.traverse(alt_node, query[i + seed_length])
+            || get_graph().traverse(alt_node, query[i + seed_length])
                 == DeBruijnGraph::npos);
 
         if (config.max_num_seeds_per_locus != 1) {
@@ -167,6 +182,111 @@ void SuffixSeeder<NodeType>
             config.min_seed_length,
             config.max_num_seeds_per_locus
         );
+
+        if (!canonical)
+            continue;
+
+        // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
+        // complements of potential suffix matches
+        graph.call_nodes_with_prefix_matching_longest_prefix(
+            std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
+                             max_seed_length),
+            [&](NodeType alt_node, size_t seed_length) {
+                assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
+                    == std::string(query.data() + i + k - seed_length, seed_length));
+                if (i + k - seed_length < query_nodes.size() && seed_length >= offsets[i + k - seed_length])
+                    process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+            },
+            config.min_seed_length,
+            config.max_num_seeds_per_locus
+        );
+    }
+}
+
+template <typename NodeType>
+void SuffixSeeder<NodeType>
+::call_end_suffix_seeds(std::function<void(Seed&&)> callback) const {
+    auto query = get_query();
+    const auto &config = get_config();
+    const auto &graph = *dbg_succ_;
+    size_t k = graph.get_k();
+    bool orientation = this->get_orientation();
+
+    auto *canonical = dynamic_cast<const CanonicalDBG*>(&get_graph());
+    std::string rev_comp_query;
+    if (canonical) {
+        rev_comp_query = query;
+        reverse_complement(rev_comp_query.begin(), rev_comp_query.end());
+    }
+
+    auto process_suffix_match = [&](size_t i, NodeType alt_node, size_t seed_length) {
+        assert(alt_node != DeBruijnGraph::npos);
+        assert(seed_length < k);
+        assert(i + seed_length + 1 == query.size()
+            || get_graph().traverse(alt_node, query[i + seed_length])
+                == DeBruijnGraph::npos);
+
+        std::string_view seed_seq(query.data() + i, seed_length);
+        DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
+
+        if (match_score <= config.min_cell_score)
+            return;
+
+        Seed seed(seed_seq, { alt_node }, match_score, i,
+                  orientation, k - seed_length);
+
+        assert(seed.is_valid(get_graph(), &config));
+        callback(std::move(seed));
+    };
+
+    for (size_t i = query.size() - k + 1; i + config.min_seed_length <= query.size(); ++i) {
+        graph.call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view(query.data() + i, query.size() - i),
+            [&](NodeType alt_node, size_t seed_length) {
+                process_suffix_match(i, alt_node, seed_length);
+            },
+            config.min_seed_length,
+            config.max_num_seeds_per_locus
+        );
+
+        if (!canonical)
+            continue;
+
+        // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
+        // complements of potential suffix matches
+        graph.call_nodes_with_prefix_matching_longest_prefix(
+            std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
+                             query.size() - i),
+            [&](NodeType alt_node, size_t seed_length) {
+                assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
+                    == std::string(query.data() + i + k - seed_length, seed_length));
+                process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+            },
+            config.min_seed_length,
+            config.max_num_seeds_per_locus
+        );
+    }
+
+    if (!canonical)
+        return;
+
+    size_t max_seed_length = std::min(query.size(), std::min(config.max_seed_length, k));
+
+    for (size_t i = 0; i < query.size() - k + 1; ++i) {
+        // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
+        // complements of potential suffix matches
+        graph.call_nodes_with_prefix_matching_longest_prefix(
+            std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
+                             max_seed_length),
+            [&](NodeType alt_node, size_t seed_length) {
+                assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
+                    == std::string(query.data() + i + k - seed_length, seed_length));
+                if (i + k - seed_length >= query.size() - k + 1)
+                    process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+            },
+            config.min_seed_length,
+            config.max_num_seeds_per_locus
+        );
     }
 }
 
@@ -190,44 +310,8 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
     });
 
     const auto &query_nodes = base_seeder_->get_query_nodes();
-    if (query_nodes.back())
-        return;
-
-    const auto &config = get_config();
-    const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
-    size_t k = graph.get_k();
-    bool orientation = this->get_orientation();
-
-    auto process_suffix_match = [&](size_t i, NodeType alt_node, size_t seed_length) {
-        assert(alt_node != DeBruijnGraph::npos);
-        assert(seed_length < k);
-        assert(i + seed_length + 1 == query.size()
-            || graph.traverse(alt_node, query[i + seed_length])
-                == DeBruijnGraph::npos);
-
-        std::string_view seed_seq(query.data() + i, seed_length);
-        DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
-
-        if (match_score <= config.min_cell_score)
-            return;
-
-        Seed seed(seed_seq, { alt_node }, match_score, i,
-                  orientation, k - seed_length);
-
-        assert(seed.is_valid(graph, &config));
-        callback(std::move(seed));
-    };
-
-    for (size_t i = query.size() - k + 1; i + config.min_seed_length <= query.size(); ++i) {
-        graph.call_nodes_with_suffix_matching_longest_prefix(
-            std::string_view(query.data() + i, query.size() - i),
-            [&](NodeType alt_node, size_t seed_length) {
-                process_suffix_match(i, alt_node, seed_length);
-            },
-            config.min_seed_length,
-            config.max_num_seeds_per_locus
-        );
-    }
+    if (!query_nodes.back())
+        call_end_suffix_seeds(callback);
 }
 
 template <typename NodeType>

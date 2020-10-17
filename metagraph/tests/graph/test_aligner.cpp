@@ -6,6 +6,7 @@
 
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
@@ -1550,6 +1551,46 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
                          paths.get_query_reverse_complement());
 
     check_extend(graph, aligner.get_config(), paths, query);
+}
+
+TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
+    size_t k = 18;
+    std::string reference = "TTGGCCTCGAAAG" "TTTTT";
+    std::string query =     "GGGGG" "CTTTCGAGGCCAA";
+    std::string ref_rev =   "AAAAA" "CTTTCGAGGCCAA";
+
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    dbg_succ->add_sequence(reference);
+    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ, true);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_seed_length = 13;
+
+    for (size_t max_seed_length : { k, k + 100}) {
+        config.max_seed_length = max_seed_length;
+        DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+        auto paths = aligner.align(query);
+        ASSERT_EQ(1ull, paths.size());
+        auto path = paths.front();
+
+        EXPECT_EQ(1u, path.size()); // includes dummy k-mers
+        EXPECT_EQ(ref_rev.substr(5), path.get_sequence());
+        EXPECT_EQ(config.score_sequences(query.substr(5), ref_rev.substr(5)), path.get_score());
+        EXPECT_EQ("5S13=", path.get_cigar().to_string());
+        EXPECT_EQ(13u, path.get_num_matches());
+        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_EQ(5u, path.get_clipping());
+        EXPECT_EQ(0u, path.get_end_clipping());
+        EXPECT_EQ(5u, path.get_offset());
+        EXPECT_TRUE(path.is_valid(*graph, &config));
+        check_json_dump_load(*graph,
+                             path,
+                             paths.get_query(),
+                             paths.get_query_reverse_complement());
+    }
 }
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {

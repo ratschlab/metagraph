@@ -13,6 +13,9 @@
 
 namespace mtg {
 namespace graph {
+
+class DBGSuccinct;
+
 namespace align {
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -37,7 +40,6 @@ class Seeder {
 template <typename NodeType>
 class ExactMapSeeder;
 
-
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class SuffixSeeder : public Seeder<NodeType> {
   public:
@@ -55,12 +57,14 @@ class SuffixSeeder : public Seeder<NodeType> {
     bool get_orientation() const { return base_seeder_->get_orientation(); }
 
   private:
+    const DBGSuccinct *dbg_succ_ = nullptr;
     std::unique_ptr<ExactMapSeeder<NodeType>> base_seeder_;
     std::vector<std::vector<NodeType>> alt_query_nodes;
 
     std::vector<NodeType>& get_query_nodes() { return base_seeder_->get_query_nodes(); }
     std::vector<uint8_t>& get_offsets() { return base_seeder_->get_offsets(); }
     size_t get_num_matching_kmers() const { return base_seeder_->get_num_matching_kmers(); }
+    void call_end_suffix_seeds(std::function<void(Seed&&)> callback) const;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>

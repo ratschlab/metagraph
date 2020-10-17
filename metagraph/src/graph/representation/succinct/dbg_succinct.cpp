@@ -372,6 +372,120 @@ void DBGSuccinct
     }
 }
 
+struct NodeRangeSearch {
+    boss::BOSS::edge_index first;
+    boss::BOSS::edge_index second;
+    size_t length;
+};
+
+void DBGSuccinct
+::call_nodes_with_prefix_matching_longest_prefix(
+            std::string_view str,
+            std::function<void(node_index, uint64_t /* match length */)> callback,
+            size_t min_match_length,
+            size_t max_num_allowed_matches) const {
+    if (!max_num_allowed_matches)
+        return;
+
+    assert(str.size() <= get_k());
+
+    if (str.size() < min_match_length)
+        return;
+
+    auto encoded = boss_graph_->encode(str);
+
+    // nothing to call if the suffix contains invalid characters
+    if (std::find(encoded.begin(),
+                  encoded.end(),
+                  boss_graph_->alph_size) != encoded.end()) {
+        return;
+    }
+
+    auto index_range = boss_graph_->index_range(
+        encoded.begin(),
+        std::min(encoded.begin() + get_k() - 1, encoded.end())
+    );
+
+    if (std::get<0>(index_range) == 0 || std::get<1>(index_range) == 0)
+        return;
+
+    if (std::get<2>(index_range) == encoded.begin()) {
+        callback(std::get<0>(index_range), 0);
+        return;
+    }
+
+    // since we can only match up to get_k() - 1 in BOSS, check for this
+    // case and simply pick the appropriate BOSS edge
+    if (encoded.size() == get_k() && std::get<2>(index_range) + 1 == encoded.end()) {
+        assert(std::get<0>(index_range) == std::get<1>(index_range));
+        auto edge = boss_graph_->pick_edge(std::get<1>(index_range), encoded.back());
+        if (edge) {
+            auto kmer_index = boss_to_kmer_index(edge);
+            if (kmer_index != npos) {
+                assert(str.size() == get_k());
+                assert(get_node_sequence(kmer_index) == str);
+                callback(kmer_index, get_k());
+                return;
+            }
+        }
+    }
+
+    uint64_t match_size = std::get<2>(index_range) - encoded.begin();
+    if (match_size < min_match_length)
+        return;
+
+    std::vector<NodeRangeSearch> node_ranges;
+    node_ranges.emplace_back(NodeRangeSearch{
+        .first = boss_graph_->pred_last(std::get<0>(index_range) - 1) + 1,
+        .second = std::get<1>(index_range),
+        .length = match_size
+    });
+
+    NodeRangeSearch cur_range;
+    while (node_ranges.size()) {
+        cur_range = std::move(node_ranges.back());
+        node_ranges.pop_back();
+
+        assert(cur_range.length <= get_k());
+
+        for (++cur_range.length; cur_range.length < get_k(); ++cur_range.length) {
+            bool found = false;
+            uint64_t rl_last = cur_range.first;
+            uint64_t ru_last = cur_range.second;
+            for (boss::BOSS::TAlphabet s = 1; s < boss_graph_->alph_size; ++s) {
+                uint64_t rl = rl_last;
+                uint64_t ru = ru_last;
+                if (!boss_graph_->tighten_range(&rl, &ru, s))
+                    continue;
+
+                if (!found) {
+                    cur_range.first = rl;
+                    cur_range.second = ru;
+                    found = true;
+                } else {
+                    node_ranges.emplace_back(NodeRangeSearch{
+                        .first = rl,
+                        .second = ru,
+                        .length = cur_range.length
+                    });
+                }
+            }
+        }
+
+        if (cur_range.length != get_k())
+            continue;
+
+        for (boss::BOSS::edge_index e = cur_range.first; e <= cur_range.second; ++e) {
+            auto kmer_index = boss_to_kmer_index(e);
+            if (kmer_index != npos) {
+                assert(get_node_sequence(kmer_index).substr(0, match_size)
+                            == str.substr(0, match_size));
+                callback(kmer_index, match_size);
+            }
+        }
+    }
+}
+
 void DBGSuccinct::traverse(node_index start,
                            const char *begin,
                            const char *end,

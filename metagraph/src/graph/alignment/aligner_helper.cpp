@@ -3,6 +3,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 
 
@@ -439,7 +440,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             nodes_.assign(rev_nodes.begin(), rev_nodes.end());
 
         } else {
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            assert(canonical || nodes_ == map_sequence_to_nodes(graph, rev_seq));
             std::vector<NodeType> rev_nodes = nodes_;
             reverse_complement_seq_path(graph, rev_seq, rev_nodes);
 
