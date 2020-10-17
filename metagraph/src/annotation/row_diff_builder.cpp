@@ -33,10 +33,22 @@ void traverse_anno_chunked(
 
     sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, 1024 * 1024);
     sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, 1024 * 1024);
+    sdsl::rrr_vector rpred_boundary;
+    std::ifstream f(pred_succ_fprefix + ".pred_boundary", std::ios::binary);
+    rpred_boundary.load(f);
+    f.close();
+    sdsl::int_vector<1> spred_boundary(rpred_boundary.size());
+    for(uint64_t i = 0; i < rpred_boundary.size(); ++i) {
+      spred_boundary[i] = rpred_boundary[i];
+    }
+    std::ofstream fout(pred_succ_fprefix + ".pred_boundary2", std::ios::binary);
+    spred_boundary.serialize(fout);
+    fout.close();
+
+
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
                                              std::ios::in, 1024 * 1024);
 
-    std::cout << fmt::format("Succ size: {} Num rows {}", succ.size(), num_rows) << std::endl;
     assert(succ.size() == num_rows);
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
@@ -73,7 +85,7 @@ void traverse_anno_chunked(
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             if (col_annotations[l_idx]->num_labels()
                 && col_annotations[l_idx]->num_objects() != num_rows) {
@@ -245,7 +257,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     std::vector<std::unique_ptr<ColumnCompressed<>>>().swap(sources);
 
     logger->trace("Generating row_diff columns...");
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
         for (uint64_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
