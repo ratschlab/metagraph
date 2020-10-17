@@ -2978,14 +2978,11 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
         for (const auto &[idx, rl, ru] : suffix_ranges) {
             // prepend the suffix with one of the |alph_size - 1| possible characters
             for (TAlphabet c = 1; c < alph_size; ++c) {
-                // tighten the range for nodes ending with |c|
-                uint64_t rk_rl = rank_W(rl - 1, c) + 1;
-                uint64_t rk_ru = rank_W(ru, c);
-                if (rk_rl > rk_ru)
+                edge_index rl_next = rl;
+                edge_index ru_next = ru;
+                if (!tighten_range(&rl_next, &ru_next, c))
                     continue;
 
-                edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
-                edge_index ru_next = select_last(NF_[c] + rk_ru);
                 assert(idx < num_suffixes);
                 narrowed.emplace_back(num_suffixes * (c - 1) + idx,
                                       rl_next, ru_next);
@@ -3003,20 +3000,18 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
         // prepend the suffix with one of the |alph_size - 1| possible characters
         for (TAlphabet c = 1; c < alph_size; ++c) {
             // tighten the range
-            uint64_t rk_rl = rank_W(rl - 1, c) + 1;
-            uint64_t rk_ru = rank_W(ru, c);
-            if (rk_rl > rk_ru)
+            edge_index rl_next = rl;
+            edge_index ru_next = ru;
+            if (!tighten_range(&rl_next, &ru_next, c))
                 continue;
 
-            edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
-            edge_index ru_next = select_last(NF_[c] + rk_ru);
             assert(idx < num_suffixes);
             indexed_suffix_ranges_[num_suffixes * (c - 1) + idx]
                 = std::make_pair(rl_next, ru_next);
         }
     }
 
-    // aline the upper bounds to enable the binary search on them
+    // align the upper bounds to enable the binary search on them
     for (size_t i = 1; i < indexed_suffix_ranges_.size(); ++i) {
         if (!indexed_suffix_ranges_[i].second) {
             // shift the upper bounds of the empty ranges but still keep them empty
