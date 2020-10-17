@@ -39,9 +39,15 @@ void traverse_anno_chunked(
     rpred_boundary.load(f);
     f.close();
     logger->trace("Read rrr boundary. Converting...");
-    sdsl::int_vector<1> spred_boundary(rpred_boundary.size());
-    for(uint64_t i = 0; i < rpred_boundary.size(); ++i) {
-      spred_boundary[i] = rpred_boundary[i];
+    sdsl::bit_vector spred_boundary(rpred_boundary.size());
+    uint64_t i;
+    ProgressBar pb(rpred_boundary.size()/64, "Boundary");
+    for(i = 0; i < rpred_boundary.size() - 64; i+=64) {
+      spred_boundary.set_int(i, rpred_boundary.get_int(i));
+      ++pb;
+    }
+    for(; i < rpred_boundary.size(); ++i) {
+       spred_boundary[i] = rpred_boundary[i];
     }
     logger->trace("Done converting, serializing...");
     std::ofstream fout(pred_succ_fprefix + ".pred_boundary2", std::ios::binary);
