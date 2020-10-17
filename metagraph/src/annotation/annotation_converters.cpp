@@ -481,7 +481,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
 
     return std::make_unique<RowDiffBRWTAnnotator>(
             std::make_unique<RowDiff<BRWT>>(
-                    nullptr, std::move(*annotator->release_matrix().release()), ""),
+                    nullptr, std::move(*annotator->release_matrix()), ""),
             annotator->get_label_encoder());
 }
 

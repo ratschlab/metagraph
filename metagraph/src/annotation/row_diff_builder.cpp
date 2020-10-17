@@ -19,20 +19,24 @@ using mtg::common::logger;
 constexpr uint64_t chunk_size = 1 << 20;
 
 void traverse_anno_chunked(
-        const std::string &name,
-        const graph::DBGSuccinct &graph,
-        const std::string &outfbase,
+        const std::string &log_header,
+        uint64_t num_rows,
+        const std::string &pred_succ_fprefix,
         const std::vector<std::unique_ptr<annot::ColumnCompressed<>>> &col_annotations,
         const std::function<void()> &before_chunk,
         const CallOnes &call_ones,
         const std::function<void(node_index start, uint64_t size)> &after_chunk) {
+    if (col_annotations.empty())
+        return;
+
     const uint32_t num_threads = get_num_threads();
-    const uint64_t num_rows = graph.num_nodes();
 
-    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::in, 1024*1024);
-    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::in, 1024*1024);
-    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::in, 1024*1024);
+    sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, 1024 * 1024);
+    sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, 1024 * 1024);
+    sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
+                                             std::ios::in, 1024 * 1024);
 
+    std::cout << fmt::format("Succ size: {} Num rows {}", succ.size(), num_rows) << std::endl;
     assert(succ.size() == num_rows);
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
@@ -41,7 +45,7 @@ void traverse_anno_chunked(
 
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
-    ProgressBar progress_bar(num_rows, name, std::cerr, !common::get_verbose());
+    ProgressBar progress_bar(num_rows, log_header, std::cerr, !common::get_verbose());
     for (node_index chunk = 0; chunk < num_rows; chunk += chunk_size) {
         succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
         pred_chunk_idx.resize(std::min(chunk_size, num_rows - chunk) + 1);
@@ -72,11 +76,11 @@ void traverse_anno_chunked(
 #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             if (col_annotations[l_idx]->num_labels()
-                    && col_annotations[l_idx]->num_objects() != graph.num_nodes()) {
+                && col_annotations[l_idx]->num_objects() != num_rows) {
                 logger->error(
                         "Graph and annotation are incompatible. Graph has {} nodes, "
                         "annotation has {} entries",
-                        graph.num_nodes(), col_annotations[l_idx]->num_objects());
+                        num_rows, col_annotations[l_idx]->num_objects());
                 std::exit(1);
             }
             for (uint64_t l_idx2 = 0; l_idx2 < col_annotations[l_idx]->num_labels(); ++l_idx2) {
@@ -129,7 +133,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         std::vector<std::atomic<uint32_t>> sparse_ones(chunk_size);
 
         traverse_anno_chunked(
-                "Anchor opt", graph, graph_fname, sources,
+                "Anchor opt", graph.num_nodes(), graph_fname, sources,
                 [&]() {
                   std::fill(orig_ones.begin(), orig_ones.end(), 0);
                   std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
@@ -194,7 +198,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     }
 
     traverse_anno_chunked(
-            "Compute diffs", graph, graph_fname, sources,
+            "Compute diffs", graph.num_nodes(), graph_fname, sources,
             [&]() {
               for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
                   for (uint32_t col_idx = 0; col_idx < set_rows[source_idx].size();
