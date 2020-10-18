@@ -738,7 +738,7 @@ TEST(DBGSuccinct, CallNodesWithPrefixKEarlyCutoffMaxNum) {
             EXPECT_EQ(query.substr(0, 2), ins->substr(0, 2));
         },
         4,
-        2
+        [&]() { return nodes.size() >= 2; }
     );
 
     EXPECT_TRUE(nodes.empty());

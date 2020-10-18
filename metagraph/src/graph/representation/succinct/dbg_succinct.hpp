@@ -90,7 +90,7 @@ class DBGSuccinct : public DeBruijnGraph {
             std::string_view str,
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length = 1,
-            size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+            const std::function<bool()> &terminate = []() { return false; }) const;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()

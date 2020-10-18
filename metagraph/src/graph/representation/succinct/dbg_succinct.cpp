@@ -383,8 +383,8 @@ void DBGSuccinct
             std::string_view str,
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length,
-            size_t max_num_allowed_matches) const {
-    if (!max_num_allowed_matches)
+            const std::function<bool()> &terminate) const {
+    if (terminate())
         return;
 
     assert(str.size() <= get_k());
@@ -441,9 +441,6 @@ void DBGSuccinct
         .length = 0
     });
 
-    std::vector<std::pair<boss::BOSS::edge_index, boss::BOSS::edge_index>> final_ranges;
-    size_t node_count = 0;
-
     NodeRangeSearch cur_range;
     while (node_ranges.size()) {
         cur_range = std::move(node_ranges.back());
@@ -479,26 +476,14 @@ void DBGSuccinct
         if (cur_range.length != get_k() - match_size - 1)
             continue;
 
-        node_count += valid_edges_
-            ? valid_edges_->rank1(cur_range.second)
-                - valid_edges_->rank1(cur_range.first)
-                + (*valid_edges_)[cur_range.first]
-            : cur_range.second - cur_range.first + 1;
-
-        if (node_count > max_num_allowed_matches) {
-            return;
-        } else {
-            final_ranges.emplace_back(cur_range.first, cur_range.second);
-        }
-    }
-
-    for (const auto &[first, second] : final_ranges) {
-        for (boss::BOSS::edge_index e = first; e <= second; ++e) {
+        for (boss::BOSS::edge_index e = cur_range.first; e <= cur_range.second; ++e) {
             auto kmer_index = boss_to_kmer_index(e);
             if (kmer_index != npos && (valid_edges_ || boss_graph_->get_W(e))) {
                 assert(get_node_sequence(kmer_index).substr(0, match_size)
                             == str.substr(0, match_size));
                 callback(kmer_index, match_size);
+                if (terminate())
+                    return;
             }
         }
     }

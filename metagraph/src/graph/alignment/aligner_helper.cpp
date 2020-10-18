@@ -410,10 +410,12 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
             assert(nodes_.size() == 1);
             nodes_[0] = DeBruijnGraph::npos;
+            // TODO: find a better way to pick one node
             dbg_succ->call_nodes_with_prefix_matching_longest_prefix(
                 sequence_,
                 [&](NodeType prefix_node, size_t) { nodes_[0] = prefix_node; },
-                sequence_.size()
+                sequence_.size(),
+                [&]() -> bool { return nodes_[0]; }
             );
 
             if (nodes_[0]) {

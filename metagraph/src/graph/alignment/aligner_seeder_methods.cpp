@@ -198,6 +198,7 @@ void SuffixSeeder<NodeType>
         if (i + k - max_seed_length < query_nodes.size()) {
             // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
             // complements of potential suffix matches
+            // TODO: max num seeds per locus
             graph.call_nodes_with_prefix_matching_longest_prefix(
                 std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
                                  max_seed_length),
@@ -211,8 +212,7 @@ void SuffixSeeder<NodeType>
                                              seed_length);
                     }
                 },
-                config.min_seed_length,
-                config.max_num_seeds_per_locus
+                config.min_seed_length
             );
         }
     }
@@ -269,6 +269,7 @@ void SuffixSeeder<NodeType>
 
         // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
         // complements of potential suffix matches
+        // TODO: max num seeds per locus
         graph.call_nodes_with_prefix_matching_longest_prefix(
             std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
                              query.size() - i),
@@ -279,8 +280,7 @@ void SuffixSeeder<NodeType>
                                      alt_node + graph.max_index(),
                                      seed_length);
             },
-            config.min_seed_length,
-            config.max_num_seeds_per_locus
+            config.min_seed_length
         );
     }
 
@@ -293,6 +293,7 @@ void SuffixSeeder<NodeType>
         size_t i = j - k + 1;
         // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
         // complements of potential suffix matches
+        // TODO: max num seeds per locus
         graph.call_nodes_with_prefix_matching_longest_prefix(
             std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
                              max_seed_length),
@@ -302,8 +303,7 @@ void SuffixSeeder<NodeType>
                 if (i + k - seed_length >= query.size() - k + 1)
                     process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
             },
-            config.min_seed_length,
-            config.max_num_seeds_per_locus
+            config.min_seed_length
         );
     }
 }
