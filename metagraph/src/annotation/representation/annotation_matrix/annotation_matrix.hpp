@@ -4,8 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include "annotation/binary_matrix/column_sparse//column_major.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/base/annotation.hpp"
-
 
 namespace mtg {
 namespace annot {
@@ -18,6 +19,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
     explicit StaticBinRelAnnotator() : matrix_(new BinaryMatrixType()) {}
+    StaticBinRelAnnotator(const StaticBinRelAnnotator&) = delete;
+    StaticBinRelAnnotator(StaticBinRelAnnotator&&) = default;
 
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                           const LabelEncoder<Label> &label_encoder);
@@ -39,6 +42,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     const BinaryMatrixType& get_matrix() const override { return *matrix_; };
 
+    std::unique_ptr<BinaryMatrixType> release_matrix()  { return std::move(matrix_); };
+
     std::string file_extension() const override;
 
     static const std::string kExtension;
@@ -50,6 +55,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
+
+// specialization of merge_load for RowDiff - it allows loading from multiple files
+template <>
+bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
+        const std::vector<std::string> &filenames);
 
 } // namespace annot
 } // namespace mtg
