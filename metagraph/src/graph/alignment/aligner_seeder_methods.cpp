@@ -309,7 +309,6 @@ void SuffixSeeder<NodeType>
         size_t i = j - k + 1;
         // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
         // complements of potential suffix matches
-        // TODO: max num seeds per locus
         size_t count = 0;
         graph.call_nodes_with_prefix_matching_longest_prefix(
             std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
