@@ -31,7 +31,7 @@ bool RowDiff<BaseMatrix>::load(const std::string &filename) {
 template
 class RowDiff<ColumnMajor>;
 
-bool build_successor(const graph::DBGSuccinct &graph,
+void build_successor(const graph::DBGSuccinct &graph,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
@@ -47,7 +47,7 @@ bool build_successor(const graph::DBGSuccinct &graph,
     }
     if (!must_build) {
         common::logger->trace("Using existing pred/succ/terminal files in {}.*", outfbase);
-        return false;
+        return;
     }
 
     using graph::boss::BOSS;
@@ -69,9 +69,8 @@ bool build_successor(const graph::DBGSuccinct &graph,
         }
     }
 
-    std::ofstream fterm(outfbase + ".terminal", ios::binary);
-    sdsl::rrr_vector rterm(term);
-    rterm.serialize(fterm);
+    std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
+    term.serialize(fterm);
     fterm.close();
     common::logger->trace("Anchor nodes written to {}.terminal", outfbase);
 
@@ -144,7 +143,6 @@ bool build_successor(const graph::DBGSuccinct &graph,
     pred_boundary.close();
 
     common::logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
-    return true;
 }
 
 } // namespace binmat

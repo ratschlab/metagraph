@@ -36,7 +36,6 @@ void traverse_anno_chunked(
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
                                              std::ios::in, 1024 * 1024);
 
-    std::cout << fmt::format("Succ size: {} Num rows {}", succ.size(), num_rows) << std::endl;
     assert(succ.size() == num_rows);
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
@@ -110,7 +109,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         return;
 
     uint32_t num_threads = get_num_threads();
-    const bool build_terminal = build_successor(graph, graph_fname, max_depth, num_threads);
+    build_successor(graph, graph_fname, max_depth, num_threads);
 
     std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
     for(const auto& fname : source_files) {
@@ -120,13 +119,15 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    sdsl::rrr_vector terminal;
-    std::ifstream f(graph_fname + ".terminal", std::ios::binary);
-    terminal.load(f);
-    f.close();
+    sdsl::rrr_vector rterminal;
 
-    if (build_terminal) {
-        sdsl::bit_vector new_terminal(terminal.size());
+    // if we just generated anchor nodes, attempt a greedy anchor optimization
+    if (!std::filesystem::exists(graph_fname + "terminal")) {
+        logger->trace("Performing anchor optimization");
+        sdsl::bit_vector terminal;
+        std::ifstream f(graph_fname + ".terminal.unopt", std::ios::binary);
+        terminal.load(f);
+        f.close();
 
         // total number of set bits in the original and sparsified rows
         std::vector<std::atomic<uint32_t>> orig_ones(chunk_size);
@@ -152,19 +153,22 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                 },
                 [&](node_index chunk_start, uint64_t chunk_size) {
                   for (uint64_t i = 0; i < chunk_size; ++i) {
-                      if (sparse_ones[i] > 2 && sparse_ones[i] / 2 > orig_ones[i]) {
-                          new_terminal[i + chunk_start] = 1;
-                      } else {
-                          new_terminal[i + chunk_start] = terminal[i + chunk_start];
+                      if (sparse_ones[i] >= 2 && sparse_ones[i] > orig_ones[i] / 2) {
+                          terminal[i + chunk_start] = 1;
                       }
                   }
                 });
 
-        // overwrite the terminal bit vector with the optimized one
-        std::ofstream fterm(graph_fname + ".terminal");
-        terminal = sdsl::rrr_vector(new_terminal);
-        terminal.serialize(fterm);
+        // save the optimized terminal bit vector, and delete the unoptimized one
+        std::ofstream fterm(graph_fname + ".terminal", std::ios::binary);
+        rterminal = sdsl::rrr_vector(terminal);
+        rterminal.serialize(fterm);
         fterm.close();
+        std::filesystem::remove(graph_fname + ".terminal.unopt");
+    } else {
+        std::ifstream f(graph_fname + ".terminal", std::ios::binary);
+        rterminal.load(f);
+        f.close();
     }
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
@@ -214,13 +218,13 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
 
               // check successor node and add current node if it's either terminal
               // or if its successor is 0
-              if (terminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
+              if (rterminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
                   set_rows[source_idx][col_idx].push_back(row_idx);
 
               // check non-terminal predecessor nodes and add them if they are zero
               for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
                    p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
-                  if (!source_col[pred_chunk[p_idx]] && !terminal[pred_chunk[p_idx]])
+                  if (!source_col[pred_chunk[p_idx]] && !rterminal[pred_chunk[p_idx]])
                       set_rows[source_idx][col_idx].push_back(pred_chunk[p_idx]);
               }
             },
