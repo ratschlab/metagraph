@@ -408,50 +408,51 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
 
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
-            nodes_.resize(1);
+            assert(nodes_.size() == 1);
+            nodes_[0] = DeBruijnGraph::npos;
             dbg_succ->call_nodes_with_prefix_matching_longest_prefix(
                 sequence_,
-                [&](NodeType prefix_node, size_t length) {
-                    if (length == sequence_.size())
-                        nodes_[0] = prefix_node;
-                },
+                [&](NodeType prefix_node, size_t) { nodes_[0] = prefix_node; },
                 sequence_.size()
             );
 
-            // if the graph is primary, check the reverse complement as well
-            if (!nodes_[0] && canonical) {
+            if (nodes_[0]) {
+                rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
+                std::vector<NodeType> rev_nodes = nodes_;
+                reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+
+                assert(std::find(rev_nodes.begin(), rev_nodes.end(),
+                                 DeBruijnGraph::npos) == rev_nodes.end());
+
+                assert(rev_seq.size() > offset_);
+                sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
+                nodes_.assign(rev_nodes.begin(), rev_nodes.end());
+
+            } else if (canonical) {
+                // if the graph is primary, check the reverse complement as well
                 std::string rev = sequence_;
                 ::reverse_complement(rev.begin(), rev.end());
                 dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
                     rev,
-                    [&](NodeType suffix_node, size_t length) {
-                        if (length == rev.size())
-                            nodes_[0] = suffix_node;
-                    },
+                    [&](NodeType suffix_node, size_t) { nodes_[0] = suffix_node; },
                     sequence_.size()
                 );
 
-                if (nodes_[0])
-                    nodes_[0] += dbg_succ->max_index();
+                if (nodes_[0]) {
+                    rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
+                    if (rev_seq.back() == '$') {
+                        *this = Alignment();
+                        return;
+                    }
+
+                    assert(rev_seq.size() > offset_);
+                    sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
+
+                } else {
+                    *this = Alignment();
+                    return;
+                }
             }
-
-            if (!nodes_[0]) {
-                *this = Alignment();
-                return;
-            }
-
-            rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
-
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-            std::vector<NodeType> rev_nodes = nodes_;
-            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
-
-            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                             DeBruijnGraph::npos) == rev_nodes.end());
-
-            assert(rev_seq.size() > offset_);
-            sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
-            nodes_.assign(rev_nodes.begin(), rev_nodes.end());
 
         } else {
             assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));

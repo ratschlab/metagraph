@@ -108,6 +108,8 @@ void SuffixSeeder<NodeType>
     alt_query_nodes.clear();
 
     base_seeder_->initialize(query, orientation);
+    assert(query_nodes.size() == offsets.size());
+    assert(query_nodes.size());
     size_t k = graph.get_k();
 
     // if node suffixes of length < k were matched, then query_nodes.size() may
@@ -127,6 +129,7 @@ void SuffixSeeder<NodeType>
 
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
+    assert(!query_node_flags || query_node_flags->size() == query_nodes.size());
 
     auto *canonical = dynamic_cast<const CanonicalDBG*>(&get_graph());
     std::string rev_comp_query;
@@ -139,8 +142,14 @@ void SuffixSeeder<NodeType>
         assert(alt_node != DeBruijnGraph::npos);
         assert(seed_length < k);
         assert(i + seed_length + 1 == query.size()
-            || get_graph().traverse(alt_node, query[i + seed_length])
-                == DeBruijnGraph::npos);
+            || alt_node > graph.max_index()
+            || graph.traverse(alt_node, query[i + seed_length]) == DeBruijnGraph::npos);
+
+        if (graph.get_k() - seed_length < offsets.at(i)) {
+            query_nodes[i] = DeBruijnGraph::npos;
+            if (config.max_num_seeds_per_locus > 1)
+                alt_query_nodes.at(i).clear();
+        }
 
         if (config.max_num_seeds_per_locus != 1) {
             for (size_t j = 1; seed_length + j < k && i >= j; ++j) {
@@ -195,8 +204,12 @@ void SuffixSeeder<NodeType>
                 [&](NodeType alt_node, size_t seed_length) {
                     assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
                         == std::string(query.data() + i + k - seed_length, seed_length));
-                    if (i + k - seed_length < query_nodes.size() && seed_length >= offsets[i + k - seed_length])
-                        process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+                    if (i + k - seed_length < query_nodes.size()
+                            && graph.get_k() - seed_length <= offsets[i + k - seed_length]) {
+                        process_suffix_match(i + k - seed_length,
+                                             alt_node + graph.max_index(),
+                                             seed_length);
+                    }
                 },
                 config.min_seed_length,
                 config.max_num_seeds_per_locus
@@ -225,8 +238,8 @@ void SuffixSeeder<NodeType>
         assert(alt_node != DeBruijnGraph::npos);
         assert(seed_length < k);
         assert(i + seed_length + 1 == query.size()
-            || get_graph().traverse(alt_node, query[i + seed_length])
-                == DeBruijnGraph::npos);
+            || alt_node > graph.max_index()
+            || graph.traverse(alt_node, query[i + seed_length]) == DeBruijnGraph::npos);
 
         std::string_view seed_seq(query.data() + i, seed_length);
         DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
@@ -262,7 +275,9 @@ void SuffixSeeder<NodeType>
             [&](NodeType alt_node, size_t seed_length) {
                 assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
                     == std::string(query.data() + i + k - seed_length, seed_length));
-                process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+                process_suffix_match(i + k - seed_length,
+                                     alt_node + graph.max_index(),
+                                     seed_length);
             },
             config.min_seed_length,
             config.max_num_seeds_per_locus
