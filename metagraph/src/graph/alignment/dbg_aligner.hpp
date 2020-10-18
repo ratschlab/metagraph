@@ -278,7 +278,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
                 auto rev = path;
                 rev.reverse_complement(get_graph(), paths.get_query_reverse_complement());
                 if (rev.empty()) {
-                    mtg::common::logger->trace("Alignment cannot be reversed, returning");
+                    // mtg::common::logger->trace("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
                         alignment_callback(std::move(path));
 
@@ -321,8 +321,8 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
                     forward_path.reverse_complement(seeder.get_graph(), paths.get_query());
                     if (!forward_path.empty()) {
                         path = std::move(forward_path);
-                    } else {
-                        mtg::common::logger->trace("Backwards alignment cannot be reversed, returning");
+                    // } else {
+                        // mtg::common::logger->trace("Backwards alignment cannot be reversed, returning");
                     }
                 }
 
