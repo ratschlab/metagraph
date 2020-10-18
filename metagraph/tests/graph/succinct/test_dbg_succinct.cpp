@@ -322,6 +322,34 @@ TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoff) {
     EXPECT_EQ(ref_node_str, node_str);
 }
 
+TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoffMaxNum) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGCC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_suffix_matching_longest_prefix(
+        { query.data(), std::min(size_t(query.size()), size_t(2)) },
+        [&](auto node, auto length) {
+            EXPECT_EQ(2u, length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query.substr(0, 2), ins->substr(ins->size() - 2));
+        },
+        4,
+        2
+    );
+
+    EXPECT_TRUE(nodes.empty());
+    EXPECT_TRUE(node_str.empty());
+}
+
 TEST(DBGSuccinct, CallNodesWithSuffixEarlyCutoffKMinusOne) {
     size_t k = 4;
     std::string reference = "GGCCCAGGGGTC";
@@ -687,6 +715,34 @@ TEST(DBGSuccinct, CallNodesWithPrefixKEarlyCutoff) {
 
     EXPECT_EQ(ref_nodes, nodes) << *graph;
     EXPECT_EQ(ref_node_str, node_str);
+}
+
+TEST(DBGSuccinct, CallNodesWithPrefixKEarlyCutoffMaxNum) {
+    size_t k = 4;
+    std::string reference = "GGCCCAGGGGTC";
+
+    std::string query = "GGCC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+
+    std::multiset<DBGSuccinct::node_index> nodes;
+    std::multiset<std::string> node_str;
+    graph->call_nodes_with_prefix_matching_longest_prefix(
+        { query.data(), std::min(size_t(query.size()), size_t(2)) },
+        [&](auto node, auto length) {
+            EXPECT_EQ(2u, length);
+            nodes.insert(node);
+            auto ins = node_str.insert(graph->get_node_sequence(node));
+            EXPECT_EQ(query.substr(0, 2), ins->substr(0, 2));
+        },
+        4,
+        2
+    );
+
+    EXPECT_TRUE(nodes.empty());
+    EXPECT_TRUE(node_str.empty());
 }
 
 TEST(DBGSuccinct, CallNodesWithPrefixEarlyCutoffKMinusOne) {
