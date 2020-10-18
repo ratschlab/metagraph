@@ -403,30 +403,44 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         // if the alignment starts from a source k-mer, then traverse forwards
         // until a non-dummy k-mer is hit and check if its reverse complement exists
         const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+        if (!dbg_succ && canonical)
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
-            const auto &boss = dbg_succ->get_boss();
-            assert(rev_seq.length() == graph.get_k());
-            auto edge = dbg_succ->kmer_to_boss_index(nodes_.back());
-            auto edge_label = boss.get_W(edge) % boss.alph_size;
+            nodes_.resize(1);
+            dbg_succ->call_nodes_with_prefix_matching_longest_prefix(
+                sequence_,
+                [&](NodeType prefix_node, size_t length) {
+                    if (length == sequence_.size())
+                        nodes_[0] = prefix_node;
+                },
+                sequence_.size()
+            );
 
-            // TODO: for efficiency, the last outgoing edge is taken at each step.
-            // This is valid for canonical graphs since the reverse complement of
-            // the found non-dummy k-mer is guaranteed to exist, but this node may
-            // not exist in a non-canonical graph.
-            for (size_t i = 0; i < offset_; ++i) {
-                edge = boss.fwd(edge, edge_label);
-                edge_label = boss.get_W(edge) % boss.alph_size;
-                if (edge_label == boss::BOSS::kSentinelCode) {
-                    // reverse complement not found
-                    *this = Alignment();
-                    return;
-                }
+            // if the graph is primary, check the reverse complement as well
+            if (!nodes_[0] && canonical) {
+                std::string rev = sequence_;
+                ::reverse_complement(rev.begin(), rev.end());
+                dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
+                    rev,
+                    [&](NodeType suffix_node, size_t length) {
+                        if (length == rev.size())
+                            nodes_[0] = suffix_node;
+                    },
+                    sequence_.size()
+                );
 
-                nodes_.push_back(dbg_succ->boss_to_kmer_index(edge));
-                rev_seq.push_back(boss.decode(edge_label));
+                if (nodes_[0])
+                    nodes_[0] += dbg_succ->max_index();
             }
-            nodes_.assign(nodes_.begin() + offset_, nodes_.end());
-            rev_seq.assign(rev_seq.begin() + offset_, rev_seq.end());
+
+            if (!nodes_[0]) {
+                *this = Alignment();
+                return;
+            }
+
+            rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
 
             assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
             std::vector<NodeType> rev_nodes = nodes_;
@@ -440,8 +454,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             nodes_.assign(rev_nodes.begin(), rev_nodes.end());
 
         } else {
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            assert(canonical || nodes_ == map_sequence_to_nodes(graph, rev_seq));
+            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
             std::vector<NodeType> rev_nodes = nodes_;
             reverse_complement_seq_path(graph, rev_seq, rev_nodes);
 
