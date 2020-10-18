@@ -1,5 +1,7 @@
 #include "load_annotated_graph.hpp"
 
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -39,7 +41,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         const Config::AnnotationType input_anno_type
                 = parse_annotation_type(config.infbase_annotators.at(0));
         // row_diff annotation is special, as it must know the graph structure
-        if (input_anno_type == Config::AnnotationType::RowDiff) {
+        if (input_anno_type == Config::AnnotationType::RowDiff
+            || input_anno_type == Config::AnnotationType::RowDiffBRWT) {
             auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
 
             if (!dbg_graph) {
@@ -55,12 +58,15 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             }
             // this is really ugly, but the alternative is to add a set_graph method to
             // all annotations
-            dynamic_cast<annot::binmat::RowDiff &>(
-                    const_cast<annot::binmat::BinaryMatrix &>(annotation_temp->get_matrix()))
-                    .set_graph(dbg_graph);
+            using namespace annot::binmat;
+            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+            if (input_anno_type == Config::AnnotationType::RowDiff) {
+                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
+            } else {
+                dynamic_cast<RowDiff<BRWT> &>(matrix).set_graph(dbg_graph);
+            }
         }
     }
-
 
     // load graph
     auto anno_graph

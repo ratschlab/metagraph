@@ -952,9 +952,10 @@ TEST(BOSS, CallSequencesRowDiff_EmptyGraph) {
             BOSS empty(k);
 
             sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
             empty.call_sequences_row_diff([&](const auto &, const std::optional<uint64_t> &) {
                 FAIL() << "Empty graph should not have any sequences!";
-            }, num_threads, 1, &terminal);
+            }, num_threads, 1, &terminal, &dummy);
         }
     }
 }
@@ -1067,13 +1068,14 @@ TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
             ASSERT_EQ(2u, graph.num_edges());
 
             sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
             std::atomic<size_t> num_sequences = 0;
             graph.call_sequences_row_diff([&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &anchor) {
               num_sequences++;
               ASSERT_FALSE(anchor.has_value());
               ASSERT_EQ(1U, path.size());
               ASSERT_EQ(std::string(k, 'A'), graph.get_node_str(path[0]));
-            }, num_threads, 1, &terminal);
+            }, num_threads, 1, &terminal, &dummy);
 
             ASSERT_EQ(1, num_sequences);
         }
@@ -1133,6 +1135,7 @@ TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
 
         for (uint32_t max_length = 1; max_length <20; ++max_length) {
             sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
             std::atomic<size_t> num_sequences = 0;
             std::atomic<size_t> visited_nodes = 0;
             graph.call_sequences_row_diff(
@@ -1146,13 +1149,13 @@ TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
                         }
                         ASSERT_TRUE(terminal[path.back()] ^ anchor.has_value());
                     },
-                    num_threads, max_length, &terminal);
+                    num_threads, max_length, &terminal, &dummy);
             ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(graph.num_edges() + 1, dummy.size());
 
             ASSERT_EQ(2, num_sequences);
-            sdsl::bit_vector dummy = graph.mark_all_dummy_edges(1);
-            uint64_t count_dummy = 0;
-            for_each(dummy.begin() + 1, dummy.end(), [&](bool v) { count_dummy += v; });
+
+            uint64_t count_dummy = std::accumulate(dummy.begin() + 1, dummy.end(), 0U);
             ASSERT_EQ(graph.num_edges(), visited_nodes + count_dummy);
         }
     }
@@ -1224,6 +1227,7 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
             BOSS graph(&constructor);
 
             sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
             std::atomic<size_t> num_sequences = 0;
             graph.call_sequences_row_diff(
                     [&](const std::vector<uint64_t> &path,
@@ -1232,7 +1236,7 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
                         ASSERT_EQ(path.size(), 1);
                         ASSERT_FALSE(anchor.has_value());
                     },
-                    num_threads, 1, &terminal);
+                    num_threads, 1, &terminal, &dummy);
             ASSERT_EQ(graph.num_edges() + 1, terminal.size());
             ASSERT_EQ(4, num_sequences);
         }
@@ -1249,6 +1253,7 @@ TEST(BOSS, CallSequenceRowDiff_FourPaths) {
     std::mutex mu;
     for (size_t num_threads : { 1, 4 }) {
         sdsl::bit_vector terminal;
+        sdsl::bit_vector dummy;
         std::atomic<size_t> num_sequences = 0;
         std::vector<std::string> found_sequences(4);
         graph.call_sequences_row_diff(
@@ -1262,7 +1267,7 @@ TEST(BOSS, CallSequenceRowDiff_FourPaths) {
                       num_sequences++;
                   }
                 },
-                num_threads, 1, &terminal);
+                num_threads, 1, &terminal, &dummy);
 
         ASSERT_EQ(graph.num_edges() + 1, terminal.size());
         ASSERT_EQ(4, num_sequences);
