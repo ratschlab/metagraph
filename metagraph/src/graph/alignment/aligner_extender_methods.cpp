@@ -660,8 +660,8 @@ void DefaultColumnExtender<NodeType>
         update_columns(node, out_columns, min_path_score);
     }
 
-    logger->trace("Extension completed:\tquery size:\t{}\tseed size:\t{}\texplored nodes:\t{}",
-                  query.size(), path_->size(), dp_table.size());
+    // logger->trace("Extension completed:\tquery size:\t{}\tseed size:\t{}\texplored nodes:\t{}",
+                  // query.size(), path_->size(), dp_table.size());
 
     assert(start_score > config_.min_cell_score);
 

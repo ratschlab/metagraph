@@ -155,14 +155,14 @@ inline void SeedAndExtendAligner<Seeder, Extender>
     });
 
     for (auto &seed : seeds) {
-        mtg::common::logger->trace("Seed: {}", seed);
+        // mtg::common::logger->trace("Seed: {}", seed);
         score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query_end() == query.data() + query.size()) {
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(get_graph(), &get_config()));
-                mtg::common::logger->trace("Alignment: {}", seed);
+                // mtg::common::logger->trace("Alignment: {}", seed);
                 callback(std::move(seed));
             }
 
@@ -178,7 +178,7 @@ inline void SeedAndExtendAligner<Seeder, Extender>
                     seed.extend_query_end(query.data() + query.size());
                     seed.trim_offset();
                     assert(seed.is_valid(get_graph(), &get_config()));
-                    mtg::common::logger->trace("Alignment: {}", seed);
+                    // mtg::common::logger->trace("Alignment: {}", seed);
                     callback(std::move(seed));
                 }
                 extended = true;
@@ -194,7 +194,7 @@ inline void SeedAndExtendAligner<Seeder, Extender>
                 extension.extend_query_begin(query.data());
                 extension.trim_offset();
                 assert(extension.is_valid(get_graph(), &get_config()));
-                mtg::common::logger->trace("Alignment: {}", extension);
+                // mtg::common::logger->trace("Alignment: {}", extension);
                 callback(std::move(extension));
                 return;
             }
@@ -205,7 +205,7 @@ inline void SeedAndExtendAligner<Seeder, Extender>
             next_path.trim_offset();
             assert(next_path.is_valid(get_graph(), &get_config()));
 
-            mtg::common::logger->trace("Alignment: {}", next_path);
+            // mtg::common::logger->trace("Alignment: {}", next_path);
             callback(std::move(next_path));
             extended = true;
         }, min_path_score);
@@ -254,7 +254,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        mtg::common::logger->trace("Aligning forwards");
+        // mtg::common::logger->trace("Aligning forwards");
 
         // First get forward alignments
         align(paths.get_query(),
@@ -303,7 +303,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
             }
         );
 
-        mtg::common::logger->trace("Aligning backwards");
+        // mtg::common::logger->trace("Aligning backwards");
 
         // Then use the reverse complements of the forward alignments as seeds
         align(paths.get_query_reverse_complement(),
