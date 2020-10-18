@@ -198,7 +198,7 @@ void SuffixSeeder<NodeType>
         if (i + k - max_seed_length < query_nodes.size()) {
             // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
             // complements of potential suffix matches
-            // TODO: max num seeds per locus
+            size_t last_pos = query_nodes.size();
             graph.call_nodes_with_prefix_matching_longest_prefix(
                 std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
                                  max_seed_length),
@@ -207,12 +207,19 @@ void SuffixSeeder<NodeType>
                         == std::string(query.data() + i + k - seed_length, seed_length));
                     if (i + k - seed_length < query_nodes.size()
                             && graph.get_k() - seed_length <= offsets[i + k - seed_length]) {
+                        last_pos = i + k - seed_length;
                         process_suffix_match(i + k - seed_length,
                                              alt_node + graph.max_index(),
                                              seed_length);
                     }
                 },
-                config.min_seed_length
+                config.min_seed_length,
+                [&]() {
+                    return last_pos != query_nodes.size()
+                        && (static_cast<bool>(query_nodes[last_pos])
+                            + (alt_query_nodes.size() ? alt_query_nodes[last_pos].size() : 0)
+                                >= config.max_num_seeds_per_locus);
+                }
             );
         }
     }
@@ -300,8 +307,11 @@ void SuffixSeeder<NodeType>
             [&](NodeType alt_node, size_t seed_length) {
                 assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
                     == std::string(query.data() + i + k - seed_length, seed_length));
-                if (i + k - seed_length >= query.size() - k + 1)
-                    process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+                if (i + k - seed_length >= query.size() - k + 1) {
+                    process_suffix_match(i + k - seed_length,
+                                         alt_node + graph.max_index(),
+                                         seed_length);
+                }
             },
             config.min_seed_length
         );
