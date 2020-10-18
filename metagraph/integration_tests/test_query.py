@@ -22,6 +22,8 @@ graph_file_extension = {'succinct': '.dbg',
 
 anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg',
+                       'row_diff': '.row_diff.annodbg',
+                       'row_diff_brwt': '.row_diff_brwt.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'rbfish': '.rbfish.annodbg',
@@ -32,10 +34,17 @@ ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
 NUM_THREADS = 4
 
+def product(graph_types, anno_types):
+    result  = []
+    for graph in graph_types:
+        for anno in anno_types:
+            if graph == 'succinct' or (anno != 'row_diff' and anno != 'row_diff_brwt'):
+                result.append((graph, anno))
+    return result
 
 def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, extra_params=''):
     target_anno = anno_repr
-    if anno_repr in {'rb_brwt', 'brwt'}:
+    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'row_diff_brwt'}:
         target_anno = anno_repr
         anno_repr = 'column'
     elif anno_repr in {'flat', 'rbfish'}:
@@ -55,23 +64,38 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
     assert(res.returncode == 0)
 
     if target_anno != anno_repr:
+        final_anno = target_anno
+        if final_anno == 'row_diff_brwt':
+            target_anno = 'row_diff'
+
         annotate_command = '{exe} transform_anno \
                 --anno-type {target_anno} -o {outfile} {input}'.format(
             exe=METAGRAPH,
+            graph=graph_filename,
             target_anno=target_anno,
             outfile=output_filename,
             input=output_filename + anno_file_extension[anno_repr]
         )
+        if target_anno == 'row_diff':
+            parts = annotate_command.split('transform_anno', 1)
+            annotate_command = parts[0] + f' transform_anno -i {graph_filename} '  + parts[1]
         res = subprocess.run([annotate_command], shell=True)
         assert(res.returncode == 0)
         os.remove(output_filename + anno_file_extension[anno_repr])
+        if final_anno == 'row_diff_brwt':
+            annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
+                               f'{output_filename}.row_diff.annodbg'
+            res = subprocess.run([annotate_command], shell=True)
+            assert (res.returncode == 0)
+            os.remove(output_filename + anno_file_extension['row_diff'])
+
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=list(itertools.product(
+    input_values=product(
         GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    )),
+    ),
     class_name_func=get_test_class_name
 )
 class TestQuery(unittest.TestCase):
@@ -477,10 +501,10 @@ class TestQuery(unittest.TestCase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=list(itertools.product(
+    input_values=product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    )),
+    ),
     class_name_func=get_test_class_name
 )
 class TestQueryCanonical(unittest.TestCase):
@@ -660,10 +684,10 @@ class TestQueryCanonical(unittest.TestCase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=list(itertools.product(
+    input_values=product(
         list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
         ANNO_TYPES
-    )),
+    ),
     class_name_func=get_test_class_name
 )
 class TestQueryPrimary(unittest.TestCase):

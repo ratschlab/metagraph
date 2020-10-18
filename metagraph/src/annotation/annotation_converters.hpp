@@ -31,35 +31,42 @@ std::unique_ptr<StaticAnnotation> convert(ColumnCompressed<Label>&& annotation);
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename);
 
-template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert_to_simple_BRWT(ColumnCompressed<Label>&& annotation,
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
 
-template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert_to_greedy_BRWT(ColumnCompressed<Label>&& annotation,
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
+                       size_t grouping_arity = 2,
+                       size_t num_parallel_nodes = 1,
+                       size_t num_threads = 1);
+
+std::unique_ptr<MultiBRWTAnnotator>
+convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
+                       size_t num_parallel_nodes = 1,
+                       size_t num_threads = 1,
+                       uint64_t num_rows_subsampled = 1'000'000);
+
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
 
 template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
+std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(const std::vector<std::string> &annotation_files,
                 const std::string &linkage_matrix_file,
                 size_t num_parallel_nodes = 1,
                 size_t num_threads = 1,
                 const std::filesystem::path &tmp_dir = "");
 
-template <class StaticAnnotation>
-void relax_BRWT(StaticAnnotation *annotation,
-                size_t relax_max_arity,
-                size_t num_threads = 1);
+void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads = 1);
 
 template <class StaticAnnotation>
-typename std::unique_ptr<StaticAnnotation>
+std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
@@ -79,18 +86,31 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               size_t num_threads = 1);
 
 /**
- * Converts a row-compressed representation to a row-diff representation based on the given graph
- * @param graph the graph used for selecting rows to diff
- * @param annotation input annotation
- * @param num_threads number of threads to use when traversing the graph
- * @param max_depth maximum allowed path length before forcing a terminal node
- * @return newly constructed row-diff annotation
+ * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive
+ * nodes rather than the actual annotation.
+ * Since adjacent nodes in a graph have a high probability of sharing annotations, storing
+ * diffs rather than the full annotation results in a sparser matrix.
+ * @param files annotations in #ColumnCompressed format. Typically, each source
+ * contains a single column, but this is not a requirement
+ * @param graph the graph used for selecting adjacent nodes
+ * @param graph_path directory where the pred/succ/term vectors that determine the diff
+ * succession will be dumped
+ * @param mem_bytes available memory for loading columns; the function will load as many
+ * columns as can fit in memory in one go and transform the entire batch, then repeat with
+ * the next batch until all input files are exhausted
+ * @param max_path_length maximum distance between terminal nodes, i.e. nodes whose annotation
+ * is fully stored
+ * @param out_dir directory where the transformed columns will be dumped. Filenames are
+ * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  */
-std::unique_ptr<RowDiffAnnotator> convert_to_row_diff(const graph::DBGSuccinct &graph,
-                                                      RowCompressed<std::string> &&annotation,
-                                                      uint32_t num_threads = 1,
-                                                      uint32_t max_depth = -1);
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string& graph_fname,
+                         size_t mem_bytes,
+                         uint32_t max_path_length,
+                         const std::filesystem::path &dest_dir);
 
+void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
+                                        const std::string &outfbase);
 
 } // namespace annot
 } // namespace mtg

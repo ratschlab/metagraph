@@ -1,21 +1,14 @@
 #include <cstdint>
-
-// work around clang-related bug in GMock
-namespace testing {
-namespace internal {
-using UInt64 = uint64_t;
-using Int64 = int64_t;
-using Int32 = int32_t;
-} // namespace internal
-} // namespace testing
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include <graph/representation/succinct/dbg_succinct.hpp>
-
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/file_utils.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 namespace {
 using namespace mtg;
@@ -23,87 +16,81 @@ using namespace testing;
 using ::testing::_;
 
 TEST(RowDiff, Empty) {
-    annot::binmat::RowDiff rowdiff;
-    EXPECT_EQ(0, rowdiff.diffs().size());
-    EXPECT_EQ(0, rowdiff.boundary().size());
+    annot::binmat::RowDiff<annot::binmat::ColumnMajor> rowdiff;
+    EXPECT_EQ(0, rowdiff.diffs().num_columns());
+    EXPECT_EQ(0, rowdiff.diffs().num_relations());
+    EXPECT_EQ(0, rowdiff.diffs().num_rows());
     EXPECT_EQ(0, rowdiff.terminal().size());
     EXPECT_EQ(0, rowdiff.num_relations());
+    EXPECT_EQ(0, rowdiff.num_columns());
+    EXPECT_EQ(0, rowdiff.num_rows());
+    EXPECT_EQ(nullptr, rowdiff.graph());
 }
 
 TEST(RowDiff, Serialize) {
-    Vector<uint64_t> diffs = { 1, 2, 3, 4 };
-    sdsl::bit_vector boundary = { 0, 1, 0, 0, 1, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 1 };
-    sdsl::enc_vector<> ediffs(diffs);
-    annot::binmat::RowDiff annot(2, 5, nullptr, ediffs, boundary, terminal);
+    sdsl::bit_vector bterminal = { 0, 0, 0, 1 };
+    sdsl::rrr_vector terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(std::initializer_list<bool>({0,1,0,1}));
+    cols[1] = std::make_unique<bit_vector_sd>(std::initializer_list<bool>({1,0,1,0}));
+
+    utils::TempFile fmat;
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(nullptr, std::move(mat), fterm_temp.name());
 
     utils::TempFile tempfile;
     std::ofstream &out = tempfile.ofstream();
     annot.serialize(out);
+    out.flush();
 
-    annot::binmat::RowDiff loaded;
-    EXPECT_TRUE(loaded.load(tempfile.ifstream()));
-    EXPECT_EQ(annot.diffs().size(), loaded.diffs().size());
-    for (uint32_t i = 0; i < annot.diffs().size(); ++i) {
-        EXPECT_EQ(annot.diffs()[i], loaded.diffs()[i]);
-    }
+    annot::binmat::RowDiff<annot::binmat::ColumnMajor> loaded;
+    ASSERT_TRUE(loaded.load(tempfile.ifstream()));
+    ASSERT_EQ(loaded.num_columns(), 2);
+    ASSERT_EQ(loaded.num_rows(), 4);
+    ASSERT_EQ(loaded.diffs().num_relations(), 4);
+    ASSERT_EQ(loaded.terminal().size(), 4);
 
-    EXPECT_EQ(annot.boundary().size(), loaded.boundary().size());
-    for (uint32_t i = 0; i < annot.boundary().size(); ++i) {
-        EXPECT_EQ(annot.boundary()[i], loaded.boundary()[i]);
+    for (uint32_t i = 0; i < 4; ++i) {
+        ASSERT_THAT(loaded.diffs().get_column(0), ElementsAre(1,3));
+        ASSERT_THAT(loaded.diffs().get_column(1), ElementsAre(0,2));
+        ASSERT_EQ(loaded.terminal()[i], bterminal[i]);
     }
-
-    EXPECT_EQ(annot.terminal().size(), loaded.terminal().size());
-    for (uint32_t i = 0; i < annot.terminal().size(); ++i) {
-        EXPECT_EQ(annot.terminal()[i], loaded.terminal()[i]);
-    }
-    EXPECT_EQ(2, loaded.num_columns());
-    EXPECT_EQ(5, loaded.num_relations());
-    EXPECT_EQ(4, loaded.num_rows());
 }
 
-TEST(RowDiff, GetDiff) {
-    Vector<uint64_t> diffs = { 1, 2, 3, 4 };
-    sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 1 };
-    annot::binmat::RowDiff annot(2, 5, nullptr, sdsl::enc_vector<>(diffs), boundary,
-                                 terminal);
-
-    EXPECT_TRUE(annot.get_diff(0).empty());
-    ASSERT_THAT(annot.get_diff(1), ElementsAre(1));
-    ASSERT_THAT(annot.get_diff(2), ElementsAre(2, 3));
-    ASSERT_THAT(annot.get_diff(3), ElementsAre(4));
-}
-
-TEST(RowDiff, GetDiff2) {
-    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
-    sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0 };
-    annot::binmat::RowDiff annot(2, 5, nullptr, sdsl::enc_vector<>(diffs), boundary, terminal);
-
-    std::vector<uint32_t> empty_annot = { 0, 1, 2, 4, 5, 6, 7, 9 };
-    for (const uint32_t v : empty_annot) {
-        EXPECT_TRUE(annot.get_diff(v).empty());
-    }
-    ASSERT_THAT(annot.get_diff(3), ElementsAre(0));
-    ASSERT_THAT(annot.get_diff(8), ElementsAre(1));
-    ASSERT_THAT(annot.get_diff(10), ElementsAre(1));
-    ASSERT_THAT(annot.get_diff(11), ElementsAre(1));
-}
 
 /**
  * Tests annotations on the graph in
  * https://docs.google.com/document/d/1e0MFgZRJfmDUSvmDPuC_lvnnWA0VKm5hPdzM8mdrHMM/edit#bookmark=id.ciri4266pkc4
  */
 TEST(RowDiff, GetAnnotation) {
+    // build graph
     graph::DBGSuccinct graph(4);
     graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAG");
 
-    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
-    sdsl::bit_vector boundary = { 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, 5, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::rrr_vector terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0  }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat), fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -136,15 +123,29 @@ TEST(RowDiff, GetAnnotation) {
  * after having removed dummy nodes.
  */
 TEST(RowDiff, GetAnnotationMasked) {
+    // build graph
     graph::DBGSuccinct graph(4);
     graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAG");
     graph.mask_dummy_kmers(1, false);
 
-    Vector<uint64_t> diffs = { 0, 1, 1, 1 };
-    sdsl::bit_vector boundary = { 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::rrr_vector terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 1, 0, 0, 0, 0, 0, 0, 0 }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 0, 1, 0, 1, 1 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat), fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
@@ -177,15 +178,28 @@ TEST(RowDiff, GetAnnotationMasked) {
  *  are correctly retrieved.
  */
 TEST(RowDiff, GetAnnotationBifurcation) {
+    // build graph
     graph::DBGSuccinct graph(4);
     graph.add_sequence("TACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAGCTAT");
 
-    Vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
-    sdsl::bit_vector boundary
-            = { 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
-    sdsl::bit_vector terminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::rrr_vector terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0 }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat), fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
     ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
@@ -219,15 +233,33 @@ TEST(RowDiff, GetAnnotationBifurcation) {
 }
 
 TEST(RowDiff, GetAnnotationBifurcationMasked) {
+    // build graph
     graph::DBGSuccinct graph(4);
     graph.add_sequence("TACTAGCTAGCTAGCTAGCTAGC");
     graph.add_sequence("ACTCTAGCTAT");
     graph.mask_dummy_kmers(1, false);
 
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
+    sdsl::rrr_vector terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
     Vector<uint64_t> diffs = { 1, 0, 1, 0, 0, 1 };
     sdsl::bit_vector boundary = { 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1 };
-    sdsl::bit_vector terminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    annot::binmat::RowDiff annot(2, 9, &graph, sdsl::enc_vector<>(diffs), boundary, terminal);
+
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({0, 0, 1, 0, 0, 0, 1, 0, 1, 0 }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({0, 1, 1, 0, 0, 0, 0, 0, 1, 0 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat), fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
     ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
