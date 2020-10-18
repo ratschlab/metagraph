@@ -186,20 +186,22 @@ void SuffixSeeder<NodeType>
         if (!canonical)
             continue;
 
-        // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
-        // complements of potential suffix matches
-        graph.call_nodes_with_prefix_matching_longest_prefix(
-            std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
-                             max_seed_length),
-            [&](NodeType alt_node, size_t seed_length) {
-                assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
-                    == std::string(query.data() + i + k - seed_length, seed_length));
-                if (i + k - seed_length < query_nodes.size() && seed_length >= offsets[i + k - seed_length])
-                    process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
-            },
-            config.min_seed_length,
-            config.max_num_seeds_per_locus
-        );
+        if (i + k - max_seed_length < query_nodes.size()) {
+            // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
+            // complements of potential suffix matches
+            graph.call_nodes_with_prefix_matching_longest_prefix(
+                std::string_view(rev_comp_query.data() + rev_comp_query.size() - i - k,
+                                 max_seed_length),
+                [&](NodeType alt_node, size_t seed_length) {
+                    assert(get_graph().get_node_sequence(alt_node + graph.max_index()).substr(k - seed_length)
+                        == std::string(query.data() + i + k - seed_length, seed_length));
+                    if (i + k - seed_length < query_nodes.size() && seed_length >= offsets[i + k - seed_length])
+                        process_suffix_match(i + k - seed_length, alt_node + graph.max_index(), seed_length);
+                },
+                config.min_seed_length,
+                config.max_num_seeds_per_locus
+            );
+        }
     }
 }
 
@@ -272,7 +274,8 @@ void SuffixSeeder<NodeType>
 
     size_t max_seed_length = std::min(query.size(), std::min(config.max_seed_length, k));
 
-    for (size_t i = 0; i < query.size() - k + 1; ++i) {
+    for (size_t j = query.size() - k + config.min_seed_length; j < query.size(); ++j) {
+        size_t i = j - k + 1;
         // if the graph is a CanonicalDBG wrapped around a DBGSuccinct, find the reverse
         // complements of potential suffix matches
         graph.call_nodes_with_prefix_matching_longest_prefix(
