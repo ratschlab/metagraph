@@ -43,6 +43,7 @@ class Config {
     bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
+    bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
     bool clear_dummy = false;
@@ -83,10 +84,12 @@ class Config {
     unsigned int port = 5555;
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
+    unsigned int max_hull_forks = 4;
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
     unsigned long long int num_singleton_kmers = 0;
+    unsigned long long int max_hull_depth = -1;  // the default is a function of input
 
     uint8_t count_width = 8;
 
@@ -101,7 +104,7 @@ class Config {
 
     int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
-    int32_t alignment_xdrop = 30;
+    int32_t alignment_xdrop = 27;
 
     size_t alignment_queue_size = 20;
     size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
@@ -119,6 +122,7 @@ class Config {
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
     double alignment_max_nodes_per_seq_char = 10.0;
+    double alignment_max_ram = 200;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
@@ -134,9 +138,9 @@ class Config {
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
-    std::string annotation_label = "";
     std::string header = "";
     std::string host_address;
+    uint32_t max_path_length = 50;
 
     std::filesystem::path tmp_dir;
 
@@ -177,6 +181,8 @@ class Config {
         BRWT,
         BinRelWT_sdsl,
         BinRelWT,
+        RowDiff,
+        RowDiffBRWT,
         RowFlat,
         RBFish,
         RbBRWT,

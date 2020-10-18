@@ -4,6 +4,7 @@ from typing import Dict, Tuple, List, Iterable, Union, Any
 
 import pandas as pd
 import requests
+import warnings
 
 """Metagraph client."""
 
@@ -37,6 +38,9 @@ class GraphClientJson:
             raise ValueError(
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
+        if max_num_nodes_per_seq_char < 0:
+            warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
+
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
@@ -49,6 +53,13 @@ class GraphClientJson:
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+        if discovery_threshold < 0.0 or discovery_threshold > 1.0:
+            raise ValueError(
+                f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+
+        if max_num_nodes_per_seq_char < 0:
+            warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
+
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
                   'discovery_fraction': discovery_threshold}
@@ -63,9 +74,8 @@ class GraphClientJson:
         if isinstance(sequence, str):
             fasta_str = f">query\n{sequence}"
         else:
-            seqs = list(sequence)
             fasta_str = '\n'.join(
-                [f">{i}\n{seq}" for (i, seq) in enumerate(seqs)])
+                [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
@@ -85,7 +95,11 @@ class GraphClientJson:
         else:
             ret = requests.get(url=url)
 
-        json_obj = ret.json()
+        try:
+            json_obj = ret.json()
+        except:
+            return {}, str(ret.status_code) + " " + str(ret)
+
         if not ret.ok:
             error_msg = json_obj[
                 'error'] if 'error' in json_obj.keys() else str(json_obj)

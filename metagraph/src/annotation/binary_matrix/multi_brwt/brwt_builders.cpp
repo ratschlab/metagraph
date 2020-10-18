@@ -287,7 +287,6 @@ BRWT BRWTBottomUpBuilder::build(
                               tmp_dir/std::to_string(j));
                 exit(1);
             }
-            std::filesystem::remove(tmp_dir/std::to_string(j));
         }
 
         // merge submatrices
@@ -295,6 +294,15 @@ BRWT BRWTBottomUpBuilder::build(
                                 &buffers.at(omp_get_thread_num()),
                                 thread_pool);
 
+        // the child nodes will be serialized separately in order not
+        // to load them together with the parent next time
+        std::vector<std::unique_ptr<BinaryMatrix>> child_nodes;
+        for (size_t r = 0; r < node.child_nodes_.size(); ++r) {
+            child_nodes.push_back(std::make_unique<BRWT>());
+        }
+        // replace the child nodes with dummy empty matrices
+        std::swap(child_nodes, node.child_nodes_);
+        // serialize the node without its child nodes
         std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
         node.serialize(out);
 
@@ -320,8 +328,17 @@ BRWT BRWTBottomUpBuilder::build(
         done[i] = true;
         done_cond.notify_all();
 
+        for (size_t r = 0; r < children.size(); ++r) {
+            size_t j = linkage[i][r];
+            std::filesystem::remove(tmp_dir/std::to_string(j));
+            std::ofstream out(tmp_dir/("index_" + std::to_string(j)), std::ios::binary);
+            child_nodes[r]->serialize(out);
+        }
+
         ++progress_bar;
     }
+
+    buffers.clear();
 
     // All submatrices must be merged into one
     if (stored_columns.back().size() != num_leaves) {
@@ -329,14 +346,35 @@ BRWT BRWTBottomUpBuilder::build(
         exit(1);
     }
 
-    // get the root node in Multi-BRWT
-    BRWT root;
-    std::ifstream in(tmp_dir/std::to_string(linkage.size() - 1), std::ios::binary);
+    logger->trace("All {} index bitmaps have been constructed", linkage.size());
+    logger->trace("Assembling Multi-BRWT...");
+
+    std::vector<std::unique_ptr<BRWT>> nodes(linkage.size());
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < linkage.size() - 1; ++i) {
+        nodes[i] = std::make_unique<BRWT>();
+        std::filesystem::path filename = tmp_dir/("index_" + std::to_string(i));
+        std::ifstream in(filename, std::ios::binary);
+        if (!nodes[i]->load(in)) {
+            logger->error("Can't load node {} from {}", i, filename);
+            exit(1);
+        }
+        std::filesystem::remove(filename);
+    }
+
+    nodes.back() = std::make_unique<BRWT>();
+
+    // make the root node in Multi-BRWT
+    BRWT &root = *nodes.back();
+    std::filesystem::path filename = tmp_dir/std::to_string(linkage.size() - 1);
+    std::ifstream in(filename, std::ios::binary);
     if (!root.load(in)) {
-        logger->error("Can't load the root");
+        logger->error("Can't load the root from {}", filename);
         exit(1);
     }
-    std::filesystem::remove(tmp_dir/std::to_string(linkage.size() - 1));
+    std::filesystem::remove(filename);
+
     // compress the index vector
     root.nonzero_rows_ = std::make_unique<bit_vector_smallrank>(
         root.nonzero_rows_->convert_to<bit_vector_smallrank>()
@@ -350,7 +388,15 @@ BRWT BRWTBottomUpBuilder::build(
     }
     root.assignments_ = RangePartition(column_arrangement, submatrix_sizes);
 
-    return root;
+    // put all child nodes in place
+    for (size_t i = num_leaves; i < linkage.size(); ++i) {
+        nodes[i]->child_nodes_.clear();
+        for (size_t j : linkage[i]) {
+            nodes[i]->child_nodes_.push_back(std::move(nodes[j]));
+        }
+    }
+
+    return std::move(root);
 }
 
 BRWT BRWTBottomUpBuilder::merge(std::vector<BRWT>&& nodes,

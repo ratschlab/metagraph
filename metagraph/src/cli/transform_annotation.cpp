@@ -41,7 +41,6 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
 }
 
-
 int transform_annotation(Config *config) {
     assert(config);
 
@@ -55,9 +54,10 @@ int transform_annotation(Config *config) {
     const Config::AnnotationType input_anno_type
         = parse_annotation_type(files.at(0));
 
-    if (input_anno_type != Config::ColumnCompressed && files.size() > 1) {
+    if (input_anno_type != Config::ColumnCompressed
+        && input_anno_type != Config::RowDiff && files.size() > 1) {
         logger->error("Conversion of multiple annotators is only "
-                      "supported for ColumnCompressed");
+                      "supported for ColumnCompressed and ColumnRowDiff");
         exit(1);
     }
 
@@ -283,10 +283,11 @@ int transform_annotation(Config *config) {
                 break;
             }
             default:
-                logger->error("Streaming conversion from RowCompressed "
-                              "annotation is not implemented for the requested "
-                              "target type: {}",
-                              Config::annotype_to_string(config->anno_type));
+                logger->error(
+                        "Streaming conversion from RowCompressed "
+                        "annotation is not implemented for the requested "
+                        "target type: {}",
+                        Config::annotype_to_string(config->anno_type));
                 exit(1);
         }
 
@@ -299,14 +300,16 @@ int transform_annotation(Config *config) {
         logger->trace("Serialization done in {} sec", timer.elapsed());
 
     } else if (input_anno_type == Config::ColumnCompressed) {
-        auto annotation = initialize_annotation(files.at(0), *config);
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
+                = initialize_annotation(files.at(0), *config);
 
         // The entire annotation is loaded in all cases except for transforms
         // to BRWT with a hierarchical clustering of columns specified (infbase)
         // or RbBRWT, for which the construction is done with streaming columns
         // from disk.
         if ((config->anno_type != Config::BRWT || !config->infbase.size())
-                && config->anno_type != Config::RbBRWT) {
+            && config->anno_type != Config::RbBRWT
+            && config->anno_type != Config::RowDiff) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -323,6 +326,17 @@ int transform_annotation(Config *config) {
         switch (config->anno_type) {
             case Config::ColumnCompressed: {
                 assert(false);
+                break;
+            }
+            case Config::RowDiffBRWT: {
+                logger->error("Convert to row_diff first, and then to row_diff_brwt");
+                return 0;
+
+            }
+            case Config::RowDiff: {
+                auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
+                convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
+                                    config->max_path_length, out_dir);
                 break;
             }
             case Config::RowCompressed: {
@@ -359,12 +373,12 @@ int transform_annotation(Config *config) {
                             ? std::filesystem::path(config->outfbase).remove_filename()
                             : config->tmp_dir)
                     : (config->greedy_brwt
-                        ? convert_to_greedy_BRWT<MultiBRWTAnnotator>(
+                        ? convert_to_greedy_BRWT(
                             std::move(*annotator),
                             config->parallel_nodes,
                             get_num_threads(),
                             config->num_rows_subsampled)
-                        : convert_to_simple_BRWT<MultiBRWTAnnotator>(
+                        : convert_to_simple_BRWT(
                             std::move(*annotator),
                             config->arity_brwt,
                             config->parallel_nodes,
@@ -403,6 +417,45 @@ int transform_annotation(Config *config) {
                 rb_brwt_annotator->serialize(config->outfbase);
                 break;
             }
+        }
+
+    } else if (input_anno_type == Config::RowDiff) {
+        if (config->anno_type != Config::RowDiffBRWT
+            && config->anno_type != Config::ColumnCompressed) {
+            logger->error(
+                    "Only conversion to `column` and `row_diff_brwt` supported for "
+                    "row_diff");
+            exit(1);
+        }
+        if (config->anno_type == Config::RowDiffBRWT) {
+            std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
+            if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+                logger->trace("Loading annotation from disk...");
+                auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                if (!row_diff_anno->merge_load(files))
+                    std::exit(1);
+                logger->trace("Annotation loaded in {} sec", timer.elapsed());
+                brwt_annotator = config->greedy_brwt
+                        ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
+                                                 config->parallel_nodes, get_num_threads(),
+                                                 config->num_rows_subsampled)
+                        : convert_to_simple_BRWT(std::move(*row_diff_anno), config->arity_brwt,
+                                                 config->parallel_nodes, get_num_threads());
+            } else {
+                std::string tmp_dir = config->tmp_dir.empty()
+                        ? std::filesystem::path(config->outfbase).remove_filename()
+                        : config->tmp_dir;
+                brwt_annotator
+                        = convert_to_BRWT<RowDiffBRWTAnnotator>(files, config->infbase,
+                                                                config->parallel_nodes,
+                                                                get_num_threads(), tmp_dir);
+            }
+            logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+            logger->trace("Serializing to '{}'", config->outfbase);
+            brwt_annotator->serialize(config->outfbase);
+        } else {
+            convert_row_diff_to_col_compressed(files, config->outfbase);
         }
 
     } else {
@@ -480,11 +533,25 @@ int relax_multi_brwt(Config *config) {
 
     Timer timer;
 
-    auto annotator = std::make_unique<MultiBRWTAnnotator>();
+    const std::string &fname = files.at(0);
+
+    std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
+    Config::AnnotationType anno_type = parse_annotation_type(fname);
+    switch(anno_type) {
+        case Config::BRWT:
+            annotator = std::make_unique<MultiBRWTAnnotator>();
+            break;
+        case Config::RowDiffBRWT:
+            annotator = std::make_unique<RowDiffBRWTAnnotator>();
+            break;
+        default:
+            logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
+            exit(1);
+    }
 
     logger->trace("Loading annotator...");
 
-    if (!annotator->load(files.at(0))) {
+    if (!annotator->load(fname)) {
         logger->error("Cannot load annotations from file '{}'", files.at(0));
         exit(1);
     }
@@ -492,9 +559,11 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    relax_BRWT<MultiBRWTAnnotator>(annotator.get(),
-                                   config->relax_arity_brwt,
-                                   get_num_threads());
+    const binmat::BRWT &matrix = anno_type == Config::BRWT
+            ? dynamic_cast<MultiBRWTAnnotator *>(annotator.get())->get_matrix()
+            : dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())->get_matrix().diffs();
+    relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
+               get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

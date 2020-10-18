@@ -76,10 +76,11 @@ class DBGSuccinct : public DeBruijnGraph {
     // of the string |str|, and call these nodes. If more than |max_num_allowed_matches|
     // are found, or if the maximal prefix is shorter than |min_match_length|, return
     // without calling.
-    void call_nodes_with_suffix(std::string_view str,
-                                std::function<void(node_index, uint64_t /* match length */)> callback,
-                                size_t min_match_length = 1,
-                                size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+    void call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view str,
+            std::function<void(node_index, uint64_t /* match length */)> callback,
+            size_t min_match_length = 1,
+            size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()
@@ -102,6 +103,10 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool has_no_incoming(node_index) const override final;
     virtual bool has_single_incoming(node_index) const override final;
 
+    /**
+     * Returns the number of nodes (k-mers) in the graph, which is equal to the number of
+     * edges in the BOSS graph (because an edge in the BOSS graph represents a k-mer).
+     */
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;

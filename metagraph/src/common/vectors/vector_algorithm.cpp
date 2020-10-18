@@ -468,7 +468,7 @@ void compute_subindex(const bit_vector &column,
     // check if all ones
     if (popcount == end - begin) {
         for ( ; i + 64 <= end; i += 64, offset += 64) {
-            subindex->set_int(offset, 0xFFFF, 64);
+            subindex->set_int(offset, sdsl::bits::lo_set[64], 64);
         }
         if (i < end) {
             subindex->set_int(offset, sdsl::bits::lo_set[end - i], end - i);

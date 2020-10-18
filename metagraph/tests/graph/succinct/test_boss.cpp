@@ -1,3 +1,4 @@
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include <zlib.h>
@@ -928,7 +929,7 @@ TEST(BOSS, CallPathsEmptyGraph) {
 }
 
 TEST(BOSS, CallUnitigsEmptyGraph) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 30; ++k) {
             BOSS empty(k);
 
@@ -945,8 +946,22 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
     }
 }
 
+TEST(BOSS, CallSequencesRowDiff_EmptyGraph) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 30; ++k) {
+            BOSS empty(k);
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            empty.call_sequences_row_diff([&](const auto &, const std::optional<uint64_t> &) {
+                FAIL() << "Empty graph should not have any sequences!";
+            }, num_threads, 1, &terminal, &dummy);
+        }
+    }
+}
+
 TEST(BOSS, CallPathsOneLoop) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSS graph(k);
 
@@ -969,7 +984,7 @@ TEST(BOSS, CallPathsOneLoop) {
 }
 
 TEST(BOSS, CallUnitigsOneLoop) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSS graph(k);
 
@@ -993,7 +1008,7 @@ TEST(BOSS, CallUnitigsOneLoop) {
 }
 
 TEST(BOSS, CallPathsTwoLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
@@ -1018,7 +1033,7 @@ TEST(BOSS, CallPathsTwoLoops) {
 }
 
 TEST(BOSS, CallUnitigsTwoLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
@@ -1043,8 +1058,32 @@ TEST(BOSS, CallUnitigsTwoLoops) {
     }
 }
 
+TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A') });
+            BOSS graph(&constructor);
+
+            ASSERT_EQ(2u, graph.num_edges());
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            std::atomic<size_t> num_sequences = 0;
+            graph.call_sequences_row_diff([&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &anchor) {
+              num_sequences++;
+              ASSERT_FALSE(anchor.has_value());
+              ASSERT_EQ(1U, path.size());
+              ASSERT_EQ(std::string(k, 'A'), graph.get_node_str(path[0]));
+            }, num_threads, 1, &terminal, &dummy);
+
+            ASSERT_EQ(1, num_sequences);
+        }
+    }
+}
+
 TEST(BOSS, CallUnitigsTwoBigLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         size_t k = 10;
         std::vector<std::string> sequences {
             "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
@@ -1076,14 +1115,54 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
             num_kmers += path.size();
         }, num_threads, 0, true);
 
-        EXPECT_EQ(2, num_sequences);
+        // There is no guarantee on the number of contigs in the primary mode
+        // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
     }
 }
 
+TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        size_t k = 10;
+        std::vector<std::string> sequences {
+                "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+                "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        };
+        BOSSConstructor constructor(k);
+        constructor.add_sequences(std::vector<std::string>(sequences));
+        BOSS graph(&constructor);
+
+        for (uint32_t max_length = 1; max_length <20; ++max_length) {
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            std::atomic<size_t> num_sequences = 0;
+            std::atomic<size_t> visited_nodes = 0;
+            graph.call_sequences_row_diff(
+                    [&](const std::vector<uint64_t> &path,
+                        const std::optional<uint64_t> &anchor) {
+                        num_sequences++;
+                        visited_nodes += path.size();
+
+                        for (uint32_t idx = max_length; idx <= path.size(); idx += max_length) {
+                            ASSERT_TRUE(terminal[path[idx - 1]]);
+                        }
+                        ASSERT_TRUE(terminal[path.back()] ^ anchor.has_value());
+                    },
+                    num_threads, max_length, &terminal, &dummy);
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+
+            ASSERT_EQ(2, num_sequences);
+
+            uint64_t count_dummy = std::accumulate(dummy.begin() + 1, dummy.end(), 0U);
+            ASSERT_EQ(graph.num_edges(), visited_nodes + count_dummy);
+        }
+    }
+}
+
 TEST(BOSS, CallPathsFourLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
@@ -1110,7 +1189,7 @@ TEST(BOSS, CallPathsFourLoops) {
 }
 
 TEST(BOSS, CallUnitigsFourLoops) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
             BOSSConstructor constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
@@ -1137,8 +1216,67 @@ TEST(BOSS, CallUnitigsFourLoops) {
     }
 }
 
+TEST(BOSS, CallSequenceRowDiff_FourLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'G'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'T')});
+            BOSS graph(&constructor);
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            std::atomic<size_t> num_sequences = 0;
+            graph.call_sequences_row_diff(
+                    [&](const std::vector<uint64_t> &path,
+                        const std::optional<uint64_t> &anchor) {
+                        num_sequences++;
+                        ASSERT_EQ(path.size(), 1);
+                        ASSERT_FALSE(anchor.has_value());
+                    },
+                    num_threads, 1, &terminal, &dummy);
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(4, num_sequences);
+        }
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_FourPaths) {
+    constexpr size_t k = 5;
+    BOSSConstructor constructor(k);
+    std::vector<std::string> sequences
+            = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
+    constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
+    BOSS graph(&constructor);
+    std::mutex mu;
+    for (size_t num_threads : { 1, 4 }) {
+        sdsl::bit_vector terminal;
+        sdsl::bit_vector dummy;
+        std::atomic<size_t> num_sequences = 0;
+        std::vector<std::string> found_sequences(4);
+        graph.call_sequences_row_diff(
+                [&](const std::vector<uint64_t> &path, const std::optional<uint64_t> &) {
+                  std::string sequence(path.size(), '\0');
+                  std::transform(path.begin(), path.end(), sequence.begin(),
+                                 [&](uint64_t edge) { return graph.decode(graph.get_W(edge)); });
+                  {
+                      std::unique_lock<std::mutex> lock(mu);
+                      found_sequences[num_sequences] = graph.get_node_str(path[0]) + sequence;
+                      num_sequences++;
+                  }
+                },
+                num_threads, 1, &terminal, &dummy);
+
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(4, num_sequences);
+        ASSERT_THAT(found_sequences, ::testing::UnorderedElementsAreArray(sequences));
+    }
+}
+
 TEST(BOSS, CallPaths) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 10; ++k) {
             std::mutex seq_mutex;
             {
@@ -1228,7 +1366,7 @@ TEST(BOSS, CallPaths) {
 }
 
 TEST(BOSS, CallUnitigs) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 10; ++k) {
             std::mutex seq_mutex;
             {
@@ -1318,10 +1456,12 @@ TEST(BOSS, CallUnitigs) {
 }
 
 TEST(BOSS, CallUnitigs1) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);
-        constructor.add_sequences(std::vector<std::string> { "ACTAGCTAGCTAGCTAGCTAGC",
-                                    "ACTCT" });
+        constructor.add_sequences(std::vector<std::string> {
+            "ACTAGCTAGCTAGCTAGCTAGC",
+            "ACTCT"
+        });
         BOSS graph(&constructor);
 
         std::multiset<std::string> contigs {
@@ -1348,7 +1488,7 @@ TEST(BOSS, CallUnitigs1) {
 }
 
 TEST(BOSS, CallUnitigsDisconnected1) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1382,7 +1522,7 @@ TEST(BOSS, CallUnitigsDisconnected1) {
 
 #ifndef _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1417,7 +1557,7 @@ TEST(BOSS, CallUnitigsDisconnected2) {
 }
 
 TEST(BOSS, CallUnitigsTwoComponents) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
@@ -1456,7 +1596,7 @@ TEST(BOSS, CallUnitigsTwoComponents) {
 #endif
 
 TEST(BOSS, CallUnitigsWithPruning) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(4);
         constructor.add_sequences({
             "ACTATAGCTAGTCTATGCGA",
@@ -1598,7 +1738,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
         "TCTGAACTC"
     };
 
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::multiset<std::string> obs_unitigs;
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
@@ -1647,7 +1787,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
         "TCTGAACTC"
     };
 
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::multiset<std::string> obs_unitigs;
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
@@ -1680,7 +1820,7 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
     };
 
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::multiset<std::string> obs_unitigs;
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
@@ -1713,7 +1853,7 @@ TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
         "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
     };
 
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::multiset<std::string> obs_unitigs;
         graph.call_unitigs(
             [&](const auto &unitig, const auto &path) {
@@ -1749,7 +1889,7 @@ TEST(BOSS, CallUnitigsMasked) {
 
     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
 
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::unordered_multiset<std::string> obs;
 
         graph.call_unitigs(
@@ -1785,7 +1925,7 @@ TEST(BOSS, CallUnitigsSingleKmer) {
         "TTTTTTT"
     };
     std::mutex seq_mutex;
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         std::multiset<std::string> obs_unitigs;
         graph.call_unitigs([&](auto&& seq, auto&&) {
             std::lock_guard<std::mutex> lock(seq_mutex);

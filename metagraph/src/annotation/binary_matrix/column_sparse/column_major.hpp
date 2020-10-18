@@ -15,31 +15,36 @@ class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
     ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
+    ColumnMajor(ColumnMajor&& other);
 
-    uint64_t num_columns() const { return columns_->size(); }
-    uint64_t num_rows() const;
+    uint64_t num_columns() const override { return columns_->size(); }
+    uint64_t num_rows() const override;
 
-    bool get(Row row, Column column) const;
-    SetBitPositions get_row(Row row) const;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
-    std::vector<Row> get_column(Column column) const;
+    bool get(Row row, Column column) const override;
+    SetBitPositions get_row(Row row) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
+    std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
 
-    bool load(std::istream &in);
-    void serialize(std::ostream &out) const;
+    bool load(std::istream &in) override;
+    void serialize(std::ostream &out) const override;
 
     // number of ones in the matrix
-    uint64_t num_relations() const;
+    uint64_t num_relations() const override;
 
-    static ColumnMajor
-    construct_view(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-        ColumnMajor view;
-        view.columns_ = &columns;
-        return view;
+    void update_pointer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
+        columns_ = &columns;
     }
 
     const auto& data() const { return *columns_; }
+
+    /**
+     * Returns the columns vector and pilfers the existing columns.
+     */
+    std::vector<std::unique_ptr<bit_vector>> &&release_columns() {
+        return std::move(data_);
+    }
 
   private:
     std::vector<std::unique_ptr<bit_vector>> data_;

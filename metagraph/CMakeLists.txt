@@ -8,6 +8,7 @@ include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
 
 enable_testing()
+include(GoogleTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -104,11 +105,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(APPLE)
-    # Fix include directories on 10.14+, as they are not added by default any longer
-    string(APPEND CMAKE_CXX_FLAGS " \
-    -I/usr/include \
-    -I/usr/local/include \
-  ")
+  # Fix include directories on 10.14+, as they are not added by default any longer
+  INCLUDE_DIRECTORIES(/usr/local/include)
   # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
   LINK_DIRECTORIES(/usr/lib)
   LINK_DIRECTORIES(/usr/local/lib)
@@ -510,6 +508,7 @@ file(GLOB unit_tests_files
   "tests/*.cpp"
   "tests/*/*.cpp"
   "tests/*/*/*.cpp"
+  "tests/*/*/*/*.cpp"
 )
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
@@ -520,7 +519,7 @@ link_directories(
 add_executable(unit_tests ${unit_tests_files})
 target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(unit_tests gtest_main gtest metagraph-core)
+target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core)
 
 target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 

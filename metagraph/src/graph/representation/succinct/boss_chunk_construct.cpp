@@ -493,7 +493,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
-    logger->info("Generating dummy-1 source k-mers and dummy sink k-mers...");
+    logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
     uint64_t num_sink = 0;
     uint64_t num_source = 0;
 
@@ -527,7 +527,6 @@ generate_dummy_1_kmers(size_t k,
                 // dummy sink k-mers
                 skip_same_suffix(v, sink_gen_it, 1);
                 dummy_sink_chunks[F].add(kmer::get_sink_and_lift<KMER>(v, k + 1));
-                num_sink++;
             }
             if (!sink_gen_it.empty()) {
                 KMER_REAL top(sink_gen_it.top());
@@ -543,20 +542,22 @@ generate_dummy_1_kmers(size_t k,
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
             dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
-            num_source++;
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER_REAL v(sink_gen_it.pop());
             skip_same_suffix(v, sink_gen_it, 1);
             dummy_sink_chunks[F].add(kmer::get_sink_and_lift<KMER>(v, k + 1));
-            num_sink++;
         }
     }
 
+    uint64_t num_sink = 0;
+    uint64_t num_source = 0;
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
         dummy_sink_chunks[i].finish();
         dummy_l1_chunks[i].finish();
+        num_sink += dummy_sink_chunks[i].size();
+        num_source += dummy_l1_chunks[i].size();
     }
 
     logger->trace("Generated {} dummy sink and {} dummy source k-mers", num_sink,
