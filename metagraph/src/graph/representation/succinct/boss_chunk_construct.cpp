@@ -494,8 +494,6 @@ generate_dummy_1_kmers(size_t k,
     }
 
     logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
-    uint64_t num_sink = 0;
-    uint64_t num_source = 0;
 
     static constexpr size_t L = KMER::kBitsPerChar;
     KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
