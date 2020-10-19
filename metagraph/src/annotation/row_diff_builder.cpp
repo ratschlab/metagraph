@@ -133,6 +133,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         std::vector<std::atomic<uint32_t>> orig_ones(chunk_size);
         std::vector<std::atomic<uint32_t>> sparse_ones(chunk_size);
 
+        std::atomic<uint64_t> forced_anchors = 0;
+
         traverse_anno_chunked(
                 "Anchor opt", graph.num_nodes(), graph_fname, sources,
                 [&]() {
@@ -153,11 +155,14 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                 },
                 [&](node_index chunk_start, uint64_t chunk_size) {
                   for (uint64_t i = 0; i < chunk_size; ++i) {
-                      if (sparse_ones[i] >= 2 && sparse_ones[i] > orig_ones[i] / 2) {
+                      if (sparse_ones[i] > orig_ones[i] / 2) {
+                          forced_anchors += !terminal[i + chunk_start];
                           terminal[i + chunk_start] = 1;
                       }
                   }
                 });
+
+        logger->trace("Anchor optimization added {} anchors", forced_anchors);
 
         // save the optimized terminal bit vector, and delete the unoptimized one
         std::ofstream fterm(graph_fname + ".anchor", std::ios::binary);

@@ -210,9 +210,8 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
 
 // template specialization of merge_load for RowDiffAnnotator
 template <>
-[[clang::optnone]] bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
+bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
         const std::vector<std::string> &filenames) {
-#pragma clang optimize off
     std::vector<std::unique_ptr<bit_vector>> columns;
 
     bool no_errors = true;

@@ -159,18 +159,21 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
     return diffs_.load(f);
 }
 
+template <class BaseMatrix>
+void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+    // write a uint64_t value for backward compatibility (it's not used anymore)
+    uint64_t v = 0;
+    f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
+    diffs_.serialize(f);
+};
+
+// template specialization for load/serialize BRWT. The anchor bit vector is saved as
+// part of the annotation
 template <>
 inline bool RowDiff<BRWT>::load(std::istream &f) {
     anchor_.load(f);
     return diffs_.load(f);
 }
-
-template <class BaseMatrix>
-void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
-    uint64_t v = 0;
-    f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
-    diffs_.serialize(f);
-};
 
 template <>
 inline void RowDiff<BRWT>::serialize(std::ostream &f) const {
