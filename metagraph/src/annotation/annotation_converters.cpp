@@ -1080,45 +1080,46 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               size_t num_threads);
 
 void convert_to_row_diff(const std::vector<std::string> &files,
-                         const std::string& graph_fname,
+                         const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          const std::filesystem::path &dest_dir) {
-    logger->trace("Loading graph...");
-    graph::DBGSuccinct graph(2);
-    bool result = graph.load(graph_fname);
-    if (!result) {
-        logger->error("Cannot load graph from {}", graph_fname);
-        std::exit(1);
+    if (files.size()) {
+        graph::DBGSuccinct graph(2);
+        logger->trace("Loading graph...");
+        if (!graph.load(graph_fname)) {
+            logger->error("Cannot load graph from {}", graph_fname);
+            std::exit(1);
+        }
+        build_successor(graph, graph_fname, max_path_length, get_num_threads());
     }
 
-    mem_bytes -= std::filesystem::file_size(graph_fname);
     // load as many columns as we can fit in memory, and convert them
-    for (uint32_t i = 0; i < files.size();) {
+    for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
-        size_t cur_mem_bytes = mem_bytes;
+        size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
-        for (; i < files.size(); ++i) {
+        for ( ; i < files.size(); ++i) {
             // *2 in order to account for constructing the sparsified column
             size_t file_size = 2 * std::filesystem::file_size(files[i]);
             if (file_size > mem_bytes) {
                 logger->warn(
-                        "Not enough memory to process {}, requires {} MB",
+                        "Not enough memory to process {}, requires {} MB, skipped",
                         files[i], file_size/1e6);
                 continue;
             }
-            if (file_size > cur_mem_bytes || file_batch.size() >= 15'000)
+            if (file_size > mem_bytes_left || file_batch.size() >= 15'000)
                 break;
 
-            cur_mem_bytes -= file_size;
+            mem_bytes_left -= file_size;
             file_batch.push_back(files[i]);
         }
 
         Timer timer;
-        logger->trace("Starting converting column-batch with {} columns ...",
+        logger->trace("Starting transforming batch of {} columns ...",
                       file_batch.size());
-        convert_batch_to_row_diff(graph, graph_fname, file_batch, dest_dir, max_path_length);
-        logger->trace("Column-batch converted in {} sec", timer.elapsed());
+        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir);
+        logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
 
 }

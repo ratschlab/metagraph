@@ -72,7 +72,7 @@ void traverse_anno_chunked(
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (uint64_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             if (col_annotations[l_idx]->num_labels()
                 && col_annotations[l_idx]->num_objects() != num_rows) {
@@ -100,19 +100,16 @@ void traverse_anno_chunked(
 }
 
 
-void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
-                               const std::string &graph_fname,
+void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir,
-                               uint32_t max_depth) {
+                               const std::filesystem::path &dest_dir) {
     if (source_files.empty())
         return;
 
     uint32_t num_threads = get_num_threads();
-    build_successor(graph, graph_fname, max_depth, num_threads);
 
     std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
-    for(const auto& fname : source_files) {
+    for (const auto &fname : source_files) {
         auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
         anno->merge_load({fname});
         sources.push_back(std::move(anno));
@@ -134,7 +131,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
         std::vector<std::atomic<uint32_t>> sparse_ones(chunk_size);
 
         traverse_anno_chunked(
-                "Anchor opt", graph.num_nodes(), graph_fname, sources,
+                "Anchor opt", terminal.size(), graph_fname, sources,
                 [&]() {
                   std::fill(orig_ones.begin(), orig_ones.end(), 0);
                   std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
@@ -191,7 +188,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                            std::min((uint64_t)1'000'000, sources[i]->num_relations()));
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
-        for(uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
+        for (uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
@@ -202,7 +199,7 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     }
 
     traverse_anno_chunked(
-            "Compute diffs", graph.num_nodes(), graph_fname, sources,
+            "Compute diffs", rterminal.size(), graph_fname, sources,
             [&]() {
               for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
                   for (uint32_t col_idx = 0; col_idx < set_rows[source_idx].size();
@@ -242,35 +239,34 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     std::for_each(sources.begin(), sources.end(), [&](auto& source) {
-      label_encoders.push_back(source->get_label_encoder());
+        label_encoders.push_back(source->get_label_encoder());
     });
 
     // free memory occupied by sources
     std::vector<std::unique_ptr<ColumnCompressed<>>>().swap(sources);
 
     logger->trace("Generating row_diff columns...");
-#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
         for (uint64_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
-              auto &queue = targets[l_idx][l_idx2]->data(true);
-              for (auto &it = queue.begin(); it != queue.end(); ++it) {
-                  call(*it);
-              }
+                auto &queue = targets[l_idx][l_idx2]->data(true);
+                for (auto &it = queue.begin(); it != queue.end(); ++it) {
+                    call(*it);
+                }
             };
-            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, graph.num_nodes(),
+            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, rterminal.size(),
                                                               targets_size[l_idx][l_idx2]);
         }
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                &graph, std::move(matrix), graph_fname + ".terminal");
+                nullptr, std::move(matrix), graph_fname + ".terminal");
         RowDiffAnnotator annotator(std::move(diff_annotation), label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
                 .replace_extension()
-                .replace_extension(
-                        RowDiffAnnotator::kExtension);
+                .replace_extension(RowDiffAnnotator::kExtension);
         auto fpath = dest_dir/fname;
         annotator.serialize(fpath);
         logger->trace("Serialized {}", fpath);
@@ -279,5 +275,5 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     std::filesystem::remove_all(tmp_path);
 }
 
-}
-}
+} // namespace annot
+} // namespace mtg
