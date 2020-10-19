@@ -219,7 +219,7 @@ int transform_annotation(Config *config) {
                 }
             });
         };
-        if (input_anno_type != Config::ColumnCompressed) {
+        if (input_anno_type == Config::ColumnCompressed) {
             success = ColumnCompressed<>::merge_load(files, on_column, get_num_threads());
         } else {
             success = merge_load_row_diff(files, on_column, get_num_threads());
