@@ -199,6 +199,8 @@ class Config {
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
 
+    std::string anchor;
+
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
 

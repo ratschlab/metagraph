@@ -143,11 +143,9 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     label_encoder_ = label_encoder;
 }
 
-// template specialization of merge_load
-template <>
-bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
-        const std::vector<std::string> &filenames) {
-    size_t num_threads = get_num_threads();
+bool merge_load_row_diff(const std::vector<std::string> &filenames,
+                         const ColumnCallback &callback,
+                         size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
     std::vector<uint64_t> offsets(filenames.size() + 1, 0);
@@ -179,7 +177,6 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
     std::vector<std::string> labels(offsets.back());
     std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
 
-    std::string anchors_filename;
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
@@ -199,24 +196,57 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
             if (!label_encoder.size())
                 common::logger->warn("No labels in {}", filenames[i]);
 
-            assert(anchors_filename.empty() || anchors_filename == matrix.anchors_filename());
-            anchors_filename = matrix.anchors_filename();
-
             std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
             for (uint32_t idx = 0; idx < cols.size(); ++idx) {
-                labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
-                columns[offsets[i] + idx] = std::move(cols[idx]);
+                callback(offsets[i] + idx, label_encoder.decode(idx), std::move(cols[idx]));
             };
         } catch (...) {
             error_occurred = true;
         }
     }
-    matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
-            nullptr, binmat::ColumnMajor(std::move(columns)), anchors_filename);
-    std::for_each(labels.begin(), labels.end(),
-                  [&](const auto &l) { label_encoder_.insert_and_encode(l); });
 
     return !error_occurred;
+}
+
+// template specialization of merge_load for RowDiffAnnotator
+template <>
+[[clang::optnone]] bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
+        const std::vector<std::string> &filenames) {
+#pragma clang optimize off
+    std::vector<std::unique_ptr<bit_vector>> columns;
+
+    bool no_errors = true;
+    bool merge_successful = merge_load_row_diff(
+            filenames,
+            [&](uint64_t, const std::string & label, std::unique_ptr<bit_vector> &&column) {
+                #pragma omp critical
+                {
+                    uint64_t num_set_bits = column->num_set_bits();
+                    common::logger->trace("Column: {}, Density: {}, Set bits: {}", label,
+                                          static_cast<double>(num_set_bits) / column->size(),
+                                          num_set_bits);
+
+                    if (columns.empty() || columns.back()->size() == column->size()) {
+                        size_t col = label_encoder_.insert_and_encode(label);
+                        if(col != columns.size()) {
+                            common::logger->error("Duplicate columns {}", label);
+                            no_errors = false;
+                        }
+                        columns.push_back(std::move(column));
+                    } else {
+                        common::logger->error(
+                                "Column {} has {} rows, previous column has {} rows",
+                                label, columns.size(), columns.back()->size());
+                        no_errors = false;
+                    }
+                }
+            },
+            get_num_threads());
+
+    matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
+            nullptr, binmat::ColumnMajor(std::move(columns)));
+
+    return no_errors && merge_successful;
 }
 
 template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;

@@ -84,7 +84,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         os.remove(output_filename + anno_file_extension[anno_repr])
         if final_anno == 'row_diff_brwt':
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
-                               f'{output_filename}.row_diff.annodbg'
+                               f'--anchor {graph_filename}.anchor {output_filename}.row_diff.annodbg'
             res = subprocess.run([annotate_command], shell=True)
             assert (res.returncode == 0)
             os.remove(output_filename + anno_file_extension['row_diff'])

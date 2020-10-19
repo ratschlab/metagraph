@@ -22,21 +22,35 @@ bool RowDiff<BaseMatrix>::load(const std::string &filename) {
     std::ifstream f(filename, ios::binary);
     bool result = load(f);
     f.close();
-
-    load_terminal(anchors_filename_, &terminal_);
-
     return result;
+}
+
+template <class BaseMatrix>
+void RowDiff<BaseMatrix>::load_anchor(const std::string& filename) {
+    if (!std::filesystem::exists(filename)) {
+        common::logger->error("Can't read anchor file: {}", filename);
+        std::exit(1);
+    }
+    std::ifstream f(filename, ios::binary);
+    if (!f.good()) {
+        common::logger->error("Could not open anchor file {}", filename);
+        std::exit(1);
+    }
+    anchor_.load(f);
+    f.close();
 }
 
 template
 class RowDiff<ColumnMajor>;
+template
+class RowDiff<BRWT>;
 
 void build_successor(const graph::DBGSuccinct &graph,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
     bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchor" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             common::logger->trace(
                     "Building and writing successor, predecessor and terminal files to {}.*",
@@ -69,10 +83,10 @@ void build_successor(const graph::DBGSuccinct &graph,
         }
     }
 
-    std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
+    std::ofstream fterm(outfbase + ".anchor.unopt", ios::binary);
     term.serialize(fterm);
     fterm.close();
-    common::logger->trace("Anchor nodes written to {}.terminal", outfbase);
+    common::logger->trace("Anchor nodes written to {}.anchor.unopt", outfbase);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;

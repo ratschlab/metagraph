@@ -258,7 +258,6 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
     };
 
     const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
-
     for (const auto &labels : label_groups) {
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
             std::filesystem::remove_all(dst_dir);
@@ -278,11 +277,13 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             annotator.load(dest_fname);
             const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                     .set_graph(graph.get());
+            const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                    .load_anchor(graph_fname + ".anchor");
 
             ASSERT_EQ(labels.size(), annotator.num_labels());
             ASSERT_EQ(5u, annotator.num_objects());
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
-                      annotator.num_relations()) << "Labels " << labels.size() << " Depth: " << max_depth;
+                      annotator.num_relations());
 
             for (uint32 i = 0; i < annotator.num_objects(); ++i) {
                 ASSERT_THAT(annotator.get(i), ContainerEq(labels));
@@ -330,6 +331,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 annotator.load(rd_anno);
                 const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                         .set_graph(graph.get());
+                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                        .load_anchor(graph_fname + ".anchor");
 
                 ASSERT_EQ(1, annotator.num_labels());
                 ASSERT_EQ(5u, annotator.num_objects());
@@ -385,6 +388,8 @@ void test_row_diff(uint32_t k,
     annotator.load(dest_fname);
     const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
             .set_graph(graph.get());
+    const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+            .load_anchor(graph_fname + ".anchor");
 
     ASSERT_EQ(all_labels.size(), annotator.num_labels());
     ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
@@ -443,6 +448,8 @@ void test_row_diff_separate_columns(uint32_t k,
         annotator.load(dest_fname);
         const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                 .set_graph(graph.get());
+        const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                .load_anchor(graph_fname + ".anchor");
 
         ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
 

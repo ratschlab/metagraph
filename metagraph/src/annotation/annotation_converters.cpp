@@ -267,7 +267,6 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
     // we are going to take the columns from the annotator and thus
     // have to replace them with empty columns to keep the structure valid
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
-    std::string anchors_filename = annotator.get_matrix().anchors_filename();
     std::vector<std::unique_ptr<bit_vector>> columns
             = annotator.release_matrix()->diffs().release_columns();
 
@@ -279,7 +278,7 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
     );
 
     return std::make_unique<RowDiffBRWTAnnotator>(
-            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix), anchors_filename),
+            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix)),
             annotator.get_label_encoder());
 }
 
@@ -481,8 +480,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
                               tmp_path, get_columns, std::move(column_names));
 
     return std::make_unique<RowDiffBRWTAnnotator>(
-            std::make_unique<RowDiff<BRWT>>(
-                    nullptr, std::move(*annotator->release_matrix()), ""),
+            std::make_unique<RowDiff<BRWT>>(nullptr, std::move(*annotator->release_matrix())),
             annotator->get_label_encoder());
 }
 

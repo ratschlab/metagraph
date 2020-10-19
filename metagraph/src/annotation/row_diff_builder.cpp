@@ -122,10 +122,10 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
     sdsl::rrr_vector rterminal;
 
     // if we just generated anchor nodes, attempt a greedy anchor optimization
-    if (!std::filesystem::exists(graph_fname + "terminal")) {
+    if (!std::filesystem::exists(graph_fname + ".anchor")) {
         logger->trace("Performing anchor optimization");
         sdsl::bit_vector terminal;
-        std::ifstream f(graph_fname + ".terminal.unopt", std::ios::binary);
+        std::ifstream f(graph_fname + ".anchor.unopt", std::ios::binary);
         terminal.load(f);
         f.close();
 
@@ -160,13 +160,13 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                 });
 
         // save the optimized terminal bit vector, and delete the unoptimized one
-        std::ofstream fterm(graph_fname + ".terminal", std::ios::binary);
+        std::ofstream fterm(graph_fname + ".anchor", std::ios::binary);
         rterminal = sdsl::rrr_vector(terminal);
         rterminal.serialize(fterm);
         fterm.close();
-        std::filesystem::remove(graph_fname + ".terminal.unopt");
+        std::filesystem::remove(graph_fname + ".anchor.unopt");
     } else {
-        std::ifstream f(graph_fname + ".terminal", std::ios::binary);
+        std::ifstream f(graph_fname + ".anchor", std::ios::binary);
         rterminal.load(f);
         f.close();
     }
@@ -263,8 +263,8 @@ void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
                                                               targets_size[l_idx][l_idx2]);
         }
         ColumnMajor matrix(std::move(columns));
-        auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                &graph, std::move(matrix), graph_fname + ".terminal");
+        auto diff_annotation
+                = std::make_unique<RowDiff<ColumnMajor>>(&graph, std::move(matrix));
         RowDiffAnnotator annotator(std::move(diff_annotation), label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()

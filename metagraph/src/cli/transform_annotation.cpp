@@ -169,8 +169,11 @@ int transform_annotation(Config *config) {
     /********************************************************/
 
     if (config->cluster_linkage) {
-        if (input_anno_type != Config::ColumnCompressed) {
-            logger->error("Column clustering is only supported for ColumnCompressed");
+        if (input_anno_type != Config::ColumnCompressed
+            && input_anno_type != Config::RowDiff) {
+            logger->error(
+                    "Column clustering is only supported for ColumnCompressed and "
+                    "RowDiff");
             exit(1);
         }
 
@@ -186,37 +189,41 @@ int transform_annotation(Config *config) {
         ThreadPool subsampling_pool(get_num_threads(), 1);
 
         // Load columns from disk
-        bool success = ColumnCompressed<>::merge_load(files,
-            [&](uint64_t i, const std::string &label, auto&& column) {
-                subsampling_pool.enqueue([&,i,label,column{std::move(column)}]() {
-                    sdsl::bit_vector *subvector;
-                    {
-                        std::lock_guard<std::mutex> lock(mu);
-                        if (row_indexes.empty()) {
-                            num_rows = column->size();
-                            row_indexes
+        bool success;
+        auto on_column = [&](uint64_t i, const std::string &label,
+                             std::unique_ptr<bit_vector> &&column) {
+            subsampling_pool.enqueue([&, i, label, column { std::move(column) }]() {
+                sdsl::bit_vector *subvector;
+                {
+                    std::lock_guard<std::mutex> lock(mu);
+                    if (row_indexes.empty()) {
+                        num_rows = column->size();
+                        row_indexes
                                 = binmat::sample_row_indexes(num_rows,
                                                              config->num_rows_subsampled);
-                        } else if (column->size() != num_rows) {
-                            logger->error("Size of column {} is {} != {}",
-                                          label, column->size(), num_rows);
-                            exit(1);
-                        }
-                        subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
-                        subvector = subcolumn_ptrs.back().get();
-                        column_ids.push_back(i);
-                        logger->trace("Column {}: {}", i, label);
+                    } else if (column->size() != num_rows) {
+                        logger->error("Size of column {} is {} != {}", label,
+                                      column->size(), num_rows);
+                        exit(1);
                     }
+                    subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                    subvector = subcolumn_ptrs.back().get();
+                    column_ids.push_back(i);
+                    logger->trace("Column {}: {}", i, label);
+                }
 
-                    *subvector = sdsl::bit_vector(row_indexes.size(), false);
-                    for (size_t j = 0; j < row_indexes.size(); ++j) {
-                        if ((*column)[row_indexes[j]])
-                            (*subvector)[j] = true;
-                    }
-                });
-            },
-            get_num_threads()
-        );
+                *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                for (size_t j = 0; j < row_indexes.size(); ++j) {
+                    if ((*column)[row_indexes[j]])
+                        (*subvector)[j] = true;
+                }
+            });
+        };
+        if (input_anno_type != Config::ColumnCompressed) {
+            success = ColumnCompressed<>::merge_load(files, on_column, get_num_threads());
+        } else {
+            success = merge_load_row_diff(files, on_column, get_num_threads());
+        }
 
         if (!success) {
             logger->error("Cannot load annotations");
@@ -428,12 +435,21 @@ int transform_annotation(Config *config) {
             exit(1);
         }
         if (config->anno_type == Config::RowDiffBRWT) {
+            if (config->anchor.empty()) {
+                logger->error(
+                        "Please specify the location of the anchor file via --anchor. "
+                        "The anchor file is in the same directory as the annotated graph");
+                std::exit(1);
+            }
             std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
             if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
                 logger->trace("Loading annotation from disk...");
                 auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
                 if (!row_diff_anno->merge_load(files))
                     std::exit(1);
+
+                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(row_diff_anno->get_matrix())
+                        .load_anchor(config->anchor);
                 logger->trace("Annotation loaded in {} sec", timer.elapsed());
                 brwt_annotator = config->greedy_brwt
                         ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
@@ -453,6 +469,8 @@ int transform_annotation(Config *config) {
             logger->trace("Annotation converted in {} sec", timer.elapsed());
 
             logger->trace("Serializing to '{}'", config->outfbase);
+            const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                    .load_anchor(config->anchor);
             brwt_annotator->serialize(config->outfbase);
         } else {
             convert_row_diff_to_col_compressed(files, config->outfbase);
