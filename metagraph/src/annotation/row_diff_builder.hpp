@@ -59,11 +59,9 @@ void traverse_anno_chunked(
         const CallOnes &call_ones,
         const std::function<void(node_index start, uint64_t size)> &after_chunk);
 
-void convert_batch_to_row_diff(const graph::DBGSuccinct &graph,
-                               const std::string &graph_fname,
+void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir,
-                               uint32_t max_depth);
+                               const std::filesystem::path &dest_dir);
 
-}
-}
+} // namespace annot
+} // namespace mtg
