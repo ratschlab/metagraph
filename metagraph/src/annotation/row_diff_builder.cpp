@@ -10,14 +10,174 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
+constexpr uint64_t chunk_size = 1 << 20;
+
 namespace mtg {
 namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
+/** Marker type to indicate a value represent a node index in a BOSS graph */
+using node_index = graph::boss::BOSS::node_index;
 
-constexpr uint64_t chunk_size = 1 << 20;
 
+void build_successor(const std::string &graph_fname,
+                     const std::string &outfbase,
+                     uint32_t max_length,
+                     uint32_t num_threads) {
+    bool must_build = false;
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
+        if (!std::filesystem::exists(outfbase + suffix)) {
+            logger->trace(
+                    "Building and writing successor, predecessor and terminal files to {}.*",
+                    outfbase);
+            must_build = true;
+            break;
+        }
+    }
+    if (!must_build) {
+        logger->trace("Using existing pred/succ/terminal files in {}.*", outfbase);
+        return;
+    }
+
+    graph::DBGSuccinct graph(2);
+    logger->trace("Loading graph...");
+    if (!graph.load(graph_fname)) {
+        logger->error("Cannot load graph from {}", graph_fname);
+        std::exit(1);
+    }
+
+    using graph::boss::BOSS;
+    const BOSS &boss = graph.get_boss();
+    sdsl::bit_vector terminal;
+    sdsl::bit_vector dummy;
+    boss.call_sequences_row_diff([&](const vector<uint64_t> &, std::optional<uint64_t>) {},
+                                 num_threads, max_length, &terminal, &dummy);
+
+    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
+    sdsl::bit_vector term(graph.num_nodes(), 0);
+    for (uint64_t i = 1; i < terminal.size(); ++i) {
+        if (terminal[i]) {
+            uint64_t graph_idx = graph.boss_to_kmer_index(i);
+            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_idx);
+            assert(anno_index < graph.num_nodes());
+            term[anno_index] = 1;
+        }
+    }
+
+    std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
+    term.serialize(fterm);
+    fterm.close();
+    logger->trace("Anchor nodes written to {}.terminal", outfbase);
+
+    // create the succ file, indexed using annotation indices
+    uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
+    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, 1024 * 1024);
+    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
+
+    // traverse BOSS table in parallel processing num_threads chunks of size 1'000'000
+    constexpr uint64_t chunk_size = 1'000'000;
+    const uint64_t batch_size = chunk_size * num_threads;
+    const uint64_t batch_count = (graph.num_nodes() - 1) / batch_size + 1;
+
+    ProgressBar progress_bar(batch_count, "Compute successors", std::cerr,
+                             !common::get_verbose());
+
+    for (uint64_t batch = 0; batch < batch_count; ++batch) {
+        std::vector<std::vector<uint64_t>> pred_buf(num_threads);
+        std::vector<std::vector<uint64_t>> succ_buf(num_threads);
+        std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
+
+        #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+        for (uint32_t chunk = 0; chunk < std::max((uint32_t)1, num_threads); ++chunk) {
+            uint64_t start = batch * batch_size + chunk * chunk_size + 1;
+            for (uint64_t i = start;
+                 i < std::min(graph.num_nodes() + 1, start + chunk_size); ++i) {
+                uint64_t boss_idx = graph.kmer_to_boss_index(i);
+                if (dummy[boss_idx] || terminal[boss_idx]) {
+                    succ_buf[chunk].push_back(0);
+                } else {
+                    const graph::boss::BOSS::TAlphabet w
+                            = boss.get_W(boss_idx) % boss.alph_size;
+                    uint64_t next = w ? graph.boss_to_kmer_index(boss.fwd(boss_idx, w)) : 0;
+                    succ_buf[chunk].push_back(next);
+                }
+                uint64_t back_idx = boss.bwd(boss_idx);
+                boss.call_incoming_to_target(
+                        back_idx, boss.get_W(back_idx), [&](BOSS::edge_index incoming_edge) {
+                          // terminal and dummy predecessors are ignored; also ignore
+                          // predecessors for which boss_idx is not the last outgoing
+                          // edge (bc. we only traverse the last outgoing at a bifurcation)
+                          if (terminal[incoming_edge] || dummy[incoming_edge]
+                                  || boss.fwd(incoming_edge,
+                                              boss.get_W(incoming_edge) % boss.alph_size)
+                                          != boss_idx)
+                              return;
+
+                          pred_buf[chunk].push_back(graph.boss_to_kmer_index(incoming_edge));
+                          pred_boundary_buf[chunk].push_back(0);
+                        });
+                pred_boundary_buf[chunk].push_back(1);
+            }
+        }
+        for (uint32_t i = 0; i < num_threads; ++i) {
+            for (uint32_t j = 0; j < succ_buf[i].size(); ++j) {
+                succ.push_back(succ_buf[i][j]);
+            }
+            for (uint32_t j = 0; j < pred_buf[i].size(); ++j) {
+                pred.push_back(pred_buf[i][j]);
+            }
+            for (uint32_t j = 0; j < pred_boundary_buf[i].size(); ++j) {
+                pred_boundary.push_back(pred_boundary_buf[i][j]);
+            }
+        }
+        ++progress_bar;
+    }
+    succ.close();
+    pred.close();
+    pred_boundary.close();
+
+    logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
+}
+
+
+/**
+ * Callback invoked by #traverse_anno_chunked for each set bit in the annotation matrix.
+ * @param source_col the column for which the callback was invoked, in bit_vector format
+ * @param row_idx the row in which the bit is set
+ * @param row_idx_chunk relative index of the row in the current chunk
+ * @param source_idx index of the source file for the current column
+ * @param coll_idx index of the column in the current source file (typically, the source
+ *        files contain a single column each, but that's not a requirement)
+ * @param succ_chunk current chunk of successor values (indexed by #row_idx_chunk)
+ * @param pred_chunk current chunk of predecessor values (indexed by #row_idx_chunk)
+ * @param pred_chunk_idx indexes pred_chunk. The predecessors of #row_idx are located
+ *        in #pred_chunk between pred_chunk_idx[row_idx_chunk] and
+ *        pred_chunk_idx[row_idx_chunk + 1]
+ */
+using CallOnes = std::function<void(const bit_vector &source_col,
+                                    node_index row_idx,
+                                    node_index row_idx_chunk,
+                                    uint64_t source_idx,
+                                    uint64_t col_idx,
+                                    const std::vector<uint64_t> &succ_chunk,
+                                    const std::vector<uint64_t> &pred_chunk,
+                                    const std::vector<uint64_t> &pred_chunk_idx)>;
+
+/**
+ * Traverses a group of column compressed annotations (loaded in memory) in chunks of
+ * 1'000'000 rows at a time and invokes #call_ones for each set bit.
+ * @param log_header label to be displayed in the progress bar
+ * @param num_rows number of rows in the annotation
+ * @param pred_succ_fprefix prefix for the pred/succ files containg the predecessors and
+ * the successor for each node
+ * @param col_annotations the annotations to be traversed
+ * @param before_chunk callback to invoke before a chunk is traversed
+ * @param call_ones callback to invoke on a set bit
+ * @param after_chunk callback to invoke after a chunk is traversed
+ */
 void traverse_anno_chunked(
         const std::string &log_header,
         uint64_t num_rows,
