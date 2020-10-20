@@ -67,7 +67,8 @@ void build_successor(const std::string &graph_fname,
     }
 
     std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
-    term.serialize(fterm);
+    sdsl::rrr_vector(term).serialize(fterm);
+    term = sdsl::bit_vector();
     fterm.close();
     logger->trace("Anchor nodes written to {}.terminal.unopt", outfbase);
 
@@ -278,55 +279,9 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     logger->trace("Done loading {} annotations", sources.size());
 
     sdsl::rrr_vector rterminal;
-
-    // if we just generated anchor nodes, attempt a greedy anchor optimization
-    if (!std::filesystem::exists(graph_fname + "terminal")) {
-        logger->trace("Performing anchor optimization");
-        sdsl::bit_vector terminal;
+    {
         std::ifstream f(graph_fname + ".terminal.unopt", std::ios::binary);
-        terminal.load(f);
-        f.close();
-
-        // total number of set bits in the original and sparsified rows
-        std::vector<std::atomic<uint32_t>> orig_ones(chunk_size);
-        std::vector<std::atomic<uint32_t>> sparse_ones(chunk_size);
-
-        traverse_anno_chunked(
-                "Anchor opt", terminal.size(), graph_fname, sources,
-                [&]() {
-                    std::fill(orig_ones.begin(), orig_ones.end(), 0);
-                    std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
-                },
-                [&](const bit_vector &source_col, node_index i, node_index chunk_idx,
-                        size_t, size_t, const std::vector<uint64_t> &succ_chunk,
-                        const std::vector<uint64_t> &, const std::vector<uint64_t> &) {
-                    if (terminal[i])
-                        return;
-
-                    // if successor is not set, add it to the diff
-                    if (!source_col[succ_chunk[chunk_idx]])
-                        sparse_ones[i]++;
-
-                    orig_ones[i]++;
-                },
-                [&](node_index chunk_start, uint64_t chunk_size) {
-                    for (uint64_t i = 0; i < chunk_size; ++i) {
-                        if (sparse_ones[i] >= 2 && sparse_ones[i] > orig_ones[i] / 2) {
-                            terminal[i + chunk_start] = 1;
-                        }
-                    }
-                });
-
-        // save the optimized terminal bit vector, and delete the unoptimized one
-        std::ofstream fterm(graph_fname + ".terminal", std::ios::binary);
-        rterminal = sdsl::rrr_vector(terminal);
-        rterminal.serialize(fterm);
-        fterm.close();
-        std::filesystem::remove(graph_fname + ".terminal.unopt");
-    } else {
-        std::ifstream f(graph_fname + ".terminal", std::ios::binary);
         rterminal.load(f);
-        f.close();
     }
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
@@ -347,7 +302,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
         uint64_t num_elements
                 = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
-                           std::min((uint64_t)1'000'000, sources[i]->num_relations()));
+                           std::min(1'000'000ull, sources[i]->num_relations()));
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
         for (size_t j = 0; j < sources[i]->num_labels(); ++j) {
@@ -421,7 +376,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         }
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix), graph_fname + ".terminal");
+                nullptr, std::move(matrix), graph_fname + ".terminal.unopt");
         RowDiffAnnotator annotator(std::move(diff_annotation), label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
