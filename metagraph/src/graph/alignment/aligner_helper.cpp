@@ -408,8 +408,13 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
 
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
+            // If the first character is a sentinel, even after the trim_offset()
+            // call, then it means the alignment must have been restricted to
+            // a single dummy k-mer
             assert(nodes_.size() == 1);
+
             nodes_[0] = DeBruijnGraph::npos;
+
             // TODO: find a better way to pick one node
             dbg_succ->call_nodes_with_prefix_matching_longest_prefix(
                 sequence_,
@@ -420,15 +425,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
             if (nodes_[0]) {
                 rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
-                std::vector<NodeType> rev_nodes = nodes_;
-                reverse_complement_seq_path(graph, rev_seq, rev_nodes);
-
-                assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                                 DeBruijnGraph::npos) == rev_nodes.end());
-
-                assert(rev_seq.size() > offset_);
+                reverse_complement_seq_path(graph, rev_seq, nodes_);
                 sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
-                nodes_.assign(rev_nodes.begin(), rev_nodes.end());
 
             } else if (canonical) {
                 // if the graph is primary, check the reverse complement as well
