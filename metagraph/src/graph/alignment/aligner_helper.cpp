@@ -498,17 +498,16 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // Then, try to trim off offset_ characters from the end of the sequence
             // and the end of the path. Stop if the path ends up having a single
             // node.
-            size_t trim_left = offset_;
-            while (trim_left && rev_nodes.size() > 1) {
+            while (offset_ && rev_nodes.size() > 1) {
                 rev_nodes.pop_back();
                 rev_seq.pop_back();
-                --trim_left;
+                --offset_;
             }
 
             // If there's still more sequence to trim, then traverse backwards
             // in the graph to find a node whose suffix matches the |sequence_|
             // length prefix of rev_seq.
-            for (size_t i = 0; i < trim_left; ++i) {
+            for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
                 graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
                     ++indegree;
@@ -532,9 +531,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
             nodes_ = rev_nodes;
             sequence_ = rev_seq;
-            offset_ = trim_left;
-            assert(!trim_left
-                    || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+            assert(!offset_ || graph.get_node_sequence(rev_nodes[0]).substr(trim_left)
+                                    == sequence_);
         }
     }
 
