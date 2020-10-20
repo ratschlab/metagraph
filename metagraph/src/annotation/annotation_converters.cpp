@@ -179,6 +179,9 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
         matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
 
+    } else if constexpr(std::is_same_v<MatrixType, RowSparse>) {
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+
     } else {
         static_assert(utils::dependent_false<StaticAnnotation>::value);
     }
@@ -187,6 +190,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 }
 
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
+template std::unique_ptr<RowSparseAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RainbowfishAnnotator> convert(const std::string &filename);
 template std::unique_ptr<BinRelWTAnnotator> convert(const std::string &filename);
 template std::unique_ptr<BinRelWT_sdslAnnotator> convert(const std::string &filename);
@@ -207,6 +211,23 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
                                               annotator.get_label_encoder());
+}
+
+template <>
+std::unique_ptr<RowSparseAnnotator>
+convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<RowSparse>(
+            [&](auto callback) {
+                utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+            },
+            num_columns, num_rows, num_set_bits);
+
+    return std::make_unique<RowSparseAnnotator>(std::move(matrix),
+                                                annotator.get_label_encoder());
 }
 
 template <>
@@ -383,6 +404,23 @@ parse_linkage_matrix(const std::string &filename) {
 
     return linkage;
 }
+
+std::unique_ptr<RowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<RowSparse>(
+            [&](auto callback) {
+                utils::RowsFromColumnsTransformer(annotator.get_matrix().diffs().data())
+                        .call_rows(callback);
+            },
+            num_columns, num_rows, num_set_bits);
+
+    return std::make_unique<RowSparseAnnotator>(std::move(matrix),
+                                                annotator.get_label_encoder());
+}
+
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
@@ -1142,6 +1180,27 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
         outstream.close();
     }
 }
+
+template <class BinaryMatrix>
+void wrap_in_row_diff(const std::string &anno_file,
+                      const std::string &graph_file,
+                      const std::string &out_dir) {
+    if (!std::filesystem::is_directory(out_dir)) {
+        logger->error("Output path must be a directory, not a file: {}", out_dir);
+        std::exit(1);
+    }
+    using std::filesystem::path;
+    path file_name = path(anno_file).filename().replace_extension("");
+    std::string old_extension = file_name.extension();
+    path out_file = path(out_dir)/ (file_name.replace_extension("").string() + "row_diff_" + old_extension
+               + ".annodbg");
+    std::ofstream out(out_file, ios::binary);
+    uint64_t v = 0;
+    out.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
+    out.close();
+    std::system(("cat " + anno_file + " >> out_file").c_str());
+}
+
 
 } // namespace annot
 } // namespace mtg

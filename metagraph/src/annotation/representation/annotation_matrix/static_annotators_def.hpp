@@ -9,6 +9,7 @@
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
@@ -16,6 +17,8 @@ namespace mtg {
 namespace annot {
 
 typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowSparse, std::string> RowSparseAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::Rainbowfish, std::string> RainbowfishAnnotator;
 
@@ -36,6 +39,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
+template <>
+inline const std::string RowSparseAnnotator::kExtension = ".sparse.annodbg";
 template <>
 inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
 template <>

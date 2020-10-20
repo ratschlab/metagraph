@@ -74,6 +74,10 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RowDiffAnnotator());
             break;
         }
+        case Config::RowSparse: {
+            annotation.reset(new annot::RowSparseAnnotator());
+            break;
+        }
         case Config::BRWT: {
             annotation.reset(new annot::MultiBRWTAnnotator());
             break;

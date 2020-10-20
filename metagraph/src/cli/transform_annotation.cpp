@@ -274,6 +274,11 @@ int transform_annotation(Config *config) {
                 target_annotator = std::move(annotator);
                 break;
             }
+            case Config::RowSparse: {
+                auto annotator = annot::convert<RowSparseAnnotator>(files.at(0));
+                target_annotator = std::move(annotator);
+                break;
+            }
             case Config::RBFish: {
                 auto annotator = annot::convert<RainbowfishAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
@@ -412,6 +417,10 @@ int transform_annotation(Config *config) {
                 convert<RowFlatAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
+            case Config::RowSparse: {
+                convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
+                break;
+            }
             case Config::RBFish: {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
                 break;
@@ -428,10 +437,11 @@ int transform_annotation(Config *config) {
 
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
-            && config->anno_type != Config::ColumnCompressed) {
+            && config->anno_type != Config::ColumnCompressed
+            && config->anno_type != Config::RowSparse) {
             logger->error(
-                    "Only conversion to `column` and `row_diff_brwt` supported for "
-                    "row_diff");
+                    "Only conversion to 'column', 'row_sparse', and 'row_diff_brwt' "
+                    "supported for row_diff");
             exit(1);
         }
         if (config->anno_type == Config::RowDiffBRWT) {
@@ -472,11 +482,22 @@ int transform_annotation(Config *config) {
             const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
                     .load_anchor(config->anchor);
             brwt_annotator->serialize(config->outfbase);
-        } else {
+        } else if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);
+        } else {
+            logger->trace("Loading annotation from disk...");
+            auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+            if (!row_diff_anno->merge_load(files))
+                std::exit(1);
+            std::unique_ptr<RowSparseAnnotator> row_sparse = convert(*row_diff_anno);
+            logger->trace("Annotation converted in {} sec", timer.elapsed());
         }
-
     } else {
+        if (config->anno_type == Config::RowDiff) {
+            for(const auto& file : files) {
+                wrap_in_row_diff(file, config->infbase, config->outfbase);
+            }
+        }
         logger->error("Conversion to other representations"
                       " is not implemented for {} annotator",
                       Config::annotype_to_string(input_anno_type));

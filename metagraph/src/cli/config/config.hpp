@@ -182,6 +182,7 @@ class Config {
         RowDiff,
         RowDiffBRWT,
         RowFlat,
+        RowSparse,
         RBFish,
         RbBRWT,
     };
