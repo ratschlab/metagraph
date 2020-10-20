@@ -31,7 +31,7 @@ bool RowDiff<BaseMatrix>::load(const std::string &filename) {
 template
 class RowDiff<ColumnMajor>;
 
-void build_successor(const graph::DBGSuccinct &graph,
+void build_successor(const std::string &graph_fname,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
@@ -48,6 +48,13 @@ void build_successor(const graph::DBGSuccinct &graph,
     if (!must_build) {
         common::logger->trace("Using existing pred/succ/terminal files in {}.*", outfbase);
         return;
+    }
+
+    graph::DBGSuccinct graph(2);
+    common::logger->trace("Loading graph...");
+    if (!graph.load(graph_fname)) {
+        common::logger->error("Cannot load graph from {}", graph_fname);
+        std::exit(1);
     }
 
     using graph::boss::BOSS;
