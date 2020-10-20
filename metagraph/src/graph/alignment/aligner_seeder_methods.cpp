@@ -127,6 +127,10 @@ void SuffixSeeder<NodeType>
     if (config.max_num_seeds_per_locus > 1)
         alt_query_nodes.resize(query_nodes.size());
 
+    // query_node_flags is used to indicate a status for each node in query_nodes.
+    // If query_node_flags[i] & 0x2, then a node match at that position exists
+    // if query_node_flags[i] & 0x1, then this node is a terminal point for a
+    //                               maximal exact match.
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
     assert(!query_node_flags || query_node_flags->size() == query_nodes.size());

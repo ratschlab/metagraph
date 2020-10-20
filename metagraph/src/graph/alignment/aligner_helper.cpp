@@ -473,15 +473,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 if (nodes_[0]) {
                     // If found, then the sequence is already reverse complemented,
                     // so we're done
-                    rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
-
-                    if (rev_seq.back() == '$') {
-                        *this = Alignment();
-                        return;
-                    }
-
-                    assert(rev_seq.size() > offset_);
-                    sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
+                    sequence_ = dbg_succ->get_node_sequence(nodes_[0]).substr(offset_);
 
                 } else {
                     // nothing was found, so clear the alignment
@@ -533,9 +525,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
             assert(rev_seq.length() == sequence_.length());
 
-            nodes_ = rev_nodes;
-            sequence_ = rev_seq;
-            assert(!offset_ || graph.get_node_sequence(rev_nodes[0]).substr(offset_)
+            nodes_ = std::move(rev_nodes);
+            sequence_ = std::move(rev_seq);
+            assert(!offset_ || graph.get_node_sequence(nodes_[0]).substr(offset_)
                                     == sequence_);
         }
     }
