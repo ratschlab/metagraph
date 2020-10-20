@@ -73,14 +73,13 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
     // Find a range of nodes with a common suffix matching the maximal prefix
-    // of the string |str|, and call these nodes. If more than |max_num_allowed_matches|
-    // are found, or if the maximal prefix is shorter than |min_match_length|, return
-    // without calling.
+    // of the string |str|, and call these nodes. Terminate the operation
+    // when terminate() returns true.
     void call_nodes_with_suffix_matching_longest_prefix(
             std::string_view str,
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length = 1,
-            size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+            const std::function<bool()> &terminate = []() { return false; }) const;
 
     // Find nodes with a common prefix matching the maximal prefix
     // of the string |str|, and call these nodes. If the maximal prefix is shorter

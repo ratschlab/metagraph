@@ -467,7 +467,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
                     rev,
                     [&](NodeType suffix_node, size_t) { nodes_[0] = suffix_node; },
-                    sequence_.size()
+                    sequence_.size(),
+                    [&]() -> bool { return nodes_[0]; }
                 );
 
                 if (nodes_[0]) {

@@ -275,8 +275,8 @@ void DBGSuccinct
             std::string_view str,
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length,
-            size_t max_num_allowed_matches) const {
-    if (!max_num_allowed_matches)
+            const std::function<bool()> &terminate) const {
+    if (terminate())
         return;
 
     assert(str.size() <= get_k());
@@ -328,47 +328,25 @@ void DBGSuccinct
 
     auto rank_first = boss_graph_->rank_last(std::get<0>(index_range));
     auto rank_last = boss_graph_->rank_last(std::get<1>(index_range));
-    // TODO: rewrite this, call first N nodes and discard the large batches
-    // in the caller (if needed at all)
-    if (max_num_allowed_matches < std::numeric_limits<size_t>::max()) {
-        std::vector<node_index> nodes;
+    for (auto i = rank_first; i <= rank_last; ++i) {
+        BOSS::edge_index e = boss_graph_->select_last(i);
+        boss_graph_->call_incoming_to_target(boss_graph_->bwd(e),
+            boss_graph_->get_node_last_value(e),
+            [&](BOSS::edge_index incoming_edge_idx) {
+                if (terminate())
+                    return;
 
-        for (auto i = rank_first; i <= rank_last && nodes.size() <= max_num_allowed_matches; ++i) {
-            BOSS::edge_index e = boss_graph_->select_last(i);
-            boss_graph_->call_incoming_to_target(boss_graph_->bwd(e),
-                boss_graph_->get_node_last_value(e),
-                [&](BOSS::edge_index incoming_edge_idx) {
-                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
-                    if (kmer_index != npos) {
-                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
-                            == str.substr(0, match_size));
-                        nodes.emplace_back(kmer_index);
-                    }
+                auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                if (kmer_index != npos) {
+                    assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
+                        == str.substr(0, match_size));
+                    callback(kmer_index, match_size);
                 }
-            );
-        }
+            }
+        );
 
-        if (nodes.size() > max_num_allowed_matches)
-            return;
-
-        for (auto node : nodes) {
-            callback(node, match_size);
-        }
-    } else {
-        for (auto i = rank_first; i <= rank_last; ++i) {
-            BOSS::edge_index e = boss_graph_->select_last(i);
-            boss_graph_->call_incoming_to_target(boss_graph_->bwd(e),
-                boss_graph_->get_node_last_value(e),
-                [&](BOSS::edge_index incoming_edge_idx) {
-                    auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
-                    if (kmer_index != npos) {
-                        assert(get_node_sequence(kmer_index).substr(get_k() - match_size)
-                            == str.substr(0, match_size));
-                        callback(kmer_index, match_size);
-                    }
-                }
-            );
-        }
+        if (terminate())
+            break;
     }
 }
 
