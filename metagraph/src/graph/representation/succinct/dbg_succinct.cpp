@@ -372,6 +372,7 @@ void DBGSuccinct
     }
 }
 
+// Used to keep track of BOSS edge ranges in the traversal steps done below
 struct NodeRangeSearch {
     boss::BOSS::edge_index first;
     boss::BOSS::edge_index second;
@@ -434,6 +435,12 @@ void DBGSuccinct
     if (match_size < min_match_length)
         return;
 
+    // Starting from the BOSS edge suffix matches, traverse forwards k - match_size - 1
+    // steps so that the matched sequence is now the prefix of the called nodes.
+    // e.g., if match_size == 3 and k == 7, then a match is of the form:
+    //         XXXMMM X
+    // So only 7 - 3 - 1 = 3 steps are required to get a prefix match.
+
     std::vector<NodeRangeSearch> node_ranges;
     node_ranges.emplace_back(NodeRangeSearch{
         .first = boss_graph_->pred_last(std::get<0>(index_range) - 1) + 1,
@@ -450,13 +457,19 @@ void DBGSuccinct
             bool found = false;
             uint64_t rl_last = cur_range.first;
             uint64_t ru_last = cur_range.second;
+
+            // try tightening the edge range for each possible character
             for (boss::BOSS::TAlphabet s = 1; s < boss_graph_->alph_size; ++s) {
                 uint64_t rl = rl_last;
                 uint64_t ru = ru_last;
+
+                // character not found, try the next one
                 if (!boss_graph_->tighten_range(&rl, &ru, s))
                     continue;
 
+                // take the first one for this loop, queue the rest
                 if (!found) {
+                    // take the first one
                     cur_range.first = rl;
                     cur_range.second = ru;
                     found = true;
@@ -473,9 +486,12 @@ void DBGSuccinct
                 break;
         }
 
+        // The suffix match have been near a tip, so a prefix match of the same
+        // length may not exist
         if (cur_range.length != get_k() - match_size - 1)
             continue;
 
+        // Call all DBGSuccinct nodes in this BOSS edge range
         for (boss::BOSS::edge_index e = cur_range.first; e <= cur_range.second; ++e) {
             auto kmer_index = boss_to_kmer_index(e);
             if (kmer_index != npos && (valid_edges_ || boss_graph_->get_W(e))) {
