@@ -20,7 +20,7 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-void build_successor(const graph::DBGSuccinct &graph,
+void build_successor(const std::string &graph_filename,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads);

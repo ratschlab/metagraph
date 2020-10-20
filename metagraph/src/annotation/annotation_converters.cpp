@@ -1084,15 +1084,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          const std::filesystem::path &dest_dir) {
-    if (files.size()) {
-        graph::DBGSuccinct graph(2);
-        logger->trace("Loading graph...");
-        if (!graph.load(graph_fname)) {
-            logger->error("Cannot load graph from {}", graph_fname);
-            std::exit(1);
-        }
-        build_successor(graph, graph_fname, max_path_length, get_num_threads());
-    }
+    if (!files.size())
+        return;
+
+    build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1121,7 +1116,6 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         convert_batch_to_row_diff(graph_fname, file_batch, dest_dir);
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
-
 }
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
