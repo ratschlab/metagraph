@@ -291,6 +291,55 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
     return linkage_matrix;
 }
 
+LinkageMatrix agglomerative_linkage_trivial(size_t num_columns) {
+    if (!num_columns)
+        return LinkageMatrix(0, 4);
+
+    LinkageMatrix linkage_matrix(num_columns - 1, 4);
+    size_t i = 0;
+
+    uint64_t num_clusters = num_columns;
+    std::vector<uint64_t> column_ids
+            = utils::arange<uint64_t>(0, num_columns);
+
+    for (size_t level = 1; column_ids.size() > 1; ++level) {
+        logger->trace("Clustering: level {}", level);
+
+        Partition groups((column_ids.size() - 1) / 2 + 1);
+        for (size_t j = 0; j < column_ids.size(); ++j) {
+            groups[j / 2].push_back(j);
+        }
+
+        assert(groups.size() > 0);
+        assert(groups.size() < column_ids.size());
+
+        std::vector<uint64_t> cluster_ids(groups.size());
+
+        for (size_t g = 0; g < groups.size(); ++g) {
+            // merge into new clusters
+            if (groups[g].size() > 1) {
+                assert(groups[g].size() == 2);
+                cluster_ids[g] = num_clusters;
+                linkage_matrix(i, 0) = column_ids[groups[g][0]];
+                linkage_matrix(i, 1) = column_ids[groups[g][1]];
+                linkage_matrix(i, 2) = 0;
+                linkage_matrix(i, 3) = cluster_ids[g];
+                num_clusters++;
+                i++;
+            } else {
+                assert(groups[g].size() == 1);
+                cluster_ids[g] = column_ids[groups[g][0]];
+            }
+        }
+
+        column_ids.swap(cluster_ids);
+    }
+
+    assert(i == static_cast<size_t>(linkage_matrix.rows()));
+
+    return linkage_matrix;
+}
+
 } // namespace binmat
 } // namespace annot
 } // namespace mtg
