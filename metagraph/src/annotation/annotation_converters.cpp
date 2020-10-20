@@ -1089,6 +1089,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
+    std::filesystem::path delta_nbits_fname;
+
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
@@ -1096,6 +1098,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
             // *2 in order to account for constructing the sparsified column
+            // TODO: *1 + size(SortedSetDisk)?
             size_t file_size = 2 * std::filesystem::file_size(files[i]);
             if (file_size > mem_bytes) {
                 logger->warn(
@@ -1108,12 +1111,25 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
             mem_bytes_left -= file_size;
             file_batch.push_back(files[i]);
+
+            // derive name from first file in batch
+            if (delta_nbits_fname.empty()) {
+                delta_nbits_fname = dest_dir/std::filesystem::path(file_batch.back())
+                                                .filename()
+                                                .replace_extension()
+                                                .replace_extension(".delta_nbits");
+                if (std::filesystem::exists(delta_nbits_fname)) {
+                    logger->warn("File {} with row bit counts already exists. Removing...",
+                                 delta_nbits_fname);
+                    std::filesystem::remove(delta_nbits_fname);
+                }
+            }
         }
 
         Timer timer;
         logger->trace("Starting transforming batch of {} columns ...",
                       file_batch.size());
-        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir);
+        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname);
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
 }

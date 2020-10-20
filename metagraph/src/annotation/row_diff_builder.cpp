@@ -11,6 +11,7 @@
 #include "graph/annotated_dbg.hpp"
 
 constexpr uint64_t chunk_size = 1 << 20;
+constexpr uint64_t DELTA_WIDTH = 16;
 
 namespace mtg {
 namespace annot {
@@ -184,7 +185,7 @@ void traverse_anno_chunked(
         uint64_t num_rows,
         const std::string &pred_succ_fprefix,
         const std::vector<std::unique_ptr<annot::ColumnCompressed<>>> &col_annotations,
-        const std::function<void()> &before_chunk,
+        const std::function<void(uint64_t chunk_size)> &before_chunk,
         const CallOnes &call_ones,
         const std::function<void(node_index start, uint64_t size)> &after_chunk) {
     if (col_annotations.empty())
@@ -214,7 +215,7 @@ void traverse_anno_chunked(
         std::vector<uint64_t> pred_chunk;
         pred_chunk.reserve(succ_chunk.size() * 1.1);
 
-        before_chunk();
+        before_chunk(succ_chunk.size());
 
         for (node_index idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
             succ_chunk[i] = succ[idx] == 0
@@ -264,7 +265,8 @@ void traverse_anno_chunked(
 
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir) {
+                               const std::filesystem::path &dest_dir,
+                               const std::string &delta_nbits_fname) {
     if (source_files.empty())
         return;
 
@@ -315,9 +317,15 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         }
     }
 
+    // total number of set bits in the original rows
+    std::vector<uint32_t> row_nbits_batch;
+    const std::string temp_delta_nbits_fname = delta_nbits_fname + ".out";
+    sdsl::int_vector_buffer source_row_nbits(temp_delta_nbits_fname, std::ios::out, 1024 * 1024, DELTA_WIDTH);
+
     traverse_anno_chunked(
             "Compute diffs", rterminal.size(), graph_fname, sources,
-            [&]() {
+            [&](uint64_t chunk_size) {
+                row_nbits_batch.assign(chunk_size, 0);
                 for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
                     for (uint32_t j = 0; j < set_rows[source_idx].size(); ++j) {
                         set_rows[source_idx][j].resize(0);
@@ -329,6 +337,8 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                     const std::vector<uint64_t> &succ_chunk,
                     const std::vector<uint64_t> &pred_chunk,
                     const std::vector<uint64_t> &pred_chunk_idx) {
+
+                __atomic_add_fetch(&row_nbits_batch[chunk_idx], 1, __ATOMIC_RELAXED);
 
                 // check successor node and add current node if it's either terminal
                 // or if its successor is 0
@@ -343,6 +353,11 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                 }
             },
             [&](node_index /* start */, uint64_t /* chunk_size */) {
+                __atomic_thread_fence(__ATOMIC_ACQUIRE);
+                for (uint32_t nbits : row_nbits_batch) {
+                    source_row_nbits.push_back(nbits);
+                }
+
                 for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
                     for (size_t j = 0; j < set_rows[source_idx].size(); ++j) {
                         targets[source_idx][j]->insert(set_rows[source_idx][j].begin(),
@@ -360,6 +375,31 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     // free memory occupied by sources
     sources.clear();
 
+    if (std::filesystem::exists(delta_nbits_fname)) {
+        logger->trace("Merging row bit counters {} and {}",
+                      delta_nbits_fname, temp_delta_nbits_fname);
+
+        sdsl::int_vector_buffer result(delta_nbits_fname, std::ios::in | std::ios::out,
+                                       1024 * 1024, DELTA_WIDTH);
+        if (result.size() != source_row_nbits.size()) {
+            logger->error("Incompatible sizes of '{}': {} and '{}': {}",
+                          delta_nbits_fname, result.size(),
+                          temp_delta_nbits_fname, source_row_nbits.size());
+            exit(1);
+        }
+        for (uint64_t i = 0; i < result.size(); ++i) {
+            result[i] += source_row_nbits[i];
+        }
+        source_row_nbits.close();
+        std::filesystem::remove(temp_delta_nbits_fname);
+
+    } else {
+        source_row_nbits.close();
+        std::filesystem::rename(temp_delta_nbits_fname, delta_nbits_fname);
+    }
+
+    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(targets.size());
+
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
@@ -374,20 +414,58 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, rterminal.size(),
                                                          targets_size[l_idx][j]);
         }
+        targets[l_idx].clear();
+
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
                 nullptr, std::move(matrix), graph_fname + ".terminal.unopt");
-        RowDiffAnnotator annotator(std::move(diff_annotation), label_encoders[l_idx]);
+        row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
+                                                             label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
                 .replace_extension()
                 .replace_extension(RowDiffAnnotator::kExtension);
         auto fpath = dest_dir/fname;
-        annotator.serialize(fpath);
+        row_diff[l_idx]->serialize(fpath);
         logger->trace("Serialized {}", fpath);
     }
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
+
+    sdsl::int_vector_buffer result(delta_nbits_fname, std::ios::in | std::ios::out,
+                                   1024 * 1024, DELTA_WIDTH);
+    uint64_t num_larger_rows = 0;
+    ProgressBar progress_bar(result.size(), "Update deltas",
+                             std::cerr, !common::get_verbose());
+    for (node_index chunk = 0; chunk < result.size(); chunk += chunk_size) {
+        row_nbits_batch.assign(std::min(chunk_size, result.size() - chunk), 0);
+
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
+            const auto &columns = row_diff[l_idx]->get_matrix().diffs().data();
+            for (size_t j = 0; j < columns.size(); ++j) {
+                const std::unique_ptr<bit_vector> &source_col = columns[j];
+                source_col->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+                    [&](node_index i) {
+                        __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
+                    }
+                );
+            }
+        }
+
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+        for (uint64_t i = 0; i < row_nbits_batch.size(); ++i) {
+            result[chunk + i] -= row_nbits_batch[i];
+            // check if the delta is negative
+            if (result[chunk + i] >> (result.width() - 1))
+                num_larger_rows++;
+        }
+
+        progress_bar += row_nbits_batch.size();
+    }
+
+    logger->trace("Rows with negative reduction: {}", num_larger_rows);
 }
 
 } // namespace annot
