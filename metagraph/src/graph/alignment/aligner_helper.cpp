@@ -433,7 +433,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
             // If the first character is a sentinel even after the trim_offset()
             // call, then it means the alignment must have been restricted to
-            // a single dummy k-mer
+            // a single dummy k-mer.
+            // So, for this case, we need to find some other node whose prefix
+            // matches sequence_, then take the reverse complement of that node.
             assert(nodes_.size() == 1);
 
             // start by finding a node with the matched sequence as its prefix
@@ -456,7 +458,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
 
             } else if (canonical) {
-                // If the graph is primary, check the reverse complement as well.
+                // If nothing was found, but the graph is primary wrapped in CanonicalDBG,
+                // check to try to find the reverse complement as well.
                 // In this case, we need to find a node whose suffix matches
                 // the reverse complement of sequence_.
                 std::string rev = sequence_;
@@ -471,6 +474,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                     // If found, then the sequence is already reverse complemented,
                     // so we're done
                     rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
+
                     if (rev_seq.back() == '$') {
                         *this = Alignment();
                         return;
@@ -531,7 +535,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
             nodes_ = rev_nodes;
             sequence_ = rev_seq;
-            assert(!offset_ || graph.get_node_sequence(rev_nodes[0]).substr(trim_left)
+            assert(!offset_ || graph.get_node_sequence(rev_nodes[0]).substr(offset_)
                                     == sequence_);
         }
     }
