@@ -622,8 +622,8 @@ BOSS::get_initial_range(RandomAccessIt begin, RandomAccessIt end) const {
 }
 
 bool BOSS::tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const {
-    // Tighten the range including all edges where
-    // the source nodes have the given suffix.
+    // Tighten the range of edges including only those
+    // ending with |s| and do fwd.
     uint64_t rk_rl = rank_W(*rl - 1, s) + 1;
     uint64_t rk_ru = rank_W(*ru, s);
     if (rk_rl > rk_ru)
