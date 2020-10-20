@@ -117,7 +117,6 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
  */
 std::unique_ptr<RowSparseAnnotator> convert(const RowDiffAnnotator &annotator);
 
-template <class BinaryMatrix>
 void wrap_in_row_diff(const std::string &anno_file,
                       const std::string &graph_file,
                       const std::string &out_dir);

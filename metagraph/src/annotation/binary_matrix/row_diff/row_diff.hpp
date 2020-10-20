@@ -60,6 +60,8 @@ class RowDiff : public BinaryMatrix {
 
     const graph::DBGSuccinct *graph() const { return graph_; }
 
+    uint64_t num_anchors() const;
+
     /**
      * Returns the number of set bits in the matrix.
      */
@@ -100,6 +102,13 @@ class RowDiff : public BinaryMatrix {
     BaseMatrix diffs_;
     sdsl::rrr_vector<> anchor_;
 };
+
+template <class BaseMatrix>
+uint64_t RowDiff<BaseMatrix>:: num_anchors() const {
+    sdsl::rrr_vector<>::rank_1_type rank_anchor;
+    sdsl::util::init_support(rank_anchor, &anchor_);
+    return rank_anchor.rank(anchor_.size());
+}
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {

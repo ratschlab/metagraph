@@ -26,6 +26,7 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
 
     boundary_ = sdsl::rrr_vector<>(boundary);
     elements_ = sdsl::enc_vector<>(elements);
+    sdsl::util::init_support(sboundary_, &boundary_);
 }
 
 bool RowSparse::get(Row row, Column column) const {

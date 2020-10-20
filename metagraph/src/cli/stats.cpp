@@ -160,6 +160,21 @@ void print_stats(const Annotator &annotation) {
         }
     }
 
+    if (const auto *brwt_rd
+        = dynamic_cast<const annot::binmat::RowDiff<annot::binmat::BRWT> *>(
+                &annotation.get_matrix())) {
+        std::cout << "underlying matrix: BRWT";
+        std::cout << "=================== Anchor STATS ===================" << std::endl;
+        std::cout << "num anchors: " << brwt_rd->num_anchors() << std::endl;
+    }
+    if (const auto *rd
+        = dynamic_cast<const annot::binmat::RowDiff<annot::binmat::ColumnMajor> *>(
+                &annotation.get_matrix())) {
+        std::cout << "underlying matrix: ColumnMajor";
+        std::cout << "=================== Anchor STATS ===================" << std::endl;
+        std::cout << "num anchors: " << rd->num_anchors() << std::endl;
+    }
+
     std::cout << "========================================================" << std::endl;
 }
 
@@ -236,6 +251,14 @@ int print_stats(Config *config) {
         if (!annotation->load(file)) {
             logger->error("Cannot load annotations from file '{}'", file);
             exit(1);
+        }
+
+        using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
+        if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
+            std::string anchor_file = utils::remove_suffix(config->infbase, ".dbg") + ".anchor";
+            if (!config->infbase.empty() && std::filesystem::exists(anchor_file)) {
+                const_cast<RowDiffCol *>(rd)->load_anchor(anchor_file);
+            }
         }
 
         logger->info("Statistics for annotation '{}'", file);

@@ -1181,7 +1181,6 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
     }
 }
 
-template <class BinaryMatrix>
 void wrap_in_row_diff(const std::string &anno_file,
                       const std::string &graph_file,
                       const std::string &out_dir) {
@@ -1192,13 +1191,24 @@ void wrap_in_row_diff(const std::string &anno_file,
     using std::filesystem::path;
     path file_name = path(anno_file).filename().replace_extension("");
     std::string old_extension = file_name.extension();
-    path out_file = path(out_dir)/ (file_name.replace_extension("").string() + "row_diff_" + old_extension
-               + ".annodbg");
-    std::ofstream out(out_file, ios::binary);
-    uint64_t v = 0;
-    out.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
-    out.close();
-    std::system(("cat " + anno_file + " >> out_file").c_str());
+    std::string out_file = path(out_dir)
+            / (file_name.replace_extension("").string() + "row_diff_" + old_extension
+                    + ".annodbg");
+
+    if (old_extension != "brwt") {
+        std::ofstream out(out_file, ios::binary);
+        uint64_t v = 0;
+        out.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
+        out.close();
+    } else {
+        std::string anchor_file = utils::remove_suffix(graph_file, ".dbg") + ".anchor";
+        if (!std::filesystem::exists(anchor_file)) {
+            logger->error("Couldn't find anchor file at {}", anchor_file);
+            std::exit(1);
+        }
+        std::system(("cp " + anchor_file + " "  + out_file).c_str());
+    }
+    std::system(("cat " + anno_file + " >> " + out_file).c_str());
 }
 
 
