@@ -163,16 +163,22 @@ void print_stats(const Annotator &annotation) {
     if (const auto *brwt_rd
         = dynamic_cast<const annot::binmat::RowDiff<annot::binmat::BRWT> *>(
                 &annotation.get_matrix())) {
-        std::cout << "underlying matrix: BRWT";
+        std::cout << "underlying matrix: BRWT" << std::endl;
         std::cout << "=================== Anchor STATS ===================" << std::endl;
         std::cout << "num anchors: " << brwt_rd->num_anchors() << std::endl;
     }
     if (const auto *rd
         = dynamic_cast<const annot::binmat::RowDiff<annot::binmat::ColumnMajor> *>(
                 &annotation.get_matrix())) {
-        std::cout << "underlying matrix: ColumnMajor";
+        std::cout << "underlying matrix: ColumnMajor" << std::endl;
         std::cout << "=================== Anchor STATS ===================" << std::endl;
-        std::cout << "num anchors: " << rd->num_anchors() << std::endl;
+        uint64_t num_anchors = rd->num_anchors();
+        if (num_anchors != 0) {
+            std::cout << "num anchors: " << rd->num_anchors() << std::endl;
+        } else {
+            std::cout << "Please specify the anchor file via '-i anchor_file' to get "
+                         "anchor stats" << std::endl;
+        }
     }
 
     std::cout << "========================================================" << std::endl;
@@ -255,7 +261,8 @@ int print_stats(Config *config) {
 
         using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
         if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
-            std::string anchor_file = utils::remove_suffix(config->infbase, ".dbg") + ".anchor";
+            std::string anchor_file
+                    = utils::remove_suffix(config->infbase, ".anchor") + ".anchor";
             if (!config->infbase.empty() && std::filesystem::exists(anchor_file)) {
                 const_cast<RowDiffCol *>(rd)->load_anchor(anchor_file);
             }

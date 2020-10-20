@@ -56,6 +56,7 @@ void build_successor(const std::string &graph_fname,
 
     // terminal uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(graph.num_nodes(), 0);
+    uint64_t num_anchors = 0;
     for (uint64_t i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
@@ -63,8 +64,10 @@ void build_successor(const std::string &graph_fname,
                     graph_idx);
             assert(anno_index < graph.num_nodes());
             term[anno_index] = 1;
+            num_anchors++;
         }
     }
+    logger->trace("Number of anchors before anchor optimization: {}", num_anchors);
 
     std::ofstream fterm(outfbase + ".anchor.unopt", ios::binary);
     term.serialize(fterm);
