@@ -242,13 +242,13 @@ void traverse_anno_chunked(
                         num_rows, col_annotations[l_idx]->num_objects());
                 std::exit(1);
             }
-            for (size_t l_idx2 = 0; l_idx2 < col_annotations[l_idx]->num_labels(); ++l_idx2) {
+            for (size_t j = 0; j < col_annotations[l_idx]->num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
-                        = col_annotations[l_idx]->get_matrix().data()[l_idx2];
+                        = col_annotations[l_idx]->get_matrix().data()[j];
                 source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(),
-                    [&](node_index row_idx) {
-                        call_ones(*source_col, row_idx, row_idx - chunk, l_idx,
-                                  l_idx2, succ_chunk, pred_chunk, pred_chunk_idx);
+                    [&](node_index i) {
+                        call_ones(*source_col, i, i - chunk, l_idx,
+                                  j, succ_chunk, pred_chunk, pred_chunk_idx);
                     }
                 );
             }
@@ -272,7 +272,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
     for (const auto &fname : source_files) {
         auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-        anno->merge_load({fname});
+        anno->load(fname);
         sources.push_back(std::move(anno));
     }
     logger->trace("Done loading {} annotations", sources.size());
@@ -294,20 +294,20 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         traverse_anno_chunked(
                 "Anchor opt", terminal.size(), graph_fname, sources,
                 [&]() {
-                  std::fill(orig_ones.begin(), orig_ones.end(), 0);
-                  std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
+                    std::fill(orig_ones.begin(), orig_ones.end(), 0);
+                    std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
                 },
-                [&](const bit_vector &source_col, node_index row_idx, node_index chunk_idx,
+                [&](const bit_vector &source_col, node_index i, node_index chunk_idx,
                         size_t, size_t, const std::vector<uint64_t> &succ_chunk,
                         const std::vector<uint64_t> &, const std::vector<uint64_t> &) {
-                    if (terminal[row_idx])
+                    if (terminal[i])
                         return;
 
                     // if successor is not set, add it to the diff
                     if (!source_col[succ_chunk[chunk_idx]])
-                        sparse_ones[row_idx]++;
+                        sparse_ones[i]++;
 
-                    orig_ones[row_idx]++;
+                    orig_ones[i]++;
                 },
                 [&](node_index chunk_start, uint64_t chunk_size) {
                     for (uint64_t i = 0; i < chunk_size; ++i) {
@@ -388,19 +388,19 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                 }
             },
             [&](node_index /* start */, uint64_t /* chunk_size */) {
-              for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                  for (size_t j = 0; j < set_rows[source_idx].size(); ++j) {
-                      targets[source_idx][j]->insert(set_rows[source_idx][j].begin(),
-                                                     set_rows[source_idx][j].end());
-                      targets_size[source_idx][j] += set_rows[source_idx][j].size();
-                  }
-              }
+                for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+                    for (size_t j = 0; j < set_rows[source_idx].size(); ++j) {
+                        targets[source_idx][j]->insert(set_rows[source_idx][j].begin(),
+                                                       set_rows[source_idx][j].end());
+                        targets_size[source_idx][j] += set_rows[source_idx][j].size();
+                    }
+                }
             });
 
     std::vector<LabelEncoder<std::string>> label_encoders;
-    std::for_each(sources.begin(), sources.end(), [&](auto& source) {
+    for (const auto &source : sources) {
         label_encoders.push_back(source->get_label_encoder());
-    });
+    }
 
     // free memory occupied by sources
     sources.clear();
@@ -409,15 +409,15 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
-        for (size_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
+        for (size_t j = 0; j < targets[l_idx].size(); ++j) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
-                auto &queue = targets[l_idx][l_idx2]->data(true);
+                auto &queue = targets[l_idx][j]->data(true);
                 for (auto &it = queue.begin(); it != queue.end(); ++it) {
                     call(*it);
                 }
             };
-            columns[l_idx2] = std::make_unique<bit_vector_sd>(call_ones, rterminal.size(),
-                                                              targets_size[l_idx][l_idx2]);
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, rterminal.size(),
+                                                         targets_size[l_idx][j]);
         }
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
