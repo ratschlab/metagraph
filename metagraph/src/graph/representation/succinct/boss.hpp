@@ -621,17 +621,16 @@ BOSS::get_initial_range(RandomAccessIt begin, RandomAccessIt end) const {
     return std::make_tuple(rl, ru, offset);
 }
 
-bool BOSS::tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const {
-    // Tighten the range of edges including only those
-    // ending with |s| and do fwd.
+inline bool BOSS::tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const {
+    // Tighten the range of edges including only those ending with |s| and do fwd.
     uint64_t rk_rl = rank_W(*rl - 1, s) + 1;
     uint64_t rk_ru = rank_W(*ru, s);
     if (rk_rl > rk_ru)
         return false;
 
     // select the index of the position in last that is rank many positions after offset
-    *ru = select_last(NF_[s] + rk_ru);
     *rl = select_last(NF_[s] + rk_rl - 1) + 1;
+    *ru = select_last(NF_[s] + rk_ru);
     return true;
 }
 
