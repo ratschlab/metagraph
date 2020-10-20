@@ -160,8 +160,8 @@ void build_successor(const std::string &graph_fname,
 using CallOnes = std::function<void(const bit_vector &source_col,
                                     node_index row_idx,
                                     node_index row_idx_chunk,
-                                    uint64_t source_idx,
-                                    uint64_t col_idx,
+                                    size_t source_idx,
+                                    size_t col_idx,
                                     const std::vector<uint64_t> &succ_chunk,
                                     const std::vector<uint64_t> &pred_chunk,
                                     const std::vector<uint64_t> &pred_chunk_idx)>;
@@ -233,7 +233,7 @@ void traverse_anno_chunked(
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-        for (uint64_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
+        for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             if (col_annotations[l_idx]->num_labels()
                 && col_annotations[l_idx]->num_objects() != num_rows) {
                 logger->error(
@@ -242,14 +242,15 @@ void traverse_anno_chunked(
                         num_rows, col_annotations[l_idx]->num_objects());
                 std::exit(1);
             }
-            for (uint64_t l_idx2 = 0; l_idx2 < col_annotations[l_idx]->num_labels(); ++l_idx2) {
+            for (size_t l_idx2 = 0; l_idx2 < col_annotations[l_idx]->num_labels(); ++l_idx2) {
                 const std::unique_ptr<bit_vector> &source_col
                         = col_annotations[l_idx]->get_matrix().data()[l_idx2];
-                source_col->call_ones_in_range(
-                        chunk, chunk + succ_chunk.size(), [&](node_index row_idx) {
-                          call_ones(*source_col, row_idx, row_idx - chunk, l_idx,
-                                    l_idx2, succ_chunk, pred_chunk, pred_chunk_idx);
-                        });
+                source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(),
+                    [&](node_index row_idx) {
+                        call_ones(*source_col, row_idx, row_idx - chunk, l_idx,
+                                  l_idx2, succ_chunk, pred_chunk, pred_chunk_idx);
+                    }
+                );
             }
         }
         after_chunk(chunk, succ_chunk.size());
@@ -297,23 +298,23 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                   std::fill(sparse_ones.begin(), sparse_ones.end(), 0);
                 },
                 [&](const bit_vector &source_col, node_index row_idx, node_index chunk_idx,
-                    uint64_t, uint64_t, const std::vector<uint64_t> &succ_chunk,
-                    const std::vector<uint64_t> &, const std::vector<uint64_t> &) {
-                  if (terminal[row_idx])
-                      return;
+                        size_t, size_t, const std::vector<uint64_t> &succ_chunk,
+                        const std::vector<uint64_t> &, const std::vector<uint64_t> &) {
+                    if (terminal[row_idx])
+                        return;
 
-                  // if successor is not set, add it to the diff
-                  if (!source_col[succ_chunk[chunk_idx]])
-                      sparse_ones[row_idx]++;
+                    // if successor is not set, add it to the diff
+                    if (!source_col[succ_chunk[chunk_idx]])
+                        sparse_ones[row_idx]++;
 
-                  orig_ones[row_idx]++;
+                    orig_ones[row_idx]++;
                 },
                 [&](node_index chunk_start, uint64_t chunk_size) {
-                  for (uint64_t i = 0; i < chunk_size; ++i) {
-                      if (sparse_ones[i] >= 2 && sparse_ones[i] > orig_ones[i] / 2) {
-                          terminal[i + chunk_start] = 1;
-                      }
-                  }
+                    for (uint64_t i = 0; i < chunk_size; ++i) {
+                        if (sparse_ones[i] >= 2 && sparse_ones[i] > orig_ones[i] / 2) {
+                            terminal[i + chunk_start] = 1;
+                        }
+                    }
                 });
 
         // save the optimized terminal bit vector, and delete the unoptimized one
@@ -340,15 +341,16 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     // stores the set rows for each of the sources, per chunk
     std::vector<std::vector<std::vector<uint64_t>>> set_rows(sources.size());
 
-    for (uint64_t i = 0; i < sources.size(); ++i) {
+    for (size_t i = 0; i < sources.size(); ++i) {
         if (sources[i]->num_labels() == 0)
             continue;
+
         uint64_t num_elements
                 = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
                            std::min((uint64_t)1'000'000, sources[i]->num_relations()));
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
-        for (uint64_t j = 0; j < sources[i]->num_labels(); ++j) {
+        for (size_t j = 0; j < sources[i]->num_labels(); ++j) {
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
@@ -361,38 +363,36 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     traverse_anno_chunked(
             "Compute diffs", rterminal.size(), graph_fname, sources,
             [&]() {
-              for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                  for (uint32_t col_idx = 0; col_idx < set_rows[source_idx].size();
-                       ++col_idx) {
-                      set_rows[source_idx][col_idx].resize(0);
-                  }
-              }
+                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+                    for (uint32_t j = 0; j < set_rows[source_idx].size(); ++j) {
+                        set_rows[source_idx][j].resize(0);
+                    }
+                }
             },
             [&](const bit_vector &source_col, node_index row_idx, node_index chunk_idx,
-                uint64_t source_idx, uint64_t col_idx, const std::vector<uint64_t> &succ_chunk,
-                const std::vector<uint64_t> &pred_chunk,
-                const std::vector<uint64_t> &pred_chunk_idx) {
+                    size_t source_idx, size_t j,
+                    const std::vector<uint64_t> &succ_chunk,
+                    const std::vector<uint64_t> &pred_chunk,
+                    const std::vector<uint64_t> &pred_chunk_idx) {
 
-              // check successor node and add current node if it's either terminal
-              // or if its successor is 0
-              if (rterminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
-                  set_rows[source_idx][col_idx].push_back(row_idx);
+                // check successor node and add current node if it's either terminal
+                // or if its successor is 0
+                if (rterminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
+                    set_rows[source_idx][j].push_back(row_idx);
 
-              // check non-terminal predecessor nodes and add them if they are zero
-              for (uint64_t p_idx = pred_chunk_idx[chunk_idx];
-                   p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
-                  if (!source_col[pred_chunk[p_idx]] && !rterminal[pred_chunk[p_idx]])
-                      set_rows[source_idx][col_idx].push_back(pred_chunk[p_idx]);
-              }
+                // check non-terminal predecessor nodes and add them if they are zero
+                for (size_t p_idx = pred_chunk_idx[chunk_idx];
+                     p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
+                    if (!source_col[pred_chunk[p_idx]] && !rterminal[pred_chunk[p_idx]])
+                        set_rows[source_idx][j].push_back(pred_chunk[p_idx]);
+                }
             },
             [&](node_index /* start */, uint64_t /* chunk_size */) {
               for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                  for (size_t col_idx = 0; col_idx < set_rows[source_idx].size(); ++col_idx) {
-                      targets[source_idx][col_idx]->insert(
-                              set_rows[source_idx][col_idx].begin(),
-                              set_rows[source_idx][col_idx].end());
-                      targets_size[source_idx][col_idx]
-                              += set_rows[source_idx][col_idx].size();
+                  for (size_t j = 0; j < set_rows[source_idx].size(); ++j) {
+                      targets[source_idx][j]->insert(set_rows[source_idx][j].begin(),
+                                                     set_rows[source_idx][j].end());
+                      targets_size[source_idx][j] += set_rows[source_idx][j].size();
                   }
               }
             });
@@ -403,13 +403,13 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     });
 
     // free memory occupied by sources
-    std::vector<std::unique_ptr<ColumnCompressed<>>>().swap(sources);
+    sources.clear();
 
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
-        for (uint64_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
+        for (size_t l_idx2 = 0; l_idx2 < targets[l_idx].size(); ++l_idx2) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
                 auto &queue = targets[l_idx][l_idx2]->data(true);
                 for (auto &it = queue.begin(); it != queue.end(); ++it) {
