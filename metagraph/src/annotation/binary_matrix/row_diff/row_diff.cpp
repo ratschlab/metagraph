@@ -1,5 +1,6 @@
 #include "row_diff.hpp"
 
+#include <filesystem>
 #include <fstream>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
