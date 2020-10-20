@@ -390,32 +390,58 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         == query_begin_ - get_clipping() + query_rev_comp.size());
     assert(is_valid(graph));
 
+    // trim off the prefix nodes which are only partially matched
     trim_offset();
     assert(is_valid(graph));
 
+    // start by reversing the CIGAR, alignment orientation, and swapping out the
+    // query sequence
+    std::reverse(cigar_.begin(), cigar_.end());
+
+    orientation_ = !orientation_;
+
+    query_begin_ = query_rev_comp.data() + get_clipping();
+    query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
+
+    assert(query_end_ >= query_begin_);
+
+    // now, reverse complement the path and the matched sequence
+
     if (!offset_) {
+        // if there is no offset (i.e., no sequence is trimmed off from the beginning
+        // of the path), then the alignment can be reverse complemented as usual
         reverse_complement_seq_path(graph, sequence_, nodes_);
+
     } else {
-        // extract target sequence prefix
+        // The mapped sequence was too short, so there are still |offset_|
+        // characters at the beginning of the first node which are not included
+        // in the alignment. This means that when the alignment is reverse complemented,
+        // |offset_| new prefix nodes need to be found and the last |offset_|
+        // nodes need to be trimmed off.
+        assert(sequence_.size() < graph.get_k());
+
+        // start by extracting the prefix of the first node which is not included
+        // in the alignment
         std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
             + sequence_;
 
-        // if the alignment starts from a source k-mer, then traverse forwards
-        // until a non-dummy k-mer is hit and check if its reverse complement exists
         const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
         const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
         if (!dbg_succ && canonical)
             dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
 
         if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
-            // If the first character is a sentinel, even after the trim_offset()
+            // If the first character is a sentinel even after the trim_offset()
             // call, then it means the alignment must have been restricted to
             // a single dummy k-mer
             assert(nodes_.size() == 1);
 
+            // start by finding a node with the matched sequence as its prefix
             nodes_[0] = DeBruijnGraph::npos;
 
             // TODO: find a better way to pick one node
+            // TODO: return the node sequence suffix so we don't have to extract
+            // it again below
             dbg_succ->call_nodes_with_prefix_matching_longest_prefix(
                 sequence_,
                 [&](NodeType prefix_node, size_t) { nodes_[0] = prefix_node; },
@@ -424,12 +450,15 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             );
 
             if (nodes_[0]) {
+                // If found, then proceed to reverse complement
                 rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
                 reverse_complement_seq_path(graph, rev_seq, nodes_);
                 sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
 
             } else if (canonical) {
-                // if the graph is primary, check the reverse complement as well
+                // If the graph is primary, check the reverse complement as well.
+                // In this case, we need to find a node whose suffix matches
+                // the reverse complement of sequence_.
                 std::string rev = sequence_;
                 ::reverse_complement(rev.begin(), rev.end());
                 dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
@@ -439,6 +468,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 );
 
                 if (nodes_[0]) {
+                    // If found, then the sequence is already reverse complemented,
+                    // so we're done
                     rev_seq = dbg_succ->get_node_sequence(nodes_[0]);
                     if (rev_seq.back() == '$') {
                         *this = Alignment();
@@ -449,12 +480,14 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                     sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
 
                 } else {
+                    // nothing was found, so clear the alignment
                     *this = Alignment();
                     return;
                 }
             }
 
         } else {
+            // start by reverse complementing the path
             assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
             std::vector<NodeType> rev_nodes = nodes_;
             reverse_complement_seq_path(graph, rev_seq, rev_nodes);
@@ -462,7 +495,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             assert(std::find(rev_nodes.begin(), rev_nodes.end(),
                              DeBruijnGraph::npos) == rev_nodes.end());
 
-            // trim off ending from reverse complement (corresponding to the added prefix)
+            // Then, try to trim off offset_ characters from the end of the sequence
+            // and the end of the path. Stop if the path ends up having a single
+            // node.
             size_t trim_left = offset_;
             while (trim_left && rev_nodes.size() > 1) {
                 rev_nodes.pop_back();
@@ -470,13 +505,17 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 --trim_left;
             }
 
+            // If there's still more sequence to trim, then traverse backwards
+            // in the graph to find a node whose suffix matches the |sequence_|
+            // length prefix of rev_seq.
             for (size_t i = 0; i < trim_left; ++i) {
                 size_t indegree = 0;
                 graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
-                    // do we pick? Currently we pick the first one
+                    // do we pick? Currently we pick the first one. This is only
+                    // guaranteed to find a node with unmasked DBGSuccinct.
                     if (indegree == 1)
                         rev_nodes[0] = prev;
                 });
@@ -489,6 +528,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 rev_seq.pop_back();
             }
 
+            assert(rev_seq.length() == sequence_.length());
+
             nodes_ = rev_nodes;
             sequence_ = rev_seq;
             offset_ = trim_left;
@@ -497,14 +538,6 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         }
     }
 
-    std::reverse(cigar_.begin(), cigar_.end());
-
-    orientation_ = !orientation_;
-
-    query_begin_ = query_rev_comp.data() + get_clipping();
-    query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
-
-    assert(query_end_ >= query_begin_);
     assert(is_valid(graph));
 }
 
