@@ -29,7 +29,7 @@ void build_successor(const std::string &graph_fname,
     for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchor" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             logger->trace(
-                    "Building and writing successor, predecessor and acnhor files to {}.*",
+                    "Building and writing successor, predecessor and anchor files to {}.*",
                     outfbase);
             must_build = true;
             break;
@@ -312,12 +312,12 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                     orig_ones[row_idx]++;
                 },
                 [&](node_index chunk_start, uint64_t chunk_size) {
-                  for (uint64_t i = 0; i < chunk_size; ++i) {
-                      if (sparse_ones[i] > orig_ones[i] / 2) {
-                          forced_anchors += !terminal[i + chunk_start];
-                          terminal[i + chunk_start] = 1;
-                      }
-                  }
+                    for (uint64_t i = 0; i < chunk_size; ++i) {
+                        if (sparse_ones[i] > orig_ones[i] / 2) {
+                            forced_anchors += !terminal[i + chunk_start];
+                            terminal[i + chunk_start] = 1;
+                        }
+                    }
                 });
 
         logger->trace("Anchor optimization added {} anchors", forced_anchors);

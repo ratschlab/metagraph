@@ -19,8 +19,7 @@ void build_successor(const std::string &graph_filename,
 
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir,
-                               uint32_t max_depth);
+                               const std::filesystem::path &dest_dir);
 
 } // namespace annot
 } // namespace mtg

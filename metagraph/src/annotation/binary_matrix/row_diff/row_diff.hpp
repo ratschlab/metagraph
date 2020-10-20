@@ -21,11 +21,6 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-void build_successor(const graph::DBGSuccinct &graph,
-                     const std::string &outfbase,
-                     uint32_t max_length,
-                     uint32_t num_threads);
-
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
  * successive nodes, rather than the full annotation.
@@ -219,7 +214,6 @@ void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t>
         result->push_back(diff2[idx2++]);
     }
 }
-
 
 } // namespace binmat
 } // namespace annot
