@@ -270,17 +270,20 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         );
 
         logger->trace("Reconstructing count vector");
-        std::atomic_thread_fence(std::memory_order_release);
         counts = aligned_int_vector(graph_ptr->max_index() + 1, 0, width * 2, 16);
 
+        std::atomic_thread_fence(std::memory_order_release);
+
         std::mutex vector_backup_mutex;
+        constexpr int memorder = std::memory_order_relaxed;
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l = 0; l < contigs.size(); ++l) {
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_exchange(counts, i, contigs[l].second[j++], vector_backup_mutex);
+                atomic_exchange(counts, i, contigs[l].second[j++],
+                                vector_backup_mutex, memorder);
             });
             assert(j == seq_counts.size());
         }
@@ -296,7 +299,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
                     uint64_t old_val = atomic_exchange(counts, i, contigs[l].second[--j],
-                                                       vector_backup_mutex);
+                                                       vector_backup_mutex, memorder);
                     std::ignore = old_val;
                     assert(!old_val);
                 });
@@ -350,6 +353,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         label_out_codes[i] = label_encoder.encode(labels_out[i]);
     }
 
+    constexpr int memorder = std::memory_order_relaxed;
+
     std::mutex vector_backup_mutex;
     #pragma omp parallel num_threads(num_threads)
     #pragma omp single
@@ -359,8 +364,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         binmat.slice_columns(label_in_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex, __ATOMIC_RELAXED);
+                set_bit(indicator.data(), i, async, memorder);
+                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex, memorder);
             });
         });
 
@@ -374,8 +379,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         binmat.slice_columns(label_out_codes, [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                set_bit(indicator.data(), i, async, __ATOMIC_RELAXED);
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, __ATOMIC_RELAXED);
+                set_bit(indicator.data(), i, async, memorder);
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, memorder);
             });
         });
 
@@ -387,6 +392,8 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         std::move(indicator)
     );
 
+#if 0
+    // MAKE_BOSS is set to true, so for now, comment this out
     if (!MAKE_BOSS && graph->is_canonical_mode()) {
         logger->trace("Adding reverse complements");
 
@@ -406,22 +413,21 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                         callback(i, true);
                         atomic_fetch_and_add(counts, i * 2,
                                              atomic_fetch(counts, *it * 2, count_mutex),
-                                             count_mutex,
-                                             __ATOMIC_RELAXED);
+                                             count_mutex, memorder);
                         atomic_fetch_and_add(counts, i * 2 + 1,
                                              atomic_fetch(counts, *it * 2 + 1, count_mutex),
-                                             count_mutex,
-                                             __ATOMIC_RELAXED);
+                                             count_mutex, memorder);
                     }
                     ++it;
                 });
                 assert(it == path.rend());
             }, num_threads);
-        }, update_in_place, num_threads > 1, __ATOMIC_RELAXED);
+        }, update_in_place, num_threads > 1, memorder);
         std::atomic_thread_fence(std::memory_order_acquire);
 
         union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
     }
+#endif
 
     // set the width to be double again
     counts.width(width * 2);
@@ -439,7 +445,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic<size_t> total_unitigs(0);
     std::atomic<size_t> num_kept_nodes(0);
     bool parallel = num_threads > 1;
-    constexpr auto memorder = std::memory_order_relaxed;
+    constexpr int memorder = std::memory_order_relaxed;
 
     std::atomic_thread_fence(std::memory_order_release);
     masked_graph.update_mask([&](const auto &callback) {
