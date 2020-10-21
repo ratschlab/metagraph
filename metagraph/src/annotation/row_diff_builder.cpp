@@ -505,6 +505,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
             // compute sum of t-1 and t.
             filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
             sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
+
             sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024, DELTA_WIDTH);
             sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024, DELTA_WIDTH);
             if (first.size() != second.size()) {
@@ -512,7 +513,8 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
                               filenames[t - 1], first.size(), filenames[t], second.size());
                 exit(1);
             }
-            for (uint64_t i = 0; i < sum.size(); ++i) {
+
+            for (uint64_t i = 0; i < first.size(); ++i) {
                 sum.push_back(first[i] + second[i]);
             }
         }
@@ -520,9 +522,10 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         if (filenames.size() % 2)
             filenames_new.back() = filenames.back();
 
-        filenames.swap(filenames_new);
+        logger->trace("Merged {} delta vectors into {}",
+                      filenames.size(), filenames_new.size());
 
-        logger->trace("Merged into {} delta vectors", filenames.size());
+        filenames.swap(filenames_new);
     }
 
     assert(filenames.size() == 1u && "All must be merged into one vector");
