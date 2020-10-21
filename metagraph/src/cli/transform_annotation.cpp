@@ -190,7 +190,8 @@ int transform_annotation(Config *config) {
                     logger->error("Can't read from {}", file);
                     exit(1);
                 }
-                std::ignore = load_number(instream);
+                if (input_anno_type == Config::ColumnCompressed)
+                    std::ignore = load_number(instream);
 
                 annot::LabelEncoder<std::string> label_encoder;
                 if (!label_encoder.load(instream)) {
