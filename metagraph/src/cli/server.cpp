@@ -6,6 +6,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -19,6 +20,7 @@ namespace mtg {
 namespace cli {
 
 using mtg::common::logger;
+using mtg::graph::AnnotatedDBG;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
