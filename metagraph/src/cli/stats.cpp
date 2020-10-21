@@ -171,7 +171,7 @@ void print_stats(const Annotator &annotation) {
     if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
-        
+
     } else if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
         print_brwt_stats(*brwt);
 

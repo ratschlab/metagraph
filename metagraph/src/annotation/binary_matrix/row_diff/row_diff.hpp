@@ -10,7 +10,7 @@
 #include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
-#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/logger.hpp"
 #include "common/vector.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -153,7 +153,21 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 }
 
 template <class BaseMatrix>
-bool RowDiff<BaseMatrix>::load(std::istream &f) {
+inline bool RowDiff<BaseMatrix>::load(std::istream &f) {
+    anchor_.load(f);
+    return diffs_.load(f);
+}
+
+template <class BaseMatrix>
+inline void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+    anchor_.serialize(f);
+    diffs_.serialize(f);
+}
+
+// template specialization for load/serialize ColumnCompressed. Anchors are not saved in
+// the annotation file, as there typically is one file per column
+template <>
+bool RowDiff<ColumnMajor>::load(std::istream &f) {
     // read and ignore len bytes; for backward compatibility
     uint64_t len;
     f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
@@ -162,27 +176,14 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
     return diffs_.load(f);
 }
 
-template <class BaseMatrix>
-void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+template <>
+void RowDiff<ColumnMajor>::serialize(std::ostream &f) const {
     // write a uint64_t value for backward compatibility (it's not used anymore)
     uint64_t v = 0;
     f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
     diffs_.serialize(f);
 };
 
-// template specialization for load/serialize BRWT. The anchor bit vector is saved as
-// part of the annotation
-template <>
-inline bool RowDiff<BRWT>::load(std::istream &f) {
-    anchor_.load(f);
-    return diffs_.load(f);
-}
-
-template <>
-inline void RowDiff<BRWT>::serialize(std::ostream &f) const {
-    anchor_.serialize(f);
-    diffs_.serialize(f);
-}
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
