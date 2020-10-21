@@ -458,8 +458,6 @@ int transform_annotation(Config *config) {
                 if (!row_diff_anno->merge_load(files))
                     std::exit(1);
 
-                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(row_diff_anno->get_matrix())
-                        .load_anchor(config->anchor);
                 logger->trace("Annotation loaded in {} sec", timer.elapsed());
                 brwt_annotator = config->greedy_brwt
                         ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
