@@ -516,18 +516,31 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
 
     assert(filenames.size() == 1u && "All must be merged into one vector");
 
+    anchor_bv_type old_anchors;
+    {
+        std::ifstream f(graph_fname + ".terminal.unopt", ios::binary);
+        old_anchors.load(f);
+    }
+    uint64_t num_anchors_old = old_anchors.num_set_bits();
+
     sdsl::int_vector_buffer deltas(filenames[0], std::ios::in, 1024 * 1024, DELTA_WIDTH);
-    sdsl::bit_vector anchors(deltas.size());
-    // TODO: load from ".terminal.unopt"
+
+    if (old_anchors.size() != deltas.size()) {
+        logger->error("Unoptimized anchors ({}) and vector with delta row bits {}"
+                      " are incompatible", old_anchors.size(), deltas.size());
+        exit(1);
+    }
+    sdsl::bit_vector anchors = old_anchors.convert_to<sdsl::bit_vector>();
     for (uint64_t i = 0; i < deltas.size(); ++i) {
         // check if the delta is negative
         if (deltas[i] >> (deltas.width() - 1))
             anchors[i] = true;
     }
-    logger->trace("Number of anchors after optimization: {}",
-                  sdsl::util::cnt_one_bits(anchors));
+    anchor_bv_type ranchors(std::move(anchors));
 
-    anchor_bv_type ranchors(anchors);
+    logger->trace("Number of anchors increased after optimization from {} to {}",
+                  num_anchors_old, ranchors.num_set_bits());
+
     std::ofstream f(graph_fname + ".terminal", ios::binary);
     ranchors.serialize(f);
     logger->trace("Serialized optimized anchors to {}", graph_fname + ".terminal");

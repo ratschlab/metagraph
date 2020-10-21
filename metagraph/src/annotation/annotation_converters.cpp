@@ -1137,7 +1137,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         }
 
         Timer timer;
-        logger->trace("Starting transforming batch of {} annotations ...",
+        logger->trace("Annotations for row-diff transform in batch: {}",
                       file_batch.size());
         convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname,
                                   optimize ? ".terminal" : ".terminal.unopt");
