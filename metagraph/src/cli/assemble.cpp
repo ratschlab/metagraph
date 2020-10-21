@@ -152,7 +152,6 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
         if (line.empty() || line[0] == '#')
             continue;
 
-        std::unique_ptr<sdsl::int_vector<>> shared_counts;
         if (line[0] == '@') {
             logger->trace("Counting shared k-mers");
 
@@ -161,7 +160,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             if (line_split.size() <= 1 || line_split.size() > 3)
                 throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
 
-            // sync all assembly jobs before clearing current shared_counts
+            // sync all assembly jobs before clearing shared labels
             thread_pool.join();
 
             shared_foreground_labels = utils::split_string(line_split[1], ",");
