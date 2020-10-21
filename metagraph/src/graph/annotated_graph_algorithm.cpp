@@ -33,14 +33,12 @@ constexpr bool MAKE_BOSS = true;
 template <class GetKeptIntervals>
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
-                                   size_t num_threads,
-                                   bool update_in_place);
+                                   size_t num_threads);
 
 template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
-                                 size_t num_threads,
-                                 bool update_in_place);
+                                 size_t num_threads);
 
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
@@ -60,13 +58,6 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                         size_t num_threads) {
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
-    );
-
-    // TODO: find a way to avoid this hack
-    // Since call_unitigs/sequences on a masked DBGSuccinct makes a copy of the
-    // mask before traversal, we can safely update the mask in the callback
-    bool update_in_place = static_cast<bool>(
-        std::dynamic_pointer_cast<const DBGSuccinct>(graph_ptr)
     );
 
     logger->trace("Generating initial mask");
@@ -115,7 +106,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             uint64_t sum = in_count + out_count;
             return in_count >= config.label_mask_in_kmer_fraction * sum
                 && out_count <= config.label_mask_out_kmer_fraction * sum;
-        }, num_threads, update_in_place);
+        }, num_threads);
 
         return std::move(*masked_graph);
     }
@@ -206,7 +197,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         return { std::make_pair(begin, end) };
 
-    }, num_threads, update_in_place);
+    }, num_threads);
 
     return std::move(*masked_graph);
 }
@@ -275,7 +266,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
         std::atomic_thread_fence(std::memory_order_release);
 
         std::mutex vector_backup_mutex;
-        constexpr int memorder = std::memory_order_relaxed;
+        constexpr std::memory_order memorder = std::memory_order_relaxed;
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l = 0; l < contigs.size(); ++l) {
@@ -327,13 +318,6 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         anno_graph.get_graph_ptr()
     );
 
-    // TODO: find a way to avoid this hack
-    // Since call_unitigs/sequences on a masked DBGSuccinct makes a copy of the
-    // mask before traversal, we can safely update the mask in the callback
-    bool update_in_place = static_cast<bool>(
-        std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-    );
-
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::bit_vector indicator(graph->max_index() + 1, false);
 
@@ -353,7 +337,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
         label_out_codes[i] = label_encoder.encode(labels_out[i]);
     }
 
-    constexpr int memorder = std::memory_order_relaxed;
+    constexpr std::memory_order memorder = std::memory_order_relaxed;
 
     std::mutex vector_backup_mutex;
     #pragma omp parallel num_threads(num_threads)
@@ -422,7 +406,7 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
                 });
                 assert(it == path.rend());
             }, num_threads);
-        }, update_in_place, num_threads > 1, memorder);
+        }, true, num_threads > 1, memorder);
         std::atomic_thread_fence(std::memory_order_acquire);
 
         union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
@@ -439,35 +423,39 @@ fill_count_vector(const AnnotatedDBG &anno_graph,
 template <class GetKeptIntervals>
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
-                                   size_t num_threads,
-                                   bool update_in_place) {
-    std::atomic<size_t> kept_unitigs(0);
-    std::atomic<size_t> total_unitigs(0);
-    std::atomic<size_t> num_kept_nodes(0);
+                                   size_t num_threads) {
+    std::atomic<uint64_t> kept_unitigs(0);
+    std::atomic<uint64_t> total_unitigs(0);
+    std::atomic<uint64_t> num_kept_nodes(0);
     bool parallel = num_threads > 1;
-    constexpr int memorder = std::memory_order_relaxed;
+    constexpr std::memory_order memorder = std::memory_order_relaxed;
 
     std::atomic_thread_fence(std::memory_order_release);
-    masked_graph.update_mask([&](const auto &callback) {
-        masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
-            total_unitigs.fetch_add(1, memorder);
 
-            size_t last = 0;
-            for (const auto &[begin, end] : get_kept_intervals(unitig, path)) {
-                kept_unitigs.fetch_add(1, memorder);
-                num_kept_nodes.fetch_add(end - begin, memorder);
-                for ( ; last < begin; ++last) {
-                    callback(path[last], false);
-                }
-                last = end;
+    // TODO: the hack below relies on the fact that the implementation of call_unitigs
+    // on masked DBGSuccinct makes a copy of the underlying bit vector, so we can
+    // safely modify the mask during the call. Find a way to avoid this.
+    auto &mask = const_cast<sdsl::bit_vector&>(dynamic_cast<bitmap_vector*>(
+        masked_graph.get_dynamic_mask()
+    )->data());
+    masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
+        total_unitigs.fetch_add(1, memorder);
+
+        size_t last = 0;
+        for (const auto &[begin, end] : get_kept_intervals(unitig, path)) {
+            kept_unitigs.fetch_add(1, memorder);
+            num_kept_nodes.fetch_add(end - begin, memorder);
+            for ( ; last < begin; ++last) {
+                unset_bit(mask.data(), path[last], parallel, memorder);
             }
+            last = end;
+        }
 
-            for ( ; last < path.size(); ++last) {
-                callback(path[last], false);
-            }
+        for ( ; last < path.size(); ++last) {
+            unset_bit(mask.data(), path[last], parallel, memorder);
+        }
 
-        }, num_threads);
-    }, update_in_place, parallel, memorder);
+    }, num_threads);
     std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace("Kept {} out of {} unitigs with average length {}",
@@ -479,26 +467,27 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
-                                 size_t num_threads,
-                                 bool update_in_place) {
+                                 size_t num_threads) {
     // TODO: parallel
     std::ignore = num_threads;
     bool parallel = false;
-    constexpr auto memorder = std::memory_order_relaxed;
+    constexpr std::memory_order memorder = std::memory_order_relaxed;
 
     size_t kept_nodes = 0;
     size_t total_nodes = masked_graph.num_nodes();
 
+    auto &mask = const_cast<sdsl::bit_vector&>(dynamic_cast<bitmap_vector*>(
+        masked_graph.get_dynamic_mask()
+    )->data());
+
     std::atomic_thread_fence(std::memory_order_release);
-    masked_graph.update_mask([&](const auto &callback) {
-        masked_graph.call_nodes([&](node_index node) {
-            if (keep_node(node)) {
-                ++kept_nodes;
-            } else {
-                callback(node, false);
-            }
-        });
-    }, update_in_place, parallel, memorder);
+    masked_graph.call_nodes([&](node_index node) {
+        if (keep_node(node)) {
+            ++kept_nodes;
+        } else {
+            unset_bit(mask.data(), node, parallel, memorder);
+        }
+    });
     std::atomic_thread_fence(std::memory_order_acquire);
 
     logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);

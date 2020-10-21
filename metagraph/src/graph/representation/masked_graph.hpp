@@ -115,13 +115,13 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
         kmers_in_graph_ = std::move(mask);
     }
 
-    typedef std::function<void(const std::function<void(node_index, bool /* new value */)>&)> GenerateNodeUpdates;
-    virtual void update_mask(const GenerateNodeUpdates &generate_nodes,
-                             bool in_place = false,
-                             bool async = false,
-                             int memorder = __ATOMIC_SEQ_CST);
-
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
+
+    // Return a pointer to the mask casted to bitmap_dyn*, or nullptr if mask is static
+    virtual bitmap_dyn* get_dynamic_mask() {
+        return dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
+    }
+
     bitmap* release_mask() { return kmers_in_graph_.release(); }
 
   private:

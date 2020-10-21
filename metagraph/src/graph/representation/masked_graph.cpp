@@ -243,49 +243,5 @@ bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     return DeBruijnGraph::operator==(other);
 }
 
-void MaskedDeBruijnGraph::update_mask(const GenerateNodeUpdates &generate_nodes,
-                                      bool in_place, bool async, int memorder) {
-    std::mutex set_mutex;
-    auto *mask_updateable = dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
-    if (in_place && mask_updateable) {
-        auto *mask_vector = dynamic_cast<bitmap_vector*>(mask_updateable);
-        if (mask_vector) {
-            auto &mask_sdsl = const_cast<sdsl::bit_vector&>(mask_vector->data());
-            generate_nodes([&](node_index i, bool val) {
-                if (val) {
-                    set_bit(mask_sdsl.data(), i, async, memorder);
-                } else {
-                    unset_bit(mask_sdsl.data(), i, async, memorder);
-                }
-            });
-        } else {
-            if (async) {
-                generate_nodes([&](node_index i, bool val) {
-                    std::lock_guard<std::mutex> lock(set_mutex);
-                    mask_updateable->set(i, val);
-                });
-            } else {
-                generate_nodes([&](node_index i, bool val) {
-                    mask_updateable->set(i, val);
-                });
-            }
-        }
-    } else {
-        if (in_place)
-            logger->warn("Mask not updateable. Making a copy instead");
-
-        sdsl::bit_vector mask_updated(kmers_in_graph_->size(), false);
-        kmers_in_graph_->add_to(&mask_updated);
-        generate_nodes([&](node_index i, bool val) {
-            if (val) {
-                set_bit(mask_updated.data(), i, async, memorder);
-            } else {
-                unset_bit(mask_updated.data(), i, async, memorder);
-            }
-        });
-        kmers_in_graph_ = std::make_unique<bit_vector_stat>(std::move(mask_updated));
-    }
-}
-
 } // namespace graph
 } // namespace mtg
