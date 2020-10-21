@@ -180,9 +180,11 @@ int transform_annotation(Config *config) {
         if (!config->greedy_brwt) {
             logger->trace("Computing total number of columns");
             size_t num_columns = 0;
+            std::string extension = input_anno_type == Config::ColumnCompressed
+                    ? ColumnCompressed<>::kExtension
+                    : RowDiffAnnotator::kExtension;
             for (std::string file : files) {
-                file = utils::remove_suffix(file, ColumnCompressed<>::kExtension)
-                                                    + ColumnCompressed<>::kExtension;
+                file = utils::remove_suffix(file, extension) + extension;
                 std::ifstream instream(file, std::ios::binary);
                 if (!instream.good()) {
                     logger->error("Can't read from {}", file);
