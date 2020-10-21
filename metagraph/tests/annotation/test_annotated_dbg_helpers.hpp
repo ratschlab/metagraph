@@ -20,6 +20,8 @@
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
 
+#include "../graph/all/test_dbg_helpers.hpp"
+
 
 namespace mtg {
 namespace test {
@@ -29,7 +31,8 @@ using namespace mtg::graph;
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels);
+                                               const std::vector<std::string> &labels,
+                                               DBGMode mode = NORMAL);
 
 typedef ::testing::Types<DBGBitmap,
                          DBGHashString,
@@ -65,6 +68,16 @@ typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
+
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
+                        > GraphAnnotationCanonicalPairTypes;
 
 } // namespace test
 } // namespace mtg

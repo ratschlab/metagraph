@@ -1,5 +1,7 @@
 #include "binary_matrix.hpp"
 
+#include "common/vectors/bitmap.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/serialization.hpp"
 
 
@@ -30,6 +32,15 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
     }
 
     return slice;
+}
+
+void BinaryMatrix::slice_columns(const std::vector<Column> &column_ids,
+                                 const ColumnCallback &callback) const {
+    size_t nrows = num_rows();
+    for (size_t k = 0; k < column_ids.size(); ++k) {
+        Column j = column_ids[k];
+        callback(j, bitmap_generator(get_column(j), nrows));
+    }
 }
 
 template <typename RowType>

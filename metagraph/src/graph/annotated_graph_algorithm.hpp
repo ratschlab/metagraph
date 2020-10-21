@@ -2,71 +2,52 @@
 #define __ANNOTATED_GRAPH_ALGORITHM_HPP__
 
 #include <vector>
-#include <functional>
 
-#include "common/threads/threading.hpp"
-#include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/representation/masked_graph.hpp"
 
 
 namespace mtg {
 namespace graph {
 
-typedef std::function<size_t()> LabelCountCallback;
 
-template <typename NodeType>
-class Alignment;
+class MaskedDeBruijnGraph;
 
-typedef std::function<bool(const std::string&,
-                           const std::vector<DeBruijnGraph::node_index>&)> KeepUnitigPath;
+/**
+ * A container for differential assembly parameters. These are:
+ * label_mask_in_kmer_fraction: minimum fraction of in-labels which should be
+ *                              present for a node to be kept
+ * label_mask_in_unitig_fraction: minimum fraction of nodes within a unitig which
+ *                                must satisfy the in-label criteria
+ * label_mask_out_kmer_fraction: maximum fraction of out-labels which can be
+ *                               present in a kept node
+ * label_mask_out_unitig_fraction: maximum fraction of nodes within a unitig which
+ *                                 can satisfy the out-label criteria
+ * label_mask_other_unitig_fraction: maximum fraction of nodes within a unitig which
+ *                                   can contain labels not in the in- and out-groups
+ * add_complement: also consider the reverse complements of nodes
+ */
+struct DifferentialAssemblyConfig {
+    double label_mask_in_unitig_fraction = 1.0;
+    double label_mask_in_kmer_fraction = 1.0;
+    double label_mask_out_unitig_fraction = 0.0;
+    double label_mask_out_kmer_fraction = 0.0;
+    double label_mask_other_unitig_fraction = 1.0;
+    bool add_complement = false;
+};
 
-// Given a DeBruijnGraph and a bool-returning string callback, return a bitmap of
-// length graph.max_index() + 1. An index is set to 1 if it is contained in a
-// unitig satisfying keep_unitig(unitig).
-std::unique_ptr<bitmap_vector>
-mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const KeepUnitigPath &keep_unitig,
-                     size_t num_threads = 1);
-
-// Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
-// return a bitmap of length anno_graph.get_graph().max_index() + 1. An index i
-// is set to 1 if there is a unitig containing i such that
-// at least (label_mask_in_fraction * 100)% of the total possible number of in labels is present,
-// at most (label_mask_out_fraction * 100)% of the total possible number of out labels is present,
-// and (label_other_fraction * 100)% of the labels are neither in or out masked.
-std::unique_ptr<bitmap_vector>
-mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
-                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
-                            const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                            size_t num_threads = 1,
-                            double label_mask_in_fraction = 1.0,
-                            double label_mask_out_fraction = 0.0,
-                            double label_other_fraction = 1.0);
-
-// Given an AnnotatedDBG and vectors of foreground (labels_in) and
-// background (labels_out) labels, construct a bitmap of length
-// anno_graph.get_graph().max_index() + 1. An index i is set to 1 if
-//
-// is_node_in_mask(i,
-//                 get # of labels of node i in labels_in,
-//                 get # of labels of node i in labels_out)
-//
-// where the getters for the numbers of overlapping labels are callbacks of
-// type LabelCountCallback.
-//
-// For labels which appear in more than
-// num_nodes() * lazy_evaluation_label_frequency_cutoff
-// nodes, precompute the numbers of overlapping labels.
-std::unique_ptr<bitmap>
-mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
-                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
-                         const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
-                         const std::function<bool(DeBruijnGraph::node_index,
-                                                  const LabelCountCallback & /* get_num_labels_in */,
-                                                  const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
-                         size_t num_threads = 1,
-                         double min_frequency_for_frequent_label = 0.05);
+/**
+ * Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
+ * return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
+ * the parameters specified by config.
+ */
+MaskedDeBruijnGraph
+mask_nodes_by_label(const AnnotatedDBG &anno_graph,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_post,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_post,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads = 1);
 
 } // namespace graph
 } // namespace mtg

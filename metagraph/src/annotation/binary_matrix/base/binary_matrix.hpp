@@ -9,6 +9,8 @@
 #include "common/vector.hpp"
 
 
+class bitmap;
+
 namespace mtg {
 namespace annot {
 namespace binmat {
@@ -21,6 +23,7 @@ class BinaryMatrix {
     typedef Vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
+    typedef std::function<void(Column, bitmap&&)> ColumnCallback;
 
     virtual ~BinaryMatrix() {}
 
@@ -32,8 +35,12 @@ class BinaryMatrix {
     virtual SetBitPositions get_row(Row row) const = 0;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
+
     // get all selected rows appended with -1 and concatenated
     virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
+
+    virtual void slice_columns(const std::vector<Column> &columns,
+                               const ColumnCallback &callback) const;
 
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;

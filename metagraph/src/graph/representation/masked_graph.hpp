@@ -119,6 +119,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual void set_mask(bitmap *mask) { kmers_in_graph_.reset(mask); }
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
+    virtual std::unique_ptr<bitmap>& get_mask_ptr() { return kmers_in_graph_; }
 
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;

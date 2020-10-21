@@ -142,6 +142,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--parallel-assemblies")) {
+            parallel_assemblies = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-path-length")) {
             max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -250,6 +252,8 @@ Config::Config(int argc, char *argv[]) {
             host_address = get_value(i++);
         }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
+        } else if (!strcmp(argv[i], "--label-mask-file")) {
+            label_mask_file = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
@@ -330,18 +334,6 @@ Config::Config(int argc, char *argv[]) {
             print_welcome_message();
             print_usage(argv[0], identity);
             exit(0);
-        } else if (!strcmp(argv[i], "--label-mask-in")) {
-            label_mask_in.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out")) {
-            label_mask_out.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-in-fraction")) {
-            label_mask_in_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
-            label_mask_out_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-other-fraction")) {
-            label_other_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--filter-by-kmer")) {
-            filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--disk-swap")) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
@@ -357,6 +349,9 @@ Config::Config(int argc, char *argv[]) {
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
         parallel_nodes = get_num_threads();
+
+    if (parallel_assemblies == static_cast<unsigned int>(-1))
+        parallel_assemblies = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;
@@ -497,6 +492,12 @@ Config::Config(int argc, char *argv[]) {
     if (identity == ANNOTATE
             && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if ((identity == ASSEMBLE || identity == TRANSFORM)
+            && (infbase_annotators.size() && label_mask_file.empty())) {
+        std::cerr << "Error: annotator passed, but no label mask file provided" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -926,13 +927,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
-            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
-            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
-            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --parallel-assemblies [INT] \tnumber of assembly experiments to run in parallel [n_threads]\n");
+            fprintf(stderr, "\t   --label-mask-file [STR] \tfile describing labels to mask in and out and their relative fractions []\n");
+            fprintf(stderr, "\t                       \t\tA k-mer is an in-k-mer if it has at least in_kmer_frac in-labels.\n");
+            fprintf(stderr, "\t                       \t\tA k-mer is an out-k-mer if it has more than out_kmer_frac out-labels.\n");
+            fprintf(stderr, "\t                       \t\tA unitig is included if it has at least in_unitig_frac in-k-mers and at most out_unitig_frac out-k-mers.\n");
+            fprintf(stderr, "\t                       \t\tA unitig is excluded if more than other_unitig_frac of its k-mers are not in the in- or out-label sets.\n");
+            fprintf(stderr, "\t                       \t\texample: '<exp_label>\\t<in_kmer_frac>,<in_unitig_frac>,<out_kmer_frac>,<out_unitig_frac>,<other_unitig_frac>\\t<inlabel1>,<inlabel2>,...\\t<outlabel1>,<outlabel2>,...'\n");
+            fprintf(stderr, "\t                       \t\tIf exp_label == @, then the second and third fields are lists of in- and out-labels, respectively, that apply to all subsequent lines.\n");
+            fprintf(stderr, "\t                       \t\texample: '@\\t<inlabel1>,<inlabel2>,...\\t<outlabel1>,<outlabel2>,...'\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());

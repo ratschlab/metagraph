@@ -14,194 +14,265 @@ using namespace mtg::graph;
 using namespace mtg::test;
 
 
-MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
-                                       const std::vector<std::string> &ingroup,
-                                       const std::vector<std::string> &outgroup,
-                                       double mask_in_label_fraction,
-                                       double mask_out_label_fraction,
-                                       double other_label_fraction,
-                                       double lazy_evaluation_density_cutoff,
-                                       size_t num_threads) {
-    size_t insize = ingroup.size();
-    size_t outsize = outgroup.size();
-    return MaskedDeBruijnGraph(
-        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-        graph::mask_nodes_by_node_label(
-            anno_graph,
-            ingroup,
-            outgroup,
-            [=,&anno_graph](auto index, auto get_num_in_labels, auto get_num_out_labels) {
-                assert(index != DeBruijnGraph::npos);
-
-                size_t num_in_labels = get_num_in_labels();
-                if (num_in_labels < mask_in_label_fraction * insize)
-                    return false;
-
-                size_t num_out_labels = get_num_out_labels();
-                if (num_out_labels < mask_out_label_fraction * outsize)
-                    return false;
-
-                size_t num_total_labels = anno_graph.get_labels(index).size();
-
-                return (num_total_labels - num_in_labels - num_out_labels)
-                    <= other_label_fraction * num_total_labels;
-            },
-            num_threads,
-            lazy_evaluation_density_cutoff
-        )
-    );
-}
-
-
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
-template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void test_mask_indices(double density_cutoff, size_t num_threads) {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-
-    for (size_t k = 3; k < 15; ++k) {
-        const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "C",
-            std::string("T") + std::string(k - 1, 'A') + "A",
-            std::string("T") + std::string(k - 1, 'A') + "G"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
-
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
-
-        std::unordered_set<std::string> obs_labels, obs_kmers;
-        const std::unordered_set<std::string> ref_kmers {
-            std::string(k - 1, 'A') + "C"
-        };
-        const std::unordered_set<std::string> ref_labels {
-            "B", "C"
-        };
-
-        auto masked_dbg = build_masked_graph(*anno_graph,
-                                             ingroup, outgroup,
-                                             1.0, 0.0, 0.0,
-                                             density_cutoff,
-                                             num_threads);
-
-        // FYI: num_nodes() throws exception for masked graph with lazy node mask
-        // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
-        ASSERT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
-
-        masked_dbg.call_kmers([&](auto i, const auto &kmer) {
-            auto cur_labels = anno_graph->get_labels(i);
-            obs_labels.insert(cur_labels.begin(), cur_labels.end());
-            obs_kmers.insert(kmer);
-        });
-
-        EXPECT_EQ(ref_labels, obs_labels) << k << " " << density_cutoff;
-        EXPECT_EQ(ref_kmers, obs_kmers) << k << " " << density_cutoff;
-    }
-}
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationCanonicalPairTypes);
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
-    for (size_t num_threads : { 1, 4 }) {
-        for (double d = 0.0; d <= 1.0; d += 0.05) {
-            test_mask_indices<typename TypeParam::first_type,
-                              typename TypeParam::second_type>(d, num_threads);
+    typedef typename TypeParam::first_type Graph;
+    typedef typename TypeParam::second_type Annotation;
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
+
+        for (size_t k = 3; k < 15; ++k) {
+            const std::vector<std::string> sequences {
+                std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "C",
+                std::string("T") + std::string(k - 1, 'A') + "A",
+                std::string("T") + std::string(k - 1, 'A') + "G"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+            std::unordered_set<std::string> obs_labels, obs_kmers;
+            const std::unordered_set<std::string> ref_kmers {
+                std::string(k - 1, 'A') + "C"
+            };
+            const std::unordered_set<std::string> ref_labels {
+                "B", "C"
+            };
+
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = 0.0,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = 1.0,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = 1.0
+            };
+
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  {}, {},
+                                                  config, num_threads);
+
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) {
+                auto cur_labels = anno_graph->get_labels(kmer, 0.0);
+                obs_labels.insert(cur_labels.begin(), cur_labels.end());
+                obs_kmers.insert(kmer);
+            });
+
+            EXPECT_EQ(ref_labels, obs_labels) << k;
+            EXPECT_EQ(ref_kmers, obs_kmers) << k;
         }
     }
 }
 
-
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void
-test_mask_unitigs(double inlabel_fraction,
-                  double outlabel_fraction,
-                  double other_label_fraction,
-                  const std::unordered_set<std::string> &ref_kmers,
-                  size_t num_threads) {
-    const std::vector<std::string> ingroup { "B", "C" };
-    const std::vector<std::string> outgroup { "A" };
-    size_t k = 3;
+void test_mask_unitigs(double inlabel_fraction,
+                       double outlabel_fraction,
+                       double other_label_fraction,
+                       const std::unordered_set<std::string> &ref_kmers) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
+        size_t k = 3;
 
-    {
-        /*
-           CGA                 GCC-CCT
-              \               /
-               GAA-AAT-ATG-TGC
-              /               \
-           GGA                 GCA-CAC
-        */
-        const std::vector<std::string> sequences {
-            "TGCCT",
-            "CGAATGCCT",
-            "GGAATGCAC",
-            "TTTTTTTTTTTTTT"
-        };
-        const std::vector<std::string> labels { "A", "B", "C", "D" };
+        {
+            /*  B                  AB  AB
+               CGA                 GCC-CCT
+                  \ BC  BC  BC ABC/
+                   GAA-AAT-ATG-TGC
+                 C/               \  C   C
+               GGA                 GCA-CAC
+            */
+            const std::vector<std::string> sequences {
+                    "TGCCT",
+                "CGAATGCCT",
+                "GGAATGCAC",
+                "TTTTTTTTTTTTTT"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D" };
 
-        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+            auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
 
-        std::unordered_set<std::string> obs_kmers;
+            std::unordered_set<std::string> obs_kmers;
 
-        MaskedDeBruijnGraph masked_dbg(
-            std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph->get_graph_ptr()),
-            mask_nodes_by_unitig_labels(
-                *anno_graph,
-                ingroup,
-                outgroup,
-                num_threads,
-                inlabel_fraction,
-                outlabel_fraction,
-                other_label_fraction
-            )
-        );
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = inlabel_fraction,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = outlabel_fraction,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = other_label_fraction
+            };
 
-        EXPECT_EQ(anno_graph->get_graph().max_index(), masked_dbg.max_index());
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  {}, {},
+                                                  config, num_threads);
 
-        masked_dbg.call_kmers([&](auto, const auto &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
-        EXPECT_EQ(ref_kmers, obs_kmers)
-            << k << " "
-            << inlabel_fraction << " "
-            << outlabel_fraction << " "
-            << other_label_fraction;
+            EXPECT_EQ(ref_kmers, obs_kmers)
+                << k << " "
+                << inlabel_fraction << " "
+                << outlabel_fraction << " "
+                << other_label_fraction;
+        }
     }
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
-    for (size_t num_threads : { 1, 4 }) {
+    for (double other_frac : std::vector<double>{ 0.0, 1.0 }) {
         std::unordered_set<std::string> ref_kmers;
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.0, other_frac, ref_kmers);
 
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 0.0, 0.0, ref_kmers, num_threads
-        );
-
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 0.24, 0.0, ref_kmers, num_threads
-        );
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.24, other_frac, ref_kmers);
 
         ref_kmers.insert("GAA");
         ref_kmers.insert("AAT");
         ref_kmers.insert("ATG");
         ref_kmers.insert("TGC");
 
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 0.25, 0.0, ref_kmers, num_threads
-        );
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.25, other_frac, ref_kmers);
 
 
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 0.50, 0.0, ref_kmers, num_threads
-        );
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.50, other_frac, ref_kmers);
 
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 0.75, 0.0, ref_kmers, num_threads
-        );
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 0.75, other_frac, ref_kmers);
 
-        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
-            1.0, 1.0, 0.0, ref_kmers, num_threads
-        );
+        test_mask_unitigs<typename TypeParam::first_type,
+                          typename TypeParam::second_type>(1.0, 1.0, other_frac, ref_kmers);
+    }
+}
+
+
+template <class Graph, class Annotation = annot::ColumnCompressed<>>
+void test_mask_unitigs_canonical(double inlabel_fraction,
+                                 double outlabel_fraction,
+                                 double other_label_fraction,
+                                 const std::unordered_set<std::string> &ref_kmers,
+                                 bool add_complement,
+                                 DBGMode mode) {
+    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+        const std::vector<std::string> ingroup { "B", "C" };
+        const std::vector<std::string> outgroup { "A" };
+        size_t k = 5;
+
+        {
+            /*
+                B                AB    AB
+               CGAAT             ATGCC-TGCCT
+                    \ BC   ABC  /
+                     GAATG-AATGC
+                 C  /           \  C     C
+               GGAAT             ATGCA-TGCAC
+                                   C  /  C                B
+                                 GTGCA-TGCAT             ATTCG
+                                            \ABC    BC  /
+                                             GCATT-CATTC
+                                 AB    AB   /           \  C
+                                 AGGCA-GGCAT             ATTCC
+            */
+            const std::vector<std::string> sequences {
+                  "AATGCCT",     // "AGGCATT"
+                "CGAATGCCT",     // "AGGCATTCG"
+                "GGAATGCAC",     // "GTGCATTCC"
+                "TTTTTTTTTTTTTT" // "AAAAAAAAAAAAAA"
+            };
+            const std::vector<std::string> labels { "A", "B", "C", "D" };
+
+            // if add_complement, then the differential
+            auto anno_graph = build_anno_graph<Graph, Annotation>(
+                k, sequences, labels, mode
+            );
+
+            std::unordered_set<std::string> obs_kmers;
+
+            DifferentialAssemblyConfig config {
+                .label_mask_in_unitig_fraction = inlabel_fraction,
+                .label_mask_in_kmer_fraction = 1.0,
+                .label_mask_out_unitig_fraction = outlabel_fraction,
+                .label_mask_out_kmer_fraction = 0.0,
+                .label_mask_other_unitig_fraction = other_label_fraction,
+                .add_complement = add_complement
+            };
+
+            auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                                  ingroup, outgroup,
+                                                  {}, {},
+                                                  config, num_threads);
+
+            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+
+            EXPECT_EQ(ref_kmers, obs_kmers)
+                << k << " "
+                << inlabel_fraction << " "
+                << outlabel_fraction << " "
+                << other_label_fraction << " "
+                << add_complement << " "
+                << mode << " "
+                << num_threads;
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
+    std::vector<std::pair<bool, DBGMode>> params {
+        { true, DBGMode::NORMAL },
+        { false, DBGMode::CANONICAL },
+        { true, DBGMode::CANONICAL },
+        { false, DBGMode::CANONICAL_WRAPPER },
+        { true, DBGMode::CANONICAL_WRAPPER },
+        { true, DBGMode::PRIMARY },
+    };
+    for (const auto &[add_complement, mode] : params) {
+        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
+            std::unordered_set<std::string> ref_kmers;
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.0, other_frac, ref_kmers, add_complement, mode
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.25, other_frac, ref_kmers, add_complement, mode
+            );
+
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.49, other_frac, ref_kmers, add_complement, mode
+            );
+
+            ref_kmers.insert("GAATG");
+            ref_kmers.insert("AATGC");
+            ref_kmers.insert("GCATT");
+            ref_kmers.insert("CATTC");
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.50, other_frac, ref_kmers, add_complement, mode
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 0.75, other_frac, ref_kmers, add_complement, mode
+            );
+
+            test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                        typename TypeParam::second_type>(
+                1.0, 1.0, other_frac, ref_kmers, add_complement, mode
+            );
+        }
     }
 }
 

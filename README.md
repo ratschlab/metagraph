@@ -206,9 +206,7 @@ Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in t
 ./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
                         --unitigs \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
-                        --label-mask-in LABEL_1 \
-                        --label-mask-in LABEL_2 \
-                        --label-mask-out LABEL_3 \
+                        --label-mask-file diff_assembly_experiment_file.txt \
                         -o diff_assembled.fa
 ```
 
