@@ -62,7 +62,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
             if (input_anno_type == Config::AnnotationType::RowDiff) {
                 dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
-                std::string anchor_fname = config.infbase + ".anchor";
+                std::string anchor_fname = config.infbase + ".anchors";
                 dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_anchor(anchor_fname);
             } else {
                 dynamic_cast<RowDiff<BRWT> &>(matrix).set_graph(dbg_graph);

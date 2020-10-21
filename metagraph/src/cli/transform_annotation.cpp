@@ -488,7 +488,7 @@ int transform_annotation(Config *config) {
             exit(1);
         }
         if (config->anno_type == Config::RowDiffBRWT) {
-            if (config->anchor.empty()) {
+            if (config->anchor_fname.empty()) {
                 logger->error(
                         "Please specify the location of the anchor file via --anchor. "
                         "The anchor file is in the same directory as the annotated graph");
@@ -521,7 +521,7 @@ int transform_annotation(Config *config) {
 
             logger->trace("Serializing to '{}'", config->outfbase);
             const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
-                    .load_anchor(config->anchor);
+                    .load_anchor(config->anchor_fname);
             brwt_annotator->serialize(config->outfbase);
         } else if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);

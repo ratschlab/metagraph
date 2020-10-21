@@ -48,8 +48,7 @@ class RowDiff : public BinaryMatrix {
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
-        : graph_(graph), diffs_(std::move(diff)) {
-    }
+        : graph_(graph), diffs_(std::move(diff)) {}
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 

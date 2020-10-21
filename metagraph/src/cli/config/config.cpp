@@ -345,7 +345,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
         } else if (!strcmp(argv[i], "--anchor")) {
-            anchor = get_value(i++);
+            anchor_fname = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);

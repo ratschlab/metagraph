@@ -141,6 +141,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     uint32_t max_path_length = 50;
+    std::string anchor_fname;
 
     std::filesystem::path tmp_dir;
 
@@ -200,8 +201,6 @@ class Config {
 
     AnnotationType anno_type = ColumnCompressed;
     GraphType graph_type = SUCCINCT;
-
-    std::string anchor;
 
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);

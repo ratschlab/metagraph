@@ -15,11 +15,11 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     uint64_t idx = 0;
     uint64_t b_idx = 0;
     call_rows([&](const auto &column_indices) {
-      for (const uint64_t col : column_indices) {
+        for (const uint64_t col : column_indices) {
          elements[idx++] = col;
          b_idx++;
-      }
-      boundary[b_idx++] = 1;
+        }
+        boundary[b_idx++] = 1;
     });
     assert(idx == num_relations);
 

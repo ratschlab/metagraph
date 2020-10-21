@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 
 namespace mtg {
 namespace annot {
@@ -43,6 +44,8 @@ template
 class RowDiff<ColumnMajor>;
 template
 class RowDiff<BRWT>;
+template
+class RowDiff<RowSparse>;
 
 } // namespace binmat
 } // namespace annot

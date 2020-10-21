@@ -26,7 +26,7 @@ void build_successor(const std::string &graph_fname,
                      uint32_t max_length,
                      uint32_t num_threads) {
     bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchor" }) {
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchors" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             logger->trace(
                     "Building and writing successor, predecessor and anchor files to {}.*",
@@ -69,10 +69,10 @@ void build_successor(const std::string &graph_fname,
     }
     logger->trace("Number of anchors before anchor optimization: {}", num_anchors);
 
-    std::ofstream fterm(outfbase + ".anchor.unopt", ios::binary);
+    std::ofstream fterm(outfbase + ".anchors.unopt", ios::binary);
     term.serialize(fterm);
     fterm.close();
-    logger->trace("Anchor nodes written to {}.anchor.unopt", outfbase);
+    logger->trace("Anchor nodes written to {}.anchors.unopt", outfbase);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -283,10 +283,10 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     sdsl::rrr_vector rterminal;
 
     // if we just generated anchor nodes, attempt a greedy anchor optimization
-    if (!std::filesystem::exists(graph_fname + ".anchor")) {
+    if (!std::filesystem::exists(graph_fname + ".anchors")) {
         logger->trace("Performing anchor optimization");
         sdsl::bit_vector terminal;
-        std::ifstream f(graph_fname + ".anchor.unopt", std::ios::binary);
+        std::ifstream f(graph_fname + ".anchors.unopt", std::ios::binary);
         terminal.load(f);
         f.close();
 
@@ -326,13 +326,13 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         logger->trace("Anchor optimization added {} anchors", forced_anchors);
 
         // save the optimized terminal bit vector, and delete the unoptimized one
-        std::ofstream fterm(graph_fname + ".anchor", std::ios::binary);
+        std::ofstream fterm(graph_fname + ".anchors", std::ios::binary);
         rterminal = sdsl::rrr_vector(terminal);
         rterminal.serialize(fterm);
         fterm.close();
-        std::filesystem::remove(graph_fname + ".anchor.unopt");
+        std::filesystem::remove(graph_fname + ".anchors.unopt");
     } else {
-        std::ifstream f(graph_fname + ".anchor", std::ios::binary);
+        std::ifstream f(graph_fname + ".anchors", std::ios::binary);
         rterminal.load(f);
         f.close();
     }
