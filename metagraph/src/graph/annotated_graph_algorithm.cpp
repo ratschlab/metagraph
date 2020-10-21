@@ -435,9 +435,9 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     // TODO: the hack below relies on the fact that the implementation of call_unitigs
     // on masked DBGSuccinct makes a copy of the underlying bit vector, so we can
     // safely modify the mask during the call. Find a way to avoid this.
-    auto &mask = const_cast<sdsl::bit_vector&>(dynamic_cast<bitmap_vector*>(
-        masked_graph.get_dynamic_mask()
-    )->data());
+    auto &mask = const_cast<sdsl::bit_vector&>(
+        dynamic_cast<bitmap_vector*>(masked_graph.get_mask_ptr().get())->data()
+    );
     masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         total_unitigs.fetch_add(1, memorder);
 
@@ -476,9 +476,9 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
     size_t kept_nodes = 0;
     size_t total_nodes = masked_graph.num_nodes();
 
-    auto &mask = const_cast<sdsl::bit_vector&>(dynamic_cast<bitmap_vector*>(
-        masked_graph.get_dynamic_mask()
-    )->data());
+    auto &mask = const_cast<sdsl::bit_vector&>(
+        dynamic_cast<bitmap_vector*>(masked_graph.get_mask_ptr().get())->data()
+    );
 
     std::atomic_thread_fence(std::memory_order_release);
     masked_graph.call_nodes([&](node_index node) {

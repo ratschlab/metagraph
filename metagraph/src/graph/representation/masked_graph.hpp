@@ -116,11 +116,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     }
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
-
-    // Return a pointer to the mask casted to bitmap_dyn*, or nullptr if mask is static
-    virtual bitmap_dyn* get_dynamic_mask() {
-        return dynamic_cast<bitmap_dyn*>(kmers_in_graph_.get());
-    }
+    virtual std::unique_ptr<bitmap>& get_mask_ptr() { return kmers_in_graph_; }
 
     bitmap* release_mask() { return kmers_in_graph_.release(); }
 
