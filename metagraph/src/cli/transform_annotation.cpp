@@ -383,6 +383,11 @@ int transform_annotation(Config *config) {
                 return 0;
 
             }
+            case Config::RowDiffRowSparse: {
+                logger->error("Convert to row_diff first, and then to row_diff_sparse");
+                return 0;
+
+            }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
@@ -520,13 +525,15 @@ int transform_annotation(Config *config) {
             brwt_annotator->serialize(config->outfbase);
         } else if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);
-        } else {
+        } else { // RowDiff<RowSparse>
             logger->trace("Loading annotation from disk...");
             auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
             if (!row_diff_anno->merge_load(files))
                 std::exit(1);
-            std::unique_ptr<RowSparseAnnotator> row_sparse = convert(*row_diff_anno);
+            std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse = convert(*row_diff_anno);
             logger->trace("Annotation converted in {} sec", timer.elapsed());
+            std::string out_file = utils::remove_suffix(config->outfbase, ".row_diff_sparse.annodbg") + ".row_diff_sparse.annodbg";
+            row_sparse->serialize(out_file);
         }
     } else {
         if (config->anno_type == Config::RowDiff) {

@@ -115,7 +115,7 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 /**
  * Converts a RowDiff annotation into RowSparse.
  */
-std::unique_ptr<RowSparseAnnotator> convert(const RowDiffAnnotator &annotator);
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator);
 
 void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                       const std::string &graph_file,

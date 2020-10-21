@@ -405,7 +405,7 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
-std::unique_ptr<RowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
     uint64_t num_set_bits = annotator.num_relations();
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
@@ -416,9 +416,9 @@ std::unique_ptr<RowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
                         .call_rows(callback);
             },
             num_columns, num_rows, num_set_bits);
-
-    return std::make_unique<RowSparseAnnotator>(std::move(matrix),
-                                                annotator.get_label_encoder());
+    auto rd = std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(*matrix));
+    return std::make_unique<RowDiffRowSparseAnnotator>(std::move(rd),
+                                                       annotator.get_label_encoder());
 }
 
 

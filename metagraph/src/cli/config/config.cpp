@@ -639,6 +639,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffRowSparse:
+            return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
         default:
@@ -668,6 +670,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiff;
     } else if (string == "row_diff_brwt") {
         return AnnotationType::RowDiffBRWT;
+    } else if (string == "row_diff_sparse") {
+        return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
     } else {
