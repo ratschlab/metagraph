@@ -96,8 +96,7 @@ void build_successor(const std::string &graph_fname,
             if (dummy[boss_idx] || terminal[boss_idx]) {
                 succ_buf[r].push_back(0);
             } else {
-                const graph::boss::BOSS::TAlphabet d
-                        = boss.get_W(boss_idx) % boss.alph_size;
+                const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
                 uint64_t next = d ? graph.boss_to_kmer_index(boss.fwd(boss_idx, d)) : 0;
                 succ_buf[r].push_back(next);
             }
