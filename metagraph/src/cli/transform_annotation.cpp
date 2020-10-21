@@ -481,59 +481,68 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
             && config->anno_type != Config::ColumnCompressed
-            && config->anno_type != Config::RowSparse) {
+            && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to 'column', 'row_sparse', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
-        if (config->anno_type == Config::RowDiffBRWT) {
+        if (config->anno_type == Config::ColumnCompressed) {
+            convert_row_diff_to_col_compressed(files, config->outfbase);
+        } else {
             if (config->anchor_fname.empty()) {
                 logger->error(
-                        "Please specify the location of the anchor file via --anchor. "
+                        "Please specify the location of the anchor file via --anchors-file "
                         "The anchor file is in the same directory as the annotated graph");
                 std::exit(1);
             }
-            std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
-            if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+            if (config->anno_type == Config::RowDiffBRWT) {
+                std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
+                if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+                    logger->trace("Loading annotation from disk...");
+                    auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                    if (!row_diff_anno->merge_load(files))
+                        std::exit(1);
+
+                    logger->trace("Annotation loaded in {} sec", timer.elapsed());
+                    brwt_annotator = config->greedy_brwt
+                            ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
+                                                     config->parallel_nodes,
+                                                     get_num_threads(),
+                                                     config->num_rows_subsampled)
+                            : convert_to_simple_BRWT(std::move(*row_diff_anno),
+                                                     config->arity_brwt,
+                                                     config->parallel_nodes,
+                                                     get_num_threads());
+                } else {
+                    std::string tmp_dir = config->tmp_dir.empty()
+                            ? std::filesystem::path(config->outfbase).remove_filename()
+                            : config->tmp_dir;
+                    brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
+                            files, config->infbase, config->parallel_nodes,
+                            get_num_threads(), tmp_dir);
+                }
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                logger->trace("Serializing to '{}'", config->outfbase);
+                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                        .load_anchor(config->anchor_fname);
+                brwt_annotator->serialize(config->outfbase);
+            } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
                 auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
                 if (!row_diff_anno->merge_load(files))
                     std::exit(1);
-
-                logger->trace("Annotation loaded in {} sec", timer.elapsed());
-                brwt_annotator = config->greedy_brwt
-                        ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
-                                                 config->parallel_nodes, get_num_threads(),
-                                                 config->num_rows_subsampled)
-                        : convert_to_simple_BRWT(std::move(*row_diff_anno), config->arity_brwt,
-                                                 config->parallel_nodes, get_num_threads());
-            } else {
-                std::string tmp_dir = config->tmp_dir.empty()
-                        ? std::filesystem::path(config->outfbase).remove_filename()
-                        : config->tmp_dir;
-                brwt_annotator
-                        = convert_to_BRWT<RowDiffBRWTAnnotator>(files, config->infbase,
-                                                                config->parallel_nodes,
-                                                                get_num_threads(), tmp_dir);
+                std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
+                        = convert(*row_diff_anno);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                std::string extension = RowDiffRowSparseAnnotator::kExtension + ".annodbg";
+                std::string out_file
+                        = utils::remove_suffix(config->outfbase, extension) + extension;
+                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
+                        .load_anchor(config->anchor_fname);
+                row_sparse->serialize(out_file);
             }
-            logger->trace("Annotation converted in {} sec", timer.elapsed());
-
-            logger->trace("Serializing to '{}'", config->outfbase);
-            const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
-                    .load_anchor(config->anchor_fname);
-            brwt_annotator->serialize(config->outfbase);
-        } else if (config->anno_type == Config::ColumnCompressed) {
-            convert_row_diff_to_col_compressed(files, config->outfbase);
-        } else { // RowDiff<RowSparse>
-            logger->trace("Loading annotation from disk...");
-            auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
-            if (!row_diff_anno->merge_load(files))
-                std::exit(1);
-            std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse = convert(*row_diff_anno);
-            logger->trace("Annotation converted in {} sec", timer.elapsed());
-            std::string out_file = utils::remove_suffix(config->outfbase, ".row_diff_sparse.annodbg") + ".row_diff_sparse.annodbg";
-            row_sparse->serialize(out_file);
         }
     } else {
         if (config->anno_type == Config::RowDiff) {

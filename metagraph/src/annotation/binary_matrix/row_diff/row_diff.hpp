@@ -167,7 +167,7 @@ inline void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
 // template specialization for load/serialize ColumnCompressed. Anchors are not saved in
 // the annotation file, as there typically is one file per column
 template <>
-bool RowDiff<ColumnMajor>::load(std::istream &f) {
+inline bool RowDiff<ColumnMajor>::load(std::istream &f) {
     // read and ignore len bytes; for backward compatibility
     uint64_t len;
     f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
@@ -177,7 +177,7 @@ bool RowDiff<ColumnMajor>::load(std::istream &f) {
 }
 
 template <>
-void RowDiff<ColumnMajor>::serialize(std::ostream &f) const {
+inline void RowDiff<ColumnMajor>::serialize(std::ostream &f) const {
     // write a uint64_t value for backward compatibility (it's not used anymore)
     uint64_t v = 0;
     f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));

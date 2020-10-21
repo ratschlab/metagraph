@@ -141,7 +141,7 @@ void print_anchor_stats(const Matrix& m) {
     if (num_anchors != 0) {
         std::cout << "num anchors: " << m.num_anchors() << std::endl;
     } else {
-        std::cout << "Please specify the anchor file via '-i anchor_file' to get "
+        std::cout << "Please specify the anchor file via '-i anchors_file' to get "
                      "anchor stats" << std::endl;
     }
 }
@@ -271,10 +271,10 @@ int print_stats(Config *config) {
 
         using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
         if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
-            std::string anchor_file
+            std::string anchors_file
                     = utils::remove_suffix(config->infbase, ".anchors") + ".anchors";
-            if (!config->infbase.empty() && std::filesystem::exists(anchor_file)) {
-                const_cast<RowDiffCol *>(rd)->load_anchor(anchor_file);
+            if (!config->infbase.empty() && std::filesystem::exists(anchors_file)) {
+                const_cast<RowDiffCol *>(rd)->load_anchor(anchors_file);
             }
         }
 

@@ -1185,17 +1185,17 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
         auto rd_brwt = std::make_unique<RowDiff<BRWT>>(nullptr, std::move(brwt));
         StaticBinRelAnnotator<RowDiff<BRWT>> row_diff_anno(std::move(rd_brwt),
                                                            anno.get_label_encoder());
-        std::string anchor_file = utils::remove_suffix(graph_file, ".anchors") + ".anchors";
+        std::string anchors_file = utils::remove_suffix(graph_file, ".anchors") + ".anchors";
         if (graph_file.empty()) {
             logger->error(
                     "Please specify the anchor file location via `-i <anchor_location>'");
             std::exit(1);
         }
-        if (!std::filesystem::exists(anchor_file)) {
-            logger->error("Couldn't find anchor file at {}", anchor_file);
+        if (!std::filesystem::exists(anchors_file)) {
+            logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
-        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchor_file);
+        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchors_file);
         row_diff_anno.serialize(out_file);
         return;
 
