@@ -28,6 +28,12 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     sdsl::util::init_support(sboundary_, &boundary_);
 }
 
+RowSparse::RowSparse(RowSparse &&other) {
+    elements_ = std::move(other.elements_);
+    boundary_ = std::move(other.boundary_);
+    sdsl::util::init_support(sboundary_, &boundary_);
+}
+
 bool RowSparse::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);

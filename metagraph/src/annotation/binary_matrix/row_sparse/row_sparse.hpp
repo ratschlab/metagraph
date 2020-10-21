@@ -28,6 +28,7 @@ class RowSparse : public BinaryMatrix {
                     uint64_t num_columns,
                     uint64_t num_rows,
                     uint64_t num_relations);
+    RowSparse(RowSparse &&);
 
     uint64_t num_columns() const override { return num_columns_; }
     uint64_t num_rows() const override { return num_rows_; }
