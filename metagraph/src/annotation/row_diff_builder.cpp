@@ -305,7 +305,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
         uint64_t num_elements
                 = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
-                           std::min(1'000'000ull, sources[i]->num_relations()));
+                           std::min((uint64_t)1'000'000, sources[i]->num_relations()));
         targets_size[i].assign(sources[i]->num_labels(), 0U);
         set_rows[i].resize(sources[i]->num_labels());
         for (size_t j = 0; j < sources[i]->num_labels(); ++j) {
