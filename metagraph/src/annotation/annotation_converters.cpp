@@ -1090,6 +1090,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
+    if (optimize)
+        optimize_anchors_in_row_diff(graph_fname, dest_dir);
+
     std::filesystem::path delta_nbits_fname;
 
     // load as many columns as we can fit in memory, and convert them
@@ -1119,6 +1122,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".delta_nbits");
+                if (optimize)
+                    delta_nbits_fname += ".opt";
+
                 if (std::filesystem::exists(delta_nbits_fname)) {
                     logger->warn("File {} with row bit counts already exists. Removing...",
                                  delta_nbits_fname);
@@ -1128,13 +1134,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         }
 
         Timer timer;
-        logger->trace("Starting transforming batch of {} columns ...",
+        logger->trace("Starting transforming batch of {} annotations ...",
                       file_batch.size());
-        if (optimize) {
-            optimize_anchors_in_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname);
-        } else {
-            convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname);
-        }
+        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname,
+                                  optimize ? ".terminal" : ".terminal.unopt");
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
 }
