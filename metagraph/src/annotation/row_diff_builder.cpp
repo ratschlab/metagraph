@@ -495,13 +495,13 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         exit(1);
     }
 
-    logger->info("Start merging {} delta vectors", filenames.size());
+    logger->trace("Merging delta vectors");
 
     while (filenames.size() > 1u) {
         std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i < filenames.size(); i += 2) {
+        for (size_t i = 0; i + 1 < filenames.size(); i += 2) {
             // compute sum of i and i+1
             filenames_new[i / 2] = fmt::format("{}.merged.{}", filenames[i], i / 2);
             sdsl::int_vector_buffer sum(filenames_new[i / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
