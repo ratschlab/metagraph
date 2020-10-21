@@ -21,6 +21,8 @@ using mtg::common::logger;
 /** Marker type to indicate a value represent a node index in a BOSS graph */
 using node_index = graph::boss::BOSS::node_index;
 
+typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
+
 
 void build_successor(const std::string &graph_fname,
                      const std::string &outfbase,
@@ -68,7 +70,7 @@ void build_successor(const std::string &graph_fname,
     }
 
     std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
-    sdsl::rrr_vector(term).serialize(fterm);
+    anchor_bv_type(term).serialize(fterm);
     term = sdsl::bit_vector();
     fterm.close();
     logger->trace("Anchor nodes written to {}.terminal.unopt", outfbase);
@@ -281,7 +283,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    sdsl::rrr_vector rterminal;
+    anchor_bv_type rterminal;
     {
         std::ifstream f(graph_fname + anchors_extension, std::ios::binary);
         rterminal.load(f);
@@ -525,7 +527,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     logger->trace("Number of anchors after optimization: {}",
                   sdsl::util::cnt_one_bits(anchors));
 
-    sdsl::rrr_vector ranchors(anchors);
+    anchor_bv_type ranchors(anchors);
     std::ofstream f(graph_fname + ".terminal", ios::binary);
     ranchors.serialize(f);
     logger->trace("Serialized optimized anchors to {}", graph_fname + ".terminal");

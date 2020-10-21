@@ -1083,10 +1083,13 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         const std::filesystem::path &dest_dir,
+                         std::filesystem::path dest_dir,
                          bool optimize) {
     if (!files.size())
         return;
+
+    if (dest_dir.empty())
+        dest_dir = "./";
 
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
