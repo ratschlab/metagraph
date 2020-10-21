@@ -60,6 +60,9 @@ bool RowSparse::load(std::istream &f)  {
     elements_.load(f);
     boundary_.load(f);
     sdsl::util::init_support(sboundary_, &boundary_);
+    sdsl::rrr_vector<>::rank_1_type rboundary;
+    sdsl::util::init_support(rboundary, &boundary_);
+    num_rows_ = rboundary.rank(boundary_.size());
     return true;
 }
 

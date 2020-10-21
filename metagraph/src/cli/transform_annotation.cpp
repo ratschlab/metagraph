@@ -531,13 +531,28 @@ int transform_annotation(Config *config) {
     } else {
         if (config->anno_type == Config::RowDiff) {
             for(const auto& file : files) {
-                wrap_in_row_diff(file, config->infbase, config->outfbase);
+                std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+                        = initialize_annotation(file, *config);
+                if (!annotator->load(file)) {
+                    logger->error("Cannot load annotations from file '{}'", file);
+                    exit(1);
+                }
+
+                using std::filesystem::path;
+                path out_dir = path(config->outfbase).remove_filename();
+                path file_name = path(file).filename().replace_extension("");
+                std::string old_extension = file_name.extension();
+                file_name = file_name.replace_extension("row_diff_" + old_extension.substr(1));
+                std::string out_file = out_dir/(file_name.string() + ".annodbg");
+
+                wrap_in_row_diff(std::move(*annotator), config->infbase, out_file);
             }
+        } else {
+            logger->error(
+                    "Conversion to other representations is not implemented for {} "
+                    "annotator", Config::annotype_to_string(input_anno_type));
+            exit(1);
         }
-        logger->error("Conversion to other representations"
-                      " is not implemented for {} annotator",
-                      Config::annotype_to_string(input_anno_type));
-        exit(1);
     }
 
     logger->trace("Done");

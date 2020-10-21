@@ -1176,34 +1176,36 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
     }
 }
 
-void wrap_in_row_diff(const std::string &anno_file,
+void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                       const std::string &graph_file,
-                      const std::string &out_dir) {
-    if (!std::filesystem::is_directory(out_dir)) {
-        logger->error("Output path must be a directory, not a file: {}", out_dir);
-        std::exit(1);
-    }
-    using std::filesystem::path;
-    path file_name = path(anno_file).filename().replace_extension("");
-    std::string old_extension = file_name.extension();
-    std::string out_file = path(out_dir)
-            / (file_name.replace_extension("").string() + "row_diff_" + old_extension
-                    + ".annodbg");
+                      const std::string &out_file) {
 
-    if (old_extension != "brwt") {
-        std::ofstream out(out_file, ios::binary);
-        uint64_t v = 0;
-        out.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
-        out.close();
-    } else {
-        std::string anchor_file = utils::remove_suffix(graph_file, ".dbg") + ".anchor";
+    if (dynamic_cast<MultiBRWTAnnotator *>(&anno)) {
+        auto& brwt = const_cast<BRWT &>(dynamic_cast<const BRWT &>(anno.get_matrix()));
+        auto rd_brwt = std::make_unique<RowDiff<BRWT>>(nullptr, std::move(brwt));
+        StaticBinRelAnnotator<RowDiff<BRWT>> row_diff_anno(std::move(rd_brwt),
+                                                           anno.get_label_encoder());
+        std::string anchor_file = utils::remove_suffix(graph_file, ".anchor") + ".anchor";
+        if (graph_file.empty()) {
+            logger->error(
+                    "Please specify the anchor file location via `-i <anchor_location>'");
+            std::exit(1);
+        }
         if (!std::filesystem::exists(anchor_file)) {
             logger->error("Couldn't find anchor file at {}", anchor_file);
             std::exit(1);
         }
-        std::system(("cp " + anchor_file + " "  + out_file).c_str());
+        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchor_file);
+        row_diff_anno.serialize(out_file);
+        return;
+
     }
-    std::system(("cat " + anno_file + " >> " + out_file).c_str());
+    std::ofstream f(out_file, std::ios::binary);
+    anno.get_label_encoder().serialize(f);
+    uint64_t v = 0;
+    f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
+    anno.get_matrix().serialize(f);
+    f.close();
 }
 
 

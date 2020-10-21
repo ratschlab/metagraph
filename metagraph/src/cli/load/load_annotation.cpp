@@ -40,6 +40,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
+    } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
+        return Config::AnnotationType::RowSparse;
+
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
