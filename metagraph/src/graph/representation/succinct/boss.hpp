@@ -121,8 +121,7 @@ class BOSS {
      * If |kmers_in_single_form| is false, set |trim_dummy| to true
      * to fetch paths without sentinels.
      */
-    void call_paths(Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
+    void call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&> callback,
                     size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
@@ -153,7 +152,8 @@ class BOSS {
             Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
             size_t num_threads,
             size_t max_length,
-            sdsl::bit_vector *terminal) const;
+            sdsl::bit_vector *terminal,
+            sdsl::bit_vector *dummy) const;
 
     /**
      * Call unitigs (dummy edges are skipped).

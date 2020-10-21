@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include <ips4o.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
@@ -47,7 +48,7 @@ void parse_sequences(const std::string &file,
         auto max_count = config.max_count;
 
         if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
-            std::unordered_map<uint64_t, uint64_t> count_hist;
+            tsl::hopscotch_map<uint64_t, uint64_t> count_hist;
             read_kmers(
                 file,
                 [&](std::string_view, uint32_t count) {
@@ -98,7 +99,8 @@ void parse_sequences(const std::string &file,
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
 
-        if (std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
+        if (config.count_kmers
+            && std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
 
             mtg::common::logger->trace("Parsing k-mer counts from '{}'",
                 utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"

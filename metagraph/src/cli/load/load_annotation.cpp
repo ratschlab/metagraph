@@ -19,11 +19,17 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
+    } else if (utils::ends_with(filename, annot::RowDiffAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiff;
+
     } else if (utils::ends_with(filename, annot::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
     } else if (utils::ends_with(filename, annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
+
+    } else if (utils::ends_with(filename, annot::RowDiffBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffBRWT;
 
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
@@ -39,9 +45,6 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annot::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
-
-    } else if (utils::ends_with(filename, annot::RowDiffAnnotator::kExtension)) {
-        return Config::AnnotationType::RowDiff;
 
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
@@ -67,8 +70,16 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RowCompressed<>(num_rows, row_compressed_sparse));
             break;
         }
+        case Config::RowDiff: {
+            annotation.reset(new annot::RowDiffAnnotator());
+            break;
+        }
         case Config::BRWT: {
             annotation.reset(new annot::MultiBRWTAnnotator());
+            break;
+        }
+        case Config::RowDiffBRWT: {
+            annotation.reset(new annot::RowDiffBRWTAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
@@ -89,10 +100,6 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RbBRWT: {
             annotation.reset(new annot::RbBRWTAnnotator());
-            break;
-        }
-        case Config::RowDiff: {
-            annotation.reset(new annot::RowDiffAnnotator());
             break;
         }
     }

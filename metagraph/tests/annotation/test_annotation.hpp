@@ -44,7 +44,7 @@ class AnnotatorTest : public ::testing::Test {
 
     virtual void set(annot::ColumnCompressed<>&& column_annotator) {
         if constexpr(std::is_same_v<Annotator, annot::MultiBRWTAnnotator>) {
-            annotation = annot::convert_to_simple_BRWT<annot::MultiBRWTAnnotator>(
+            annotation = annot::convert_to_simple_BRWT(
                 std::move(column_annotator)
             );
 

@@ -1,5 +1,6 @@
 #include "annotation_matrix.hpp"
 
+#include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
@@ -142,6 +143,82 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     label_encoder_ = label_encoder;
 }
 
+// template specialization of merge_load
+template <>
+bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
+        const std::vector<std::string> &filenames) {
+    size_t num_threads = get_num_threads();
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size() + 1, 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        std::ifstream instream(filenames[i], std::ios::binary);
+        if (!instream.good()) {
+            common::logger->error("Can't read from {}", filenames[i]);
+            error_occurred = true;
+        }
+
+        LabelEncoder<std::string> label_encoder;
+        if (!label_encoder.load(instream)) {
+            common::logger->error("Can't load label encoder from {}", filenames[i]);
+            error_occurred = true;
+        }
+
+        offsets[i + 1] = label_encoder.size();
+    }
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    std::vector<std::string> labels(offsets.back());
+    std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
+
+    std::string anchors_filename;
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        try {
+            common::logger->trace("Loading annotations from file {}", filenames[i]);
+            LabelEncoder<std::string> label_encoder;
+            std::ifstream instream(filenames[i], std::ios::binary);
+            binmat::RowDiff<binmat::ColumnMajor> matrix;
+            if (!label_encoder.load(instream) || !matrix.load(instream)) {
+                common::logger->error("Can't load {}", filenames[i]);
+                std::exit(1);
+            }
+            if (!label_encoder.size())
+                common::logger->warn("No labels in {}", filenames[i]);
+
+            assert(anchors_filename.empty() || anchors_filename == matrix.anchors_filename());
+            anchors_filename = matrix.anchors_filename();
+
+            std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
+            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
+                labels[offsets[i] + idx] = label_encoder.get_labels()[idx];
+                columns[offsets[i] + idx] = std::move(cols[idx]);
+            };
+        } catch (...) {
+            error_occurred = true;
+        }
+    }
+    matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
+            nullptr, binmat::ColumnMajor(std::move(columns)), anchors_filename);
+    std::for_each(labels.begin(), labels.end(),
+                  [&](const auto &l) { label_encoder_.insert_and_encode(l); });
+
+    return !error_occurred;
+}
+
 template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::Rainbowfish, std::string>;
@@ -156,7 +233,9 @@ template class StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string>;
 
 template class StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string>;
 
-template class StaticBinRelAnnotator<binmat::RowDiff, std::string>;
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string>;
+
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>;
 
 } // namespace annot
 } // namespace mtg

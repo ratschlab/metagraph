@@ -160,6 +160,9 @@ void test_serialization(const TypeParam &matrix) {
     for (size_t j = 0; j < loaded.num_columns(); ++j) {
         EXPECT_EQ(matrix.get_column(j), loaded.get_column(j));
     }
+
+    std::filesystem::remove(test_dump_basename_vec_good);
+    std::filesystem::remove(test_dump_basename_vec_bad);
 }
 
 template <typename TypeParam>

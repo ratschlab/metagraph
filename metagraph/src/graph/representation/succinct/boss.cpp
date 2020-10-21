@@ -2002,8 +2002,7 @@ void assert_no_leftovers(const BOSS& boss, const sdsl::bit_vector& visited) {
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void BOSS::call_paths(Call<std::vector<edge_index>&&,
-                           std::vector<TAlphabet>&&> callback,
+void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&> callback,
                       size_t num_threads,
                       bool split_to_unitigs,
                       bool kmers_in_single_form,
@@ -2417,6 +2416,7 @@ void call_row_diff_path(
         sdsl::bit_vector *visited,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *near_terminal,
+        sdsl::bit_vector *dummy,
         ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
@@ -2444,6 +2444,7 @@ void call_row_diff_path(
 
         // stop the traversal on dummy sink nodes
         if (d == boss.kSentinelCode) {
+            set_bit(dummy->data(), edge, async);
             edge = 0;
             break;
         }
@@ -2452,6 +2453,7 @@ void call_row_diff_path(
         if (skip_count == 0) {
             path.push_back(edge);
         } else {
+            set_bit(dummy->data(), edge, async);
             skip_count--;
         }
 
@@ -2651,12 +2653,15 @@ void BOSS::call_sequences_row_diff(
         Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
         size_t num_threads,
         size_t max_length,
-        sdsl::bit_vector *terminal) const {
+        sdsl::bit_vector *terminal,
+        sdsl::bit_vector *dummy) const {
     // keep track of the edges that have been reached
     sdsl::bit_vector visited(W_->size(), false);
     sdsl::bit_vector near_terminal(W_->size(), false);
     terminal->resize(W_->size());
+    dummy->resize((W_->size()));
     sdsl::util::set_to_value(*terminal, false);
+    sdsl::util::set_to_value(*dummy, false);
     visited[0] = true;
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -2666,11 +2671,12 @@ void BOSS::call_sequences_row_diff(
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
     constexpr bool async = true;
 
-    // TODO: Accumulate more edges and start each task for a bunch of nodes
-    auto enqueue_start = [&](ThreadPool &thread_pool, edge_index start) {
+    auto enqueue_start = [&](ThreadPool &thread_pool, const std::vector<edge_index> &start) {
         thread_pool.enqueue([&, start]() {
-            call_row_diff_path(*this, start, callback, max_length,
-                               &visited, terminal, &near_terminal, progress_bar);
+            for (auto edge : start) {
+                call_row_diff_path(*this, edge, callback, max_length, &visited, terminal,
+                                   &near_terminal, dummy, progress_bar);
+            }
         });
     };
 
@@ -2678,13 +2684,16 @@ void BOSS::call_sequences_row_diff(
     //  .____
     for (edge_index i = succ_last(1); i >= 1; --i) {
         if (!fetch_bit(visited.data(), i, async))
-            enqueue_start(thread_pool, i);
+            enqueue_start(thread_pool, { i });
     }
 
     // then all forks
     //  ____.____
     //       \___
     uint64_t last_processed = 0;
+    constexpr uint32_t batch_size = 128;
+    std::vector<uint64_t> to_visit;
+    to_visit.reserve(batch_size);
     auto process_fork = [&](edge_index i) {
         if (i <= last_processed)
             return; // this fork was already processed
@@ -2694,11 +2703,18 @@ void BOSS::call_sequences_row_diff(
             return; // single outgoing edge, so not a fork
         }
         for (; i <= last_processed; ++i) {
-            if (!fetch_bit(visited.data(), i, async))
-                enqueue_start(thread_pool, i);
+            if (!fetch_bit(visited.data(), i, async)) {
+                to_visit.push_back(i);
+                if (to_visit.size() == batch_size) {
+                    enqueue_start(thread_pool, to_visit);
+                    to_visit.resize(0);
+                }
+            }
+
         }
     };
     call_zeros(visited, process_fork, async);
+    enqueue_start(thread_pool, to_visit);
 
     thread_pool.join();
 

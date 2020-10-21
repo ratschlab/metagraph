@@ -594,7 +594,7 @@ class DPTable {
     }
 
     void erase(NodeType key) { dp_table_.erase(key); }
-    size_t count(NodeType key) { return dp_table_.count(key); }
+    size_t count(NodeType key) const { return dp_table_.count(key); }
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,
