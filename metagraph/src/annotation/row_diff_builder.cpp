@@ -501,15 +501,15 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t i = 0; i + 1 < filenames.size(); i += 2) {
-            // compute sum of i and i+1
-            filenames_new[i / 2] = fmt::format("{}.merged.{}", filenames[i], i / 2);
-            sdsl::int_vector_buffer sum(filenames_new[i / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
-            sdsl::int_vector_buffer first(filenames[i], std::ios::in, 1024 * 1024, DELTA_WIDTH);
-            sdsl::int_vector_buffer second(filenames[i + 1], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+        for (size_t t = 1; t < filenames.size(); t += 2) {
+            // compute sum of t-1 and t.
+            filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
+            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024, DELTA_WIDTH);
             if (first.size() != second.size()) {
                 logger->error("Sizes of delta vectors are incompatible, {}: {}, {}: {}",
-                              filenames[i], first.size(), filenames[i + 1], second.size());
+                              filenames[t - 1], first.size(), filenames[t], second.size());
                 exit(1);
             }
             for (uint64_t i = 0; i < sum.size(); ++i) {
