@@ -21,10 +21,11 @@ typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const KeepUnitigPath &keep_unitig) {
+                     const KeepUnitigPath &keep_unitig,
+                     size_t num_threads) {
     sdsl::bit_vector unitig_mask(graph.max_index() + 1, false);
 
-    const bool atomic = get_num_threads() > 1;
+    const bool atomic = num_threads > 1;
 
     graph.call_unitigs([&](const std::string &unitig, const auto &path) {
         if (keep_unitig(unitig, path)) {
@@ -32,7 +33,7 @@ mask_nodes_by_unitig(const DeBruijnGraph &graph,
                 set_bit(unitig_mask.data(), node, atomic);
             }
         }
-    }, get_num_threads());
+    }, num_threads);
 
     return std::make_unique<bitmap_vector>(std::move(unitig_mask));
 }
@@ -41,6 +42,7 @@ std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             const std::vector<Label> &labels_in,
                             const std::vector<Label> &labels_out,
+                            size_t num_threads,
                             double label_mask_in_fraction,
                             double label_mask_out_fraction,
                             double label_other_fraction) {
@@ -90,32 +92,44 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
 
         return (in_count >= label_in_factor * path.size())
             && (other_count <= label_other_fraction * (in_count + out_count + other_count));
-    });
+    }, num_threads);
 }
 
 sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
                                      const std::vector<Label> &labels_in,
-                                     const std::vector<Label> &labels_out) {
+                                     const std::vector<Label> &labels_out,
+                                     size_t num_threads) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     // in the beginning, it's the correct size, but double width
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
-    for (const std::string &label_in : labels_in) {
-        anno_graph.call_annotated_nodes(label_in,
-                                        [&](DeBruijnGraph::node_index i) { counts[i]++; });
+    std::mutex backup_mutex;
+    constexpr std::memory_order memorder = std::memory_order_relaxed;
+
+    std::atomic_thread_fence(std::memory_order_release);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t j = 0; j < labels_in.size(); ++j) {
+        const std::string &label_in = labels_in[j];
+        anno_graph.call_annotated_nodes(label_in, [&](DeBruijnGraph::node_index i) {
+            atomic_fetch_and_add(counts, i, 1, backup_mutex, memorder);
+        });
     }
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     // correct the width of counts, making it single-width
     counts.width(width);
 
-    for (const auto &label_out : labels_out) {
-        anno_graph.call_annotated_nodes(
-            label_out,
-            [&](DeBruijnGraph::node_index i) { counts[(i << 1) + 1]++; }
-        );
+    std::atomic_thread_fence(std::memory_order_release);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t j = 0; j < labels_out.size(); ++j) {
+        const std::string &label_out = labels_out[j];
+        anno_graph.call_annotated_nodes(label_out, [&](DeBruijnGraph::node_index i) {
+            atomic_fetch_and_add(counts, (i << 1) + 1, 1, backup_mutex, memorder);
+        });
     }
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     // set the width to be double again
     counts.width(width << 1);
@@ -141,6 +155,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          const std::function<bool(DeBruijnGraph::node_index,
                                                   const LabelCountCallback & /* get_num_labels_in */,
                                                   const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
+                         size_t num_threads,
                          double min_frequency_for_frequent_label) {
     if (!anno_graph.get_graph().num_nodes())
         return std::make_unique<bitmap_lazy>([](uint64_t) { return false; },
@@ -186,7 +201,8 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
         if (labels_in_infrequent.size() || labels_out_infrequent.size()) {
             sdsl::int_vector<> counts = fill_count_vector(anno_graph,
                                                           labels_in_infrequent,
-                                                          labels_out_infrequent);
+                                                          labels_out_infrequent,
+                                                          num_threads);
 
             // the width of counts is double, since it's both in and out counts interleaved
             uint32_t width = counts.width() >> 1;

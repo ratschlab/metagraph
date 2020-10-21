@@ -65,6 +65,7 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
                 anno_graph,
                 config->label_mask_in,
                 config->label_mask_out,
+                std::max(1u, get_num_threads()),
                 config->label_mask_in_fraction,
                 config->label_mask_out_fraction,
                 config->label_other_fraction
@@ -99,7 +100,8 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
                 return num_total_labels - num_in_labels - num_out_labels
                             <= config->label_other_fraction * num_total_labels;
-            }
+            },
+            std::max(1u, get_num_threads())
         )
     );
 }
