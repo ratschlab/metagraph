@@ -502,12 +502,23 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < filenames.size(); i += 2) {
+            // compute sum of i and i+1
             filenames_new[i / 2] = fmt::format("{}.merged.{}", filenames[i], i / 2);
-            //TODO: merge (filenames_new[i / 2] = filenames[i] + filenames[i + 1])
+            sdsl::int_vector_buffer sum(filenames_new[i / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer first(filenames[i], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer second(filenames[i + 1], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+            if (first.size() != second.size()) {
+                logger->error("Sizes of delta vectors are incompatible, {}: {}, {}: {}",
+                              filenames[i], first.size(), filenames[i + 1], second.size());
+                exit(1);
+            }
+            for (uint64_t i = 0; i < sum.size(); ++i) {
+                sum.push_back(first[i] + second[i]);
+            }
         }
 
         if (filenames.size() % 2)
-            filenames_new.push_back(filenames.back());
+            filenames_new.back() = filenames.back();
 
         filenames.swap(filenames_new);
 
