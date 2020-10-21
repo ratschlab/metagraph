@@ -104,16 +104,20 @@ void SuffixSeeder<NodeType>
     const auto &graph = *dbg_succ_;
     const auto &config = get_config();
     auto &query_nodes = get_query_nodes();
+
+    // vector storing the amount trimmed from the beginning of each node match
     auto &offsets = get_offsets();
+
     alt_query_nodes.clear();
 
+    // start by finding all exact k-mer matches
     base_seeder_->initialize(query, orientation);
     assert(query_nodes.size() == offsets.size());
     assert(query_nodes.size());
+
     size_t k = graph.get_k();
 
-    // if node suffixes of length < k were matched, then query_nodes.size() may
-    // be greater than query.size() - k + 1
+    // if the number of exact matching k-mers is too low, skip
     if (get_num_matching_kmers()
             < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
         return;
@@ -128,13 +132,14 @@ void SuffixSeeder<NodeType>
         alt_query_nodes.resize(query_nodes.size());
 
     // query_node_flags is used to indicate a status for each node in query_nodes.
-    // If query_node_flags[i] & 0x2, then a node match at that position exists
-    // if query_node_flags[i] & 0x1, then this node is a terminal point for a
-    //                               maximal exact match.
+    // If query_node_flags[i] & 0x2, then a node match exists at position i exists
+    // if query_node_flags[i] & 0x1, then this node is set as a seed breakpoint
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
     assert(!query_node_flags || query_node_flags->size() == query_nodes.size());
 
+    // if the graph is wrapped in a CanonicalDBG, then both the forward and
+    // reverse complement of a query has to be checked for matches
     auto *canonical = dynamic_cast<const CanonicalDBG*>(&get_graph());
     std::string rev_comp_query;
     if (canonical) {
@@ -149,36 +154,43 @@ void SuffixSeeder<NodeType>
             || alt_node > graph.max_index()
             || graph.traverse(alt_node, query[i + seed_length]) == DeBruijnGraph::npos);
 
+        // if the found suffix match is longer than the previous one, then clear
+        // the previous results
         if (graph.get_k() - seed_length < offsets.at(i)) {
             query_nodes[i] = DeBruijnGraph::npos;
             if (config.max_num_seeds_per_locus > 1)
                 alt_query_nodes.at(i).clear();
         }
 
-        if (config.max_num_seeds_per_locus != 1) {
-            for (size_t j = 1; seed_length + j < k && i >= j; ++j) {
-                if (alt_node == query_nodes[i - j]
-                        && k - offsets[i - j] - j == seed_length) {
-                    return;
-                }
+
+        // skip this seed if it's just a suffix of a previous seed
+        for (size_t j = 1; seed_length + j < k && i >= j; ++j) {
+            if (alt_node == query_nodes[i - j]
+                    && k - offsets[i - j] - j == seed_length) {
+                return;
             }
         }
 
-        if (query_nodes.at(i)) {
+        // if another match has been found at this position, add the extra node
+        // to the alt_query_nodes vector
+        if (query_nodes.at(i) && alt_query_nodes.size()) {
             alt_query_nodes.at(i).push_back(alt_node);
             assert(offsets.at(i) == k - seed_length);
         } else {
             query_nodes.at(i) = alt_node;
             offsets.at(i) = k - seed_length;
 
+            // set query_node_flags
             if (query_node_flags) {
-                query_node_flags->at(i) = 3;
+                // a match has been found, and this node is a seed terminus
+                query_node_flags->at(i) = 0x3;
 
+                // also set adjacent matches to be termini
                 if (i)
-                    query_node_flags->at(i - 1) |= 1;
+                    query_node_flags->at(i - 1) |= 0x1;
 
                 if (i + 1 < query_node_flags->size())
-                    query_node_flags->at(i + 1) |= 1;
+                    query_node_flags->at(i + 1) |= 0x1;
             }
         }
     };
@@ -347,6 +359,7 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
     base_seeder_->call_seeds([&](auto&& alignment) {
         size_t i = alignment.get_query().data() - query.data();
 
+        // if alternate seeds exist, call them as well
         assert(get_config().max_num_seeds_per_locus > alt_query_nodes.size());
         if (alt_query_nodes.size()) {
             for (auto alt_node : alt_query_nodes.at(i)) {
@@ -360,6 +373,7 @@ void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) co
         callback(std::move(alignment));
     });
 
+    // if the last k-mer didn't match, then try finding sub-k matches at the end
     const auto &query_nodes = base_seeder_->get_query_nodes();
     if (!query_nodes.back())
         call_end_suffix_seeds(callback);
@@ -371,11 +385,12 @@ void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
 
     const auto &query_nodes = this->get_query_nodes();
 
-    query_node_flags_.assign(query_nodes.size(), 0);
+    query_node_flags_.assign(query_nodes.size(), 0x0);
 
+    // mark all matched nodes and also mark all bifurcation points as seed termini
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos) {
-            query_node_flags_[i] = 2 | (*is_mem_terminus_)[query_nodes[i]];
+            query_node_flags_[i] = 0x2 | (*is_mem_terminus_)[query_nodes[i]];
         }
     }
 }
@@ -399,11 +414,11 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
     // find start of MEM
     auto it = query_node_flags_.begin();
     while ((it = std::find_if(it, query_node_flags_.end(),
-                              [](uint8_t flags) { return flags & 2; }))
+                              [](uint8_t flags) { return flags & 0x2; }))
             < query_node_flags_.end()) {
         // find end of MEM
         auto next = std::find_if(it, query_node_flags_.end(),
-                                 [](uint8_t flags) { return (flags & 1) == 1 || (flags & 2) == 0; });
+                                 [](uint8_t flags) { return (flags & 0x1) == 1 || (flags & 0x2) == 0; });
 
         if (next != query_node_flags_.end() && ((*next) & 2))
             ++next;
