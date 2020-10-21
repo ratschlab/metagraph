@@ -283,10 +283,10 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    anchor_bv_type rterminal;
+    anchor_bv_type terminal;
     {
         std::ifstream f(graph_fname + anchors_extension, std::ios::binary);
-        rterminal.load(f);
+        terminal.load(f);
     }
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
@@ -326,7 +326,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
                                              1024 * 1024, ROW_REDUCTION_WIDTH);
     traverse_anno_chunked(
-            "Compute diffs", rterminal.size(), graph_fname, sources,
+            "Compute diffs", terminal.size(), graph_fname, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
                 for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
@@ -345,13 +345,13 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
                 // check successor node and add current node if it's either terminal
                 // or if its successor is 0
-                if (rterminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
+                if (terminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
                     set_rows[source_idx][j].push_back(row_idx);
 
                 // check non-terminal predecessor nodes and add them if they are zero
                 for (size_t p_idx = pred_chunk_idx[chunk_idx];
                      p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
-                    if (!source_col[pred_chunk[p_idx]] && !rterminal[pred_chunk[p_idx]])
+                    if (!source_col[pred_chunk[p_idx]] && !terminal[pred_chunk[p_idx]])
                         set_rows[source_idx][j].push_back(pred_chunk[p_idx]);
                 }
             },
@@ -414,7 +414,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                     call(*it);
                 }
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, rterminal.size(),
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, terminal.size(),
                                                          targets_size[l_idx][j]);
         }
         targets[l_idx].clear();
