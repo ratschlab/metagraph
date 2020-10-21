@@ -24,7 +24,8 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::string &anchors_extension = ".terminal.unopt");
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const std::filesystem::path &dest_dir);
+                                  const std::filesystem::path &dest_dir,
+                                  const std::string &row_reduction_extension);
 
 } // namespace annot
 } // namespace mtg

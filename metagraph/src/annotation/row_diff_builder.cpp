@@ -382,8 +382,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         logger->trace("Merging row reduction vectors {} and {}",
                       row_reduction_fname, temp_row_reduction_fname);
 
-        sdsl::int_vector_buffer result(row_reduction_fname, std::ios::in | std::ios::out,
-                                       1024 * 1024, ROW_REDUCTION_WIDTH);
+        sdsl::int_vector_buffer result(row_reduction_fname, std::ios::in | std::ios::out, 1024 * 1024);
         if (result.size() != source_row_nbits.size()) {
             logger->error("Incompatible sizes of '{}': {} and '{}': {}",
                           row_reduction_fname, result.size(),
@@ -435,8 +434,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
 
-    sdsl::int_vector_buffer row_reduction(row_reduction_fname, std::ios::in | std::ios::out,
-                                          1024 * 1024, ROW_REDUCTION_WIDTH);
+    sdsl::int_vector_buffer row_reduction(row_reduction_fname, std::ios::in | std::ios::out, 1024 * 1024);
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
@@ -473,7 +471,8 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 }
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const std::filesystem::path &dest_dir) {
+                                  const std::filesystem::path &dest_dir,
+                                  const std::string &row_reduction_extension) {
     if (std::filesystem::exists(graph_fname + ".terminal")) {
         logger->info("Found optimized anchors {}", graph_fname + ".terminal");
         return;
@@ -484,7 +483,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     std::vector<std::string> filenames;
     for (const auto &p : std::filesystem::directory_iterator(dest_dir)) {
         auto path = p.path();
-        if (utils::ends_with(path, ".row_reduction")) {
+        if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
             filenames.push_back(path);
         }
@@ -503,16 +502,15 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t t = 1; t < filenames.size(); t += 2) {
             // compute sum of t-1 and t.
-            filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
-            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
-
-            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
-            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
-            if (first.size() != second.size()) {
+            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024);
+            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024);
+            if (first.size() != second.size() || first.width() != second.width()) {
                 logger->error("Sizes of row reduction vectors are incompatible, {}: {}, {}: {}",
                               filenames[t - 1], first.size(), filenames[t], second.size());
                 exit(1);
             }
+            filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
+            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, first.width());
 
             for (uint64_t i = 0; i < first.size(); ++i) {
                 sum.push_back(first[i] + second[i]);
@@ -538,7 +536,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     }
     uint64_t num_anchors_old = old_anchors.num_set_bits();
 
-    sdsl::int_vector_buffer row_reduction(filenames[0], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
+    sdsl::int_vector_buffer row_reduction(filenames[0], std::ios::in, 1024 * 1024);
 
     if (old_anchors.size() != row_reduction.size()) {
         logger->error(

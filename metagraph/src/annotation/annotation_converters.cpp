@@ -1094,9 +1094,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     if (optimize)
-        optimize_anchors_in_row_diff(graph_fname, dest_dir);
+        optimize_anchors_in_row_diff(graph_fname, dest_dir, ".row_reduction.unopt");
 
-    std::filesystem::path delta_nbits_fname;
+    std::filesystem::path row_reduction_fname;
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1120,18 +1120,18 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             file_batch.push_back(files[i]);
 
             // derive name from first file in batch
-            if (delta_nbits_fname.empty()) {
-                delta_nbits_fname = dest_dir/std::filesystem::path(file_batch.back())
+            if (row_reduction_fname.empty()) {
+                row_reduction_fname = dest_dir/std::filesystem::path(file_batch.back())
                                                 .filename()
                                                 .replace_extension()
-                                                .replace_extension(".delta_nbits");
-                if (optimize)
-                    delta_nbits_fname += ".opt";
+                                                .replace_extension(".row_reduction");
+                if (!optimize)
+                    row_reduction_fname += ".unopt";
 
-                if (std::filesystem::exists(delta_nbits_fname)) {
-                    logger->warn("File {} with row bit counts already exists. Removing...",
-                                 delta_nbits_fname);
-                    std::filesystem::remove(delta_nbits_fname);
+                if (std::filesystem::exists(row_reduction_fname)) {
+                    logger->warn("Found row reduction vector {}. Removing...",
+                                 row_reduction_fname);
+                    std::filesystem::remove(row_reduction_fname);
                 }
             }
         }
@@ -1139,7 +1139,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         Timer timer;
         logger->trace("Annotations for row-diff transform in batch: {}",
                       file_batch.size());
-        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, delta_nbits_fname,
+        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir, row_reduction_fname,
                                   optimize ? ".terminal" : ".terminal.unopt");
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
