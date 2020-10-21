@@ -10,8 +10,8 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t chunk_size = 1 << 20;
-constexpr uint64_t DELTA_WIDTH = 16;
+constexpr uint64_t BLOCK_SIZE = 1 << 20;
+constexpr uint64_t ROW_REDUCTION_WIDTH = 16;
 
 namespace mtg {
 namespace annot {
@@ -209,9 +209,9 @@ void traverse_anno_chunked(
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
     ProgressBar progress_bar(num_rows, log_header, std::cerr, !common::get_verbose());
-    for (node_index chunk = 0; chunk < num_rows; chunk += chunk_size) {
-        succ_chunk.resize(std::min(chunk_size, num_rows - chunk));
-        pred_chunk_idx.resize(std::min(chunk_size, num_rows - chunk) + 1);
+    for (node_index chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
+        succ_chunk.resize(std::min(BLOCK_SIZE, num_rows - chunk));
+        pred_chunk_idx.resize(std::min(BLOCK_SIZE, num_rows - chunk) + 1);
         pred_chunk_idx[0] = 0;
 
         std::vector<uint64_t> pred_chunk;
@@ -268,7 +268,7 @@ void traverse_anno_chunked(
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
-                               const std::string &delta_nbits_fname,
+                               const std::string &row_reduction_fname,
                                const std::string &anchors_extension) {
     if (source_files.empty())
         return;
@@ -322,9 +322,9 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
     // total number of set bits in the original rows
     std::vector<uint32_t> row_nbits_batch;
-    const std::string temp_delta_nbits_fname = delta_nbits_fname + ".out";
-    sdsl::int_vector_buffer source_row_nbits(temp_delta_nbits_fname, std::ios::out, 1024 * 1024, DELTA_WIDTH);
-
+    const std::string temp_row_reduction_fname = row_reduction_fname + ".temp";
+    sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
+                                             1024 * 1024, ROW_REDUCTION_WIDTH);
     traverse_anno_chunked(
             "Compute diffs", rterminal.size(), graph_fname, sources,
             [&](uint64_t chunk_size) {
@@ -378,27 +378,27 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     // free memory occupied by sources
     sources.clear();
 
-    if (std::filesystem::exists(delta_nbits_fname)) {
-        logger->trace("Merging row bit counters {} and {}",
-                      delta_nbits_fname, temp_delta_nbits_fname);
+    if (std::filesystem::exists(row_reduction_fname)) {
+        logger->trace("Merging row reduction vectors {} and {}",
+                      row_reduction_fname, temp_row_reduction_fname);
 
-        sdsl::int_vector_buffer result(delta_nbits_fname, std::ios::in | std::ios::out,
-                                       1024 * 1024, DELTA_WIDTH);
+        sdsl::int_vector_buffer result(row_reduction_fname, std::ios::in | std::ios::out,
+                                       1024 * 1024, ROW_REDUCTION_WIDTH);
         if (result.size() != source_row_nbits.size()) {
             logger->error("Incompatible sizes of '{}': {} and '{}': {}",
-                          delta_nbits_fname, result.size(),
-                          temp_delta_nbits_fname, source_row_nbits.size());
+                          row_reduction_fname, result.size(),
+                          temp_row_reduction_fname, source_row_nbits.size());
             exit(1);
         }
         for (uint64_t i = 0; i < result.size(); ++i) {
             result[i] += source_row_nbits[i];
         }
         source_row_nbits.close();
-        std::filesystem::remove(temp_delta_nbits_fname);
+        std::filesystem::remove(temp_row_reduction_fname);
 
     } else {
         source_row_nbits.close();
-        std::filesystem::rename(temp_delta_nbits_fname, delta_nbits_fname);
+        std::filesystem::rename(temp_row_reduction_fname, row_reduction_fname);
     }
 
     std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(targets.size());
@@ -435,13 +435,13 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
 
-    sdsl::int_vector_buffer result(delta_nbits_fname, std::ios::in | std::ios::out,
-                                   1024 * 1024, DELTA_WIDTH);
+    sdsl::int_vector_buffer row_reduction(row_reduction_fname, std::ios::in | std::ios::out,
+                                          1024 * 1024, ROW_REDUCTION_WIDTH);
     uint64_t num_larger_rows = 0;
-    ProgressBar progress_bar(result.size(), "Update deltas",
+    ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
-    for (node_index chunk = 0; chunk < result.size(); chunk += chunk_size) {
-        row_nbits_batch.assign(std::min(chunk_size, result.size() - chunk), 0);
+    for (node_index chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
+        row_nbits_batch.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
@@ -459,17 +459,17 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
         for (uint64_t i = 0; i < row_nbits_batch.size(); ++i) {
-            result[chunk + i] -= row_nbits_batch[i];
-            // check if the delta is negative
-            if (result[chunk + i] >> (result.width() - 1))
+            row_reduction[chunk + i] -= row_nbits_batch[i];
+            // check if the row reduction is negative
+            if (row_reduction[chunk + i] >> (row_reduction.width() - 1))
                 num_larger_rows++;
         }
 
         progress_bar += row_nbits_batch.size();
     }
 
-    logger->trace("Rows with negative reduction: {} in delta vector {}",
-                  num_larger_rows, delta_nbits_fname);
+    logger->trace("Rows with negative row reduction: {} in vector {}",
+                  num_larger_rows, row_reduction_fname);
 }
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
@@ -484,18 +484,18 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     std::vector<std::string> filenames;
     for (const auto &p : std::filesystem::directory_iterator(dest_dir)) {
         auto path = p.path();
-        if (utils::ends_with(path, ".delta_nbits")) {
-            logger->info("Found delta vector {}", path);
+        if (utils::ends_with(path, ".row_reduction")) {
+            logger->info("Found row reduction vector {}", path);
             filenames.push_back(path);
         }
     }
 
     if (!filenames.size()) {
-        logger->error("Didn't find any delta vectors to merge in {}", dest_dir);
+        logger->error("Didn't find any row reduction vectors in {} to merge", dest_dir);
         exit(1);
     }
 
-    logger->trace("Merging delta vectors");
+    logger->trace("Merging row reduction vectors");
 
     while (filenames.size() > 1u) {
         std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
@@ -504,12 +504,12 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         for (size_t t = 1; t < filenames.size(); t += 2) {
             // compute sum of t-1 and t.
             filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
-            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
 
-            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024, DELTA_WIDTH);
-            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
+            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
             if (first.size() != second.size()) {
-                logger->error("Sizes of delta vectors are incompatible, {}: {}, {}: {}",
+                logger->error("Sizes of row reduction vectors are incompatible, {}: {}, {}: {}",
                               filenames[t - 1], first.size(), filenames[t], second.size());
                 exit(1);
             }
@@ -522,7 +522,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         if (filenames.size() % 2)
             filenames_new.back() = filenames.back();
 
-        logger->trace("Merged {} delta vectors into {}",
+        logger->trace("Merged {} row reduction vectors into {}",
                       filenames.size(), filenames_new.size());
 
         filenames.swap(filenames_new);
@@ -531,23 +531,25 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     assert(filenames.size() == 1u && "All must be merged into one vector");
 
     anchor_bv_type old_anchors;
+    auto original_anchors_fname = graph_fname + ".terminal.unopt";
     {
-        std::ifstream f(graph_fname + ".terminal.unopt", ios::binary);
+        std::ifstream f(original_anchors_fname, ios::binary);
         old_anchors.load(f);
     }
     uint64_t num_anchors_old = old_anchors.num_set_bits();
 
-    sdsl::int_vector_buffer deltas(filenames[0], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+    sdsl::int_vector_buffer row_reduction(filenames[0], std::ios::in, 1024 * 1024, ROW_REDUCTION_WIDTH);
 
-    if (old_anchors.size() != deltas.size()) {
-        logger->error("Unoptimized anchors ({}) and vector with delta row bits {}"
-                      " are incompatible", old_anchors.size(), deltas.size());
+    if (old_anchors.size() != row_reduction.size()) {
+        logger->error(
+            "Original anchors {}: {} and row reduction vector {}: {} are incompatible",
+            original_anchors_fname, old_anchors.size(), filenames[0], row_reduction.size());
         exit(1);
     }
     sdsl::bit_vector anchors = old_anchors.convert_to<sdsl::bit_vector>();
-    for (uint64_t i = 0; i < deltas.size(); ++i) {
-        // check if the delta is negative
-        if (deltas[i] >> (deltas.width() - 1))
+    for (uint64_t i = 0; i < row_reduction.size(); ++i) {
+        // check if the reduction is negative
+        if (row_reduction[i] >> (row_reduction.width() - 1))
             anchors[i] = true;
     }
     anchor_bv_type ranchors(std::move(anchors));
