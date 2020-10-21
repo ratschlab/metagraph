@@ -129,7 +129,7 @@ try_compile(MODE_TI
   "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
 )
 if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
+  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI -mcx16")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

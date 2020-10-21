@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <cassert>
+#include <cstdlib>
 
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
@@ -107,6 +108,192 @@ inline void unset_bit(uint64_t *v,
     } else {
         v[i >> 6] &= ~(1llu << (i & 0x3F));
     }
+}
+
+inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
+                             std::mutex &backup_mutex,
+                             int memorder = __ATOMIC_SEQ_CST) {
+    size_t width = vector.width();
+    size_t bit_pos = i * width;
+    uint64_t mask = (1llu << width) - 1;
+    if (width + 7 > 64) {
+        // there is no way to reliably modify without a mutex
+        std::lock_guard<std::mutex> lock(backup_mutex);
+        return vector[i];
+    } else if ((bit_pos & 0x3F) + width <= 64) {
+        // element fits in an aligned word
+        const uint64_t *word = &vector.data()[bit_pos >> 6];
+        return (__atomic_load_n(word, memorder) >> (bit_pos & 0x3F)) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
+    } else if ((bit_pos & 0x7F) + width <= 128) {
+        // element fits in an aligned double word
+        const __uint128_t *word = &reinterpret_cast<const __uint128_t*>(vector.data())[bit_pos >> 7];
+        return (__atomic_load_n(word, memorder) >> (bit_pos & 0x7F)) & mask;
+#endif
+    } else {
+        uint8_t shift = bit_pos & 0x7;
+        const uint8_t *word = &reinterpret_cast<const uint8_t*>(vector.data())[bit_pos >> 3];
+        if (shift + width <= 8) {
+            // read from a byte
+            return (__atomic_load_n(word, memorder) >> shift) & mask;
+        } else if (shift + width <= 16) {
+            // unaligned read from two bytes
+            return (__atomic_load_n((const uint16_t*)word, memorder) >> shift) & mask;
+        } else if (shift + width <= 32) {
+            // unaligned read from four bytes
+            return (__atomic_load_n((const uint32_t*)word, memorder) >> shift) & mask;
+        } else if (shift + width <= 64) {
+            // unaligned read from eight bytes
+            return (__atomic_load_n((const uint64_t*)word, memorder) >> shift) & mask;
+        } else {
+            assert(false);
+        }
+    }
+
+    return 0;
+}
+
+inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
+                                     uint64_t count,
+                                     std::mutex &backup_mutex,
+                                     int memorder = __ATOMIC_SEQ_CST) {
+    size_t width = vector.width();
+    size_t bit_pos = i * width;
+    uint64_t mask = (1llu << width) - 1;
+    if (width + 7 > 64) {
+        // there is no way to reliably modify without a mutex
+        std::lock_guard<std::mutex> lock(backup_mutex);
+        uint64_t old_val = vector[i];
+        vector[i] += count;
+        return old_val;
+    } else if ((bit_pos & 0x3F) + width <= 64) {
+        // element fits in an aligned word
+        uint64_t *word = &vector.data()[bit_pos >> 6];
+        uint8_t shift = bit_pos & 0x3F;
+        return (__atomic_fetch_add(word, count << shift, memorder) >> shift) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
+    } else if ((bit_pos & 0x7F) + width <= 128) {
+        // element fits in an aligned double word
+        __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+        uint8_t shift = bit_pos & 0x7F;
+        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
+        return (__sync_fetch_and_add(word, __uint128_t(count) << shift) >> shift) & mask;
+#endif
+    } else {
+        uint8_t shift = bit_pos & 0x7;
+        uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        if (shift + width <= 8) {
+            // read from a byte
+            return (__atomic_fetch_add(word, count << shift, memorder) >> shift) & mask;
+        } else if (shift + width <= 16) {
+            // unaligned read from two bytes
+            return (__atomic_fetch_add((uint16_t*)word, count << shift, memorder) >> shift) & mask;
+        } else if (shift + width <= 32) {
+            // unaligned read from four bytes
+            return (__atomic_fetch_add((uint32_t*)word, count << shift, memorder) >> shift) & mask;
+        } else if (shift + width <= 64) {
+            // unaligned read from eight bytes
+            return (__atomic_fetch_add((uint64_t*)word, count << shift, memorder) >> shift) & mask;
+        } else {
+            assert(false);
+        }
+    }
+
+    return 0;
+}
+
+inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
+                                std::mutex &backup_mutex,
+                                int memorder = __ATOMIC_SEQ_CST) {
+    size_t width = vector.width();
+    size_t bit_pos = i * width;
+    uint64_t mask = (1llu << width) - 1;
+    if (width + 7 > 64) {
+        // there is no way to reliably modify without a mutex
+        std::lock_guard<std::mutex> lock(backup_mutex);
+        uint64_t old_val = vector[i];
+        vector[i] = val;
+        return old_val;
+    } else if ((bit_pos & 0x3F) + width <= 64) {
+        // element fits in an aligned word
+        uint64_t *word = &vector.data()[bit_pos >> 6];
+        uint8_t shift = bit_pos & 0x3F;
+        uint64_t desired;
+        uint64_t exp = *word;
+        uint64_t inv_mask = ~(mask << shift);
+        val <<= shift;
+        do {
+            desired = val | (inv_mask & exp);
+        } while (!__atomic_compare_exchange(word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
+        return (exp >> shift) & mask;
+#if defined(MODE_TI) && defined(__CX16__)
+    } else if ((bit_pos & 0x7F) + width <= 128) {
+        // element fits in an aligned double word
+        __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+        uint8_t shift = bit_pos & 0x7F;
+        __uint128_t desired;
+        __uint128_t exp;
+        __uint128_t inv_mask = ~(__uint128_t(mask) << shift);
+        __uint128_t big_val = __uint128_t(val) << shift;
+        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
+        do {
+            exp = *word;
+            desired = big_val | (inv_mask & exp);
+        } while (!__sync_bool_compare_and_swap(word, exp, desired));
+        return (exp >> shift) & mask;
+#endif
+    } else {
+        uint8_t shift = bit_pos & 0x7;
+        uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        if (shift + width <= 8) {
+            // read from a byte
+            uint8_t desired;
+            uint8_t exp = *word;
+            uint8_t inv_mask = ~(mask << shift);
+            val <<= shift;
+            do {
+                desired = val | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
+            return (exp >> shift) & mask;
+        } else if (shift + width <= 16) {
+            // unaligned read from two bytes
+            uint16_t *this_word = (uint16_t*)word;
+            uint16_t desired;
+            uint16_t exp = *this_word;
+            uint16_t inv_mask = ~(mask << shift);
+            val <<= shift;
+            do {
+                desired = val | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
+            return (exp >> shift) & mask;
+        } else if (shift + width <= 32) {
+            // unaligned read from four bytes
+            uint32_t *this_word = (uint32_t*)word;
+            uint32_t desired;
+            uint32_t exp = *this_word;
+            uint32_t inv_mask = ~(mask << shift);
+            val <<= shift;
+            do {
+                desired = val | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
+            return (exp >> shift) & mask;
+        } else if (shift + width <= 64) {
+            // unaligned read from eight bytes
+            uint64_t *this_word = (uint64_t*)word;
+            uint64_t desired;
+            uint64_t exp = *this_word;
+            uint64_t inv_mask = ~(mask << shift);
+            val <<= shift;
+            do {
+                desired = val | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, memorder, __ATOMIC_RELAXED));
+            return (exp >> shift) & mask;
+        } else {
+            assert(false);
+        }
+    }
+
+    return 0;
 }
 
 
@@ -486,6 +673,49 @@ prev_bit(const t_int_vec &v,
             return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
     }
     return v.bit_size();
+}
+
+
+// Return an int_vector whose limbs are aligned to alignment bytes.
+// This is useful for algorithms requiring access to larger words in the underlying
+// vector (atomic increment, SIMD, etc.)
+template <int width = 0>
+inline sdsl::int_vector<width> aligned_int_vector(size_t size = 0, uint64_t val = 0,
+                                                  uint8_t var_width = 0,
+                                                  size_t alignment = 8) {
+    assert(__builtin_popcountll(alignment) == 1);
+
+    // This is a dirty hack to allow for reallocating an int_vector<width>'s
+    // underlying storage
+    struct int_vector_access {
+        typename sdsl::int_vector<width>::size_type m_size;
+        uint64_t *m_data;
+        typename sdsl::int_vector<width>::int_width_type m_width;
+    };
+    static_assert(sizeof(sdsl::int_vector<width>) == sizeof(int_vector_access));
+    assert(!width || width == var_width);
+
+    sdsl::int_vector<width> v;
+    auto &v_cast = reinterpret_cast<int_vector_access&>(v);
+    v_cast.m_size = size * var_width;
+    v_cast.m_width = var_width;
+    free(v_cast.m_data);
+
+    size_t capacity_bytes = (((((v_cast.m_size + 63) >> 6) << 3) + alignment - 1) / alignment) * alignment;
+    if (posix_memalign((void**)&v_cast.m_data, alignment, capacity_bytes) || !v_cast.m_data)
+        throw std::bad_alloc();
+
+    memset(v_cast.m_data, 0, capacity_bytes);
+
+    if (val)
+        sdsl::util::set_to_value(v, val);
+
+    return v;
+}
+
+inline sdsl::bit_vector aligned_bit_vector(size_t size = 0, bool val = false,
+                                           size_t alignment = 8) {
+    return aligned_int_vector<1>(size, val, 1, alignment);
 }
 
 
