@@ -266,7 +266,8 @@ void traverse_anno_chunked(
 void convert_batch_to_row_diff(const std::string &graph_fname,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
-                               const std::string &delta_nbits_fname) {
+                               const std::string &delta_nbits_fname,
+                               const std::string &anchors_extension) {
     if (source_files.empty())
         return;
 
@@ -282,7 +283,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
     sdsl::rrr_vector rterminal;
     {
-        std::ifstream f(graph_fname + ".terminal.unopt", std::ios::binary);
+        std::ifstream f(graph_fname + anchors_extension, std::ios::binary);
         rterminal.load(f);
     }
 
@@ -418,7 +419,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix), graph_fname + ".terminal.unopt");
+                nullptr, std::move(matrix), graph_fname + anchors_extension);
         row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                                              label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
@@ -465,7 +466,160 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         progress_bar += row_nbits_batch.size();
     }
 
-    logger->trace("Rows with negative reduction: {}", num_larger_rows);
+    logger->trace("Rows with negative reduction: {} in delta vector {}",
+                  num_larger_rows, delta_nbits_fname);
+}
+
+void optimize_anchors_in_row_diff(const std::string &graph_fname,
+                                  const std::vector<std::string> &source_files,
+                                  const std::filesystem::path &dest_dir,
+                                  const std::string &delta_nbits_fname) {
+    if (source_files.empty())
+        return;
+
+    if (!std::filesystem::exists(graph_fname + ".terminal")) {
+        logger->trace("Optimizing anchors");
+
+        std::vector<std::string> filenames;
+        for (const auto &p : std::filesystem::directory_iterator(dest_dir)) {
+            auto path = p.path();
+            if (utils::ends_with(path, ".delta_nbits")) {
+                logger->info("Found delta vector {}", path);
+                filenames.push_back(path);
+            }
+        }
+
+        if (!filenames.size()) {
+            logger->error("Didn't find any delta vectors to merge in {}", dest_dir);
+            exit(1);
+        }
+
+        logger->info("Start merging {} delta vectors", filenames.size());
+
+        while (filenames.size() > 1u) {
+            std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
+
+            #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+            for (size_t i = 0; i < filenames.size(); i += 2) {
+                filenames_new[i / 2] = fmt::format("{}.merged.{}", filenames[i], i / 2);
+                //TODO: merge (filenames_new[i / 2] = filenames[i] + filenames[i + 1])
+            }
+
+            if (filenames.size() % 2)
+                filenames_new.push_back(filenames.back());
+
+            filenames.swap(filenames_new);
+
+            logger->trace("Merged into {} delta vectors", filenames.size());
+        }
+
+        assert(filenames.size() == 1u && "All must be merged into one vector");
+
+        sdsl::int_vector_buffer deltas(filenames[0], std::ios::in, 1024 * 1024, DELTA_WIDTH);
+        sdsl::bit_vector anchors(deltas.size());
+        // TODO: load from ".terminal.unopt"
+        for (uint64_t i = 0; i < deltas.size(); ++i) {
+            // check if the delta is negative
+            if (deltas[i] >> (deltas.width() - 1))
+                anchors[i] = true;
+        }
+        logger->trace("Number of anchors after optimization: {}",
+                      sdsl::util::cnt_one_bits(anchors));
+
+        sdsl::rrr_vector ranchors(anchors);
+        std::ofstream f(graph_fname + ".terminal", ios::binary);
+        ranchors.serialize(f);
+        logger->trace("Serialized optimized anchors to {}", graph_fname + ".terminal");
+    }
+
+    convert_batch_to_row_diff(graph_fname, source_files, dest_dir, delta_nbits_fname,
+                              ".terminal");
+
+/*
+    logger->trace("Using optimized anchors from {}", graph_fname + ".terminal");
+    std::ifstream f(graph_fname + ".terminal.delta", std::ios::binary);
+    sdsl::rrr_vector temp;
+    temp.load(f);
+    bit_vector_small new_anchors(std::move(temp));
+
+    logger->trace("Updating row_diff columns...");
+
+    ProgressBar progress_bar(graph_fname.size(), "Update row-diff",
+                             std::cerr, !common::get_verbose());
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t l_idx = 0; l_idx < source_files.size(); ++l_idx) {
+        annot::ColumnCompressed<> original;
+        if (!original.load(source_files[l_idx])) {
+            logger->error("Can't load original annotation from {}", source_files[l_idx]);
+            exit(1);
+        }
+
+        if (!original.num_labels())
+            continue;
+
+        auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
+                                .filename()
+                                .replace_extension()
+                                .replace_extension(RowDiffAnnotator::kExtension);
+        auto row_diff = std::make_unique<RowDiffAnnotator>();
+        if (row_diff->load(fpath)) {
+            logger->error("Can't load initial row-diff annotation from {}", fpath);
+            exit(1);
+        }
+
+        if (row_diff->get_label_encoder().get_labels()
+                != original.get_label_encoder().get_labels()) {
+            logger->error("Annotations {} and {} have different lists of labels",
+                          source_files[l_idx], fpath);
+        }
+
+        std::vector<std::unique_ptr<bit_vector>> columns
+                        = row_diff->release_matrix()->diffs().release_columns();
+
+        for (size_t j = 0; j < columns.size(); ++j) {
+            const bit_vector &original_col = *original.get_matrix().data()[j];
+            std::unique_ptr<bit_vector> old_rd_col = std::move(columns[j]);
+
+            if (original_col.size() != new_anchors.size()
+                    || old_rd_col->size() != new_anchors.size()) {
+                logger->error("Columns have incompatible sizes");
+                exit(1);
+            }
+
+            uint64_t num_set_bits = old_rd_col->num_set_bits();
+
+            new_anchors.call_ones([&](uint64_t i) {
+                if ((*old_rd_col)[i]) {
+                    if (!original_col[i])
+                        num_set_bits--;
+                } else {
+                    if (original_col[i])
+                        num_set_bits++;
+                }
+            });
+
+            auto call_ones = [&](const std::function<void(uint64_t)>& call) {
+                // TODO: merge two bitmaps
+            };
+
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, old_rd_col->size(),
+                                                         num_set_bits);
+        }
+
+        row_diff = std::make_unique<RowDiffAnnotator>(
+            std::make_unique<RowDiff<ColumnMajor>>(
+                nullptr,
+                ColumnMajor(std::move(columns)),
+                graph_fname + ".terminal"
+            ),
+            original.get_label_encoder()
+        );
+        row_diff->serialize(fpath);
+        logger->trace("Updated {}", fpath);
+
+        ++progress_bar;
+    }
+*/
 }
 
 } // namespace annot
