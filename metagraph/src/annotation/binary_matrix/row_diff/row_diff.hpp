@@ -50,9 +50,11 @@ class RowDiff : public BinaryMatrix {
 
     RowDiff(const graph::DBGSuccinct *graph,
                BaseMatrix &&diffs,
-               const std::string &anchors_filename)
+               const std::string &anchors_filename,
+               bool load_anchors = true)
         : graph_(graph), diffs_(std::move(diffs)), anchors_filename_(anchors_filename) {
-        load_terminal(anchors_filename_, &terminal_);
+        if (load_anchors)
+            load_terminal(anchors_filename_, &terminal_);
     }
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }

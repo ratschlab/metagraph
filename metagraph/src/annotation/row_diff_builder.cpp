@@ -420,7 +420,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix), graph_fname + anchors_extension);
+                nullptr, std::move(matrix), graph_fname + anchors_extension, false);
         row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                                              label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
