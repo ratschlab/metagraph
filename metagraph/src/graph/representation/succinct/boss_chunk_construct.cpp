@@ -692,7 +692,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     uint32_t last_checkpoint = checkpoint->checkpoint();
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
-        checkpoint->set_checkpoint(1);
+        checkpoint->set_checkpoint(kmer_collector.is_both_strands_mode() ? 1 : 2);
     }
 
     size_t k = kmer_collector.get_k() - 1;

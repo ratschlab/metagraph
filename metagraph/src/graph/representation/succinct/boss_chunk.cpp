@@ -254,7 +254,6 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 }
 
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
-    std::cout << "Liast " << last_.size() << " w " << W_.size() << std::endl;
     assert(last_.size() == W_.size());
     assert(weights_.size() == 0 || weights_.size() == W_.size());
 
