@@ -196,9 +196,6 @@ TEST(IntVector, atomic_exchange_then_fetch_after_join) {
             for (size_t i = 0; i < vector_atomic.size(); ++i) {
                 EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
             }
-
-            // ensure everything is synced before deallocating
-            std::atomic_thread_fence(std::memory_order_acquire);
         }
     }
 }
@@ -224,9 +221,6 @@ TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
                 }
             }
         }
-
-        // ensure everything is synced before deallocating
-        std::atomic_thread_fence(std::memory_order_acquire);
     }
 }
 
