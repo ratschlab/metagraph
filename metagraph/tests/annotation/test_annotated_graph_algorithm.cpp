@@ -106,9 +106,8 @@ void test_mask_indices(double density_cutoff, size_t num_threads) {
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     for (size_t num_threads : { 1, 4 }) {
         for (double d = 0.0; d <= 1.0; d += 0.05) {
-            test_mask_indices<typename TypeParam::first_type, typename TypeParam::second_type>(
-                d, num_threads
-            );
+            test_mask_indices<typename TypeParam::first_type,
+                              typename TypeParam::second_type>(d, num_threads);
         }
     }
 }
