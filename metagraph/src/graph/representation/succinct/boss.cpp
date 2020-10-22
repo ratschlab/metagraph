@@ -1483,29 +1483,31 @@ void traverse_dummy_edges(const BOSS &graph,
 uint64_t traverse_dummy_edges(const BOSS &graph,
                               sdsl::bit_vector *redundant_mask,
                               sdsl::bit_vector *traversed_mask,
-                              size_t num_threads) {
+                              size_t num_threads,
+                              const std::function<void(edge_index, size_t)> &on_dummy
+                                        = [](edge_index, size_t) {}) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
     assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
 
+    // assume the main dummy source node already traversed
+    std::atomic<uint64_t> num_dummy_traversed = 1;
+    on_dummy(1, 0); // call the main dummy source edge
     if (traversed_mask)
         (*traversed_mask)[1] = true;
 
     if (graph.get_last(1))
         return 1; // the only dummy k-mer is the main dummy source
 
-    // assume the main dummy source node already traversed
-    std::atomic<uint64_t> num_dummy_traversed = 1;
-
-    auto on_dummy = [&](edge_index /*edge*/, size_t /*depth*/) {
-        num_dummy_traversed++;
-    };
-
     if (graph.get_k() <= 1) {
         // start traversal in the children of the main dummy source
         edge_index root = 2;
         do {
             traverse_dummy_edges(graph, root, graph.get_k(),
-                                 on_dummy, redundant_mask, traversed_mask);
+                                 [&](edge_index edge, size_t depth) {
+                                     num_dummy_traversed++;
+                                     on_dummy(edge, depth);
+                                 },
+                                 redundant_mask, traversed_mask);
             logger->trace("Source dummy edges traversed: {}", num_dummy_traversed);
         } while (!graph.get_last(root++));
 
@@ -1541,11 +1543,13 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < start_edges.size(); ++i) {
         traverse_dummy_edges(graph, start_edges[i], 1 + graph.get_k() - tree_split_depth,
-            on_dummy, redundant_mask, traversed_mask
+            [&](edge_index edge, size_t depth) {
+                num_dummy_traversed++;
+                on_dummy(edge, tree_split_depth - 1 + depth);
+            },
+            redundant_mask, traversed_mask
         );
         ++progress_bar;
-        // nodes at depth |tree_split_depth| will be visited again
-        num_dummy_traversed--;
     }
 
     logger->trace("All subtrees are traversed");
@@ -1554,7 +1558,17 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
     root = 2;
     do {
         traverse_dummy_edges(graph, root, tree_split_depth,
-                             on_dummy, redundant_mask, traversed_mask);
+                            [&](edge_index edge, size_t depth) {
+                                // We must reach the depth of |tree_split_depth|
+                                // to update the masks, but we don't need to
+                                // visit those edges, they had already been visited.
+                                // So now we visit only their predecessors
+                                if (depth < tree_split_depth) {
+                                    num_dummy_traversed++;
+                                    on_dummy(edge, depth);
+                                }
+                            },
+                            redundant_mask, traversed_mask);
     } while (!graph.get_last(root++));
 
     return num_dummy_traversed;
@@ -2407,9 +2421,7 @@ void call_row_diff_path(
         return;
 
     std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
-    auto not_dummy = std::find_if(sequence.begin(), sequence.end(),
-                                  [&](TAlphabet c) { return c != boss.kSentinelCode; });
-    uint32_t skip_count = not_dummy - sequence.begin();
+    assert(sequence.back() != boss.kSentinelCode);
 
     std::vector<edge_index> path;
     path.reserve(100);
@@ -2430,13 +2442,7 @@ void call_row_diff_path(
             break;
         }
 
-        // don't add dummy source k-mers to the path
-        if (skip_count == 0) {
-            path.push_back(edge);
-        } else {
-            set_bit(dummy->data(), edge, async);
-            skip_count--;
-        }
+        path.push_back(edge);
 
         // make one traversal step (this will pick the last outgoing edge)
         edge = boss.fwd(edge, d);
@@ -2636,46 +2642,68 @@ void BOSS::call_sequences_row_diff(
         size_t max_length,
         sdsl::bit_vector *terminal,
         sdsl::bit_vector *dummy) const {
-    // keep track of the edges that have been reached
-    sdsl::bit_vector visited(W_->size(), false);
-    sdsl::bit_vector near_terminal(W_->size(), false);
-    terminal->resize(W_->size());
     dummy->resize((W_->size()));
-    sdsl::util::set_to_value(*terminal, false);
     sdsl::util::set_to_value(*dummy, false);
-    visited[0] = true;
+    (*dummy)[0] = true;
+    // keep track of the edges that have been reached
+    sdsl::bit_vector visited = *dummy;
+
+    constexpr bool async = true;
+
+    // traverse all dummy source k-mers but leave last source dummy edges
+    // as not visited
+    traverse_dummy_edges(*this, NULL, NULL, num_threads,
+        [&](edge_index edge, size_t depth) {
+            assert(depth <= get_k());
+            set_bit(dummy->data(), edge, async);
+            if (depth < get_k())
+                set_bit(visited.data(), edge, async);
+        }
+    );
+
+    terminal->resize(W_->size());
+    sdsl::util::set_to_value(*terminal, false);
+    sdsl::bit_vector near_terminal(W_->size(), false);
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse BOSS",
                              std::cerr, !common::get_verbose());
 
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
-    constexpr bool async = true;
 
-    auto enqueue_start = [&](ThreadPool &thread_pool, const std::vector<edge_index> &start) {
-        thread_pool.enqueue([&, start]() {
-            for (auto edge : start) {
-                call_row_diff_path(*this, edge, callback, max_length, &visited, terminal,
-                                   &near_terminal, dummy, progress_bar);
-            }
+    std::function<void(edge_index)> traverse_path = [&](edge_index start) {
+        call_row_diff_path(*this, start, callback, max_length, &visited,
+                           terminal, &near_terminal, dummy, progress_bar);
+    };
+    std::vector<uint64_t> to_visit;
+    auto flush_batch = [&]() {
+        thread_pool.enqueue([to_visit,&traverse_path]() {
+            std::for_each(to_visit.begin(), to_visit.end(), traverse_path);
         });
+        to_visit.resize(0);
+    };
+    auto enqueue_start = [&](edge_index start) {
+        to_visit.push_back(start);
+        if (to_visit.size() == TRAVERSAL_START_BATCH_SIZE)
+            flush_batch();
     };
 
-    // start traversal from the dummy source edges first ($..$X)
+    // start traversal from the dummy source edges first ($X...X)
+    // they are marked as |dummy| AND NOT |visited|
     //  .____
-    for (edge_index i = succ_last(1); i >= 1; --i) {
-        if (!fetch_bit(visited.data(), i, async))
-            enqueue_start(thread_pool, { i });
-    }
+    call_ones(*dummy, [&](edge_index i) {
+        if (!fetch_and_set_bit(visited.data(), i, async)) {
+            ++progress_bar;
+            edge_index real_source = fwd(i, get_W(i) % alph_size);
+            masked_call_outgoing(*this, real_source, NULL, enqueue_start);
+        }
+    }, async);
 
     // then all forks
     //  ____.____
     //       \___
     uint64_t last_processed = 0;
-    constexpr uint32_t batch_size = 128;
-    std::vector<uint64_t> to_visit;
-    to_visit.reserve(batch_size);
-    auto process_fork = [&](edge_index i) {
+    call_zeros(visited, [&](edge_index i) {
         if (i <= last_processed)
             return; // this fork was already processed
 
@@ -2684,19 +2712,12 @@ void BOSS::call_sequences_row_diff(
             return; // single outgoing edge, so not a fork
         }
         for (; i <= last_processed; ++i) {
-            if (!fetch_bit(visited.data(), i, async)) {
-                to_visit.push_back(i);
-                if (to_visit.size() == batch_size) {
-                    enqueue_start(thread_pool, to_visit);
-                    to_visit.resize(0);
-                }
-            }
-
+            if (!fetch_bit(visited.data(), i, async))
+                enqueue_start(i);
         }
-    };
-    call_zeros(visited, process_fork, async);
-    enqueue_start(thread_pool, to_visit);
+    }, async);
 
+    flush_batch();
     thread_pool.join();
 
 #ifndef NDEBUG
@@ -2704,7 +2725,7 @@ void BOSS::call_sequences_row_diff(
 #endif
 
     // Now we only have to traverse simple cycles that have no forks
-    auto process_cycle = [&](edge_index edge) {
+    traverse_path = [&](edge_index edge) {
         if (fetch_bit(visited.data(), edge, async))
             return;
 
@@ -2750,27 +2771,10 @@ void BOSS::call_sequences_row_diff(
         callback(std::move(path), anchor);
     };
 
-    std::vector<edge_index> index_buffer;
+    // traverse cycles in parallel
+    call_zeros(visited, enqueue_start, async);
 
-    call_zeros(visited, [&](edge_index edge) {
-      // traverse loops in parallel and only check for unique k-mers at the
-      // end of the traversal
-      index_buffer.push_back(edge);
-
-      if (index_buffer.size() == TRAVERSAL_START_BATCH_SIZE) {
-          thread_pool.enqueue([&,index_buffer]() {
-              std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
-          });
-
-          index_buffer.clear();
-      }
-
-    }, async);
-
-    thread_pool.enqueue([&,index_buffer]() {
-        std::for_each(index_buffer.begin(), index_buffer.end(), process_cycle);
-    });
-
+    flush_batch();
     thread_pool.join();
 
 #ifndef NDEBUG
