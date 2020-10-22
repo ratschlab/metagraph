@@ -201,7 +201,7 @@ TEST(IntVector, atomic_fetch_and_add_val) {
     }
 }
 
-TEST(IntVector, atomic_fetch_and_add_bits) {
+TEST(IntVector, atomic_fetch_and_add_all_bits) {
     for (size_t w = 1; w <= 64; ++w) {
         for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
             sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
@@ -220,6 +220,33 @@ TEST(IntVector, atomic_fetch_and_add_bits) {
 
             std::atomic_thread_fence(std::memory_order_acquire);
             EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+        }
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_all_bits_except_first) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            for (size_t s = 0; s < w; ++s) {
+                sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+                uint64_t val = sdsl::bits::lo_set[w] ^ (1llu << s);
+
+                std::mutex mu;
+                std::atomic_thread_fence(std::memory_order_release);
+                #pragma omp parallel for num_threads(3) schedule(static, 1)
+                for (size_t j = 0; j < w; ++j) {
+                    if (j != s) {
+                        uint64_t set_val = 1llu << j;
+                        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                            EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
+                                                               mu, memorder) & set_val);
+                        }
+                    }
+                }
+
+                std::atomic_thread_fence(std::memory_order_acquire);
+                EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+            }
         }
     }
 }
