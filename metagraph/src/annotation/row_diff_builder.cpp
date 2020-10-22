@@ -100,11 +100,11 @@ void build_successor(const std::string &graph_fname,
                 uint64_t next = d ? graph.boss_to_kmer_index(boss.fwd(boss_idx, d)) : 0;
                 succ_buf[r].push_back(next);
             }
-            BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
-            uint64_t back_idx = boss.bwd(boss_idx);
             // ignore predecessors if boss_idx is not the last outgoing
             // edge (bc. we only traverse the last outgoing at a bifurcation)
-            if (!dummy[boss_idx] && boss.fwd(back_idx, d) == boss_idx) {
+            if (!dummy[boss_idx] && boss.get_last(boss_idx)) {
+                BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
+                uint64_t back_idx = boss.bwd(boss_idx);
                 boss.call_incoming_to_target(back_idx, d,
                     [&](BOSS::edge_index pred) {
                         // terminal and dummy predecessors are ignored
