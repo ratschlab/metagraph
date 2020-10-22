@@ -839,7 +839,7 @@ aligned_int_vector(size_t size, uint64_t val, uint8_t width, size_t alignment) {
         typename sdsl::int_vector<t_width>::int_width_type m_width;
     };
     static_assert(sizeof(sdsl::int_vector<t_width>) == sizeof(int_vector_access));
-    assert(!width || t_width == width);
+    assert(!t_width || t_width == width);
 
     sdsl::int_vector<t_width> v;
     auto &v_cast = reinterpret_cast<int_vector_access&>(v);
