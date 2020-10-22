@@ -23,8 +23,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                         bool only_valid_nodes_in_mask = false,
                         bool canonical = false);
 
-    MaskedDeBruijnGraph(MaskedDeBruijnGraph&&) noexcept = default;
-    MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) noexcept = default;
+    MaskedDeBruijnGraph(MaskedDeBruijnGraph&&) = default;
+    MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) = default;
 
     virtual ~MaskedDeBruijnGraph() {}
 
