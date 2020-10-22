@@ -179,7 +179,7 @@ TEST(IntVector, atomic_exchange) {
     }
 }
 
-TEST(IntVector, atomic_fetch) {
+TEST(IntVector, atomic_exchange_then_fetch_after_join) {
     for (size_t w = 1; w <= 64; ++w) {
         for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
             sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
@@ -200,6 +200,33 @@ TEST(IntVector, atomic_fetch) {
             // ensure everything is synced before deallocating
             std::atomic_thread_fence(std::memory_order_acquire);
         }
+    }
+}
+
+TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
+    for (size_t w = 1; w <= 64; ++w) {
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+
+        #pragma omp parallel num_threads(3)
+        #pragma omp single
+        {
+            #pragma omp taskloop
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, __ATOMIC_RELEASE));
+
+                #pragma omp task
+                {
+                    EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+                }
+            }
+        }
+
+        // ensure everything is synced before deallocating
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 }
 
