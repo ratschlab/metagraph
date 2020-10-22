@@ -170,15 +170,13 @@ TEST(IntVector, atomic_exchange_and_fetch_sparse) {
 
             std::mutex mu;
             std::mutex mu2;
-            #pragma omp parallel for num_threads(3) schedule(dynamic)
-            for (size_t j = 0; j < 3; ++j) {
-                for (size_t i = j; i < vector.size(); i += 3) {
-                    if (i % 130 == 1) {
-                        uint64_t val = (++counter) % w;
-                        EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
-                        std::lock_guard<std::mutex> lock(mu2);
-                        vector[i] = val;
-                    }
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t i = 0; i < vector.size(); ++i) {
+                if (i % 130 == 1) {
+                    uint64_t val = (++counter) % w;
+                    EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+                    std::lock_guard<std::mutex> lock(mu2);
+                    vector[i] = val;
                 }
             }
 
@@ -198,14 +196,12 @@ TEST(IntVector, atomic_fetch_and_add_sparse) {
 
             std::mutex mu;
             std::mutex mu2;
-            #pragma omp parallel for num_threads(3) schedule(dynamic)
-            for (size_t j = 0; j < 3; ++j) {
-                for (size_t i = j; i < vector.size(); i += 3) {
-                    if (i % 130 == 1) {
-                        EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
-                        std::lock_guard<std::mutex> lock(mu2);
-                        ++vector[i];
-                    }
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t i = 0; i < vector.size(); ++i) {
+                if (i % 130 == 1) {
+                    EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
+                    std::lock_guard<std::mutex> lock(mu2);
+                    ++vector[i];
                 }
             }
 
@@ -226,15 +222,13 @@ TEST(IntVector, atomic_exchange_and_fetch_sparse_every_4) {
 
             std::mutex mu;
             std::mutex mu2;
-            #pragma omp parallel for num_threads(3) schedule(dynamic)
-            for (size_t j = 0; j < 3; ++j) {
-                for (size_t i = j; i < vector.size(); i += 3) {
-                    if (i % 130 == 1) {
-                        uint64_t val = (++counter) % w;
-                        EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
-                        std::lock_guard<std::mutex> lock(mu2);
-                        vector[i] = val;
-                    }
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t i = 0; i < vector.size(); ++i) {
+                if (i % 130 == 1) {
+                    uint64_t val = (++counter) % w;
+                    EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+                    std::lock_guard<std::mutex> lock(mu2);
+                    vector[i] = val;
                 }
             }
 
@@ -254,14 +248,12 @@ TEST(IntVector, atomic_fetch_and_add_sparse_every_4) {
 
             std::mutex mu;
             std::mutex mu2;
-            #pragma omp parallel for num_threads(3) schedule(dynamic)
-            for (size_t j = 0; j < 3; ++j) {
-                for (size_t i = j; i < vector.size(); i += 3) {
-                    if (i % 130 == 1) {
-                        EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
-                        std::lock_guard<std::mutex> lock(mu2);
-                        ++vector[i];
-                    }
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t i = 0; i < vector.size(); ++i) {
+                if (i % 130 == 1) {
+                    EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder));
+                    std::lock_guard<std::mutex> lock(mu2);
+                    ++vector[i];
                 }
             }
 

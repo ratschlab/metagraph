@@ -95,15 +95,16 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     }, num_threads);
 }
 
-sdsl::int_vector<> fill_count_vector(const AnnotatedDBG &anno_graph,
-                                     const std::vector<Label> &labels_in,
-                                     const std::vector<Label> &labels_out,
-                                     size_t num_threads) {
+sdsl::int_vector<>
+construct_label_count_vector(const AnnotatedDBG &anno_graph,
+                             const std::vector<Label> &labels_in,
+                             const std::vector<Label> &labels_out,
+                             size_t num_threads) {
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
     // in the beginning, it's the correct size, but double width
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::int_vector<> counts(anno_graph.get_graph().max_index() + 1, 0, width << 1);
+    auto counts = aligned_int_vector(anno_graph.get_graph().max_index() + 1, 0, width << 1);
 
     std::mutex backup_mutex;
     constexpr std::memory_order memorder = std::memory_order_relaxed;
@@ -199,10 +200,9 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
         // If at least one infrequent label exists, construct a count vector to
         // reduce calls to the annotator
         if (labels_in_infrequent.size() || labels_out_infrequent.size()) {
-            sdsl::int_vector<> counts = fill_count_vector(anno_graph,
-                                                          labels_in_infrequent,
-                                                          labels_out_infrequent,
-                                                          num_threads);
+            sdsl::int_vector<> counts = construct_label_count_vector(
+                anno_graph, labels_in_infrequent, labels_out_infrequent, num_threads
+            );
 
             // the width of counts is double, since it's both in and out counts interleaved
             uint32_t width = counts.width() >> 1;
