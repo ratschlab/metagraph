@@ -26,8 +26,7 @@ typedef annot::MultiLabelEncoded<std::string> Annotator;
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy,
-                      size_t num_threads,
-                      bool verbose) {
+                      size_t num_threads) {
     std::cout << "====================== BOSS STATS ======================" << std::endl;
     std::cout << "k: " << boss_graph.get_k() + 1 << std::endl;
     std::cout << "nodes (k-1): " << boss_graph.num_nodes() << std::endl;
@@ -57,7 +56,7 @@ void print_boss_stats(const graph::boss::BOSS &boss_graph,
 
     if (count_dummy) {
         uint64_t num_source_dummy_edges
-            = boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose);
+            = boss_graph.mark_source_dummy_edges(NULL, num_threads);
         uint64_t num_sink_dummy_edges = boss_graph.mark_sink_dummy_edges(NULL);
 
         std::cout << "dummy source edges: " << num_source_dummy_edges << std::endl;
@@ -182,10 +181,7 @@ int print_stats(Config *config) {
         if (auto dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
             const auto &boss_graph = dbg_succ->get_boss();
 
-            print_boss_stats(boss_graph,
-                             config->count_dummy,
-                             get_num_threads(),
-                             get_verbose());
+            print_boss_stats(boss_graph, config->count_dummy, get_num_threads());
 
             if (config->print_graph_internal_repr) {
                 logger->info("Printing internal representation");

@@ -31,6 +31,7 @@ namespace graph {
 namespace boss {
 
 using utils::remove_suffix;
+using common::logger;
 
 #define CHECK_INDEX(idx) \
     assert(idx < W_->size()); \
@@ -1420,44 +1421,46 @@ void BOSS::edge_DFT(edge_index start,
  * Traverse the entire dummy subtree
  * and find all redundant dummy edges.
  */
-template <typename Array, typename U>
+template <class Callback>
 void traverse_dummy_edges(const BOSS &graph,
                           edge_index subtree_root,
                           size_t check_depth,
-                          Array *redundant_mask,
-                          Array *traversed_mask,
-                          U *num_dummy_traversed,
-                          bool verbose) {
+                          const Callback &call_edge,
+                          sdsl::bit_vector *redundant_mask,
+                          sdsl::bit_vector *traversed_mask) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
     assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
 
     if (!check_depth)
         return;
 
+    constexpr bool async = true;
+
     std::vector<bool> redundant_path;
-    uint64_t num_edges_traversed = 0;
 
     // start traversal in the given node
     graph.edge_DFT(subtree_root,
         [&](edge_index) {
             redundant_path.push_back(true);
-            num_edges_traversed++;
         },
         [&](edge_index edge) {
             assert(graph.get_W(edge) < graph.alph_size);
 
+            call_edge(edge, redundant_path.size());
+
+            // TODO: remove this mask and use |call_edge| instead
             if (traversed_mask)
-                (*traversed_mask)[edge] = 1;
+                set_bit(traversed_mask->data(), edge, async, __ATOMIC_RELAXED);
 
             if (redundant_path.back())
-                (*redundant_mask)[edge] = 2;
+                set_bit(redundant_mask->data(), edge, async);
 
             redundant_path.pop_back();
         },
         [&](edge_index edge) {
             if (redundant_path.size() == check_depth) {
                 if (!redundant_mask
-                        || (!(*redundant_mask)[edge]
+                        || (!fetch_bit(redundant_mask->data(), edge, async)
                                 && graph.is_single_incoming(edge, graph.get_W(edge)))) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
@@ -1470,11 +1473,6 @@ void traverse_dummy_edges(const BOSS &graph,
             }
         }
     );
-    *num_dummy_traversed += num_edges_traversed;
-    if (verbose) {
-        std::cout << "Source dummy edges traversed: "
-                        + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
-    }
     assert(redundant_path.empty());
 }
 
@@ -1485,8 +1483,7 @@ void traverse_dummy_edges(const BOSS &graph,
 uint64_t traverse_dummy_edges(const BOSS &graph,
                               sdsl::bit_vector *redundant_mask,
                               sdsl::bit_vector *traversed_mask,
-                              size_t num_threads,
-                              bool verbose) {
+                              size_t num_threads) {
     assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
     assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
 
@@ -1494,34 +1491,30 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
         (*traversed_mask)[1] = true;
 
     if (graph.get_last(1))
-        return 1;
+        return 1; // the only dummy k-mer is the main dummy source
 
-    if (num_threads <= 1 || graph.get_k() <= 1) {
-        // assume the main dummy source node already traversed
-        uint64_t num_dummy_traversed = 1;
-        // start traversal in the main dummy source node
+    // assume the main dummy source node already traversed
+    std::atomic<uint64_t> num_dummy_traversed = 1;
+
+    auto on_dummy = [&](edge_index /*edge*/, size_t /*depth*/) {
+        num_dummy_traversed++;
+    };
+
+    if (graph.get_k() <= 1) {
+        // start traversal in the children of the main dummy source
         edge_index root = 2;
         do {
             traverse_dummy_edges(graph, root, graph.get_k(),
-                                 redundant_mask,
-                                 traversed_mask,
-                                 &num_dummy_traversed,
-                                 verbose);
+                                 on_dummy, redundant_mask, traversed_mask);
+            logger->trace("Source dummy edges traversed: {}", num_dummy_traversed);
         } while (!graph.get_last(root++));
 
         return num_dummy_traversed;
     }
 
-    ThreadPool pool(num_threads);
-
-    std::unique_ptr<std::vector<char>> edges_threadsafe;
-    if (redundant_mask || traversed_mask)
-        edges_threadsafe.reset(new std::vector<char>(graph.get_W().size(), 0));
-
-    // assume the main dummy source node already traversed
-    std::atomic<uint64_t> num_dummy_traversed { 1 };
-
     const size_t tree_split_depth = std::min(size_t(6), graph.get_k() / 2);
+
+    std::vector<edge_index> start_edges;
 
     // run traversal for subtree at depth |tree_split_depth| in parallel
     edge_index root = 2;
@@ -1532,47 +1525,36 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
             [&](edge_index) { depth--; },
             [&](edge_index edge) {
                 if (depth == tree_split_depth) {
-                    pool.enqueue([](const auto& ...args) {
-                                    traverse_dummy_edges(args...);
-                                 },
-                                 std::ref(graph),
-                                 edge, 1 + graph.get_k() - tree_split_depth,
-                                 edges_threadsafe.get(),
-                                 edges_threadsafe.get(),
-                                 &num_dummy_traversed, verbose);
-                    num_dummy_traversed--;
+                    start_edges.push_back(edge);
                     return true;
                 } else {
-                    return false;
+                    return false; // go deeper
                 }
             }
         );
         assert(!depth);
     } while (!graph.get_last(root++));
 
-    pool.join();
-    if (verbose) {
-        std::cout << "All subtrees are done" << std::endl;
+    ProgressBar progress_bar(start_edges.size(), "Dummy subtrees traversed",
+                             std::cerr, !common::get_verbose());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < start_edges.size(); ++i) {
+        traverse_dummy_edges(graph, start_edges[i], 1 + graph.get_k() - tree_split_depth,
+            on_dummy, redundant_mask, traversed_mask
+        );
+        ++progress_bar;
+        // nodes at depth |tree_split_depth| will be visited again
+        num_dummy_traversed--;
     }
 
-    if (edges_threadsafe.get()) {
-        for (edge_index i = 0; i < edges_threadsafe->size(); ++i) {
-            if ((*edges_threadsafe)[i] && traversed_mask)
-                (*traversed_mask)[i] = true;
-            if ((*edges_threadsafe)[i] == 2 && redundant_mask)
-                (*redundant_mask)[i] = true;
-        }
-        edges_threadsafe.reset();
-    }
+    logger->trace("All subtrees are traversed");
 
-    // propagate the results from the subtrees
+    // traverse all dummy nodes at depth <= tree_split_depth
     root = 2;
     do {
         traverse_dummy_edges(graph, root, tree_split_depth,
-                             redundant_mask,
-                             traversed_mask,
-                             &num_dummy_traversed,
-                             verbose);
+                             on_dummy, redundant_mask, traversed_mask);
     } while (!graph.get_last(root++));
 
     return num_dummy_traversed;
@@ -1604,7 +1586,7 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
     switch_state(State::STAT);
 
     auto num_dummy_traversed = traverse_dummy_edges(
-        *this, &redundant_dummy_edges_mask, source_dummy_edges, num_threads, verbose
+        *this, &redundant_dummy_edges_mask, source_dummy_edges, num_threads
     );
 
     if (verbose) {
@@ -1627,11 +1609,10 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
 }
 
 uint64_t BOSS::mark_source_dummy_edges(sdsl::bit_vector *mask,
-                                       size_t num_threads,
-                                       bool verbose) const {
+                                       size_t num_threads) const {
     assert(!mask || mask->size() == W_->size());
 
-    return traverse_dummy_edges(*this, NULL, mask, num_threads, verbose);
+    return traverse_dummy_edges(*this, NULL, mask, num_threads);
 }
 
 uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
