@@ -82,7 +82,7 @@ bsub -J "cluster" \
      -n 48 -R "rusage[mem=42500] span[hosts=1]" \
     "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 5000000 \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
             --parallel 96 \
@@ -94,7 +94,7 @@ bsub -J "cluster" \
      -n 48 -R "rusage[mem=37500] span[hosts=1]" \
     "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 1000000 \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_1M.csv \
             --parallel 96 \
@@ -197,7 +197,7 @@ bsub -J "cluster" \
      -n 48 -R "rusage[mem=42500] span[hosts=1]" \
     "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 5000000 \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
             --parallel 96 \

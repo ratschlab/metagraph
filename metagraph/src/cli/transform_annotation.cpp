@@ -174,6 +174,41 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
+        if (!config->greedy_brwt) {
+            logger->trace("Computing total number of columns");
+            size_t num_columns = 0;
+            for (std::string file : files) {
+                file = utils::remove_suffix(file, ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kExtension;
+                std::ifstream instream(file, std::ios::binary);
+                if (!instream.good()) {
+                    logger->error("Can't read from {}", file);
+                    exit(1);
+                }
+                std::ignore = load_number(instream);
+
+                annot::LabelEncoder<std::string> label_encoder;
+                if (!label_encoder.load(instream)) {
+                    logger->error("Can't load label encoder from {}", file);
+                    exit(1);
+                }
+
+                num_columns += label_encoder.size();
+            }
+
+            logger->trace("Generating trivial linkage matrix for {} columns",
+                          num_columns);
+
+            binmat::LinkageMatrix linkage_matrix
+                    = binmat::agglomerative_linkage_trivial(num_columns);
+
+            std::ofstream out(config->outfbase);
+            out << linkage_matrix.format(CSVFormat) << std::endl;
+
+            logger->trace("Linkage matrix is written to {}", config->outfbase);
+            return 0;
+        }
+
         logger->trace("Loading annotation and sampling subcolumns of size {}",
                       config->num_rows_subsampled);
 

@@ -99,7 +99,8 @@ void parse_sequences(const std::string &file,
     } else if (file_format(file) == "FASTA"
                 || file_format(file) == "FASTQ") {
 
-        if (false && std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
+        if (config.count_kmers
+            && std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
 
             mtg::common::logger->trace("Parsing k-mer counts from '{}'",
                 utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
