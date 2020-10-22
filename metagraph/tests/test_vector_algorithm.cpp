@@ -160,7 +160,7 @@ TEST(IntVector, call_nonzeros_sparse_every_4) {
     }
 }
 
-TEST(IntVector, atomic_exchange_and_fetch) {
+TEST(IntVector, atomic_exchange) {
     for (size_t w = 1; w <= 64; ++w) {
         for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
             sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
@@ -179,6 +179,30 @@ TEST(IntVector, atomic_exchange_and_fetch) {
     }
 }
 
+TEST(IntVector, atomic_fetch) {
+    for (size_t w = 1; w <= 64; ++w) {
+        for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+            uint64_t val = sdsl::bits::lo_set[w];
+
+            std::mutex mu;
+            std::atomic_thread_fence(std::memory_order_release);
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+            }
+
+            #pragma omp parallel for num_threads(3) schedule(dynamic)
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+            }
+
+            // ensure everything is synced before deallocating
+            std::atomic_thread_fence(std::memory_order_acquire);
+        }
+    }
+}
+
 TEST(IntVector, atomic_fetch_and_add_val) {
     for (size_t w = 1; w <= 64; ++w) {
         for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
@@ -191,6 +215,16 @@ TEST(IntVector, atomic_fetch_and_add_val) {
             for (size_t j = 0; j < val; ++j) {
                 for (size_t i = 0; i < vector_atomic.size(); ++i) {
                     atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder);
+
+                    // some added contention
+                    atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                    size_t r = 2;
+                    size_t i_min = i - std::min(i, r);
+                    size_t i_max = std::min(i + r, vector_atomic.size());
+                    for (size_t k = i_min; k < i_max; ++k) {
+                        atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                    }
                 }
             }
 
@@ -215,6 +249,16 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
                 for (size_t i = 0; i < vector_atomic.size(); ++i) {
                     EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
                                                        mu, memorder) & set_val);
+
+                    // some added contention
+                    atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                    size_t r = 5; // this test is faster, so we can make this wider
+                    size_t i_min = i - std::min(i, r);
+                    size_t i_max = std::min(i + r, vector_atomic.size());
+                    for (size_t k = i_min; k < i_max; ++k) {
+                        atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                    }
                 }
             }
 
@@ -224,10 +268,10 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
     }
 }
 
-TEST(IntVector, atomic_fetch_and_add_all_bits_except_first) {
+TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
     for (size_t w = 1; w <= 64; ++w) {
         for (auto memorder : { __ATOMIC_RELAXED, __ATOMIC_SEQ_CST }) {
-            for (size_t s = 0; s < w; ++s) {
+            for (size_t s = 0; s < w; s += 3) {
                 sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
                 uint64_t val = sdsl::bits::lo_set[w] ^ (1llu << s);
 
@@ -240,6 +284,16 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_first) {
                         for (size_t i = 0; i < vector_atomic.size(); ++i) {
                             EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
                                                                mu, memorder) & set_val);
+
+                            // some added contention
+                            atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                            size_t r = 2;
+                            size_t i_min = i - std::min(i, r);
+                            size_t i_max = std::min(i + r, vector_atomic.size());
+                            for (size_t k = i_min; k < i_max; ++k) {
+                                atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                            }
                         }
                     }
                 }
