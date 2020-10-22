@@ -354,7 +354,6 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
     // TODO: add method max_canonical_index() and call it here without casts
     if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_.get()))
         return canonical->get_graph().max_index() == annotator_->num_objects();
-
     return graph_->max_index() == annotator_->num_objects();
 }
 

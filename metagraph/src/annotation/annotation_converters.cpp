@@ -225,7 +225,6 @@ convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotat
                 utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
             },
             num_columns, num_rows, num_set_bits);
-
     return std::make_unique<RowSparseAnnotator>(std::move(matrix),
                                                 annotator.get_label_encoder());
 }

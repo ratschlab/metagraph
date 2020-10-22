@@ -42,7 +42,7 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> R
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
 template <>
-inline const std::string RowSparseAnnotator::kExtension = ".sparse.annodbg";
+inline const std::string RowSparseAnnotator::kExtension = ".row_sparse.annodbg";
 template <>
 inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
 template <>

@@ -115,11 +115,12 @@ MultiLabelEncoded<LabelType>::get(Index i) const {
 }
 
 template <typename LabelType>
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
+[[clang::optnone]] std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
 MultiLabelEncoded<LabelType>
 ::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
                size_t min_count,
                size_t count_cap) const {
+#pragma clang optimize off
     assert(count_cap >= min_count);
 
     if (!count_cap)

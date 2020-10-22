@@ -536,12 +536,10 @@ int transform_annotation(Config *config) {
                 std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
                         = convert(*row_diff_anno);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
-                std::string extension = RowDiffRowSparseAnnotator::kExtension + ".annodbg";
-                std::string out_file
-                        = utils::remove_suffix(config->outfbase, extension) + extension;
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
                         .load_anchor(config->anchor_fname);
-                row_sparse->serialize(out_file);
+                logger->trace("Serializing to '{}'", config->outfbase);
+                row_sparse->serialize(config->outfbase);
             }
         }
     } else {

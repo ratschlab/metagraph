@@ -60,12 +60,12 @@ TEST(RowSparse, Move) {
       }
     }, 4, 4, 4);
     annot::binmat::RowSparse other = std::move(under_test);
-    EXPECT_EQ(4, under_test.num_relations());
-    EXPECT_EQ(4, under_test.num_columns());
-    EXPECT_EQ(4, under_test.num_rows());
+    EXPECT_EQ(4, other.num_relations());
+    EXPECT_EQ(4, other.num_columns());
+    EXPECT_EQ(4, other.num_rows());
     for (uint32_t i = 0; i < 4; ++i) {
         for(uint32_t j = 0; j < 4; ++j) {
-            ASSERT_EQ(under_test.get(i,j), i == j);
+            ASSERT_EQ(other.get(i,j), i == j);
         }
     }
 }
