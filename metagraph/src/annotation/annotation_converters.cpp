@@ -1129,7 +1129,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                     row_reduction_fname += ".unopt";
 
                 if (std::filesystem::exists(row_reduction_fname)) {
-                    logger->warn("Found row reduction vector {}. Removing...",
+                    logger->warn("Found row reduction vector {}, will be overwritten",
                                  row_reduction_fname);
                     std::filesystem::remove(row_reduction_fname);
                 }
