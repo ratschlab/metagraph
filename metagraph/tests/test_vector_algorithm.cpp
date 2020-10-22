@@ -248,7 +248,7 @@ TEST(IntVector, atomic_fetch_and_add_val) {
 
                     size_t r = 2;
                     size_t i_min = i - std::min(i, r);
-                    size_t i_max = std::min(i + r, vector_atomic.size());
+                    size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
                     for (size_t k = i_min; k < i_max; ++k) {
                         atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
                     }
@@ -282,7 +282,7 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
 
                     size_t r = 5; // this test is faster, so we can make this wider
                     size_t i_min = i - std::min(i, r);
-                    size_t i_max = std::min(i + r, vector_atomic.size());
+                    size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
                     for (size_t k = i_min; k < i_max; ++k) {
                         atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
                     }
@@ -317,7 +317,7 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
 
                             size_t r = 2;
                             size_t i_min = i - std::min(i, r);
-                            size_t i_max = std::min(i + r, vector_atomic.size());
+                            size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
                             for (size_t k = i_min; k < i_max; ++k) {
                                 atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
                             }
