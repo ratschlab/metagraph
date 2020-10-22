@@ -16,14 +16,25 @@ sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
 
 template <class Vector>
-inline sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_number);
+inline sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_number) {
+    if constexpr(std::is_same_v<Vector, sdsl::int_vector<>>) {
+          if (bits_per_number == vector.width())
+              return vector;
+      }
+
+      sdsl::int_vector<> packed(vector.size(), 0, bits_per_number);
+      for (uint64_t i = 0; i < vector.size(); ++i) {
+          packed[i] = vector[i];
+      }
+      return packed;
+}
 
 sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t bits_per_number);
 
 
 /**
  * Atomic bit fetching, setting, and unsetting on packed vectors.
- * fetch_and_* return the old values. The default mo __ATOMIC_SEQ_CST
+ * fetch_and_* return the old values. The default memory order __ATOMIC_SEQ_CST
  * enforces the ordering of writes and reads across threads. See
  * https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
  * for more details.
@@ -193,7 +204,7 @@ inline sdsl::int_vector<t_width> aligned_int_vector(size_t size = 0, uint64_t va
                                                     size_t alignment = 8);
 
 inline sdsl::bit_vector aligned_bit_vector(size_t size = 0,
-                                           bool val = false,
+                                           bool val = 0,
                                            size_t alignment = 8) {
     return aligned_int_vector<1>(size, val, 1, alignment);
 }
@@ -257,21 +268,6 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
 ////////////////////////////////////////////////////////////////
 //                      IMPLEMENTATIONS                       //
 ////////////////////////////////////////////////////////////////
-
-template <class Vector>
-inline sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_number) {
-    if constexpr(std::is_same_v<Vector, sdsl::int_vector<>>) {
-        if (bits_per_number == vector.width())
-            return vector;
-    }
-
-    sdsl::int_vector<> packed(vector.size(), 0, bits_per_number);
-    for (uint64_t i = 0; i < vector.size(); ++i) {
-        packed[i] = vector[i];
-    }
-    return packed;
-}
-
 
 inline bool fetch_and_set_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
     const uint64_t mask = (1llu << (i & 0x3F));
@@ -519,9 +515,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
 
 
 template <class Bitmap, class Callback>
-inline void call_ones(const Bitmap &vector,
-                      uint64_t begin, uint64_t end,
-                      Callback callback) {
+void call_ones(const Bitmap &vector, uint64_t begin, uint64_t end, Callback callback) {
     assert(begin <= end);
     assert(end <= vector.size());
 
@@ -553,11 +547,11 @@ inline void call_ones(const Bitmap &vector,
 }
 
 template <class Callback>
-inline void call_ones(const sdsl::bit_vector &vector,
-                      uint64_t begin, uint64_t end,
-                      Callback callback,
-                      bool atomic,
-                      int mo) {
+void call_ones(const sdsl::bit_vector &vector,
+               uint64_t begin, uint64_t end,
+               Callback callback,
+               bool atomic,
+               int mo) {
     if (!atomic) {
         call_ones(vector, begin, end, callback);
         return;
@@ -594,9 +588,7 @@ inline void call_ones(const sdsl::bit_vector &vector,
 }
 
 template <class Bitmap, class Callback>
-inline void call_zeros(const Bitmap &vector,
-                       uint64_t begin, uint64_t end,
-                       Callback callback) {
+void call_zeros(const Bitmap &vector, uint64_t begin, uint64_t end, Callback callback) {
     assert(begin <= end);
     assert(end <= vector.size());
 
@@ -628,11 +620,11 @@ inline void call_zeros(const Bitmap &vector,
 }
 
 template <class Callback>
-inline void call_zeros(const sdsl::bit_vector &vector,
-                       uint64_t begin, uint64_t end,
-                       Callback callback,
-                       bool atomic,
-                       int mo) {
+void call_zeros(const sdsl::bit_vector &vector,
+                uint64_t begin, uint64_t end,
+                Callback callback,
+                bool atomic,
+                int mo) {
     if (!atomic) {
         call_zeros(vector, begin, end, callback);
         return;
@@ -669,9 +661,9 @@ inline void call_zeros(const sdsl::bit_vector &vector,
 }
 
 template <class Callback>
-inline void call_nonzeros(const sdsl::int_vector<> &vector,
-                          uint64_t begin, uint64_t end,
-                          Callback callback) {
+void call_nonzeros(const sdsl::int_vector<> &vector,
+                   uint64_t begin, uint64_t end,
+                   Callback callback) {
     if (begin >= end)
         return;
 
