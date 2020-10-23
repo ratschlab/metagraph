@@ -166,6 +166,7 @@ void print_stats(const Annotator &annotation) {
                                     / annotation.num_labels() << std::endl;
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
+
     using namespace annot::binmat;
 
     if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {

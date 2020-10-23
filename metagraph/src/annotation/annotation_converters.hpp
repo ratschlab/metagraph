@@ -127,7 +127,6 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                       const std::string &graph_file,
                       const std::string &out_file);
 
-
 } // namespace annot
 } // namespace mtg
 

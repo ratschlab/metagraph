@@ -544,7 +544,7 @@ int transform_annotation(Config *config) {
         }
     } else {
         if (config->anno_type == Config::RowDiff) {
-            for(const auto& file : files) {
+            for(const auto &file : files) {
                 std::unique_ptr<MultiLabelEncoded<std::string>> annotator
                         = initialize_annotation(file, *config);
                 if (!annotator->load(file)) {

@@ -26,7 +26,7 @@ bool RowDiff<BaseMatrix>::load(const std::string &filename) {
 }
 
 template <class BaseMatrix>
-void RowDiff<BaseMatrix>::load_anchor(const std::string& filename) {
+void RowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read anchor file: {}", filename);
         std::exit(1);

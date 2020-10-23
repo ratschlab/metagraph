@@ -74,7 +74,7 @@ class RowDiff : public BinaryMatrix {
     SetBitPositions get_row(Row row) const override;
 
     inline bool load(std::istream &f) override;
-    inline void serialize(std::ostream &f) const override ;
+    inline void serialize(std::ostream &f) const override;
 
     void serialize(const std::string &filename) const;
     bool load(const std::string &filename);
