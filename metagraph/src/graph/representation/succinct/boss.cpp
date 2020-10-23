@@ -2410,9 +2410,6 @@ void call_row_diff_path(const BOSS &boss,
     if (fetch_bit(visited->data(), edge, async))
         return;
 
-    std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
-    assert(sequence.back() != boss.kSentinelCode);
-
     std::vector<edge_index> path;
     path.reserve(100);
 
