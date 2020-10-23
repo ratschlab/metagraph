@@ -546,9 +546,8 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     }
     sdsl::bit_vector anchors = old_anchors.convert_to<sdsl::bit_vector>();
     for (uint64_t i = 0; i < row_reduction.size(); ++i) {
-        // check if the reduction is negative or zero
-        uint64_t delta = row_reduction[i];
-        if (!delta || delta >> (row_reduction.width() - 1))
+        // check if the reduction is negative
+        if (row_reduction[i] >> (row_reduction.width() - 1))
             anchors[i] = true;
     }
     anchor_bv_type ranchors(std::move(anchors));
