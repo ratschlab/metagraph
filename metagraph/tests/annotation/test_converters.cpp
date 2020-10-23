@@ -157,22 +157,40 @@ std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string>
 
 TEST(RowDiff, succ) {
     const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ/";
+    const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
+    const std::string succ_file = graph_fname + ".succ";
+    const std::string pred_file = graph_fname + ".pred";
+    const std::string pred_boundary_file = graph_fname + ".pred_boundary";
+
+    /**
+     * Graph:
+     *
+     * 1: CAG
+     * 2: ACG
+     * 3: TCA
+     * 4: CGT
+     * 5: GTC
+     *
+     * 2 -> 4 -> 5 -> 3 -> 1
+     */
+
+    const std::vector<std::vector<uint64_t>> expected_succ = {
+        { 0, 0, 0, 0, 0 },
+        { 0, 4, 1, 0, 3 },
+        { 0, 4, 1, 5, 3 } };
+    const std::vector<std::vector<uint64_t>> expected_pred = {
+        {},
+        { 3, 5, 2 },
+        { 3, 5, 2, 4 } };
+    const std::vector<std::vector<bool>> expected_boundary = {
+        { 1, 1, 1, 1, 1 },
+        { 0, 1, 1, 0, 1, 0, 1, 1 },
+        { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
+    };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
         std::filesystem::create_directories(dst_dir);
-
-        const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
-        const std::string succ_file = graph_fname + ".succ";
-        const std::string pred_file = graph_fname + ".pred";
-        const std::string pred_boundary_file = graph_fname + ".pred_boundary";
-        const std::vector<std::vector<uint64_t>> expected_succ
-                = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
-        const std::vector<std::vector<uint64_t>> expected_pred
-                = { {}, { 3, 2, 4 }, { 3, 5, 2, 4 } };
-        const std::vector<std::vector<bool>> expected_boundary = {
-            { 1, 1, 1, 1, 1 }, { 0, 1, 1, 1, 0, 1, 0, 1 }, { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
-        };
 
         std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
         graph->serialize(graph_fname);
@@ -194,7 +212,7 @@ TEST(RowDiff, succ) {
         uint32_t idx = max_depth / 2;
         ASSERT_EQ(5, succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[idx][i], succ[i]);
+            EXPECT_EQ(expected_succ[idx][i], succ[i]) << max_depth << " " << i;;
         }
 
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
@@ -210,7 +228,7 @@ TEST(RowDiff, succ) {
 
         ASSERT_EQ(expected_boundary[idx].size(), boundary.size());
         for(uint32_t i = 0; i < expected_boundary[idx].size(); ++i) {
-            EXPECT_EQ(expected_boundary[idx][i], boundary[i]);
+            EXPECT_EQ(expected_boundary[idx][i], boundary[i]) << max_depth << " " << i;
         }
     }
 

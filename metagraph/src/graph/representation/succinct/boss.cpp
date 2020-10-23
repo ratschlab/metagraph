@@ -2343,11 +2343,10 @@ void call_paths(const BOSS &boss,
 /**
  * Updates #terminal and #near_terminal based on the given path.
  * One terminal node is set every max_length nodes in the path, and all nodes before it
- * are marked as near_terminal.
+ * are marked in #near_terminal.
  * The last node in the path is marked as terminal if:
  *  1. The path length is an exact multiple of max_length, OR
- *  2. The last node in the path is a dead-end, OR
- *  3. The last node into a path merges into a node that is neither terminal nor near
+ *  2. The last node in the path merges into a node that is neither terminal nor near
  *     terminal
  */
 void update_terminal_bits(uint64_t max_length,
@@ -2355,38 +2354,50 @@ void update_terminal_bits(uint64_t max_length,
                           std::vector<edge_index> &&path,
                           sdsl::bit_vector *terminal,
                           sdsl::bit_vector *near_terminal) {
+    assert(next_edge);
+
+    if (path.empty())
+        return;
+
     uint64_t i = 0;
     constexpr bool async = true;
+
+    // set anchors
+    // .........V..........V....*
+    // ||||||||||
+    // max_length
     for (i = 0; i + max_length <= path.size(); i += max_length) {
-        for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
+        for (uint64_t j = i; j + 1 < i + max_length; ++j) {
+            assert(!fetch_bit(terminal->data(), path[j], async));
             set_bit(near_terminal->data(), path[j], async);
         }
+        assert(!fetch_bit(near_terminal->data(), path[i + max_length - 1], async));
         set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
     if (path.size() % max_length == 0) // last node is terminal
         return;
 
-    // mark the last node in the path as terminal if
-    // 1. there are no outgoing edges, OR
-    // 2. we merge into a node that is neither terminal nor near terminal
-    bool is_next_terminal = next_edge && fetch_bit(terminal->data(), next_edge);
-    bool is_next_near_terminal = is_next_terminal
-            || (next_edge && fetch_bit(near_terminal->data(), next_edge));
-    const bool set_terminal = !next_edge || !is_next_near_terminal;
-    if (set_terminal) {
-        set_bit(terminal->data(), path.back(), 1);
+    // current position |i|
+    // .........V..........V....*
+    //                      ^   ^
+    //                      i next_edge
+
+    // skip the path if the next node is close to an anchor and, therefore,
+    // this last segment is close to that anchor too (at most 2 * max_length)
+    if (fetch_bit(near_terminal->data(), next_edge, async)) {
+        assert(!fetch_bit(terminal->data(), next_edge, async));
+        return;
     }
-    // if we set a terminal node or were lucky enough to merge right into a
-    // terminal node, mark the last nodes as near terminal
-    if (set_terminal || is_next_terminal) {
-        for (uint64_t j = i; j < path.size() - 1; ++j) {
-            set_bit(near_terminal->data(), path[j], async);
-        }
+
+    if (!fetch_bit(terminal->data(), next_edge, async)) {
+        set_bit(terminal->data(), path.back(), async);
+        path.pop_back();
     }
-    std::optional<edge_index> anchor_edge;
-    if (is_next_near_terminal) {
-        anchor_edge = next_edge;
+
+    // we set a new anchor, thus will mark its predecessors as close to it
+    while (i < path.size()) {
+        set_bit(near_terminal->data(), path[i++], async);
     }
 }
 
@@ -2401,49 +2412,33 @@ void call_row_diff_path(const BOSS &boss,
                         sdsl::bit_vector *visited,
                         sdsl::bit_vector *terminal,
                         sdsl::bit_vector *near_terminal,
-                        sdsl::bit_vector *dummy,
                         ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
+
+    // make sure it's not a dummy k-mer
+    assert(boss.get_node_seq(edge).front() != boss.kSentinelCode);
 
     constexpr bool async = true;
 
     if (fetch_bit(visited->data(), edge, async))
         return;
 
-    std::vector<TAlphabet> sequence = boss.get_node_seq(edge);
-    assert(sequence.back() != boss.kSentinelCode);
-
     std::vector<edge_index> path;
     path.reserve(100);
 
-    // traverse simple path until we reach its tail or a fork where the first edge
-    // has already been visited
+    // traverse unvisited simple path, always pick the last outgoing according
+    // to the routing in row-diff
     while (!fetch_and_set_bit(visited->data(), edge, async)) {
         assert(edge > 0);
         ++progress_bar;
 
-        // visit the edge
-        TAlphabet d = boss.get_W(edge) % boss.alph_size;
-
-        // stop the traversal on dummy sink nodes
-        if (d == boss.kSentinelCode) {
-            set_bit(dummy->data(), edge, async);
-            edge = 0;
-            break;
-        }
-
         path.push_back(edge);
 
+        TAlphabet d = boss.get_W(edge) % boss.alph_size;
+        assert(d != boss.kSentinelCode && "all sinks must be visited before");
         // make one traversal step (this will pick the last outgoing edge)
         edge = boss.fwd(edge, d);
     }
-
-    if (path.empty())
-        return;
-
-    // make sure no dummy kmers are in the path
-    assert(boss.get_node_seq(path.front()).front() != boss.kSentinelCode
-           && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
 
     // mark terminal and near terminal nodes
     update_terminal_bits(max_length, edge, std::move(path), terminal, near_terminal);
@@ -2761,7 +2756,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
     // forward traversal
     traverse_path = [&](edge_index start) {
         call_row_diff_path(*this, start, max_length, &visited,
-                           terminal, &near_terminal, dummy, progress_bar);
+                           terminal, &near_terminal, progress_bar);
     };
     // start traversal from the dummy source edges first ($X...X)
     // they are marked as |dummy| AND NOT |visited|
