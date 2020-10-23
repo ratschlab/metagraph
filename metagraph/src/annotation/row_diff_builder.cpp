@@ -81,7 +81,11 @@ void build_successor(const std::string &graph_fname,
     ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
 
+#ifndef NDEBUG
     const uint64_t batch_size = 10'000'000;
+#else
+    const uint64_t batch_size = 1'000;
+#endif
     // traverse BOSS table in parallel processing blocks of size |batch_size|
     for (uint64_t start = 1; start <= graph.num_nodes(); start += batch_size) {
         std::vector<std::vector<uint64_t>> pred_buf(num_threads);
@@ -97,7 +101,8 @@ void build_successor(const std::string &graph_fname,
                 succ_buf[r].push_back(0);
             } else {
                 const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
-                uint64_t next = d ? graph.boss_to_kmer_index(boss.fwd(boss_idx, d)) : 0;
+                assert(d && "must not be dummy");
+                uint64_t next = graph.boss_to_kmer_index(boss.fwd(boss_idx, d));
                 succ_buf[r].push_back(next);
             }
             // ignore predecessors if boss_idx is not the last outgoing
