@@ -3,7 +3,6 @@ from parameterized import parameterized
 import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
-import glob
 import os
 
 
@@ -44,7 +43,7 @@ class TestBuild(unittest.TestCase):
         construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -341,11 +340,11 @@ class TestBuild(unittest.TestCase):
     def test_build_phase(self, build):
         representation, tmp_dir = build_params[build]
 
-        construct_command = '{exe} build --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
+        construct_command = '{exe} build --phase 2 --mask-dummy --graph {repr} --canonical -k 20 ' \
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -353,11 +352,11 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 ' \
+        construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 -v ' \
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -378,11 +377,11 @@ class TestBuild(unittest.TestCase):
         representation, tmp_dir = build_params[build]
 
         for name in ('graph1', 'graph2'):
-            construct_command = '{exe} build --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
+            construct_command = '{exe} build --phase 2 --mask-dummy --graph {repr} --canonical -k 20 ' \
                                 '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir=tmp_dir,
+                tmp_dir='' if tmp_dir == '' else self.tempdir.name,
                 outfile=self.tempdir.name + '/' + name,
                 input=TEST_DATA_DIR + ('/transcripts_1000.fa' if name == 'graph1' else '/transcripts_100.fa')
             )
@@ -395,7 +394,7 @@ class TestBuild(unittest.TestCase):
                                 '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir=tmp_dir,
+                tmp_dir='' if tmp_dir == '' else self.tempdir.name,
                 outfile=self.tempdir.name + '/' + name,
                 input=TEST_DATA_DIR + ('/transcripts_1000.fa' if name == 'graph1' else '/transcripts_100.fa')
             )

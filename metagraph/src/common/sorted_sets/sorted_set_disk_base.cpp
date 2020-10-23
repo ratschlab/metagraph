@@ -34,11 +34,7 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
 
     if (!is_merging_) {
         is_merging_ = true;
-        // write any residual data left
-        if (!data_.empty()) {
-            sort_and_dedupe();
-            dump_to_file(true /* is_done */);
-        }
+        flush(); // write any residual data left
         if (free_buffer) {
             Vector<T>().swap(data_); // free up the (usually very large) buffer
         }
@@ -49,6 +45,14 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
         total_chunk_size_bytes_ = 0;
     }
     return merge_queue_;
+}
+
+template <typename T>
+void SortedSetDiskBase<T>::flush() {
+    if (!data_.empty()) {
+        sort_and_dedupe();
+        dump_to_file(true /* is_done */);
+    }
 }
 
 template <typename T>

@@ -92,6 +92,8 @@ class KmerCollector {
     //      Use reinterpret_cast to cast them back to k-mers.
     inline Data& data() { join(); return kmers_->data(); }
 
+    inline Container& kmers() { join(); return *kmers_; }
+
     void clear() { join(); kmers_->clear(); }
 
     inline bool is_both_strands_mode() const { return both_strands_mode_; }

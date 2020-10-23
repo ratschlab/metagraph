@@ -493,7 +493,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
-    logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
+    logger->info("Generating dummy-1 source k-mers and dummy sink k-mers...");
 
     static constexpr size_t L = KMER::kBitsPerChar;
     KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
@@ -705,14 +705,22 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                 checkpoint->kmer_dir());
         std::vector<std::string> file_names;
         namespace fs = std::filesystem;
-        for (const auto & entry : fs::directory_iterator(checkpoint->kmer_dir())) {
-            logger->trace("Checking {}", fs::canonical(entry.path()).string());
-            if (!entry.is_directory()
-                || fs::canonical(entry.path()).filename().string().rfind("temp_kmers") != 0) {
-                logger->trace("Not ok!");
-                continue;
+        std::vector<fs::path> entries;
+        if (fs::canonical(checkpoint->kmer_dir()).filename().string().rfind("temp_kmers") == 0) {
+            entries.push_back(checkpoint->kmer_dir());
+        } else {
+            for (const auto & entry : fs::directory_iterator(checkpoint->kmer_dir())) {
+                if (entry.is_directory()
+                    && fs::canonical(entry.path()).filename().string().rfind("temp_kmers")
+                            == 0) {
+                    entries.push_back(entry.path());
+                    continue;
+                }
             }
-            for (const auto &path : fs::directory_iterator(entry.path())) {
+        }
+        for (const fs::path & entry : entries) {
+            logger->trace("Adding chunks in  {}", fs::canonical(entry));
+            for (const auto &path : fs::directory_iterator(entry)) {
                 if (path.is_regular_file()
                     && path.path().filename().string().find("chunk_", 0) == 0
                     && path.path().filename().extension() == "") {
@@ -767,7 +775,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
 
     if (checkpoint->checkpoint() < 6) {
         // generate dummy k-mers of prefix length 1..k
-        logger->trace("Starting generating dummy-1..{} source k-mers...", k);
+        logger->info("Starting generating dummy-1..{} source k-mers...", k);
         for (size_t dummy_pref_len = 1; dummy_pref_len < k; ++dummy_pref_len) {
 
             std::vector<Encoder<KMER_INT>> next_chunks;
@@ -931,14 +939,14 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     template <typename KMER, typename T, typename Container>
     BOSS::Chunk *build_chunk_2bit(Container &kmers) {
-        logger->trace("Reconstructing all required dummy source k-mers...");
-
         Timer timer;
         ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE);
+
+        logger->trace("Reconstructing all required dummy source k-mers...");
         recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_, &checkpoint_);
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
+
         if (checkpoint_.phase() == 2) {
-            logger->info("Phase 2 finished");
             queue.reset();
             return nullptr;
         }
@@ -949,6 +957,15 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     }
 
     BOSS::Chunk* build_chunk() override {
+        if constexpr(utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>) {
+            if (checkpoint_.phase() == 1) {
+                kmer_collector_.kmers().flush();
+                checkpoint_.set_kmer_dir(kmer_collector_.tmp_dir());
+                checkpoint_.set_checkpoint(1);
+                return nullptr;
+            }
+        }
+
         BOSS::Chunk *result;
         typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
 

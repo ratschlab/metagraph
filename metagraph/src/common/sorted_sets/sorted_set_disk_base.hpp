@@ -63,6 +63,9 @@ class SortedSetDiskBase {
      */
     ChunkedWaitQueue<T>& data(bool free_buffer = true);
 
+    /** Flushes the unwritten buffers to disk. */
+    void flush();
+
     /**
      * Returns the files to be merged - useful if the caller prefers to do the merging.
      */
