@@ -30,6 +30,8 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
 }
 
 RowSparse::RowSparse(RowSparse &&other) {
+    num_rows_ = other.num_rows_;
+    num_columns_ = other.num_columns_;
     elements_ = std::move(other.elements_);
     boundary_ = std::move(other.boundary_);
     sdsl::util::init_support(sboundary_, &boundary_);
