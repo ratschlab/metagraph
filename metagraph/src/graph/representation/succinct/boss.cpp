@@ -2349,16 +2349,12 @@ void call_paths(const BOSS &boss,
  *  2. The last node in the path is a dead-end, OR
  *  3. The last node into a path merges into a node that is neither terminal nor near
  *     terminal
- *  If the last node in the path is not terminal then #callback is invoked with the anchor
- *  node against which the last node should be diffed.
  */
-void update_terminal_bits(
-        const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
-        uint64_t max_length,
-        edge_index next_edge,
-        std::vector<edge_index> &&path,
-        sdsl::bit_vector *terminal,
-        sdsl::bit_vector *near_terminal) {
+void update_terminal_bits(uint64_t max_length,
+                          edge_index next_edge,
+                          std::vector<edge_index> &&path,
+                          sdsl::bit_vector *terminal,
+                          sdsl::bit_vector *near_terminal) {
     uint64_t i = 0;
     constexpr bool async = true;
     for (i = 0; i + max_length <= path.size(); i += max_length) {
@@ -2368,10 +2364,8 @@ void update_terminal_bits(
         set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
-    if (path.size() % max_length == 0) { // last node is terminal
-        callback(std::move(path), nullopt);
+    if (path.size() % max_length == 0) // last node is terminal
         return;
-    }
 
     // mark the last node in the path as terminal if
     // 1. there are no outgoing edges, OR
@@ -2394,25 +2388,21 @@ void update_terminal_bits(
     if (is_next_near_terminal) {
         anchor_edge = next_edge;
     }
-    callback(std::move(path), anchor_edge);
 }
 
 /**
- * Traverses the path that can be visited starting from #edge and invokes
- * #callback at the end.
+ * Traverses the path that can be visited starting from #edge.
  * A path ends when there are either no outgoing edges from the current node or if the
  * first node in a fork was already visited.
  */
-void call_row_diff_path(
-        const BOSS &boss,
-        edge_index edge,
-        const BOSS::Call<std::vector<edge_index> &&, std::optional<edge_index>> &callback,
-        uint32_t max_length,
-        sdsl::bit_vector *visited,
-        sdsl::bit_vector *terminal,
-        sdsl::bit_vector *near_terminal,
-        sdsl::bit_vector *dummy,
-        ProgressBar &progress_bar) {
+void call_row_diff_path(const BOSS &boss,
+                        edge_index edge,
+                        uint32_t max_length,
+                        sdsl::bit_vector *visited,
+                        sdsl::bit_vector *terminal,
+                        sdsl::bit_vector *near_terminal,
+                        sdsl::bit_vector *dummy,
+                        ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
     constexpr bool async = true;
@@ -2456,7 +2446,7 @@ void call_row_diff_path(
            && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
 
     // mark terminal and near terminal nodes
-    update_terminal_bits(callback, max_length, edge, std::move(path), terminal, near_terminal);
+    update_terminal_bits(max_length, edge, std::move(path), terminal, near_terminal);
 }
 
 // Returns new edges visited while fetching the path (only returns
@@ -2636,12 +2626,10 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
 }
 
-void BOSS::call_sequences_row_diff(
-        Call<const std::vector<edge_index> &, std::optional<edge_index>> callback,
-        size_t num_threads,
-        size_t max_length,
-        sdsl::bit_vector *terminal,
-        sdsl::bit_vector *dummy) const {
+void BOSS::row_diff_traverse(size_t num_threads,
+                             size_t max_length,
+                             sdsl::bit_vector *terminal,
+                             sdsl::bit_vector *dummy) const {
     dummy->resize((W_->size()));
     sdsl::util::set_to_value(*dummy, false);
     (*dummy)[0] = true;
@@ -2666,13 +2654,12 @@ void BOSS::call_sequences_row_diff(
     sdsl::bit_vector near_terminal(W_->size(), false);
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
-                             "Traverse BOSS",
-                             std::cerr, !common::get_verbose());
+                             "Traverse graph", std::cerr, !common::get_verbose());
 
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
 
     std::function<void(edge_index)> traverse_path = [&](edge_index start) {
-        call_row_diff_path(*this, start, callback, max_length, &visited,
+        call_row_diff_path(*this, start, max_length, &visited,
                            terminal, &near_terminal, dummy, progress_bar);
     };
     std::vector<uint64_t> to_visit;
@@ -2768,7 +2755,6 @@ void BOSS::call_sequences_row_diff(
         } else if (path.size() > 1 && path.size() % max_length != 0) {
             anchor = path[0];
         }
-        callback(std::move(path), anchor);
     };
 
     // traverse cycles in parallel

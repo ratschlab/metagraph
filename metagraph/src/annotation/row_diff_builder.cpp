@@ -51,8 +51,7 @@ void build_successor(const std::string &graph_fname,
     const BOSS &boss = graph.get_boss();
     sdsl::bit_vector terminal;
     sdsl::bit_vector dummy;
-    boss.call_sequences_row_diff([&](const vector<uint64_t> &, std::optional<uint64_t>) {},
-                                 num_threads, max_length, &terminal, &dummy);
+    boss.row_diff_traverse(num_threads, max_length, &terminal, &dummy);
 
     // terminal uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(graph.num_nodes(), 0);
