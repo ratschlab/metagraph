@@ -79,6 +79,6 @@ void RowSparse::serialize(std::ostream &f) const  {
     boundary_.serialize(f);
 }
 
-}
+} // namespace binmat
 } // namespace annot
 } // namespace mtg
