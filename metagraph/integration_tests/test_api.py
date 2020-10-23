@@ -186,6 +186,49 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(ret[0]['seq_description'], '')
 
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+class TestAPIRawChain(TestAPIBase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
+                           canonical=True, primary=(cls.mode == 'primary'))
+
+    def setUp(self) -> None:
+        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
+
+    def _start_server(self, graph, annotation):
+        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
+            exe=METAGRAPH,
+            graph=graph,
+            annot=annotation,
+            host=self.host,
+            port=self.port,
+            threads=2
+        )
+
+        return Popen(shlex.split(construct_command))
+
+    @parameterized.expand([(1,1), (3,1)])
+    def test_api_raw_align_sequence(self, repetitions, dummy_arg):
+        fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
+
+        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+
+        ret = self.raw_post_request('align', payload)
+
+        self.assertEqual(ret.status_code, 200)
+
+        self.assertEqual(len(ret.json()), repetitions)
+        expected = {'seq_description': 'query0',
+                    'alignments': [{'score': 12, 'sequence': 'TCGATC', 'cigar': '6=2S'},
+                                   {'score': 4, 'sequence': 'GA', 'cigar': '6S2='}]}
+        self.assertDictEqual(ret.json()[0], expected)
+
+        self.assertListEqual(
+            [ret.json()[i]['seq_description'] for i in range(repetitions)],
+            [f"query{i}" for i in range(repetitions)]
+        )
+
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
 class TestAPIClient(TestAPIBase):
