@@ -567,7 +567,7 @@ class AlignmentSuffix {
     AlignmentSuffix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config,
                     size_t k)
           : alignment_(&alignment),
-            config_(config),
+            config_(&config),
             begin_it_(alignment_->get_query().data()),
             end_it_(alignment_->get_query_end()),
             ref_begin_it_(alignment_->get_sequence().data()),
@@ -614,7 +614,7 @@ class AlignmentSuffix {
   private:
     typedef typename Alignment<NodeType>::score_t score_t;
     const Alignment<NodeType> *alignment_;
-    DBGAlignerConfig config_;
+    const DBGAlignerConfig *config_;
     const char *begin_it_;
     const char *end_it_;
     const char *ref_begin_it_;
@@ -640,7 +640,7 @@ class AlignmentPrefix {
                     const DeBruijnGraph &graph)
           : alignment_(&alignment),
             graph_(&graph),
-            config_(config),
+            config_(&config),
             begin_it_(alignment_->get_query().data()),
             end_it_(alignment_->get_query_end()),
             ref_begin_it_(alignment_->get_sequence().data()),
@@ -691,7 +691,7 @@ class AlignmentPrefix {
     typedef typename Alignment<NodeType>::score_t score_t;
     const Alignment<NodeType> *alignment_;
     const DeBruijnGraph *graph_;
-    DBGAlignerConfig config_;
+    const DBGAlignerConfig *config_;
     const char *begin_it_;
     const char *end_it_;
     const char *ref_begin_it_;

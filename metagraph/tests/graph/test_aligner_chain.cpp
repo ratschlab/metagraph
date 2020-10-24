@@ -79,4 +79,40 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_3) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerChainTest, align_chain_insert_no_chain_if_full_coverage) {
+    size_t k = 10;
+    std::string reference = "TGAGGATCAGTTCTAGCTTGCTAGC";
+    std::string query     = "TGAGGATCAG""CTAGCTTGCTAGC";
+
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.chain_alignments = true;
+    graph->add_sequence(reference);
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    check_chain(paths, *graph, config, 1);
+    EXPECT_EQ(reference, paths[0].get_sequence());
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
+TYPED_TEST(DBGAlignerChainTest, align_chain_insert1) {
+    size_t k = 10;
+    std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
+    std::string reference2 =             "CTAGCTTGCTAGC";
+    std::string query      = "TGAGGATCAG""CTAGCTTGCTAGC";
+
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.chain_alignments = true;
+    graph->add_sequence(reference1);
+    graph->add_sequence(reference2);
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    check_chain(paths, *graph, config, 2);
+    EXPECT_EQ(query, paths[0].get_sequence() + paths[1].get_sequence());
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 } // namespace

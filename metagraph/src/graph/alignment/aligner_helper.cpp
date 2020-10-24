@@ -352,7 +352,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
             assert(end_it_ > begin_it_);
             assert(ref_end_it_ > ref_begin_it_);
             assert(node_it_ > alignment_->begin());
-            score_ -= config_.get_row(*(end_it_ - 1))[*(ref_end_it_ - 1)];
+            score_ -= config_->get_row(*(end_it_ - 1))[*(ref_end_it_ - 1)];
             --end_it_;
             --ref_end_it_;
 
@@ -375,9 +375,9 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
         case Cigar::Operator::DELETION: {
             assert(end_it_ > begin_it_);
             if ((--(cigar_it_.base())).offset()) {
-                score_ -= config_.gap_extension_penalty;
+                score_ -= config_->gap_extension_penalty;
             } else {
-                score_ -= config_.gap_opening_penalty;
+                score_ -= config_->gap_opening_penalty;
             }
 
             --end_it_;
@@ -387,9 +387,9 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
             assert(ref_end_it_ > ref_begin_it_);
             assert(node_it_ > alignment_->begin());
             if ((--(cigar_it_.base())).offset()) {
-                score_ -= config_.gap_extension_penalty;
+                score_ -= config_->gap_extension_penalty;
             } else {
-                score_ -= config_.gap_opening_penalty;
+                score_ -= config_->gap_opening_penalty;
             }
 
             --ref_end_it_;
@@ -437,16 +437,16 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
         case Cigar::Operator::MISMATCH: {
             assert(begin_it_ < end_it_);
             assert(ref_begin_it_ < ref_end_it_);
-            score_ -= config_.get_row(*begin_it_)[*ref_begin_it_];
+            score_ -= config_->get_row(*begin_it_)[*ref_begin_it_];
             ++begin_it_;
             ++ref_begin_it_;
         } break;
         case Cigar::Operator::DELETION: {
             assert(begin_it_ < end_it_);
             if (cigar_it_.count_left() == 1) {
-                score_ -= config_.gap_opening_penalty;
+                score_ -= config_->gap_opening_penalty;
             } else {
-                score_ -= config_.gap_extension_penalty;
+                score_ -= config_->gap_extension_penalty;
             }
 
             ++begin_it_;
@@ -454,9 +454,9 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
         case Cigar::Operator::INSERTION: {
             assert(ref_begin_it_ < ref_end_it_);
             if (cigar_it_.count_left() == 1) {
-                score_ -= config_.gap_opening_penalty;
+                score_ -= config_->gap_opening_penalty;
             } else {
-                score_ -= config_.gap_extension_penalty;
+                score_ -= config_->gap_extension_penalty;
             }
 
             ++ref_begin_it_;
@@ -486,14 +486,14 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             assert(ref_begin_it_ >= alignment_->get_sequence().data());
             --begin_it_;
             --ref_begin_it_;
-            score_ += config_.get_row(*begin_it_)[*ref_begin_it_];
+            score_ += config_->get_row(*begin_it_)[*ref_begin_it_];
         } break;
         case Cigar::Operator::DELETION: {
             assert(begin_it_ >= alignment_->get_query().data());
             if (cigar_it_.count_left() == 1) {
-                score_ += config_.gap_opening_penalty;
+                score_ += config_->gap_opening_penalty;
             } else {
-                score_ += config_.gap_extension_penalty;
+                score_ += config_->gap_extension_penalty;
             }
 
             --begin_it_;
@@ -502,9 +502,9 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             assert(cigar_it_.get_it() >= alignment_->get_cigar().begin());
             assert(ref_begin_it_ >= alignment_->get_sequence().data());
             if (cigar_it_.count_left() == 1) {
-                score_ += config_.gap_opening_penalty;
+                score_ += config_->gap_opening_penalty;
             } else {
-                score_ += config_.gap_extension_penalty;
+                score_ += config_->gap_extension_penalty;
             }
 
             --ref_begin_it_;
@@ -525,6 +525,12 @@ Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix
     const auto &data = alignment_prefix.data();
     assert(data.get_cigar().size());
 
+    offset_ = data.get_offset() + alignment_prefix.get_offset();
+    if (offset_ == alignment_prefix.get_graph().get_k()) {
+        *this = Alignment();
+        return;
+    }
+
     query_begin_ = data.get_query().data();
     auto prefix_node = alignment_prefix.get_prefix_node();
     if (prefix_node) {
@@ -535,7 +541,6 @@ Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix
 
     cigar_ = data.get_cigar();
     orientation_ = data.get_orientation();
-    offset_ = data.get_offset() + alignment_prefix.get_offset();
     sequence_ = alignment_prefix.get_sequence();
 
     score_ = alignment_prefix.get_score();
