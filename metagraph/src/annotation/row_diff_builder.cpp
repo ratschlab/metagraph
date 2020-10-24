@@ -257,11 +257,11 @@ void traverse_anno_chunked(
 }
 
 
-void convert_batch_to_row_diff(const std::string &graph_fname,
+void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
+                               const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
-                               const std::string &row_reduction_fname,
-                               const std::string &anchors_extension) {
+                               const std::string &row_reduction_fname) {
     if (source_files.empty())
         return;
 
@@ -269,7 +269,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
     anchor_bv_type terminal;
     {
-        std::ifstream f(graph_fname + anchors_extension, std::ios::binary);
+        std::ifstream f(anchors_fname, std::ios::binary);
         terminal.load(f);
     }
 
@@ -282,7 +282,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         if (sources.back()->num_labels() && sources.back()->num_objects() != terminal.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
                           " Vector size: {}, number of rows: {}",
-                          graph_fname + anchors_extension, fname,
+                          anchors_fname, fname,
                           terminal.size(), sources.back()->num_objects());
             std::exit(1);
         }
@@ -326,7 +326,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
                                              1024 * 1024, ROW_REDUCTION_WIDTH);
     traverse_anno_chunked(
-            "Compute diffs", terminal.size(), graph_fname, sources,
+            "Compute diffs", terminal.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
                 for (auto &buffers : set_rows) {
@@ -418,7 +418,7 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix), graph_fname + anchors_extension, false);
+                nullptr, std::move(matrix), anchors_fname, false);
         row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                                              label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
