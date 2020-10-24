@@ -564,7 +564,8 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 template <typename NodeType>
 class AlignmentSuffix {
   public:
-    AlignmentSuffix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config)
+    AlignmentSuffix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config,
+                    size_t k)
           : alignment_(&alignment),
             config_(config),
             begin_it_(alignment_->get_query().data()),
@@ -577,7 +578,8 @@ class AlignmentSuffix {
                           - static_cast<bool>(alignment_->get_end_clipping())),
             cigar_it_(cigar_begin_),
             score_(alignment_->get_score()),
-            trim_(0) {
+            trim_(0),
+            k_(k) {
         assert(cigar_begin_ <= cigar_end_);
         assert(cigar_it_ <= cigar_end_);
     }
@@ -607,6 +609,7 @@ class AlignmentSuffix {
     const Alignment<NodeType>& data() const { return *alignment_; }
 
     size_t get_trim() const { return trim_; }
+    size_t get_k() const { return k_; }
 
   private:
     typedef typename Alignment<NodeType>::score_t score_t;
@@ -621,6 +624,7 @@ class AlignmentSuffix {
     CigarOpIterator cigar_it_;
     score_t score_;
     size_t trim_;
+    size_t k_;
 };
 
 template <typename NodeType>

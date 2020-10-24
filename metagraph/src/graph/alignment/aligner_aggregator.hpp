@@ -70,23 +70,33 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         // alignment chaining
         bool updated = false;
         if (!alignment.get_orientation()) {
+            AlignmentSuffix suffix(alignment, config_, graph_.get_k());
             const std::string_view aln_query = alignment.get_query();
             auto start = best_score_.begin() + (aln_query.data() - query_.data());
             auto end = start + aln_query.size();
             for (auto it = start; it != end; ++it) {
-                if (alignment.get_score() > *it) {
-                    *it = alignment.get_score();
+                if (suffix.get_score() > *it) {
+                    *it = suffix.get_score();
                     updated = true;
+                }
+                ++suffix;
+                while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                    ++suffix;
                 }
             }
         } else {
+            AlignmentSuffix suffix(alignment, config_, graph_.get_k());
             const std::string_view aln_query = alignment.get_query();
             auto start = best_score_.rbegin() + (aln_query.data() - rc_query_.data());
             auto end = start + aln_query.size();
             for (auto it = start; it != end; ++it) {
-                if (alignment.get_score() > *it) {
-                    *it = alignment.get_score();
+                if (suffix.get_score() > *it) {
+                    *it = suffix.get_score();
                     updated = true;
+                }
+                ++suffix;
+                while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                    ++suffix;
                 }
             }
         }
@@ -190,13 +200,15 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         }
     });
 
-    mtg::common::logger->trace("Best chain score: {}", cur_chain.first);
+    if (cur_chain.first <= config_.min_path_score) {
+        mtg::common::logger->trace("No good chain found");
+    } else {
+        mtg::common::logger->trace("Best chain score: {}", cur_chain.first);
+        assert(cur_chain.second.size());
 
-    assert(cur_chain.first > config_.min_path_score);
-    assert(cur_chain.second.size());
-
-    for (auto&& path : cur_chain.second) {
-        callback(std::move(path));
+        for (auto&& path : cur_chain.second) {
+            callback(std::move(path));
+        }
     }
 }
 
@@ -232,11 +244,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     auto it = std::lower_bound(paths.begin() + i, paths.end(), chain.back(),
                                [&](const auto &a, const auto &b) {
-                                   return a.get_query_end() <= b.get_query_end();
+                                   return a.get_query_end() < b.get_query_end();
                                });
 
     for ( ; it != paths.end(); ++it) {
-        assert(it->get_query_end() > chain.back().get_query_end());
+        assert(it->get_query_end() >= chain.back().get_query_end());
         if (it->get_query().data() < chain.back().get_query_end()) {
             // the alignments overlap
             auto [first, second] = DBGAlignment::get_best_overlap(
@@ -260,9 +272,8 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             best_score->at(it - paths.begin()) = score;
 
             auto next_chain = const_cast<const std::vector<DBGAlignment>&>(chain);
-            next_chain.back() = first;
-
-            next_chain.push_back(second);
+            next_chain.back() = std::move(first);
+            next_chain.push_back(std::move(second));
 
             call_alignment_chains(paths, callback, it - paths.begin() + 1,
                                   std::move(next_chain), score, best_score);
@@ -272,7 +283,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             if (score > best_score->at(it - paths.begin())) {
                 auto next_chain = const_cast<const std::vector<DBGAlignment>&>(chain);
                 next_chain.push_back(*it);
-                best_score->at(it - paths.begin()) = cur_score;
+                best_score->at(it - paths.begin()) = score;
                 call_alignment_chains(paths, callback, it - paths.begin() + 1,
                                       std::move(next_chain), score, best_score);
             }

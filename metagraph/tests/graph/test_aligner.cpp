@@ -86,35 +86,6 @@ TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
 }
 
 
-DBGAligner<>::DBGQueryAlignment
-get_extend(std::shared_ptr<const DeBruijnGraph> graph,
-           const DBGAlignerConfig &config,
-           const DBGAligner<>::DBGQueryAlignment &paths,
-           const std::string &query) {
-    assert(graph.get());
-    EXPECT_EQ(query, paths.get_query());
-    auto uniconfig = config;
-    uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
-
-    return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<>>(*graph, uniconfig).align(query)
-        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
-}
-
-void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
-                  const DBGAlignerConfig &config,
-                  const DBGAligner<>::DBGQueryAlignment &paths,
-                  const std::string &query) {
-    auto unimem_paths = get_extend(graph, config, paths, query);
-
-    ASSERT_EQ(paths.size(), unimem_paths.size());
-
-    for (size_t i = 0; i < paths.size(); ++i) {
-        EXPECT_EQ(paths[i], unimem_paths[i]) << paths[i] << "\n" << unimem_paths[i];
-    }
-}
-
-
 template <typename Graph>
 class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 

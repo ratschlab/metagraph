@@ -592,6 +592,11 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
         ++begin;
     }
 
+    if (offset_ == alignment_suffix.get_k()) {
+        *this = Alignment();
+        return;
+    }
+
     while (it != end) {
         assert(it < end);
         cigar_.append(*it);
@@ -617,20 +622,11 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     if (second.get_query().data() >= first.get_query_end())
         return std::make_pair(first, second);
 
-    // first query range is a superset of the second
-    if (first.get_query().data() <= second.get_query().data()
-            && first.get_query_end() >= second.get_query_end())
-        return std::make_pair(first, Alignment());
-
-    // first query range is a subset of the second
-    if (second.get_query().data() <= first.get_query().data()
-            && second.get_query_end() >= first.get_query_end())
-        return std::make_pair(Alignment(), second);
-
     // check if first (second) is a prefix of second (first)
     if (first.get_query().data() == second.get_query().data()) {
         auto [first_it, second_it] = std::mismatch(
-            CigarOpIterator(first.cigar_), CigarOpIterator(first.cigar_, first.cigar_.end()),
+            CigarOpIterator(first.cigar_),
+            CigarOpIterator(first.cigar_, first.cigar_.end()),
             CigarOpIterator(second.cigar_)
         );
         if (first_it.get_it() == first.cigar_.end()) {
@@ -665,7 +661,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     AlignmentPrefix<NodeType> first_prefix(first, config, graph);
     AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
-    AlignmentSuffix<NodeType> second_suffix(second, config);
+    AlignmentSuffix<NodeType> second_suffix(second, config, graph.get_k());
     AlignmentSuffix<NodeType> best_second_suffix = second_suffix;
 
     size_t overlap = first_prefix.get_query().data() + first_prefix.get_query().size()
@@ -677,18 +673,21 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     // initialize: trim overlap from the left of second
     for (size_t i = 0; i < overlap; ++i) {
+        assert(!second_suffix.eof());
         while (second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
             assert(!second_suffix.eof());
             ++second_suffix;
             assert(Alignment(second_suffix).is_valid(graph, &config));
         }
+        assert(!second_suffix.eof());
         ++second_suffix;
         assert(Alignment(second_suffix).is_valid(graph, &config));
-        while (second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+        while (!second_suffix.eof() && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
             assert(!second_suffix.eof());
             ++second_suffix;
             assert(Alignment(second_suffix).is_valid(graph, &config));
         }
+        assert(!second_suffix.eof() || i + 1 == overlap);
     }
 
     cur_score = first_prefix.get_score() + second_suffix.get_score();
@@ -732,10 +731,12 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
             assert(Alignment(first_prefix).is_valid(graph, &config));
         }
 
-        while (!second_suffix.reof()
-                && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
-            --second_suffix;
-            assert(Alignment(second_suffix).is_valid(graph, &config));
+        if (!second_suffix.eof()) {
+            while (!second_suffix.reof()
+                    && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                --second_suffix;
+                assert(Alignment(second_suffix).is_valid(graph, &config));
+            }
         }
 
         assert(!second_suffix.reof());
