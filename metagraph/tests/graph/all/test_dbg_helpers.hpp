@@ -42,34 +42,34 @@ class DBGSuccinctIndexed : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
-enum BuildMode {
-    BASE, CANONICAL, WRAPPER
+enum DBGMode {
+    NORMAL, CANONICAL, CANONICAL_WRAPPER, PRIMARY
 };
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences = {},
-            BuildMode mode = BASE);
+            DBGMode mode = NORMAL);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
                   const std::vector<std::string> &sequences = {},
-                  BuildMode mode = BASE);
+                  DBGMode mode = NORMAL);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
                       std::function<void(std::function<void(const std::string&)>)> generate,
-                      BuildMode mode = BASE) {
+                      DBGMode mode = NORMAL) {
     std::vector<std::string> sequences;
     generate([&](const auto &sequence) { sequences.push_back(sequence); });
     return build_graph_batch<Graph>(k, sequences, mode);
 }
 
 template <class Graph>
-bool check_graph(const std::string &alphabet, BuildMode mode, bool check_sequence);
+bool check_graph(const std::string &alphabet, DBGMode mode, bool check_sequence);
 
 template <class Graph>
 bool check_graph_nodes(const Graph &graph) {
