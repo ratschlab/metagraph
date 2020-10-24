@@ -43,7 +43,7 @@ class TestBuild(unittest.TestCase):
         construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -65,7 +65,7 @@ class TestBuild(unittest.TestCase):
         construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -110,7 +110,7 @@ class TestBuild(unittest.TestCase):
                 --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -175,7 +175,7 @@ class TestBuild(unittest.TestCase):
         construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -197,7 +197,7 @@ class TestBuild(unittest.TestCase):
         construct_command = '{exe} build --mask-dummy --graph {repr} --disk-swap {tmp_dir} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -220,7 +220,7 @@ class TestBuild(unittest.TestCase):
                 --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
         )
@@ -243,7 +243,7 @@ class TestBuild(unittest.TestCase):
                 --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir=tmp_dir,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
         )
@@ -268,7 +268,7 @@ class TestBuild(unittest.TestCase):
                                 --graph {repr} -k 11 --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir=tmp_dir,
+                tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix
@@ -307,7 +307,7 @@ class TestBuild(unittest.TestCase):
                     --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir=tmp_dir,
+                tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
                 outfile=self.tempdir.name + '/graph',
                 input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf',
                 suffix=suffix
@@ -344,7 +344,7 @@ class TestBuild(unittest.TestCase):
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -356,7 +356,7 @@ class TestBuild(unittest.TestCase):
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
-            tmp_dir='' if tmp_dir == '' else self.tempdir.name,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
             outfile=self.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
@@ -381,7 +381,7 @@ class TestBuild(unittest.TestCase):
                                 '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir='' if tmp_dir == '' else self.tempdir.name,
+                tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
                 outfile=self.tempdir.name + '/' + name,
                 input=TEST_DATA_DIR + ('/transcripts_1000.fa' if name == 'graph1' else '/transcripts_100.fa')
             )
@@ -394,7 +394,7 @@ class TestBuild(unittest.TestCase):
                                 '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
-                tmp_dir='' if tmp_dir == '' else self.tempdir.name,
+                tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
                 outfile=self.tempdir.name + '/' + name,
                 input=TEST_DATA_DIR + ('/transcripts_1000.fa' if name == 'graph1' else '/transcripts_100.fa')
             )
