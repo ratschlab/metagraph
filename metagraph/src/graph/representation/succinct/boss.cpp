@@ -2819,24 +2819,16 @@ void BOSS::row_diff_traverse(size_t num_threads,
         if (fetch_and_set_bit(visited.data(), rep, async))
             return;
 
-        ++progress_bar;
-
         for (edge_index idx : path) {
             std::ignore = idx;
             assert(idx == rep || !fetch_bit(visited.data(), idx, async));
             set_bit(visited.data(), idx, async);
-            ++progress_bar;
         }
 
-        std::optional<edge_index> anchor;
-        for (uint64_t i = 0; i + max_length <= path.size(); i += max_length) {
-            set_bit(terminal->data(), path[i + max_length - 1], async);
-        }
+        progress_bar += path.size();
 
-        if (path.size() < max_length) { // set a terminal node every max_length nodes
-            set_bit(terminal->data(), path.back(), async);
-        } else if (path.size() > 1 && path.size() % max_length != 0) {
-            anchor = path[0];
+        for (uint64_t i = 0; i < path.size(); i += max_length) {
+            set_bit(terminal->data(), path[i], async);
         }
     };
 

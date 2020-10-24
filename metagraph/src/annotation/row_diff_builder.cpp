@@ -26,7 +26,7 @@ void build_successor(const std::string &graph_fname,
                      uint32_t max_length,
                      uint32_t num_threads) {
     bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal" }) {
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal.unopt" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             logger->trace(
                     "Building and writing successor, predecessor and terminal files to {}.*",
@@ -68,7 +68,7 @@ void build_successor(const std::string &graph_fname,
     std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
     term.serialize(fterm);
     fterm.close();
-    logger->trace("Anchor nodes written to {}.terminal", outfbase);
+    logger->trace("Anchor nodes written to {}.terminal.unopt", outfbase);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
