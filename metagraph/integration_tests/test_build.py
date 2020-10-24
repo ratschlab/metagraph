@@ -340,6 +340,18 @@ class TestBuild(unittest.TestCase):
     def test_build_phase(self, build):
         representation, tmp_dir = build_params[build]
 
+        construct_command = '{exe} build --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
+                            '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            repr=representation,
+            tmp_dir='""' if tmp_dir == '""' else self.tempdir.name,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_1000.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
+
         construct_command = '{exe} build --phase 2 --mask-dummy --graph {repr} --canonical -k 20 ' \
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
@@ -352,7 +364,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 -v ' \
+        construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 ' \
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -389,7 +401,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
             self.assertTrue(os.path.isfile(self.tempdir.name + '/' + name + '.checkpoint'))
 
-        for name in ('graph', 'graph2'):
+        for name in ('graph1', 'graph2'):
             construct_command = '{exe} build --mask-dummy --graph {repr} --canonical -k 20 ' \
                                 '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
@@ -401,7 +413,7 @@ class TestBuild(unittest.TestCase):
             res = subprocess.run([construct_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
-            res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+            res = self.__get_stats(self.tempdir.name + '/' + name + graph_file_extension[representation])
             self.assertEqual(res.returncode, 0)
             params_str = res.stdout.decode().split('\n')[2:]
             self.assertEqual('k: 20', params_str[0])

@@ -129,24 +129,19 @@ int build_graph(Config *config) {
                 logger->info("Skipping parsing sequences from input file(s)");
             }
 
+            // need to call build_chunk() even if checkpoint.phase()==1, because the
+            // SortedSetDisk needs to be flushed
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
 
-            // this needs to e called after #build_chunk, because the SortedSetDisk needs
-            // to be flushed
-            if (checkpoint.phase() == 1) {
+            if (checkpoint.phase() <= 2) { // phase 2 stops after generating dummy k-mers
                 assert(next_chunk == nullptr);
-                logger->info("Phase 1 successfully finished.");
-                return 0;
-            }
-
-            if (checkpoint.phase() == 2) { // phase 2 stops after generating dummy k-mers
-                assert(next_chunk == nullptr);
-                logger->info("Phase 2 successfully finished.");
+                logger->info("Phase {} successfully finished.", checkpoint.phase());
                 return 0;
             }
 
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
+
             if (config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
                 timer.reset();
