@@ -1,5 +1,6 @@
 #include "row_diff_builder.hpp"
 
+#include <omp.h>
 #include <progress_bar.hpp>
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -76,60 +77,59 @@ void build_successor(const std::string &graph_fname,
     sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, 1024 * 1024);
     sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
 
-    // traverse BOSS table in parallel processing num_threads chunks of size 1'000'000
-    constexpr uint64_t chunk_size = 1'000'000;
-    const uint64_t batch_size = chunk_size * num_threads;
-    const uint64_t batch_count = (graph.num_nodes() - 1) / batch_size + 1;
-
-    ProgressBar progress_bar(batch_count, "Compute successors", std::cerr,
+    ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
 
-    for (uint64_t batch = 0; batch < batch_count; ++batch) {
+#ifndef NDEBUG
+    const uint64_t batch_size = 10'000'000;
+#else
+    const uint64_t batch_size = 1'000;
+#endif
+    // traverse BOSS table in parallel processing blocks of size |batch_size|
+    for (uint64_t start = 1; start <= graph.num_nodes(); start += batch_size) {
         std::vector<std::vector<uint64_t>> pred_buf(num_threads);
         std::vector<std::vector<uint64_t>> succ_buf(num_threads);
         std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
-        for (uint32_t chunk = 0; chunk < std::max((uint32_t)1, num_threads); ++chunk) {
-            uint64_t start = batch * batch_size + chunk * chunk_size + 1;
-            for (uint64_t i = start;
-                 i < std::min(graph.num_nodes() + 1, start + chunk_size); ++i) {
-                uint64_t boss_idx = graph.kmer_to_boss_index(i);
-                if (dummy[boss_idx] || terminal[boss_idx]) {
-                    succ_buf[chunk].push_back(0);
-                } else {
-                    const graph::boss::BOSS::TAlphabet w
-                            = boss.get_W(boss_idx) % boss.alph_size;
-                    uint64_t next = w ? graph.boss_to_kmer_index(boss.fwd(boss_idx, w)) : 0;
-                    succ_buf[chunk].push_back(next);
-                }
-                uint64_t back_idx = boss.bwd(boss_idx);
-                boss.call_incoming_to_target(
-                        back_idx, boss.get_W(back_idx), [&](BOSS::edge_index incoming_edge) {
-                          // terminal and dummy predecessors are ignored; also ignore
-                          // predecessors for which boss_idx is not the last outgoing
-                          // edge (bc. we only traverse the last outgoing at a bifurcation)
-                          if (terminal[incoming_edge] || dummy[incoming_edge]
-                                  || boss.fwd(incoming_edge,
-                                              boss.get_W(incoming_edge) % boss.alph_size)
-                                          != boss_idx)
-                              return;
-
-                          pred_buf[chunk].push_back(graph.boss_to_kmer_index(incoming_edge));
-                          pred_boundary_buf[chunk].push_back(0);
-                        });
-                pred_boundary_buf[chunk].push_back(1);
+        // use static scheduling to make threads process ordered contiguous blocks
+        #pragma omp parallel for num_threads(num_threads) schedule(static)
+        for (uint64_t i = start; i < std::min(start + batch_size, graph.num_nodes() + 1); ++i) {
+            const size_t r = omp_get_thread_num();
+            uint64_t boss_idx = graph.kmer_to_boss_index(i);
+            if (dummy[boss_idx] || terminal[boss_idx]) {
+                succ_buf[r].push_back(0);
+            } else {
+                const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
+                assert(d && "must not be dummy");
+                uint64_t next = graph.boss_to_kmer_index(boss.fwd(boss_idx, d));
+                succ_buf[r].push_back(next);
             }
+            // ignore predecessors if boss_idx is not the last outgoing
+            // edge (bc. we only traverse the last outgoing at a bifurcation)
+            if (!dummy[boss_idx] && boss.get_last(boss_idx)) {
+                BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
+                uint64_t back_idx = boss.bwd(boss_idx);
+                boss.call_incoming_to_target(back_idx, d,
+                    [&](BOSS::edge_index pred) {
+                        // terminal and dummy predecessors are ignored
+                        if (!terminal[pred] && !dummy[pred]) {
+                            pred_buf[r].push_back(graph.boss_to_kmer_index(pred));
+                            pred_boundary_buf[r].push_back(0);
+                        }
+                    }
+                );
+            }
+            pred_boundary_buf[r].push_back(1);
         }
         for (uint32_t i = 0; i < num_threads; ++i) {
-            for (uint32_t j = 0; j < succ_buf[i].size(); ++j) {
-                succ.push_back(succ_buf[i][j]);
+            for (uint64_t v : succ_buf[i]) {
+                succ.push_back(v);
             }
-            for (uint32_t j = 0; j < pred_buf[i].size(); ++j) {
-                pred.push_back(pred_buf[i][j]);
+            for (uint64_t v : pred_buf[i]) {
+                pred.push_back(v);
             }
-            for (uint32_t j = 0; j < pred_boundary_buf[i].size(); ++j) {
-                pred_boundary.push_back(pred_boundary_buf[i][j]);
+            for (uint64_t v : pred_boundary_buf[i]) {
+                pred_boundary.push_back(v);
             }
         }
         ++progress_bar;

@@ -51,9 +51,10 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         target_anno = anno_repr
         anno_repr = 'row'
 
-    annotate_command = '{exe} annotate {extra_params} --anno-header -i {graph} \
+    annotate_command = '{exe} annotate -p {num_threads} {extra_params} --anno-header -i {graph} \
             --anno-type {anno_repr} -o {outfile} {input}'.format(
         exe=METAGRAPH,
+        num_threads=NUM_THREADS,
         graph=graph_filename,
         anno_repr=anno_repr,
         outfile=output_filename,
@@ -68,9 +69,10 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         if final_anno == 'row_diff_brwt':
             target_anno = 'row_diff'
 
-        annotate_command = '{exe} transform_anno \
+        annotate_command = '{exe} transform_anno -p {num_threads} \
                 --anno-type {target_anno} -o {outfile} {input}'.format(
             exe=METAGRAPH,
+            num_threads=NUM_THREADS,
             graph=graph_filename,
             target_anno=target_anno,
             outfile=output_filename,
@@ -84,7 +86,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         os.remove(output_filename + anno_file_extension[anno_repr])
         if final_anno == 'row_diff_brwt':
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
-                               f'{output_filename}.row_diff.annodbg'
+                               f'-p {NUM_THREADS} {output_filename}.row_diff.annodbg'
             res = subprocess.run([annotate_command], shell=True)
             assert (res.returncode == 0)
             os.remove(output_filename + anno_file_extension['row_diff'])
