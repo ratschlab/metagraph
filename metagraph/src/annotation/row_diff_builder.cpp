@@ -18,7 +18,7 @@ namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
-/** Marker type to indicate a value represent a node index in a BOSS graph */
+// Marker type to indicate a value represent a node index in a BOSS graph
 using node_index = graph::boss::BOSS::node_index;
 
 typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
@@ -155,20 +155,18 @@ void build_successor(const std::string &graph_fname,
  * @param source_idx index of the source file for the current column
  * @param coll_idx index of the column in the current source file (typically, the source
  *        files contain a single column each, but that's not a requirement)
- * @param succ_chunk current chunk of successor values (indexed by #row_idx_chunk)
- * @param pred_chunk current chunk of predecessor values (indexed by #row_idx_chunk)
- * @param pred_chunk_idx indexes pred_chunk. The predecessors of #row_idx are located
- *        in #pred_chunk between pred_chunk_idx[row_idx_chunk] and
- *        pred_chunk_idx[row_idx_chunk + 1]
+ * @param succ successor of #row_idx in the row-diff path
+ * @param pred_begin begin of the predecessor values
+ * @param pred_end end of the predecessor values
  */
 using CallOnes = std::function<void(const bit_vector &source_col,
-                                    node_index row_idx,
-                                    node_index row_idx_chunk,
+                                    uint64_t row_idx,
+                                    uint64_t row_idx_chunk,
                                     size_t source_idx,
                                     size_t col_idx,
-                                    const std::vector<uint64_t> &succ_chunk,
-                                    const std::vector<uint64_t> &pred_chunk,
-                                    const std::vector<uint64_t> &pred_chunk_idx)>;
+                                    uint64_t succ,
+                                    const uint64_t *pred_begin,
+                                    const uint64_t *pred_end)>;
 
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
@@ -189,7 +187,7 @@ void traverse_anno_chunked(
         const std::vector<std::unique_ptr<annot::ColumnCompressed<>>> &col_annotations,
         const std::function<void(uint64_t chunk_size)> &before_chunk,
         const CallOnes &call_ones,
-        const std::function<void(node_index start, uint64_t size)> &after_chunk) {
+        const std::function<void()> &after_chunk) {
     if (col_annotations.empty())
         return;
 
@@ -238,26 +236,20 @@ void traverse_anno_chunked(
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
-            if (col_annotations[l_idx]->num_labels()
-                && col_annotations[l_idx]->num_objects() != num_rows) {
-                logger->error(
-                        "Graph and annotation are incompatible. Graph has {} nodes, "
-                        "annotation has {} entries",
-                        num_rows, col_annotations[l_idx]->num_objects());
-                std::exit(1);
-            }
             for (size_t j = 0; j < col_annotations[l_idx]->num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
                         = col_annotations[l_idx]->get_matrix().data()[j];
                 source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(),
-                    [&](node_index i) {
-                        call_ones(*source_col, i, i - chunk, l_idx,
-                                  j, succ_chunk, pred_chunk, pred_chunk_idx);
+                    [&](uint64_t i) {
+                        call_ones(*source_col, i, i - chunk, l_idx, j,
+                                  succ_chunk[i - chunk],
+                                  pred_chunk.data() + pred_chunk_idx[i - chunk],
+                                  pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
                     }
                 );
             }
         }
-        after_chunk(chunk, succ_chunk.size());
+        after_chunk();
 
         progress_bar += succ_chunk.size();
     }
@@ -275,19 +267,27 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
 
     uint32_t num_threads = get_num_threads();
 
-    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
-    for (const auto &fname : source_files) {
-        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-        anno->load(fname);
-        sources.push_back(std::move(anno));
-    }
-    logger->trace("Done loading {} annotations", sources.size());
-
     anchor_bv_type terminal;
     {
         std::ifstream f(graph_fname + anchors_extension, std::ios::binary);
         terminal.load(f);
     }
+
+    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
+    for (const auto &fname : source_files) {
+        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
+        anno->load(fname);
+        sources.push_back(std::move(anno));
+
+        if (sources.back()->num_labels() && sources.back()->num_objects() != terminal.size()) {
+            logger->error("Anchor vector {} and annotation {} are incompatible."
+                          " Vector size: {}, number of rows: {}",
+                          graph_fname + anchors_extension, fname,
+                          terminal.size(), sources.back()->num_objects());
+            std::exit(1);
+        }
+    }
+    logger->trace("Done loading {} annotations", sources.size());
 
     // accumulate the indices for the set bits in each column into a #SortedSetDisk
     using SSD = common::SortedSetDisk<uint64_t>;
@@ -329,33 +329,31 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
             "Compute diffs", terminal.size(), graph_fname, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
-                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                    for (uint32_t j = 0; j < set_rows[source_idx].size(); ++j) {
-                        set_rows[source_idx][j].resize(0);
+                for (auto &buffers : set_rows) {
+                    for (std::vector<uint64_t> &buf : buffers) {
+                        buf.resize(0);
                     }
                 }
             },
-            [&](const bit_vector &source_col, node_index row_idx, node_index chunk_idx,
+            [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
-                    const std::vector<uint64_t> &succ_chunk,
-                    const std::vector<uint64_t> &pred_chunk,
-                    const std::vector<uint64_t> &pred_chunk_idx) {
+                    uint64_t succ,
+                    const uint64_t *pred_begin, const uint64_t *pred_end) {
 
                 __atomic_add_fetch(&row_nbits_batch[chunk_idx], 1, __ATOMIC_RELAXED);
 
                 // check successor node and add current node if it's either terminal
                 // or if its successor is 0
-                if (terminal[row_idx] || !source_col[succ_chunk[chunk_idx]])
+                if (terminal[row_idx] || !source_col[succ])
                     set_rows[source_idx][j].push_back(row_idx);
 
                 // check non-terminal predecessor nodes and add them if they are zero
-                for (size_t p_idx = pred_chunk_idx[chunk_idx];
-                     p_idx < pred_chunk_idx[chunk_idx + 1]; ++p_idx) {
-                    if (!source_col[pred_chunk[p_idx]] && !terminal[pred_chunk[p_idx]])
-                        set_rows[source_idx][j].push_back(pred_chunk[p_idx]);
+                for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
+                    if (!source_col[*pred_p] && !terminal[*pred_p])
+                        set_rows[source_idx][j].push_back(*pred_p);
                 }
             },
-            [&](node_index /* start */, uint64_t /* chunk_size */) {
+            [&]() {
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
                 for (uint32_t nbits : row_nbits_batch) {
                     source_row_nbits.push_back(nbits);
