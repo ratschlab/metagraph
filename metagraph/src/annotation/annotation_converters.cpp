@@ -1192,7 +1192,7 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                     "Please specify the anchor file location via `-i <anchor_location>'");
             std::exit(1);
         }
-        std::string anchors_file = utils::remove_suffix(graph_file, ".anchors") + ".anchors";
+        std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
         if (!std::filesystem::exists(anchors_file)) {
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
@@ -1203,8 +1203,6 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
     }
     std::ofstream f(out_file, std::ios::binary);
     anno.get_label_encoder().serialize(f);
-    uint64_t v = 0;
-    f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
     anno.get_matrix().serialize(f);
     f.close();
 }

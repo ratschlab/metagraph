@@ -19,14 +19,14 @@ using namespace mtg::annot::binmat;
 using mtg::common::logger;
 /** Marker type to indicate a value represent a node index in a BOSS graph */
 using node_index = graph::boss::BOSS::node_index;
-
+using anchor_bv_type = bit_vector_small ;
 
 void build_successor(const std::string &graph_fname,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
     bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchors" }) {
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", kRowDiffAnchorExt.c_str() }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             logger->trace(
                     "Building and writing successor, predecessor and anchor files to {}.*",
@@ -56,7 +56,6 @@ void build_successor(const std::string &graph_fname,
 
     // terminal uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(graph.num_nodes(), 0);
-    uint64_t num_anchors = 0;
     for (uint64_t i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
@@ -64,10 +63,10 @@ void build_successor(const std::string &graph_fname,
                     graph_idx);
             assert(anno_index < graph.num_nodes());
             term[anno_index] = 1;
-            num_anchors++;
         }
     }
-    logger->trace("Number of anchors before anchor optimization: {}", num_anchors);
+    logger->trace("Number of anchors before anchor optimization: {}",
+                  sdsl::util::cnt_one_bits(term));
 
     std::ofstream fterm(outfbase + ".anchors.unopt", ios::binary);
     term.serialize(fterm);
@@ -280,10 +279,10 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    sdsl::rrr_vector rterminal;
+    anchor_bv_type rterminal;
 
     // if we just generated anchor nodes, attempt a greedy anchor optimization
-    if (!std::filesystem::exists(graph_fname + ".anchors")) {
+    if (!std::filesystem::exists(graph_fname + kRowDiffAnchorExt)) {
         logger->trace("Performing anchor optimization");
         sdsl::bit_vector terminal;
         std::ifstream f(graph_fname + ".anchors.unopt", std::ios::binary);
@@ -326,13 +325,13 @@ void convert_batch_to_row_diff(const std::string &graph_fname,
         logger->trace("Anchor optimization added {} anchors", forced_anchors);
 
         // save the optimized terminal bit vector, and delete the unoptimized one
-        std::ofstream fterm(graph_fname + ".anchors", std::ios::binary);
-        rterminal = sdsl::rrr_vector(terminal);
+        std::ofstream fterm(graph_fname + kRowDiffAnchorExt, std::ios::binary);
+        rterminal = anchor_bv_type(terminal);
         rterminal.serialize(fterm);
         fterm.close();
         std::filesystem::remove(graph_fname + ".anchors.unopt");
     } else {
-        std::ifstream f(graph_fname + ".anchors", std::ios::binary);
+        std::ifstream f(graph_fname + kRowDiffAnchorExt, std::ios::binary);
         rterminal.load(f);
         f.close();
     }

@@ -137,9 +137,9 @@ void print_bloom_filter_stats(const kmer::KmerBloomFilter<KmerHasher> *kmer_bloo
 template <class Matrix>
 void print_anchor_stats(const Matrix& m) {
     std::cout << "=================== Anchor STATS ===================" << std::endl;
-    uint64_t num_anchors = m.num_anchors();
+    uint64_t num_anchors = m.anchor().num_set_bits();
     if (num_anchors != 0) {
-        std::cout << "num anchors: " << m.num_anchors() << std::endl;
+        std::cout << "num anchors: " << m.anchor().num_set_bits() << std::endl;
     } else {
         std::cout << "Please specify the anchor file via '-i anchors_file' to get "
                      "anchor stats" << std::endl;
@@ -272,8 +272,8 @@ int print_stats(Config *config) {
 
         using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
         if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
-            std::string anchors_file
-                    = utils::remove_suffix(config->infbase, ".anchors") + ".anchors";
+            std::string ext = annot::binmat::kRowDiffAnchorExt;
+            std::string anchors_file = utils::remove_suffix(config->infbase, ext) + ext;
             if (!config->infbase.empty() && std::filesystem::exists(anchors_file)) {
                 const_cast<RowDiffCol *>(rd)->load_anchor(anchors_file);
             }

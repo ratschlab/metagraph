@@ -278,7 +278,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                     .set_graph(graph.get());
             const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                    .load_anchor(graph_fname + ".anchors");
+                    .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
             ASSERT_EQ(labels.size(), annotator.num_labels());
             ASSERT_EQ(5u, annotator.num_objects());
@@ -332,7 +332,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                         .set_graph(graph.get());
                 const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                        .load_anchor(graph_fname + ".anchors");
+                        .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
                 ASSERT_EQ(1, annotator.num_labels());
                 ASSERT_EQ(5u, annotator.num_objects());
@@ -389,7 +389,7 @@ void test_row_diff(uint32_t k,
     const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
             .set_graph(graph.get());
     const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-            .load_anchor(graph_fname + ".anchors");
+            .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
     ASSERT_EQ(all_labels.size(), annotator.num_labels());
     ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
@@ -449,7 +449,7 @@ void test_row_diff_separate_columns(uint32_t k,
         const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                 .set_graph(graph.get());
         const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                .load_anchor(graph_fname + ".anchors");
+                .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
         ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
 

@@ -20,7 +20,7 @@ TEST(RowDiff, Empty) {
     EXPECT_EQ(0, rowdiff.diffs().num_columns());
     EXPECT_EQ(0, rowdiff.diffs().num_relations());
     EXPECT_EQ(0, rowdiff.diffs().num_rows());
-    EXPECT_EQ(0, rowdiff.terminal().size());
+    EXPECT_EQ(0, rowdiff.anchor().size());
     EXPECT_EQ(0, rowdiff.num_relations());
     EXPECT_EQ(0, rowdiff.num_columns());
     EXPECT_EQ(0, rowdiff.num_rows());
@@ -56,12 +56,12 @@ TEST(RowDiff, Serialize) {
     ASSERT_EQ(loaded.num_columns(), 2);
     ASSERT_EQ(loaded.num_rows(), 4);
     ASSERT_EQ(loaded.diffs().num_relations(), 4);
-    ASSERT_EQ(loaded.terminal().size(), 4);
+    ASSERT_EQ(loaded.anchor().size(), 4);
 
     for (uint32_t i = 0; i < 4; ++i) {
         ASSERT_THAT(loaded.diffs().get_column(0), ElementsAre(1,3));
         ASSERT_THAT(loaded.diffs().get_column(1), ElementsAre(0,2));
-        ASSERT_EQ(loaded.terminal()[i], bterminal[i]);
+        ASSERT_EQ(loaded.anchor()[i], bterminal[i]);
     }
 }
 

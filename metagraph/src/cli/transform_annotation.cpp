@@ -490,7 +490,7 @@ int transform_annotation(Config *config) {
         if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);
         } else {
-            if (config->anchor_fname.empty()) {
+            if (config->anchors.empty()) {
                 logger->error(
                         "Please specify the location of the anchor file via --anchors-file "
                         "The anchor file is in the same directory as the annotated graph");
@@ -526,7 +526,7 @@ int transform_annotation(Config *config) {
 
                 logger->trace("Serializing to '{}'", config->outfbase);
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
-                        .load_anchor(config->anchor_fname);
+                        .load_anchor(config->anchors);
                 brwt_annotator->serialize(config->outfbase);
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
@@ -537,7 +537,7 @@ int transform_annotation(Config *config) {
                         = convert(*row_diff_anno);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
-                        .load_anchor(config->anchor_fname);
+                        .load_anchor(config->anchors);
                 logger->trace("Serializing to '{}'", config->outfbase);
                 row_sparse->serialize(config->outfbase);
             }

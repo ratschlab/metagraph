@@ -7,12 +7,13 @@
 #include <sdsl/enc_vector.hpp>
 #include <sdsl/bit_vectors.hpp>
 #include <sdsl/util.hpp>
-#include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -20,6 +21,8 @@
 namespace mtg {
 namespace annot {
 namespace binmat {
+
+const std::string kRowDiffAnchorExt = ".anchors";
 
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
@@ -45,6 +48,9 @@ namespace binmat {
 template <class BaseMatrix>
 class RowDiff : public BinaryMatrix {
   public:
+    static const std::string kAnchorExt;
+    using anchor_bv_type = bit_vector_rrr<>; // TODO: change to bit_vector_small
+
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
@@ -53,8 +59,6 @@ class RowDiff : public BinaryMatrix {
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
     const graph::DBGSuccinct *graph() const { return graph_; }
-
-    uint64_t num_anchors() const;
 
     /**
      * Returns the number of set bits in the matrix.
@@ -81,7 +85,7 @@ class RowDiff : public BinaryMatrix {
 
     void load_anchor(const std::string& filename);
 
-    const sdsl::rrr_vector<> &terminal() const { return anchor_; }
+    const anchor_bv_type &anchor() const { return anchor_; }
 
     const BaseMatrix &diffs() const { return diffs_; }
     BaseMatrix &diffs() { return diffs_; }
@@ -94,15 +98,8 @@ class RowDiff : public BinaryMatrix {
     const graph::DBGSuccinct *graph_ = nullptr;
 
     BaseMatrix diffs_;
-    sdsl::rrr_vector<> anchor_;
+    anchor_bv_type anchor_;
 };
-
-template <class BaseMatrix>
-uint64_t RowDiff<BaseMatrix>:: num_anchors() const {
-    sdsl::rrr_vector<>::rank_1_type rank_anchor;
-    sdsl::util::init_support(rank_anchor, &anchor_);
-    return rank_anchor.rank(anchor_.size());
-}
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
@@ -154,36 +151,19 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 
 template <class BaseMatrix>
 inline bool RowDiff<BaseMatrix>::load(std::istream &f) {
-    anchor_.load(f);
+    if constexpr (!std::is_same_v<BaseMatrix, ColumnMajor>) {
+        anchor_.load(f);
+    }
     return diffs_.load(f);
 }
 
 template <class BaseMatrix>
 inline void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
-    anchor_.serialize(f);
+    if constexpr (!std::is_same_v<BaseMatrix, ColumnMajor>) {
+        anchor_.serialize(f);
+    }
     diffs_.serialize(f);
 }
-
-// template specialization for load/serialize ColumnCompressed. Anchors are not saved in
-// the annotation file, as there typically is one file per column
-template <>
-inline bool RowDiff<ColumnMajor>::load(std::istream &f) {
-    // read and ignore len bytes; for backward compatibility
-    uint64_t len;
-    f.read(reinterpret_cast<char *>(&len), sizeof(uint64_t));
-    f.ignore(len);
-
-    return diffs_.load(f);
-}
-
-template <>
-inline void RowDiff<ColumnMajor>::serialize(std::ostream &f) const {
-    // write a uint64_t value for backward compatibility (it's not used anymore)
-    uint64_t v = 0;
-    f.write(reinterpret_cast<char *>(&v), sizeof(uint64_t));
-    diffs_.serialize(f);
-};
-
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {

@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 
 namespace mtg {

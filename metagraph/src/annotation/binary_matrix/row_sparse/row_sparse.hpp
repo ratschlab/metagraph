@@ -5,17 +5,9 @@
 #include <vector>
 
 #include <sdsl/enc_vector.hpp>
-#include <sdsl/bit_vectors.hpp>
-#include <sdsl/util.hpp>
-#include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
-#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
-#include "common/logger.hpp"
-#include "common/vector.hpp"
-#include "graph/annotated_dbg.hpp"
-#include "graph/representation/succinct/boss.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg {
 namespace annot {
@@ -45,8 +37,7 @@ class RowSparse : public BinaryMatrix {
 
   private:
     sdsl::enc_vector<> elements_;
-    sdsl::rrr_vector<> boundary_;
-    sdsl::rrr_vector<>::select_1_type sboundary_;
+    bit_vector_small boundary_;
     uint64_t num_columns_ = 0;
     uint64_t num_rows_ = 0;
 };

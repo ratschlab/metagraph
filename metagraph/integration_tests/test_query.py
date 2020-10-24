@@ -15,22 +15,22 @@ METAGRAPH = './metagraph'
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
-
+                        # 'bitmap': '.bitmapdbg',
+                        # 'hash': '.orhashdbg',
+                        # 'hashfast': '.hashfastdbg',
+                        # 'hashstr': '.hashstrdbg'}
+                        }
 anno_file_extension = {'column': '.column.annodbg',
-                       'row': '.row.annodbg',
+                       #'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
                        'row_sparse': '.row_sparse.annodbg',
                        'row_diff_brwt': '.row_diff_brwt.annodbg',
                        'row_diff_sparse': '.row_diff_sparse.annodbg',
-                       'rb_brwt': '.rb_brwt.annodbg',
-                       'brwt': '.brwt.annodbg',
-                       'rbfish': '.rbfish.annodbg',
-                       'flat': '.flat.annodbg'}
-
+                       #'rb_brwt': '.rb_brwt.annodbg',
+                       #'brwt': '.brwt.annodbg',
+                       #'rbfish': '.rbfish.annodbg',
+                       #'flat': '.flat.annodbg'}
+                       }
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
@@ -65,6 +65,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
     )
     res = subprocess.run([annotate_command], shell=True)
     assert(res.returncode == 0)
+    print(annotate_command)
 
     if target_anno != anno_repr:
         final_anno = target_anno
@@ -79,6 +80,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
             outfile=output_filename,
             input=output_filename + anno_file_extension[anno_repr]
         )
+        print(annotate_command)
         if target_anno == 'row_diff':
             parts = annotate_command.split('transform_anno', 1)
             annotate_command = parts[0] + f' transform_anno -i {graph_filename} '  + parts[1]
@@ -88,6 +90,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         if final_anno == 'row_diff_brwt' or final_anno == 'row_diff_sparse':
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
                                f'--anchors-file {graph_filename}.anchors {output_filename}.row_diff.annodbg'
+            print(annotate_command)
             res = subprocess.run([annotate_command], shell=True)
             assert (res.returncode == 0)
             os.remove(output_filename + anno_file_extension['row_diff'])
@@ -128,6 +131,7 @@ class TestQuery(unittest.TestCase):
 
         res = subprocess.run([construct_command], shell=True)
         assert(res.returncode == 0)
+        print(construct_command)
 
         stats_command = '{exe} stats {graph}'.format(
             exe=METAGRAPH,
@@ -534,6 +538,7 @@ class TestQueryCanonical(unittest.TestCase):
             outfile=cls.tempdir.name + '/graph',
             input=TEST_DATA_DIR + '/transcripts_100.fa'
         )
+        print(construct_command)
 
         res = subprocess.run([construct_command], shell=True)
         assert(res.returncode == 0)
@@ -588,6 +593,7 @@ class TestQueryCanonical(unittest.TestCase):
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
+        print(query_command)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 

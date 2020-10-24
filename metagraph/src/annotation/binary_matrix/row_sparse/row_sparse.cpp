@@ -1,5 +1,9 @@
 #include "row_sparse.hpp"
 
+#include "common/logger.hpp"
+#include "common/vector.hpp"
+#include "graph/representation/succinct/boss.hpp"
+
 namespace mtg {
 namespace annot {
 namespace binmat {
@@ -24,9 +28,8 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     });
     assert(idx == num_relations);
 
-    boundary_ = sdsl::rrr_vector<>(boundary);
+    boundary_ = bit_vector_small(boundary);
     elements_ = sdsl::enc_vector<>(elements);
-    sdsl::util::init_support(sboundary_, &boundary_);
 }
 
 RowSparse::RowSparse(RowSparse &&other) {
@@ -34,7 +37,6 @@ RowSparse::RowSparse(RowSparse &&other) {
     num_columns_ = other.num_columns_;
     elements_ = std::move(other.elements_);
     boundary_ = std::move(other.boundary_);
-    sdsl::util::init_support(sboundary_, &boundary_);
 }
 
 bool RowSparse::get(Row row, Column column) const {
@@ -55,7 +57,7 @@ std::vector<BinaryMatrix::Row> RowSparse::get_column(Column column) const {
 BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     Vector<uint64_t> result;
-    uint64_t start_idx = row == 0 ? 0 : sboundary_.select(row) + 1;
+    uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
 
     while (boundary_[start_idx] == 0) {
         result.push_back(elements_[start_idx - row]);
@@ -64,14 +66,15 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     return result;
 }
 
-bool RowSparse::load(std::istream &f)  {
-    f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
-    elements_.load(f);
-    boundary_.load(f);
-    sdsl::util::init_support(sboundary_, &boundary_);
-    sdsl::rrr_vector<>::rank_1_type rboundary;
-    sdsl::util::init_support(rboundary, &boundary_);
-    num_rows_ = rboundary.rank(boundary_.size());
+bool RowSparse::load(std::istream &f) {
+    try {
+        f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
+        elements_.load(f);
+        boundary_.load(f);
+        num_rows_ = boundary_.num_set_bits();
+    } catch (...) {
+        return false;
+    }
     return true;
 }
 
