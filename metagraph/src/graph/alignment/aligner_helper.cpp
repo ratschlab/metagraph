@@ -695,12 +695,14 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         assert(!second_suffix.eof() || i + 1 == overlap);
     }
 
-    cur_score = first_prefix.get_score() + second_suffix.get_score();
-    if (cur_score > best_score) {
-        best_first_prefix = first_prefix;
-        best_second_suffix = second_suffix;
-        best_score = cur_score;
-        best_overlap = 0;
+    if (second_suffix.get_query().size() >= config.min_seed_length) {
+        cur_score = first_prefix.get_score() + second_suffix.get_score();
+        if (cur_score > best_score) {
+            best_first_prefix = first_prefix;
+            best_second_suffix = second_suffix;
+            best_score = cur_score;
+            best_overlap = 0;
+        }
     }
 
     // iteratively shift the splice point
@@ -755,12 +757,17 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
             assert(Alignment(second_suffix).is_valid(graph, &config));
         }
 
-        cur_score = first_prefix.get_score() + second_suffix.get_score();
-        if (cur_score > best_score) {
-            best_first_prefix = first_prefix;
-            best_second_suffix = second_suffix;
-            best_score = cur_score;
-            best_overlap = i;
+        if (first_prefix.get_query().size() < config.min_seed_length)
+            break;
+
+        if (second_suffix.get_query().size() >= config.min_seed_length) {
+            cur_score = first_prefix.get_score() + second_suffix.get_score();
+            if (cur_score > best_score) {
+                best_first_prefix = first_prefix;
+                best_second_suffix = second_suffix;
+                best_score = cur_score;
+                best_overlap = i;
+            }
         }
     }
 

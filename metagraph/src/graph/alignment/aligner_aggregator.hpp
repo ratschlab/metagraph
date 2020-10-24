@@ -249,6 +249,12 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     for ( ; it != paths.end(); ++it) {
         assert(it->get_query_end() >= chain.back().get_query_end());
+
+        // skip this alignment if it covers the same region as the last one
+        if (it->get_query().data() == chain.back().get_query().data()
+                && it->get_query_end() == chain.back().get_query_end())
+            continue;
+
         if (it->get_query().data() < chain.back().get_query_end()) {
             // the alignments overlap
             auto [first, second] = DBGAlignment::get_best_overlap(
@@ -279,6 +285,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                                   std::move(next_chain), score, best_score);
 
         } else {
+            // select this alignment if it leads to a better score
             score_t score = cur_score + it->get_score();
             if (score > best_score->at(it - paths.begin())) {
                 auto next_chain = const_cast<const std::vector<DBGAlignment>&>(chain);
