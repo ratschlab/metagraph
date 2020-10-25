@@ -240,7 +240,7 @@ void traverse_anno_chunked(
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic) collapse(2)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
@@ -364,7 +364,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     source_row_nbits.push_back(nbits);
                 }
 
-                #pragma omp parallel for num_threads(num_threads) collapse(2)
+                #pragma omp parallel for num_threads(num_threads)
                 for (size_t s = 0; s < sources.size(); ++s) {
                     for (size_t j = 0; j < set_rows[s].size(); ++j) {
                         targets[s][j]->insert(set_rows[s][j].begin(), set_rows[s][j].end());
