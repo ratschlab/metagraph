@@ -240,7 +240,7 @@ void traverse_anno_chunked(
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic) collapse(2)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
@@ -320,9 +320,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
-            auto sorted_set = std::make_unique<SSD>(num_threads, num_elements, tmp_dir,
-                                                    std::numeric_limits<uint64_t>::max());
-            targets[i].push_back(std::move(sorted_set));
+            targets[i].emplace_back(new SSD(1, num_elements, tmp_dir,
+                                            std::numeric_limits<uint64_t>::max()));
         }
     }
 
@@ -365,7 +364,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     source_row_nbits.push_back(nbits);
                 }
 
-                #pragma omp parallel for num_threads(num_threads)
+                #pragma omp parallel for num_threads(num_threads) collapse(2)
                 for (size_t s = 0; s < sources.size(); ++s) {
                     for (size_t j = 0; j < set_rows[s].size(); ++j) {
                         targets[s][j]->insert(set_rows[s][j].begin(), set_rows[s][j].end());
