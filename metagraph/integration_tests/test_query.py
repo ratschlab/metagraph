@@ -64,33 +64,41 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
     res = subprocess.run([annotate_command], shell=True)
     assert(res.returncode == 0)
 
-    if target_anno != anno_repr:
-        final_anno = target_anno
-        if final_anno == 'row_diff_brwt':
-            target_anno = 'row_diff'
+    if target_anno == anno_repr:
+        return
 
-        annotate_command = '{exe} transform_anno -p {num_threads} \
-                --anno-type {target_anno} -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            num_threads=NUM_THREADS,
-            graph=graph_filename,
-            target_anno=target_anno,
-            outfile=output_filename,
-            input=output_filename + anno_file_extension[anno_repr]
-        )
-        if target_anno == 'row_diff':
-            parts = annotate_command.split('transform_anno', 1)
-            annotate_command = parts[0] + f' transform_anno -i {graph_filename} '  + parts[1]
+    final_anno = target_anno
+    if final_anno == 'row_diff_brwt':
+        target_anno = 'row_diff'
+
+    annotate_command = '{exe} transform_anno -p {num_threads} \
+            --anno-type {target_anno} -o {outfile} {input}'.format(
+        exe=METAGRAPH,
+        num_threads=NUM_THREADS,
+        graph=graph_filename,
+        target_anno=target_anno,
+        outfile=output_filename,
+        input=output_filename + anno_file_extension[anno_repr]
+    )
+    if target_anno == 'row_diff':
+        annotate_command += ' -i ' + graph_filename
+
+    res = subprocess.run([annotate_command], shell=True)
+    assert(res.returncode == 0)
+
+    if target_anno == 'row_diff':
+        annotate_command += ' --optimize'
         res = subprocess.run([annotate_command], shell=True)
         assert(res.returncode == 0)
-        os.remove(output_filename + anno_file_extension[anno_repr])
-        if final_anno == 'row_diff_brwt':
-            annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
-                               f'-p {NUM_THREADS} {output_filename}.row_diff.annodbg'
-            res = subprocess.run([annotate_command], shell=True)
-            assert (res.returncode == 0)
-            os.remove(output_filename + anno_file_extension['row_diff'])
 
+    os.remove(output_filename + anno_file_extension[anno_repr])
+
+    if final_anno == 'row_diff_brwt':
+        annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
+                           f'-p {NUM_THREADS} {output_filename}.row_diff.annodbg'
+        res = subprocess.run([annotate_command], shell=True)
+        assert (res.returncode == 0)
+        os.remove(output_filename + anno_file_extension['row_diff'])
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),

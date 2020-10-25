@@ -18,12 +18,7 @@ void RowDiff<BaseMatrix>::serialize(const std::string &filename) const {
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(const std::string &filename) {
     std::ifstream f(filename, ios::binary);
-    bool result = load(f);
-    f.close();
-
-    load_terminal(anchors_filename_, &terminal_);
-
-    return result;
+    return load(f);
 }
 
 template

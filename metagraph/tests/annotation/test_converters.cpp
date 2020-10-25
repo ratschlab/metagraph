@@ -167,9 +167,9 @@ TEST(RowDiff, succ) {
         const std::string pred_file = graph_fname + ".pred";
         const std::string pred_boundary_file = graph_fname + ".pred_boundary";
         const std::vector<std::vector<uint64_t>> expected_succ
-                = { { 0, 0, 0, 0, 0 }, { 0, 4, 1, 5, 0 }, { 0, 4, 1, 5, 3 } };
+                = { { 5, 5, 5, 5, 5 }, { 5, 3, 0, 4, 5 }, { 5, 3, 0, 4, 2 } };
         const std::vector<std::vector<uint64_t>> expected_pred
-                = { {}, { 3, 2, 4 }, { 3, 5, 2, 4 } };
+                = { {}, { 2, 1, 3 }, { 2, 4, 1, 3 } };
         const std::vector<std::vector<bool>> expected_boundary = {
             { 1, 1, 1, 1, 1 }, { 0, 1, 1, 1, 0, 1, 0, 1 }, { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
         };

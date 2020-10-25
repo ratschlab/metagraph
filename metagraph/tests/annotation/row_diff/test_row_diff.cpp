@@ -15,6 +15,8 @@ using namespace mtg;
 using namespace testing;
 using ::testing::_;
 
+typedef annot::binmat::RowDiff<annot::binmat::ColumnMajor>::anchor_bv_type anchor_bv_type;
+
 TEST(RowDiff, Empty) {
     annot::binmat::RowDiff<annot::binmat::ColumnMajor> rowdiff;
     EXPECT_EQ(0, rowdiff.diffs().num_columns());
@@ -29,7 +31,7 @@ TEST(RowDiff, Empty) {
 
 TEST(RowDiff, Serialize) {
     sdsl::bit_vector bterminal = { 0, 0, 0, 1 };
-    sdsl::rrr_vector terminal(bterminal);
+    anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
     std::ofstream fterm(fterm_temp.name(), ios::binary);
     terminal.serialize(fterm);
@@ -76,7 +78,7 @@ TEST(RowDiff, GetAnnotation) {
 
     // build annotation
     sdsl::bit_vector bterminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::rrr_vector terminal(bterminal);
+    anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
     std::ofstream fterm(fterm_temp.name(), ios::binary);
     terminal.serialize(fterm);
@@ -131,7 +133,7 @@ TEST(RowDiff, GetAnnotationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal = { 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::rrr_vector terminal(bterminal);
+    anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
     std::ofstream fterm(fterm_temp.name(), ios::binary);
     terminal.serialize(fterm);
@@ -185,7 +187,7 @@ TEST(RowDiff, GetAnnotationBifurcation) {
 
     // build annotation
     sdsl::bit_vector bterminal = { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::rrr_vector terminal(bterminal);
+    anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
     std::ofstream fterm(fterm_temp.name(), ios::binary);
     terminal.serialize(fterm);
@@ -241,7 +243,7 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
 
     // build annotation
     sdsl::bit_vector bterminal = { 0, 1, 0, 0, 0, 0, 1, 0, 1, 0 };
-    sdsl::rrr_vector terminal(bterminal);
+    anchor_bv_type terminal(bterminal);
     utils::TempFile fterm_temp;
     std::ofstream fterm(fterm_temp.name(), ios::binary);
     terminal.serialize(fterm);
