@@ -498,7 +498,8 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         exit(1);
     }
 
-    logger->trace("Merging row reduction vectors");
+    if (filenames.size() > 1u)
+        logger->trace("Merging row reduction vectors");
 
     while (filenames.size() > 1u) {
         std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
