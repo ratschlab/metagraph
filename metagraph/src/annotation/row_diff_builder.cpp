@@ -180,7 +180,7 @@ using CallOnes = std::function<void(const bit_vector &source_col,
  * @param num_rows number of rows in the annotation
  * @param pred_succ_fprefix prefix for the pred/succ files containg the predecessors and
  * the successor for each node
- * @param col_annotations the annotations to be traversed
+ * @param col_annotations the annotations to transform
  * @param before_chunk callback to invoke before a chunk is traversed
  * @param call_ones callback to invoke on a set bit
  * @param after_chunk callback to invoke after a chunk is traversed
@@ -189,7 +189,7 @@ void traverse_anno_chunked(
         const std::string &log_header,
         uint64_t num_rows,
         const std::string &pred_succ_fprefix,
-        const std::vector<std::unique_ptr<annot::ColumnCompressed<>>> &col_annotations,
+        const std::vector<annot::ColumnCompressed<>> &col_annotations,
         const std::function<void(uint64_t chunk_size)> &before_chunk,
         const CallOnes &call_ones,
         const std::function<void()> &after_chunk) {
@@ -242,9 +242,9 @@ void traverse_anno_chunked(
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
-            for (size_t j = 0; j < col_annotations[l_idx]->num_labels(); ++j) {
+            for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
-                        = col_annotations[l_idx]->get_matrix().data()[j];
+                        = col_annotations[l_idx].get_matrix().data()[j];
                 source_col->call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
                         call_ones(*source_col, i, i - chunk, l_idx, j,
@@ -279,17 +279,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         terminal.load(f);
     }
 
-    std::vector<std::unique_ptr<annot::ColumnCompressed<>>> sources;
-    for (const auto &fname : source_files) {
-        auto anno = std::make_unique<annot::ColumnCompressed<>>() ;
-        anno->load(fname);
-        sources.push_back(std::move(anno));
+    std::vector<annot::ColumnCompressed<>> sources(source_files.size());
 
-        if (sources.back()->num_labels() && sources.back()->num_objects() != terminal.size()) {
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < source_files.size(); ++i) {
+        sources[i].load(source_files[i]);
+
+        if (sources[i].num_labels() && sources[i].num_objects() != terminal.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
                           " Vector size: {}, number of rows: {}",
-                          anchors_fname, fname,
-                          terminal.size(), sources.back()->num_objects());
+                          anchors_fname, source_files[i],
+                          terminal.size(), sources[i].num_objects());
             std::exit(1);
         }
     }
@@ -308,15 +308,15 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<std::vector<std::vector<uint64_t>>> set_rows(sources.size());
 
     for (size_t i = 0; i < sources.size(); ++i) {
-        if (sources[i]->num_labels() == 0)
+        if (sources[i].num_labels() == 0)
             continue;
 
         uint64_t num_elements
                 = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
-                           std::min((uint64_t)1'000'000, sources[i]->num_relations()));
-        targets_size[i].assign(sources[i]->num_labels(), 0U);
-        set_rows[i].resize(sources[i]->num_labels());
-        for (size_t j = 0; j < sources[i]->num_labels(); ++j) {
+                           std::min((uint64_t)1'000'000, sources[i].num_relations()));
+        targets_size[i].assign(sources[i].num_labels(), 0U);
+        set_rows[i].resize(sources[i].num_labels());
+        for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
@@ -365,18 +365,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     source_row_nbits.push_back(nbits);
                 }
 
-                for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                    for (size_t j = 0; j < set_rows[source_idx].size(); ++j) {
-                        targets[source_idx][j]->insert(set_rows[source_idx][j].begin(),
-                                                       set_rows[source_idx][j].end());
-                        targets_size[source_idx][j] += set_rows[source_idx][j].size();
+                #pragma omp parallel for num_threads(num_threads)
+                for (size_t s = 0; s < sources.size(); ++s) {
+                    for (size_t j = 0; j < set_rows[s].size(); ++j) {
+                        targets[s][j]->insert(set_rows[s][j].begin(), set_rows[s][j].end());
+                        targets_size[s][j] += set_rows[s][j].size();
                     }
                 }
             });
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
-        label_encoders.push_back(source->get_label_encoder());
+        label_encoders.push_back(source.get_label_encoder());
     }
 
     // free memory occupied by sources
