@@ -175,13 +175,13 @@ TEST(RowDiff, succ) {
      */
 
     const std::vector<std::vector<uint64_t>> expected_succ = {
-        { 0, 0, 0, 0, 0 },
-        { 0, 4, 1, 0, 3 },
-        { 0, 4, 1, 5, 3 } };
+        { 5, 5, 5, 5, 5 },
+        { 5, 3, 0, 5, 2 },
+        { 5, 3, 0, 4, 2 } };
     const std::vector<std::vector<uint64_t>> expected_pred = {
         {},
-        { 3, 5, 2 },
-        { 3, 5, 2, 4 } };
+        { 2, 4, 1 },
+        { 2, 4, 1, 3 } };
     const std::vector<std::vector<bool>> expected_boundary = {
         { 1, 1, 1, 1, 1 },
         { 0, 1, 1, 0, 1, 0, 1, 1 },
