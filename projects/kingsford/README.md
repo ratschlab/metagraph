@@ -110,7 +110,7 @@ bsub -J "kingsford_cluster_columns_primary" \
      -n 36 -R "rusage[mem=2100] span[hosts=1]" \
     "cat ~/metagenome/data/kingsford/annotation/columns_primary.txt \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 100000000 \
             -o ~/metagenome/data/kingsford/annotation/linkage_kingsford_primary.csv \
             -p 36 \

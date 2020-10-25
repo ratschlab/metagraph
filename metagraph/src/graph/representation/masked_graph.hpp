@@ -23,6 +23,9 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                         bool only_valid_nodes_in_mask = false,
                         bool canonical = false);
 
+    MaskedDeBruijnGraph(MaskedDeBruijnGraph&&) = default;
+    MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) = default;
+
     virtual ~MaskedDeBruijnGraph() {}
 
     virtual void add_sequence(std::string_view,
