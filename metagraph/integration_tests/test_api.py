@@ -186,7 +186,8 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(ret[0]['seq_description'], '')
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+#@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@parameterized_class(('mode',), input_values=[('canonical',)])
 class TestAPIRawChain(TestAPIBase):
     @classmethod
     def setUpClass(cls):
@@ -197,7 +198,7 @@ class TestAPIRawChain(TestAPIBase):
         self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
+        construct_command = '{exe} server_query --align-min-seed-length 2 -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
             exe=METAGRAPH,
             graph=graph,
             annot=annotation,
