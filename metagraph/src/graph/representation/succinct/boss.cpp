@@ -2369,6 +2369,7 @@ void update_terminal_bits(uint64_t max_length,
     for (i = 0; i + max_length <= path.size(); i += max_length) {
         for (uint64_t j = i; j + 1 < i + max_length; ++j) {
             assert(!fetch_bit(terminal->data(), path[j], async));
+            assert(!fetch_bit(near_terminal->data(), path[j], async));
             set_bit(near_terminal->data(), path[j], async);
         }
         assert(!fetch_bit(near_terminal->data(), path[i + max_length - 1], async));
@@ -2383,8 +2384,9 @@ void update_terminal_bits(uint64_t max_length,
     //                      ^   ^
     //                      i next_edge
 
-    // skip the path if the next node is close to an anchor and, therefore,
-    // this last segment is close to that anchor too (at most 2 * max_length)
+    // If the next node is close to an existing anchor and, therefore, every
+    // node in this last segment is close to it too (at most 2 * max_length),
+    // there is no need to set another anchor at the end of the path.
     if (fetch_bit(near_terminal->data(), next_edge, async)) {
         assert(!fetch_bit(terminal->data(), next_edge, async));
         return;
@@ -2395,7 +2397,8 @@ void update_terminal_bits(uint64_t max_length,
         path.pop_back();
     }
 
-    // we set a new anchor, thus will mark its predecessors as close to it
+    // The last node of |path| is an anchor, so all its predecessors must be
+    // marked as near-anchor.
     while (i < path.size()) {
         set_bit(near_terminal->data(), path[i++], async);
     }
