@@ -7,9 +7,9 @@
 #include <sdsl/enc_vector.hpp>
 #include <sdsl/bit_vectors.hpp>
 #include <sdsl/util.hpp>
-#include <sdsl/rrr_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/logger.hpp"
 #include "common/vector.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -44,20 +44,24 @@ namespace binmat {
 template <class BaseMatrix>
 class RowDiff : public BinaryMatrix {
   public:
+    typedef bit_vector_small anchor_bv_type;
+
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph,
                BaseMatrix &&diffs,
-               const std::string &anchors_filename)
+               const std::string &anchors_filename,
+               bool load_anchors = true)
         : graph_(graph), diffs_(std::move(diffs)), anchors_filename_(anchors_filename) {
-        load_terminal(anchors_filename_, &terminal_);
+        if (load_anchors)
+            load_terminal(anchors_filename_, &terminal_);
     }
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
     const std::string& anchors_filename() const { return anchors_filename_; }
 
-    const graph::DBGSuccinct *graph() const { return graph_; }
+    const graph::DBGSuccinct* graph() const { return graph_; }
 
     /**
      * Returns the number of set bits in the matrix.
@@ -82,22 +86,22 @@ class RowDiff : public BinaryMatrix {
     void serialize(const std::string &filename) const;
     bool load(const std::string &filename);
 
-    const sdsl::rrr_vector<> &terminal() const { return terminal_; }
+    const anchor_bv_type& terminal() const { return terminal_; }
 
-    const BaseMatrix &diffs() const { return diffs_; }
-    BaseMatrix &diffs() { return diffs_; }
+    const BaseMatrix& diffs() const { return diffs_; }
+    BaseMatrix& diffs() { return diffs_; }
 
     Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
 
   private:
-    static void load_terminal(const std::string &filename, sdsl::rrr_vector<> *terminal);
+    static void load_terminal(const std::string &filename, anchor_bv_type *terminal);
 
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
 
     const graph::DBGSuccinct *graph_ = nullptr;
 
     BaseMatrix diffs_;
-    sdsl::rrr_vector<> terminal_;
+    anchor_bv_type terminal_;
 
     std::string anchors_filename_;
 };
@@ -168,7 +172,7 @@ void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::load_terminal(const std::string &filename,
-                                        sdsl::rrr_vector<> *terminal) {
+                                        anchor_bv_type *terminal) {
     std::ifstream f(filename, ios::binary);
     if (!f.good()) {
         common::logger->error("Could not open anchor file {}", filename);
