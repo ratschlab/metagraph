@@ -3,7 +3,7 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
-#include "annotation/binary_matrix/row_sparse//row_sparse.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"

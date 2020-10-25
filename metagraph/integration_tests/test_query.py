@@ -41,7 +41,7 @@ def product(graph_types, anno_types):
     for graph in graph_types:
         for anno in anno_types:
             if graph == 'succinct' or (
-                    anno != 'row_diff' and anno != 'row_diff_brwt' and anno != 'row_sparse' and anno != 'row_diff_sparse'):
+                    anno != 'row_diff' and anno != 'row_diff_brwt' and anno != 'row_diff_sparse'):
                 result.append((graph, anno))
     return result
 
