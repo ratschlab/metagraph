@@ -29,7 +29,7 @@ inline sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t bits_per_num
       return packed;
 }
 
-sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t bits_per_number);
+sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width);
 
 
 /**
