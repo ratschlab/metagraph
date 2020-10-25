@@ -251,6 +251,39 @@ class TestAlign(unittest.TestCase):
         for [a, b] in zip(params_str, ref_align_str):
             self.assertEqual(a, b)
 
+    @parameterized.expand(['succinct'])
+    def test_align_chain(self, representation):
+
+        construct_command = '{exe} build --graph {repr} -k 31 -c -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            repr=representation,
+            outfile=self.tempdir.name + '/refs',
+            input=TEST_DATA_DIR + '/refs.fa'
+        )
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/refs' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 6346', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
+
+        stats_command = '{exe} align -i {graph} --align-min-seed-length 15 --discovery-fraction 0.0 {reads}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/refs' + graph_file_extension[representation],
+            reads=TEST_DATA_DIR + '/reads.fa',
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')
+        self.assertEqual(len(res.stdout), 14752)
 
 if __name__ == '__main__':
     unittest.main()
