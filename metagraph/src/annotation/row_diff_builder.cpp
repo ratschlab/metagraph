@@ -19,8 +19,6 @@ namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
-// Marker type to indicate a value represent a node index in a BOSS graph
-using node_index = graph::boss::BOSS::node_index;
 
 typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
 
@@ -57,14 +55,16 @@ void build_successor(const std::string &graph_fname,
     sdsl::bit_vector dummy;
     boss.row_diff_traverse(num_threads, max_length, &terminal, &dummy);
 
+    uint64_t num_rows = graph.num_nodes();
+
     // terminal uses BOSS edges as indices, so we need to map it to annotation indices
-    sdsl::bit_vector term(graph.num_nodes(), 0);
-    for (uint64_t i = 1; i < terminal.size(); ++i) {
+    sdsl::bit_vector term(num_rows, 0);
+    for (BOSS::edge_index i = 1; i < terminal.size(); ++i) {
         if (terminal[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
-            uint64_t anno_index = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_idx);
-            assert(anno_index < graph.num_nodes());
+            uint64_t anno_index
+                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
+            assert(anno_index < num_rows);
             term[anno_index] = 1;
         }
     }
@@ -99,25 +99,31 @@ void build_successor(const std::string &graph_fname,
         #pragma omp parallel for num_threads(num_threads) schedule(static)
         for (uint64_t i = start; i < std::min(start + batch_size, graph.num_nodes() + 1); ++i) {
             const size_t r = omp_get_thread_num();
-            uint64_t boss_idx = graph.kmer_to_boss_index(i);
+            BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
             if (dummy[boss_idx] || terminal[boss_idx]) {
-                succ_buf[r].push_back(0);
+                succ_buf[r].push_back(num_rows);
             } else {
                 const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
                 assert(d && "must not be dummy");
                 uint64_t next = graph.boss_to_kmer_index(boss.fwd(boss_idx, d));
-                succ_buf[r].push_back(next);
+                assert(next);
+                succ_buf[r].push_back(
+                    graph::AnnotatedSequenceGraph::graph_to_anno_index(next)
+                );
             }
             // ignore predecessors if boss_idx is not the last outgoing
             // edge (bc. we only traverse the last outgoing at a bifurcation)
             if (!dummy[boss_idx] && boss.get_last(boss_idx)) {
                 BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
-                uint64_t back_idx = boss.bwd(boss_idx);
+                BOSS::edge_index back_idx = boss.bwd(boss_idx);
                 boss.call_incoming_to_target(back_idx, d,
                     [&](BOSS::edge_index pred) {
                         // terminal and dummy predecessors are ignored
                         if (!terminal[pred] && !dummy[pred]) {
-                            pred_buf[r].push_back(graph.boss_to_kmer_index(pred));
+                            uint64_t node_index = graph.boss_to_kmer_index(pred);
+                            pred_buf[r].push_back(
+                                graph::AnnotatedSequenceGraph::graph_to_anno_index(node_index)
+                            );
                             pred_boundary_buf[r].push_back(0);
                         }
                     }
@@ -132,7 +138,7 @@ void build_successor(const std::string &graph_fname,
             for (uint64_t v : pred_buf[i]) {
                 pred.push_back(v);
             }
-            for (uint64_t v : pred_boundary_buf[i]) {
+            for (bool v : pred_boundary_buf[i]) {
                 pred_boundary.push_back(v);
             }
         }
@@ -200,31 +206,32 @@ void traverse_anno_chunked(
     assert(succ.size() == num_rows);
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
+
     std::vector<uint64_t> succ_chunk;
+    std::vector<uint64_t> pred_chunk;
     std::vector<uint64_t> pred_chunk_idx;
 
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
+
     ProgressBar progress_bar(num_rows, log_header, std::cerr, !common::get_verbose());
-    for (node_index chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        succ_chunk.resize(std::min(BLOCK_SIZE, num_rows - chunk));
-        pred_chunk_idx.resize(std::min(BLOCK_SIZE, num_rows - chunk) + 1);
+
+    for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
+        uint64_t block_size = std::min(BLOCK_SIZE, num_rows - chunk);
+
+        before_chunk(block_size);
+
+        succ_chunk.resize(block_size);
+        pred_chunk.resize(0);
+        pred_chunk_idx.resize(block_size + 1);
         pred_chunk_idx[0] = 0;
 
-        std::vector<uint64_t> pred_chunk;
-        pred_chunk.reserve(succ_chunk.size() * 1.1);
-
-        before_chunk(succ_chunk.size());
-
-        for (node_index idx = chunk, i = 0; i < succ_chunk.size(); ++idx, ++i) {
-            succ_chunk[i] = succ[idx] == 0
-                            ? std::numeric_limits<uint64_t>::max()
-                            : graph::AnnotatedSequenceGraph::graph_to_anno_index(succ[idx]);
+        for (uint64_t i = 0; i < block_size; ++i) {
+            succ_chunk[i] = succ[chunk + i];
             pred_chunk_idx[i + 1] = pred_chunk_idx[i];
             while (*pred_boundary_it == 0) {
                 ++pred_chunk_idx[i + 1];
-                pred_chunk.push_back(
-                        graph::AnnotatedSequenceGraph::graph_to_anno_index(*pred_it));
+                pred_chunk.push_back(*pred_it);
                 ++pred_it;
                 ++pred_boundary_it;
             }
@@ -238,7 +245,7 @@ void traverse_anno_chunked(
             for (size_t j = 0; j < col_annotations[l_idx]->num_labels(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col
                         = col_annotations[l_idx]->get_matrix().data()[j];
-                source_col->call_ones_in_range(chunk, chunk + succ_chunk.size(),
+                source_col->call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
                         call_ones(*source_col, i, i - chunk, l_idx, j,
                                   succ_chunk[i - chunk],
@@ -435,7 +442,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
-    for (node_index chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
+    for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_batch.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -444,7 +451,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             for (size_t j = 0; j < columns.size(); ++j) {
                 const std::unique_ptr<bit_vector> &source_col = columns[j];
                 source_col->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
-                    [&](node_index i) {
+                    [&](uint64_t i) {
                         __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
                     }
                 );
