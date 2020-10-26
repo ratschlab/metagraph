@@ -1179,7 +1179,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         convert_batch_to_row_diff(
-                graph_fname, graph_fname + (optimize ? ".terminal" : ".terminal.unopt"),
+                graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
                 file_batch, dest_dir, row_reduction_fname);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
