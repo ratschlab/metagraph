@@ -40,6 +40,8 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width);
  * for more details.
  */
 
+// TODO: make bool atomic a template parameter instead
+
 inline bool fetch_and_set_bit(uint64_t *v,
                               uint64_t i,
                               bool atomic = false,
@@ -327,11 +329,11 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
                              uint64_t i,
                              std::mutex &backup_mutex,
                              int mo) {
-    size_t width = vector.width();
-    size_t bit_pos = i * width;
-    uint64_t mask = (1llu << width) - 1;
+    const size_t width = vector.width();
+    const size_t bit_pos = i * width;
+    const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
-        // there is no way to reliably modify without a mutex
+        // there is no way to reliably fetch without a mutex
         std::lock_guard<std::mutex> lock(backup_mutex);
         return vector[i];
     } else if ((bit_pos & 0x3F) + width <= 64) {
@@ -345,7 +347,7 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
         return (__atomic_load_n(word, mo) >> (bit_pos & 0x7F)) & mask;
 #endif
     } else {
-        uint8_t shift = bit_pos & 0x7;
+        const uint8_t shift = bit_pos & 0x7;
         const uint8_t *word = &reinterpret_cast<const uint8_t*>(vector.data())[bit_pos >> 3];
         if (shift + width <= 8) {
             // read from a byte
@@ -372,30 +374,30 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
                                      uint64_t val,
                                      std::mutex &backup_mutex,
                                      int mo) {
-    size_t width = vector.width();
-    size_t bit_pos = i * width;
-    uint64_t mask = (1llu << width) - 1;
+    const size_t width = vector.width();
+    const size_t bit_pos = i * width;
+    const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
         // there is no way to reliably modify without a mutex
         std::lock_guard<std::mutex> lock(backup_mutex);
-        uint64_t old_val = vector[i];
+        const uint64_t old_val = vector[i];
         vector[i] += val;
         return old_val;
     } else if ((bit_pos & 0x3F) + width <= 64) {
         // element fits in an aligned word
         uint64_t *word = &vector.data()[bit_pos >> 6];
-        uint8_t shift = bit_pos & 0x3F;
+        const uint8_t shift = bit_pos & 0x3F;
         return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
 #if defined(MODE_TI) && defined(__CX16__)
     } else if ((bit_pos & 0x7F) + width <= 128) {
         // element fits in an aligned double word
         __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-        uint8_t shift = bit_pos & 0x7F;
-        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
+        const uint8_t shift = bit_pos & 0x7F;
+        // TODO: GCC only generates cmpxchg16b instruction with older __sync functions
         return (__sync_fetch_and_add(word, __uint128_t(val) << shift) >> shift) & mask;
 #endif
     } else {
-        uint8_t shift = bit_pos & 0x7;
+        const uint8_t shift = bit_pos & 0x7;
         uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
         if (shift + width <= 8) {
             // read from a byte
@@ -422,22 +424,22 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
                                 uint64_t val,
                                 std::mutex &backup_mutex,
                                 int mo) {
-    size_t width = vector.width();
-    size_t bit_pos = i * width;
-    uint64_t mask = (1llu << width) - 1;
+    const size_t width = vector.width();
+    const size_t bit_pos = i * width;
+    const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
         // there is no way to reliably modify without a mutex
         std::lock_guard<std::mutex> lock(backup_mutex);
-        uint64_t old_val = vector[i];
+        const uint64_t old_val = vector[i];
         vector[i] = val;
         return old_val;
     } else if ((bit_pos & 0x3F) + width <= 64) {
         // element fits in an aligned word
         uint64_t *word = &vector.data()[bit_pos >> 6];
-        uint8_t shift = bit_pos & 0x3F;
+        const uint8_t shift = bit_pos & 0x3F;
         uint64_t desired;
         uint64_t exp = *word;
-        uint64_t inv_mask = ~(mask << shift);
+        const uint64_t inv_mask = ~(mask << shift);
         val <<= shift;
         do {
             desired = val | (inv_mask & exp);
@@ -447,12 +449,12 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
     } else if ((bit_pos & 0x7F) + width <= 128) {
         // element fits in an aligned double word
         __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
-        uint8_t shift = bit_pos & 0x7F;
+        const uint8_t shift = bit_pos & 0x7F;
         __uint128_t desired;
         __uint128_t exp;
         __uint128_t inv_mask = ~(__uint128_t(mask) << shift);
         __uint128_t big_val = __uint128_t(val) << shift;
-        // TODO: GCC only generates cmpxchg16b instruction only with older __sync functions
+        // TODO: GCC only generates cmpxchg16b instruction with older __sync functions
         do {
             exp = *word;
             desired = big_val | (inv_mask & exp);
@@ -460,13 +462,13 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         return (exp >> shift) & mask;
 #endif
     } else {
-        uint8_t shift = bit_pos & 0x7;
+        const uint8_t shift = bit_pos & 0x7;
         uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
         if (shift + width <= 8) {
             // read from a byte
             uint8_t desired;
             uint8_t exp = *word;
-            uint8_t inv_mask = ~(mask << shift);
+            const uint8_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
@@ -477,7 +479,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
             uint16_t *this_word = (uint16_t*)word;
             uint16_t desired;
             uint16_t exp = *this_word;
-            uint16_t inv_mask = ~(mask << shift);
+            const uint16_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
@@ -488,7 +490,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
             uint32_t *this_word = (uint32_t*)word;
             uint32_t desired;
             uint32_t exp = *this_word;
-            uint32_t inv_mask = ~(mask << shift);
+            const uint32_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
@@ -499,7 +501,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
             uint64_t *this_word = (uint64_t*)word;
             uint64_t desired;
             uint64_t exp = *this_word;
-            uint64_t inv_mask = ~(mask << shift);
+            const uint64_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
