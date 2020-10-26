@@ -147,7 +147,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 }
             }
         },
-        get_num_threads()
+        filenames.size() > get_num_threads() ? get_num_threads() : 0
     );
 
     if (merge_successful && no_errors) {

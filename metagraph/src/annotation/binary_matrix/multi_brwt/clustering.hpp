@@ -30,6 +30,9 @@ LinkageMatrix
 agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
                              size_t num_threads = 1);
 
+// Merges points in their original order
+LinkageMatrix agglomerative_linkage_trivial(size_t num_columns);
+
 std::vector<uint64_t>
 sample_row_indexes(uint64_t num_rows, uint64_t size, int seed = 1);
 
