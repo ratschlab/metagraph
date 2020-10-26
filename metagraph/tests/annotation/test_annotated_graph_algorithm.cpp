@@ -20,7 +20,8 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        double mask_in_label_fraction,
                                        double mask_out_label_fraction,
                                        double other_label_fraction,
-                                       double lazy_evaluation_density_cutoff) {
+                                       double lazy_evaluation_density_cutoff,
+                                       size_t num_threads) {
     size_t insize = ingroup.size();
     size_t outsize = outgroup.size();
     return MaskedDeBruijnGraph(
@@ -45,6 +46,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                 return (num_total_labels - num_in_labels - num_out_labels)
                     <= other_label_fraction * num_total_labels;
             },
+            num_threads,
             lazy_evaluation_density_cutoff
         )
     );
@@ -56,7 +58,7 @@ class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
-void test_mask_indices(double density_cutoff) {
+void test_mask_indices(double density_cutoff, size_t num_threads) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
 
@@ -81,12 +83,10 @@ void test_mask_indices(double density_cutoff) {
         };
 
         auto masked_dbg = build_masked_graph(*anno_graph,
-                                             ingroup,
-                                             outgroup,
-                                             1.0,
-                                             0.0,
-                                             0.0,
-                                             density_cutoff);
+                                             ingroup, outgroup,
+                                             1.0, 0.0, 0.0,
+                                             density_cutoff,
+                                             num_threads);
 
         // FYI: num_nodes() throws exception for masked graph with lazy node mask
         // EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
@@ -104,9 +104,11 @@ void test_mask_indices(double density_cutoff) {
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
-    for (double d = 0.0; d <= 1.0; d += 0.05) {
-        test_mask_indices<typename TypeParam::first_type,
-                          typename TypeParam::second_type>(d);
+    for (size_t num_threads : { 1, 4 }) {
+        for (double d = 0.0; d <= 1.0; d += 0.05) {
+            test_mask_indices<typename TypeParam::first_type,
+                              typename TypeParam::second_type>(d, num_threads);
+        }
     }
 }
 
@@ -116,7 +118,8 @@ void
 test_mask_unitigs(double inlabel_fraction,
                   double outlabel_fraction,
                   double other_label_fraction,
-                  const std::unordered_set<std::string> &ref_kmers) {
+                  const std::unordered_set<std::string> &ref_kmers,
+                  size_t num_threads) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
     size_t k = 3;
@@ -147,6 +150,7 @@ test_mask_unitigs(double inlabel_fraction,
                 *anno_graph,
                 ingroup,
                 outgroup,
+                num_threads,
                 inlabel_fraction,
                 outlabel_fraction,
                 other_label_fraction
@@ -166,31 +170,39 @@ test_mask_unitigs(double inlabel_fraction,
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
-    std::unordered_set<std::string> ref_kmers;
+    for (size_t num_threads : { 1, 4 }) {
+        std::unordered_set<std::string> ref_kmers;
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.0, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 0.0, 0.0, ref_kmers, num_threads
+        );
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.24, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 0.24, 0.0, ref_kmers, num_threads
+        );
 
-    ref_kmers.insert("GAA");
-    ref_kmers.insert("AAT");
-    ref_kmers.insert("ATG");
-    ref_kmers.insert("TGC");
+        ref_kmers.insert("GAA");
+        ref_kmers.insert("AAT");
+        ref_kmers.insert("ATG");
+        ref_kmers.insert("TGC");
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.25, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 0.25, 0.0, ref_kmers, num_threads
+        );
 
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.50, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 0.50, 0.0, ref_kmers, num_threads
+        );
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 0.75, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 0.75, 0.0, ref_kmers, num_threads
+        );
 
-    test_mask_unitigs<typename TypeParam::first_type,
-                      typename TypeParam::second_type>(1.0, 1.0, 0.0, ref_kmers);
+        test_mask_unitigs<typename TypeParam::first_type, typename TypeParam::second_type>(
+            1.0, 1.0, 0.0, ref_kmers, num_threads
+        );
+    }
 }
 
 } // namespace

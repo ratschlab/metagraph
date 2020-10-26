@@ -58,6 +58,7 @@ class Config {
     bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
+    bool optimize = false;
 
     unsigned int k = 3;
     // For succinct graphs by default, cache ranges of nodes
