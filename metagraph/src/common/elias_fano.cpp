@@ -174,11 +174,12 @@ template <typename T>
 EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T min_value,
                                       T max_value,
-                                      const std::string &out_filename)
+                                      const std::string &out_filename,
+                                      bool append)
     : declared_size_(size), offset_(min_value) {
-    sink_internal_ = std::ofstream(out_filename, std::ios::binary);
+    sink_internal_ = std::ofstream(out_filename, std::ios::binary | (append ? std::ios::app : 0));
     sink_ = &sink_internal_;
-    sink_internal_upper_ = std::ofstream(out_filename + ".up", std::ios::binary);
+    sink_internal_upper_ = std::ofstream(out_filename + ".up", std::ios::binary | (append ? std::ios::app : 0));
     sink_upper_ = &sink_internal_upper_;
     if (!sink_->good() || !sink_upper_->good()) {
         logger->error("Unable to write to {}", out_filename);
@@ -449,10 +450,11 @@ template <typename T, typename C>
 EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     const T &first_value,
                                                     const T &last_value,
-                                                    const std::string &sink_name)
-    : ef_encoder(size, first_value, last_value, sink_name),
+                                                    const std::string &sink_name,
+                                                    bool append)
+    : ef_encoder(size, first_value, last_value, sink_name, append),
       sink_second_name_(sink_name + ".count"),
-      sink_second_(sink_second_name_, std::ios::binary) {}
+      sink_second_(sink_second_name_, std::ios::binary | (append ? std::ios::app : 0)) {}
 
 template <typename T, typename C>
 void EliasFanoEncoder<std::pair<T, C>>::add(const std::pair<T, C> &value) {

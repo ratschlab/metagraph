@@ -175,7 +175,7 @@ using CallOnes = std::function<void(const bit_vector &source_col,
 
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
- * 1'000'000 rows at a time and invokes #call_ones for each set bit.
+ * BLOC_SIZE rows at a time and invokes #call_ones for each set bit.
  * @param log_header label to be displayed in the progress bar
  * @param num_rows number of rows in the annotation
  * @param pred_succ_fprefix prefix for the pred/succ files containg the predecessors and
@@ -304,8 +304,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::filesystem::remove_all(tmp_path);
     logger->trace("Using temporary directory {}", tmp_path);
 
-    // stores the set rows for each of the sources, per chunk
-    std::vector<std::vector<std::vector<uint64_t>>> set_rows(sources.size());
+    // stores the row indices that were set because of differences to incoming/outgoing
+    // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
+    std::vector<std::vector<std::vector<uint64_t>>> set_rows_bwd(sources.size());
+    std::vector<std::vector<std::vector<uint64_t>>> set_rows_fwd(sources.size());
 
     for (size_t i = 0; i < sources.size(); ++i) {
         if (sources[i].num_labels() == 0)
@@ -315,7 +317,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
                            std::min((uint64_t)1'000'000, sources[i].num_relations()));
         targets_size[i].assign(sources[i].num_labels(), 0U);
-        set_rows[i].resize(sources[i].num_labels());
+        set_rows_fwd[i].resize(sources[i].num_labels());
+        set_rows_bwd[i].resize(sources[i].num_labels());
         for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
@@ -334,9 +337,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             "Compute diffs", terminal.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
-                for (auto &buffers : set_rows) {
-                    for (std::vector<uint64_t> &buf : buffers) {
-                        buf.resize(0);
+                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+                    for (uint32_t col = 0; col < set_rows_bwd[source_idx].size(); ++col) {
+                        set_rows_bwd[source_idx][col].resize(0);
+                        set_rows_fwd[source_idx][col].resize(0);
                     }
                 }
             },
@@ -350,12 +354,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 // check successor node and add current node if it's either terminal
                 // or if its successor is 0
                 if (terminal[row_idx] || !source_col[succ])
-                    set_rows[source_idx][j].push_back(row_idx);
+                    set_rows_fwd[source_idx][j].push_back(row_idx);
 
                 // check non-terminal predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
                     if (!source_col[*pred_p] && !terminal[*pred_p])
-                        set_rows[source_idx][j].push_back(*pred_p);
+                        set_rows_bwd[source_idx][j].push_back(*pred_p);
                 }
             },
             [&]() {
@@ -366,9 +370,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 #pragma omp parallel for num_threads(num_threads)
                 for (size_t s = 0; s < sources.size(); ++s) {
-                    for (size_t j = 0; j < set_rows[s].size(); ++j) {
-                        targets[s][j]->insert(set_rows[s][j].begin(), set_rows[s][j].end());
-                        targets_size[s][j] += set_rows[s][j].size();
+                    for (size_t j = 0; j < set_rows_fwd[s].size(); ++j) {
+                        targets[s][j]->insert(set_rows_bwd[s][j].begin(),
+                                              set_rows_bwd[s][j].end());
+                        targets[s][j]->insert_sorted(set_rows_fwd[s][j]);
+                        targets_size[s][j]
+                                += (set_rows_fwd[s][j].size() + set_rows_bwd[s][j].size());
                     }
                 }
             });
