@@ -81,7 +81,7 @@ class SortedSetDiskBase {
      * designated chunk without being sorted and de-duped.
      * Use this method along with #insert when some of the data that is inserted into the
      * set is known to be sorted.
-     * Note: if calling #insert_sorted multiple times, #data must be globally sorted
+     * Note: #data must be globally sorted between multiple calls to #insert_sorted.
      */
     void insert_sorted(const std::vector<T> &data);
 
