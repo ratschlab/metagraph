@@ -2343,11 +2343,10 @@ void call_paths(const BOSS &boss,
 /**
  * Updates #terminal and #near_terminal based on the given path.
  * One terminal node is set every max_length nodes in the path, and all nodes before it
- * are marked as near_terminal.
+ * are marked in #near_terminal.
  * The last node in the path is marked as terminal if:
  *  1. The path length is an exact multiple of max_length, OR
- *  2. The last node in the path is a dead-end, OR
- *  3. The last node into a path merges into a node that is neither terminal nor near
+ *  2. The last node in the path merges into a node that is neither terminal nor near
  *     terminal
  */
 void update_terminal_bits(uint64_t max_length,
@@ -2355,38 +2354,53 @@ void update_terminal_bits(uint64_t max_length,
                           std::vector<edge_index> &&path,
                           sdsl::bit_vector *terminal,
                           sdsl::bit_vector *near_terminal) {
+    assert(next_edge);
+
+    if (path.empty())
+        return;
+
     uint64_t i = 0;
     constexpr bool async = true;
+
+    // set anchors
+    // .........V..........V....*
+    // ||||||||||
+    // max_length
     for (i = 0; i + max_length <= path.size(); i += max_length) {
-        for (uint64_t j = i; j < i + max_length - 1UL; ++j) {
+        for (uint64_t j = i; j + 1 < i + max_length; ++j) {
+            assert(!fetch_bit(terminal->data(), path[j], async));
+            assert(!fetch_bit(near_terminal->data(), path[j], async));
             set_bit(near_terminal->data(), path[j], async);
         }
+        assert(!fetch_bit(near_terminal->data(), path[i + max_length - 1], async));
         set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
     if (path.size() % max_length == 0) // last node is terminal
         return;
 
-    // mark the last node in the path as terminal if
-    // 1. there are no outgoing edges, OR
-    // 2. we merge into a node that is neither terminal nor near terminal
-    bool is_next_terminal = next_edge && fetch_bit(terminal->data(), next_edge);
-    bool is_next_near_terminal = is_next_terminal
-            || (next_edge && fetch_bit(near_terminal->data(), next_edge));
-    const bool set_terminal = !next_edge || !is_next_near_terminal;
-    if (set_terminal) {
-        set_bit(terminal->data(), path.back(), 1);
+    // current position |i|
+    // .........V..........V....*
+    //                      ^   ^
+    //                      i next_edge
+
+    // If the next node is close to an existing anchor and, therefore, every
+    // node in this last segment is close to it too (at most 2 * max_length),
+    // there is no need to set another anchor at the end of the path.
+    if (fetch_bit(near_terminal->data(), next_edge, async)) {
+        assert(!fetch_bit(terminal->data(), next_edge, async));
+        return;
     }
-    // if we set a terminal node or were lucky enough to merge right into a
-    // terminal node, mark the last nodes as near terminal
-    if (set_terminal || is_next_terminal) {
-        for (uint64_t j = i; j < path.size() - 1; ++j) {
-            set_bit(near_terminal->data(), path[j], async);
-        }
+
+    if (!fetch_bit(terminal->data(), next_edge, async)) {
+        set_bit(terminal->data(), path.back(), async);
+        path.pop_back();
     }
-    std::optional<edge_index> anchor_edge;
-    if (is_next_near_terminal) {
-        anchor_edge = next_edge;
+
+    // The last node of |path| is an anchor, so all its predecessors must be
+    // marked as near-anchor.
+    while (i < path.size()) {
+        set_bit(near_terminal->data(), path[i++], async);
     }
 }
 
@@ -2401,9 +2415,11 @@ void call_row_diff_path(const BOSS &boss,
                         sdsl::bit_vector *visited,
                         sdsl::bit_vector *terminal,
                         sdsl::bit_vector *near_terminal,
-                        sdsl::bit_vector *dummy,
                         ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
+
+    // make sure it's not a dummy k-mer
+    assert(boss.get_node_seq(edge).front() != boss.kSentinelCode);
 
     constexpr bool async = true;
 
@@ -2413,34 +2429,19 @@ void call_row_diff_path(const BOSS &boss,
     std::vector<edge_index> path;
     path.reserve(100);
 
-    // traverse simple path until we reach its tail or a fork where the first edge
-    // has already been visited
+    // traverse unvisited simple path, always pick the last outgoing according
+    // to the routing in row-diff
     while (!fetch_and_set_bit(visited->data(), edge, async)) {
         assert(edge > 0);
         ++progress_bar;
 
-        // visit the edge
-        TAlphabet d = boss.get_W(edge) % boss.alph_size;
-
-        // stop the traversal on dummy sink nodes
-        if (d == boss.kSentinelCode) {
-            set_bit(dummy->data(), edge, async);
-            edge = 0;
-            break;
-        }
-
         path.push_back(edge);
 
+        TAlphabet d = boss.get_W(edge) % boss.alph_size;
+        assert(d != boss.kSentinelCode && "all sinks must be visited before");
         // make one traversal step (this will pick the last outgoing edge)
         edge = boss.fwd(edge, d);
     }
-
-    if (path.empty())
-        return;
-
-    // make sure no dummy kmers are in the path
-    assert(boss.get_node_seq(path.front()).front() != boss.kSentinelCode
-           && boss.get_node_seq(path.back()).back() != boss.kSentinelCode);
 
     // mark terminal and near terminal nodes
     update_terminal_bits(max_length, edge, std::move(path), terminal, near_terminal);
@@ -2623,6 +2624,72 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
 }
 
+// Reach all k-mers that merge into sink |edge| by following their diff paths.
+template <typename T>
+void traverse_diff_path_backward(const BOSS &boss,
+                                 edge_index edge,
+                                 T max_length,
+                                 sdsl::bit_vector *visited,
+                                 sdsl::bit_vector *terminal,
+                                 sdsl::bit_vector *dummy,
+                                 ProgressBar &progress_bar) {
+    constexpr bool async = true;
+
+    assert(max_length);
+    assert(!boss.get_W(edge) && fetch_bit(dummy->data(), edge, async));
+
+    assert(!fetch_bit(visited->data(), edge, async));
+    // mark as visited
+    set_bit(visited->data(), edge, async);
+    ++progress_bar;
+
+    std::vector<std::pair<edge_index, T /* next anchor dist */>> queue;
+
+    boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
+        [&](edge_index pred) {
+            // set distance to |max_length| to make it an anchor
+            queue.emplace_back(pred, max_length);
+        }
+    );
+
+    while (queue.size()) {
+        T dist_to_anchor;
+        std::tie(edge, dist_to_anchor) = queue.back();
+        queue.pop_back();
+
+        // mark as visited
+        if (fetch_and_set_bit(visited->data(), edge, async))
+            continue;
+
+        ++progress_bar;
+
+        if (fetch_bit(dummy->data(), edge, async))
+            continue;
+
+        if (dist_to_anchor == max_length) {
+            // make this node an anchor
+            set_bit(terminal->data(), edge, async);
+            dist_to_anchor = 0;
+        }
+
+        // stop if the edge is not the last outgoing for its source node
+        // AAAX - AAX$
+        // ^^^^
+        // AAAY - ****
+        if (!boss.get_last(edge))
+            continue;
+
+        // |edge| is the last outgoing edge. Thus, it is part of a diff
+        // path, and all edges incoming to it will compute diff wrt to it.
+        // So, we propagate the diff path backward.
+        boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
+            [&](edge_index pred) {
+                queue.emplace_back(pred, dist_to_anchor + 1);
+            }
+        );
+    }
+}
+
 void BOSS::row_diff_traverse(size_t num_threads,
                              size_t max_length,
                              sdsl::bit_vector *terminal,
@@ -2648,6 +2715,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     terminal->resize(W_->size());
     sdsl::util::set_to_value(*terminal, false);
+    // TODO: can we use |near_terminal| to mark visited?
     sdsl::bit_vector near_terminal(W_->size(), false);
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
@@ -2655,10 +2723,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
 
-    std::function<void(edge_index)> traverse_path = [&](edge_index start) {
-        call_row_diff_path(*this, start, max_length, &visited,
-                           terminal, &near_terminal, dummy, progress_bar);
-    };
+    std::function<void(edge_index)> traverse_path;
     std::vector<uint64_t> to_visit;
     auto flush_batch = [&]() {
         thread_pool.enqueue([to_visit,&traverse_path]() {
@@ -2672,6 +2737,30 @@ void BOSS::row_diff_traverse(size_t num_threads,
             flush_batch();
     };
 
+    // backward traversal
+    traverse_path = [&](edge_index sink) {
+        traverse_diff_path_backward(*this, sink, max_length, &visited,
+                                    terminal, dummy, progress_bar);
+    };
+    // run backward traversal from the dummy sink edges (X...X$), which
+    // are not marked as dummy yet.
+    //  ____.
+    call_zeros(*dummy, [&](edge_index i) {
+        if (!get_W(i)) {
+            // mark the dummy sink
+            set_bit(dummy->data(), i, async);
+            enqueue_start(i);
+        }
+    }, async);
+
+    flush_batch();
+    thread_pool.join();
+
+    // forward traversal
+    traverse_path = [&](edge_index start) {
+        call_row_diff_path(*this, start, max_length, &visited,
+                           terminal, &near_terminal, progress_bar);
+    };
     // start traversal from the dummy source edges first ($X...X)
     // they are marked as |dummy| AND NOT |visited|
     //  .____
@@ -2733,24 +2822,16 @@ void BOSS::row_diff_traverse(size_t num_threads,
         if (fetch_and_set_bit(visited.data(), rep, async))
             return;
 
-        ++progress_bar;
-
         for (edge_index idx : path) {
             std::ignore = idx;
             assert(idx == rep || !fetch_bit(visited.data(), idx, async));
             set_bit(visited.data(), idx, async);
-            ++progress_bar;
         }
 
-        std::optional<edge_index> anchor;
-        for (uint64_t i = 0; i + max_length <= path.size(); i += max_length) {
-            set_bit(terminal->data(), path[i + max_length - 1], async);
-        }
+        progress_bar += path.size();
 
-        if (path.size() < max_length) { // set a terminal node every max_length nodes
-            set_bit(terminal->data(), path.back(), async);
-        } else if (path.size() > 1 && path.size() % max_length != 0) {
-            anchor = path[0];
+        for (uint64_t i = 0; i < path.size(); i += max_length) {
+            set_bit(terminal->data(), path[i], async);
         }
     };
 
