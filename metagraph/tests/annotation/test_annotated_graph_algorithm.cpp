@@ -13,33 +13,47 @@ using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::test;
 
+
+MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
+                                       const std::vector<std::string> &ingroup,
+                                       const std::vector<std::string> &outgroup,
+                                       double mask_in_label_fraction,
+                                       double mask_out_label_fraction,
+                                       double other_label_fraction,
+                                       double lazy_evaluation_density_cutoff) {
+    size_t insize = ingroup.size();
+    size_t outsize = outgroup.size();
+    return MaskedDeBruijnGraph(
+        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+        graph::mask_nodes_by_node_label(
+            anno_graph,
+            ingroup,
+            outgroup,
+            [=,&anno_graph](auto index, auto get_num_in_labels, auto get_num_out_labels) {
+                assert(index != DeBruijnGraph::npos);
+
+                size_t num_in_labels = get_num_in_labels();
+                if (num_in_labels < mask_in_label_fraction * insize)
+                    return false;
+
+                size_t num_out_labels = get_num_out_labels();
+                if (num_out_labels < mask_out_label_fraction * outsize)
+                    return false;
+
+                size_t num_total_labels = anno_graph.get_labels(index).size();
+
+                return (num_total_labels - num_in_labels - num_out_labels)
+                    <= other_label_fraction * num_total_labels;
+            },
+            lazy_evaluation_density_cutoff
+        )
+    );
+}
+
+
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
-
-// TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskTangle) {
-//     size_t k = 4;
-//     // TTGC      GCACGGGTC
-//     //      TGCA
-//     // ATGC      GCAGTGGTC
-//     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
-//     const std::vector<std::string> labels { "A", "B" };
-//     auto anno_graph = build_anno_graph<TypeParam,
-//                                        annot::ColumnCompressed<>>(
-//         k, sequences, labels
-//     );
-
-//     auto masked_dbg = build_masked_graph(*anno_graph, { "A" }, {});
-//     std::unordered_multiset<std::string> ref = { "TTGCACGGGTC" };
-//     std::unordered_multiset<std::string> obs;
-
-//     masked_dbg.call_unitigs([&](const auto &unitig, const auto &path) {
-//         ASSERT_EQ(path, map_sequence_to_nodes(masked_dbg, unitig));
-//         obs.insert(unitig);
-//     });
-
-//     EXPECT_EQ(obs, ref);
-// }
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff) {

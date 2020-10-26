@@ -1588,7 +1588,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
     std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, BuildMode::CANONICAL);
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DBGMode::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);

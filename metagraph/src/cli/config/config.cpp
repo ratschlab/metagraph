@@ -314,6 +314,8 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--optimize")) {
+            optimize = true;
         } else if (!strcmp(argv[i], "--linkage")) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
@@ -1028,6 +1030,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
+            fprintf(stderr, "\t   --optimize \t\t\toptimize anchors in row_diff annotation [off]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

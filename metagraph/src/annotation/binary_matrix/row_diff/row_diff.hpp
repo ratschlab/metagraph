@@ -10,6 +10,7 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vector.hpp"
@@ -49,7 +50,7 @@ template <class BaseMatrix>
 class RowDiff : public BinaryMatrix {
   public:
     static const std::string kAnchorExt;
-    using anchor_bv_type = bit_vector_rrr<>; // TODO: change to bit_vector_small
+    using anchor_bv_type = bit_vector_small;
 
     RowDiff() {}
 
@@ -58,7 +59,7 @@ class RowDiff : public BinaryMatrix {
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
-    const graph::DBGSuccinct *graph() const { return graph_; }
+    const graph::DBGSuccinct* graph() const { return graph_; }
 
     /**
      * Returns the number of set bits in the matrix.
@@ -84,11 +85,10 @@ class RowDiff : public BinaryMatrix {
     bool load(const std::string &filename);
 
     void load_anchor(const std::string& filename);
-
     const anchor_bv_type &anchor() const { return anchor_; }
 
-    const BaseMatrix &diffs() const { return diffs_; }
-    BaseMatrix &diffs() { return diffs_; }
+    const BaseMatrix& diffs() const { return diffs_; }
+    BaseMatrix& diffs() { return diffs_; }
 
     Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
 
@@ -103,7 +103,7 @@ class RowDiff : public BinaryMatrix {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
-    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0));
 
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
@@ -116,7 +116,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
  */
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
-    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0));
 
     std::vector<Row> result;
     for (Row row = 0; row < num_rows(); ++row) {
@@ -128,7 +128,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
-    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0));
 
     Vector<uint64_t> result = get_diff(row);
 

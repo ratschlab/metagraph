@@ -1121,11 +1121,20 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         const std::filesystem::path &dest_dir) {
+                         std::filesystem::path dest_dir,
+                         bool optimize) {
     if (!files.size())
         return;
 
+    if (dest_dir.empty())
+        dest_dir = "./";
+
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
+
+    if (optimize)
+        optimize_anchors_in_row_diff(graph_fname, dest_dir, ".row_reduction.unopt");
+
+    std::filesystem::path row_reduction_fname;
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1134,6 +1143,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
             // *2 in order to account for constructing the sparsified column
+            // TODO: *1 + size(SortedSetDisk)?
             size_t file_size = 2 * std::filesystem::file_size(files[i]);
             if (file_size > mem_bytes) {
                 logger->warn(
@@ -1146,12 +1156,32 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
             mem_bytes_left -= file_size;
             file_batch.push_back(files[i]);
+
+            // derive name from first file in batch
+            if (row_reduction_fname.empty()) {
+                row_reduction_fname = dest_dir/std::filesystem::path(file_batch.back())
+                                                .filename()
+                                                .replace_extension()
+                                                .replace_extension(".row_reduction");
+                if (!optimize)
+                    row_reduction_fname += ".unopt";
+
+                if (std::filesystem::exists(row_reduction_fname)) {
+                    logger->warn("Found row reduction vector {}, will be overwritten",
+                                 row_reduction_fname);
+                    std::filesystem::remove(row_reduction_fname);
+                }
+            }
         }
 
         Timer timer;
-        logger->trace("Starting transforming batch of {} columns ...",
+        logger->trace("Annotations for row-diff transform in batch: {}",
                       file_batch.size());
-        convert_batch_to_row_diff(graph_fname, file_batch, dest_dir);
+
+        convert_batch_to_row_diff(
+                graph_fname, graph_fname + (optimize ? ".terminal" : ".terminal.unopt"),
+                file_batch, dest_dir, row_reduction_fname);
+
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
 }

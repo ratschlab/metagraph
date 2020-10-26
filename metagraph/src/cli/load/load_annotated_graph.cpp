@@ -4,9 +4,10 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
-#include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
+#include "cli/config/config.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
@@ -90,88 +91,6 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
-std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
-    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
-
-    if (!graph.get())
-        throw std::runtime_error("Masking only supported for DeBruijnGraph");
-
-    // Remove non-present labels
-    config->label_mask_in.erase(
-        std::remove_if(config->label_mask_in.begin(),
-                       config->label_mask_in.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-in label {}", label);
-
-                           return !exists;
-                       }),
-        config->label_mask_in.end()
-    );
-
-    config->label_mask_out.erase(
-        std::remove_if(config->label_mask_out.begin(),
-                       config->label_mask_out.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-out label {}", label);
-
-                           return !exists;
-                       }),
-        config->label_mask_out.end()
-    );
-
-    logger->trace("Masked in: {}", fmt::join(config->label_mask_in, " "));
-    logger->trace("Masked out: {}", fmt::join(config->label_mask_out, " "));
-
-    if (!config->filter_by_kmer) {
-        return std::make_unique<MaskedDeBruijnGraph>(
-            graph,
-            mask_nodes_by_unitig_labels(
-                anno_graph,
-                config->label_mask_in,
-                config->label_mask_out,
-                config->label_mask_in_fraction,
-                config->label_mask_out_fraction,
-                config->label_other_fraction
-            )
-        );
-    }
-
-    return std::make_unique<MaskedDeBruijnGraph>(
-        graph,
-        mask_nodes_by_node_label(
-            anno_graph,
-            config->label_mask_in,
-            config->label_mask_out,
-            [config,&anno_graph](auto index,
-                                 auto get_num_in_labels,
-                                 auto get_num_out_labels) {
-                assert(index != DeBruijnGraph::npos);
-
-                size_t num_in_labels = get_num_in_labels();
-
-                if (num_in_labels < config->label_mask_in_fraction
-                                        * config->label_mask_in.size())
-                    return false;
-
-                size_t num_out_labels = get_num_out_labels();
-
-                if (num_out_labels < config->label_mask_out_fraction
-                                        * config->label_mask_out.size())
-                    return false;
-
-                size_t num_total_labels = anno_graph.get_labels(index).size();
-
-                return num_total_labels - num_in_labels - num_out_labels
-                            <= config->label_other_fraction * num_total_labels;
-            }
-        )
-    );
-}
 
 } // namespace cli
 } // namespace mtg
