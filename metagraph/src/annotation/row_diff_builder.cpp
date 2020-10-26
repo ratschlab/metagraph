@@ -30,7 +30,7 @@ void build_successor(const std::string &graph_fname,
                      uint32_t max_length,
                      uint32_t num_threads) {
     bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchor.unopt" }) {
+    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".anchors.unopt" }) {
         if (!std::filesystem::exists(outfbase + suffix)) {
             logger->trace(
                     "Building and writing successor, predecessor and anchor files to {}.*",
@@ -73,7 +73,7 @@ void build_successor(const std::string &graph_fname,
     logger->trace("Number of anchors before anchor optimization: {}",
                   sdsl::util::cnt_one_bits(term));
 
-    std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
+    std::ofstream fterm(outfbase + ".anchors.unopt", ios::binary);
     anchor_bv_type(term).serialize(fterm);
     term = sdsl::bit_vector();
     fterm.close();
@@ -537,7 +537,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     assert(filenames.size() == 1u && "All must be merged into one vector");
 
     anchor_bv_type old_anchors;
-    auto original_anchors_fname = graph_fname + ".terminal.unopt";
+    auto original_anchors_fname = graph_fname + ".anchors.unopt";
     {
         std::ifstream f(original_anchors_fname, ios::binary);
         old_anchors.load(f);
