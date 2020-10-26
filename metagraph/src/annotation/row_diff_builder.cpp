@@ -84,20 +84,15 @@ void build_successor(const std::string &graph_fname,
     ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
 
-#ifndef NDEBUG
-    const uint64_t batch_size = 10'000'000;
-#else
-    const uint64_t batch_size = 1'000;
-#endif
-    // traverse BOSS table in parallel processing blocks of size |batch_size|
-    for (uint64_t start = 1; start <= graph.num_nodes(); start += batch_size) {
+    // traverse BOSS table in parallel processing blocks of size |BLOCK_SIZE|
+    for (uint64_t start = 1; start <= graph.num_nodes(); start += BLOCK_SIZE) {
         std::vector<std::vector<uint64_t>> pred_buf(num_threads);
         std::vector<std::vector<uint64_t>> succ_buf(num_threads);
         std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
 
         // use static scheduling to make threads process ordered contiguous blocks
         #pragma omp parallel for num_threads(num_threads) schedule(static)
-        for (uint64_t i = start; i < std::min(start + batch_size, graph.num_nodes() + 1); ++i) {
+        for (uint64_t i = start; i < std::min(start + BLOCK_SIZE, graph.num_nodes() + 1); ++i) {
             const size_t r = omp_get_thread_num();
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
             if (dummy[boss_idx] || terminal[boss_idx]) {
