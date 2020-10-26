@@ -130,6 +130,7 @@ void build_successor(const std::string &graph_fname,
                 );
             }
             pred_boundary_buf[r].push_back(1);
+            ++progress_bar;
         }
         for (uint32_t i = 0; i < num_threads; ++i) {
             for (uint64_t v : succ_buf[i]) {
@@ -142,7 +143,6 @@ void build_successor(const std::string &graph_fname,
                 pred_boundary.push_back(v);
             }
         }
-        ++progress_bar;
     }
     succ.close();
     pred.close();
