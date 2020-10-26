@@ -26,7 +26,8 @@ typedef std::function<bool(const std::string&,
 // unitig satisfying keep_unitig(unitig).
 std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig(const DeBruijnGraph &graph,
-                     const KeepUnitigPath &keep_unitig);
+                     const KeepUnitigPath &keep_unitig,
+                     size_t num_threads = 1);
 
 // Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
 // return a bitmap of length anno_graph.get_graph().max_index() + 1. An index i
@@ -38,6 +39,7 @@ std::unique_ptr<bitmap_vector>
 mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
                             const std::vector<AnnotatedDBG::Annotator::Label> &labels_in,
                             const std::vector<AnnotatedDBG::Annotator::Label> &labels_out,
+                            size_t num_threads = 1,
                             double label_mask_in_fraction = 1.0,
                             double label_mask_out_fraction = 0.0,
                             double label_other_fraction = 1.0);
@@ -63,6 +65,7 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          const std::function<bool(DeBruijnGraph::node_index,
                                                   const LabelCountCallback & /* get_num_labels_in */,
                                                   const LabelCountCallback & /* get_num_labels_out */)> &is_node_in_mask,
+                         size_t num_threads = 1,
                          double min_frequency_for_frequent_label = 0.05);
 
 } // namespace graph
