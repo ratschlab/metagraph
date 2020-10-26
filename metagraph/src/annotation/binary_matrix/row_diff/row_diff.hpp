@@ -103,7 +103,7 @@ class RowDiff : public BinaryMatrix {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
-    assert("Please call load_anchor first " && anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
 
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
@@ -116,7 +116,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
  */
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
-    assert("Please call load_anchor first " && anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
 
     std::vector<Row> result;
     for (Row row = 0; row < num_rows(); ++row) {
@@ -128,7 +128,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
-    assert("Please call load_anchor first " && anchor_.size() > 0 || diffs_.num_rows() == 0);
+    assert("Please call load_anchor first " && (anchor_.size() > 0 || diffs_.num_rows() == 0);
 
     Vector<uint64_t> result = get_diff(row);
 
