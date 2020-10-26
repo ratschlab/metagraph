@@ -852,18 +852,17 @@ void align_sequence(std::string &name, std::string &seq,
             concat.reserve(seq.size());
             std::string cigar;
 
-            size_t last = 0;
             for (const auto &path : alignments) {
-                if (last < path.get_clipping()) {
-                    last += path.get_clipping() - last;
-                    concat += std::string(path.get_clipping() - last, '$');
-                }
+                if (path.get_offset())
+                    concat += graph.get_node_sequence(path.front()).substr(0, path.get_offset());
+
                 concat += const_cast<std::string&&>(path.get_sequence());
-                last += path.get_query().size();
+                concat.push_back('$');
                 score += path.get_score();
                 cigar += path.get_cigar().to_string() + ",";
             }
             cigar.pop_back();
+            concat.pop_back();
             std::swap(seq, concat);
             name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq, score, cigar);
 
