@@ -40,6 +40,19 @@ TEST(WaitQueue, PushPop) {
     EXPECT_TRUE(iterator == under_test.end());
 }
 
+TEST(WaitQueue, BufferSizeOne) {
+    constexpr size_t buffer_size = 1;
+    ChunkedWaitQueue<int32_t> under_test(buffer_size);
+    under_test.push(1);
+
+    ChunkedWaitQueue<int32_t>::Iterator &iterator = under_test.begin();
+    EXPECT_EQ(1, *iterator);
+
+    under_test.shutdown();
+    ++iterator;
+    EXPECT_TRUE(iterator == under_test.end());
+}
+
 TEST(WaitQueue, Shutdown) {
         ChunkedWaitQueue<std::string> under_test(20);
         under_test.shutdown();

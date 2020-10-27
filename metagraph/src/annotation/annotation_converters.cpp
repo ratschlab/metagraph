@@ -7,14 +7,18 @@
 
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
+#include <tsl/hopscotch_map.h>
 
+#include "annotation/row_diff_builder.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "binary_matrix/multi_brwt/clustering.hpp"
@@ -255,12 +259,35 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
                                               annotator.get_label_encoder());
 }
 
-template <>
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
+                         BRWTBottomUpBuilder::Partitioner partitioning,
+                         size_t num_parallel_nodes,
+                         size_t num_threads) {
+    // we are going to take the columns from the annotator and thus
+    // have to replace them with empty columns to keep the structure valid
+    const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
+    std::string anchors_filename = annotator.get_matrix().anchors_filename();
+    std::vector<std::unique_ptr<bit_vector>> columns
+            = annotator.release_matrix()->diffs().release_columns();
+
+    auto matrix = std::make_unique<BRWT>(
+            BRWTBottomUpBuilder::build(std::move(columns),
+                                       partitioning,
+                                       num_parallel_nodes,
+                                       num_threads)
+    );
+
+    return std::make_unique<RowDiffBRWTAnnotator>(
+            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix), anchors_filename),
+            annotator.get_label_encoder());
+}
+
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                        size_t num_parallel_nodes,
-                                                        size_t num_threads,
-                                                        uint64_t num_rows_subsampled) {
+convert_to_greedy_BRWT(ColumnCompressed<std::string> &&annotation,
+                       size_t num_parallel_nodes,
+                       size_t num_threads,
+                       uint64_t num_rows_subsampled) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         [num_threads,num_rows_subsampled](const auto &columns) {
@@ -273,18 +300,44 @@ convert_to_greedy_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::st
     );
 }
 
-template <>
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
+                       size_t num_parallel_nodes,
+                       size_t num_threads,
+                       uint64_t num_rows_subsampled) {
+    return convert_row_diff_to_BRWT(
+            std::move(annotation),
+            [num_threads,num_rows_subsampled](const auto &columns) {
+                std::vector<sdsl::bit_vector> subvectors
+                        = random_submatrix(columns, num_rows_subsampled, num_threads);
+                return greedy_matching(subvectors, num_threads);
+            },
+            num_parallel_nodes,
+            num_threads
+    );
+}
+
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_simple_BRWT<MultiBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotation,
-                                                        size_t grouping_arity,
-                                                        size_t num_parallel_nodes,
-                                                        size_t num_threads) {
+convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
+                       size_t grouping_arity,
+                       size_t num_parallel_nodes,
+                       size_t num_threads) {
     return convert_to_BRWT<MultiBRWTAnnotator>(
         std::move(annotation),
         BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
         num_parallel_nodes,
         num_threads
     );
+}
+
+std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffAnnotator&& annotation,
+                                                             size_t grouping_arity,
+                                                             size_t num_parallel_nodes,
+                                                             size_t num_threads) {
+    return convert_row_diff_to_BRWT(
+            std::move(annotation),
+            BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
+            num_parallel_nodes, num_threads);
 }
 
 std::vector<std::vector<uint64_t>>
@@ -322,7 +375,7 @@ parse_linkage_matrix(const std::string &filename) {
 
         } catch (const std::exception &e) {
             logger->error("Possibly invalid format of the linkage matrix."
-                          " Each line must contsin exactly 4 values:"
+                          " Each line must contain exactly 4 values:"
                           " <cluster 1> <cluster 2> <dist> <cluster 3>"
                           "\nException: {}", e.what());
             exit(1);
@@ -332,13 +385,44 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
-template <>
 std::unique_ptr<MultiBRWTAnnotator>
-convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                                    const std::string &linkage_matrix_file,
-                                    size_t num_parallel_nodes,
-                                    size_t num_threads,
-                                    const std::filesystem::path &tmp_path) {
+convert_to_BRWT(
+        const std::string &linkage_matrix_file,
+        size_t num_parallel_nodes,
+        size_t num_threads,
+        const std::filesystem::path &tmp_path,
+        const std::function<void(const BRWTBottomUpBuilder::CallColumn &)> &get_columns,
+        std::vector<std::pair<uint64_t, std::string>> &&column_names) {
+    auto linkage = parse_linkage_matrix(linkage_matrix_file);
+
+    if (!linkage.size())
+        logger->warn("Parsed empty linkage tree");
+
+    auto matrix = std::make_unique<BRWT>(
+            BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
+                                       num_parallel_nodes, num_threads));
+
+    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
+    column_names.erase(std::unique(column_names.begin(), column_names.end()),
+                       column_names.end());
+
+    assert(matrix->num_columns() == column_names.size());
+
+    LEncoder label_encoder;
+    for (const auto &[i, label] : column_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
+}
+
+template <>
+std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
+        const std::vector<std::string> &annotation_files,
+        const std::string &linkage_matrix_file,
+        size_t num_parallel_nodes,
+        size_t num_threads,
+        const std::filesystem::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -359,35 +443,52 @@ convert_to_BRWT<MultiBRWTAnnotator>(const std::vector<std::string> &annotation_f
             exit(1);
         }
     };
-
-    auto linkage = parse_linkage_matrix(linkage_matrix_file);
-
-    auto matrix = std::make_unique<BRWT>(
-        BRWTBottomUpBuilder::build(get_columns, linkage, tmp_path,
-                                   num_parallel_nodes, num_threads));
-
-    std::sort(column_names.begin(), column_names.end(), utils::LessFirst());
-    column_names.erase(std::unique(column_names.begin(), column_names.end()),
-                       column_names.end());
-
-    assert(matrix->num_columns() == column_names.size());
-
-    LEncoder label_encoder;
-    for (const auto &[i, label] : column_names) {
-        label_encoder.insert_and_encode(label);
-    }
-
-    return std::make_unique<MultiBRWTAnnotator>(std::move(matrix), label_encoder);
+    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads, tmp_path,
+                    get_columns, std::move(column_names));
 }
 
-template <>
-void relax_BRWT<MultiBRWTAnnotator>(MultiBRWTAnnotator *annotation,
-                                    size_t relax_max_arity,
-                                    size_t num_threads) {
+template<>
+std::unique_ptr<RowDiffBRWTAnnotator>
+convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
+                         const std::string &linkage_matrix_file,
+                         size_t num_parallel_nodes,
+                         size_t num_threads,
+                         const std::filesystem::path &tmp_path) {
+    std::vector<std::pair<uint64_t, std::string>> column_names;
+    std::mutex mu;
+
+    auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
+        for (const auto &fname : annotation_files) {
+            RowDiffAnnotator annotator;
+            if (!annotator.merge_load({fname})) {
+                logger->error("Could not load {}", fname);
+                std::exit(1);
+            }
+            std::vector<std::unique_ptr<bit_vector>> cols
+                    = std::move(annotator.release_matrix()->diffs().release_columns());
+            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
+                std::string label = annotator.get_label_encoder().get_labels()[idx];
+                call_column(idx, std::move(cols[idx]));
+
+                std::lock_guard<std::mutex> lock(mu);
+                column_names.emplace_back(idx, label);
+            };
+        }
+    };
+
+    std::unique_ptr<MultiBRWTAnnotator> annotator
+            = convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+                              tmp_path, get_columns, std::move(column_names));
+
+    return std::make_unique<RowDiffBRWTAnnotator>(
+            std::make_unique<RowDiff<BRWT>>(
+                    nullptr, std::move(*annotator->release_matrix()), ""),
+            annotator->get_label_encoder());
+}
+
+void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
     if (relax_max_arity > 1)
-        BRWTOptimizer::relax(const_cast<BRWT*>(&annotation->get_matrix()),
-                             relax_max_arity,
-                             num_threads);
+        BRWTOptimizer::relax(annotation, relax_max_arity, num_threads);
 }
 
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
@@ -977,6 +1078,97 @@ template
 void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
+
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string &graph_fname,
+                         size_t mem_bytes,
+                         uint32_t max_path_length,
+                         std::filesystem::path dest_dir,
+                         bool optimize) {
+    if (!files.size())
+        return;
+
+    if (dest_dir.empty())
+        dest_dir = "./";
+
+    build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
+
+    if (optimize)
+        optimize_anchors_in_row_diff(graph_fname, dest_dir, ".row_reduction.unopt");
+
+    std::filesystem::path row_reduction_fname;
+
+    // load as many columns as we can fit in memory, and convert them
+    for (uint32_t i = 0; i < files.size(); ) {
+        logger->trace("Loading columns for batch-conversion...");
+        size_t mem_bytes_left = mem_bytes;
+        std::vector<std::string> file_batch;
+        for ( ; i < files.size(); ++i) {
+            // *2 in order to account for constructing the sparsified column
+            // TODO: *1 + size(SortedSetDisk)?
+            size_t file_size = 2 * std::filesystem::file_size(files[i]);
+            if (file_size > mem_bytes) {
+                logger->warn(
+                        "Not enough memory to process {}, requires {} MB, skipped",
+                        files[i], file_size/1e6);
+                continue;
+            }
+            if (file_size > mem_bytes_left || file_batch.size() >= 15'000)
+                break;
+
+            mem_bytes_left -= file_size;
+            file_batch.push_back(files[i]);
+
+            // derive name from first file in batch
+            if (row_reduction_fname.empty()) {
+                row_reduction_fname = dest_dir/std::filesystem::path(file_batch.back())
+                                                .filename()
+                                                .replace_extension()
+                                                .replace_extension(".row_reduction");
+                if (!optimize)
+                    row_reduction_fname += ".unopt";
+
+                if (std::filesystem::exists(row_reduction_fname)) {
+                    logger->warn("Found row reduction vector {}, will be overwritten",
+                                 row_reduction_fname);
+                    std::filesystem::remove(row_reduction_fname);
+                }
+            }
+        }
+
+        Timer timer;
+        logger->trace("Annotations for row-diff transform in batch: {}",
+                      file_batch.size());
+
+        convert_batch_to_row_diff(
+                graph_fname, graph_fname + (optimize ? ".terminal" : ".terminal.unopt"),
+                file_batch, dest_dir, row_reduction_fname);
+
+        logger->trace("Batch transformed in {} sec", timer.elapsed());
+    }
+}
+
+void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
+                                        const std::string &outfbase) {
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint32_t i = 0; i < files.size(); ++i) {
+        std::string file = files[i];
+        RowDiffAnnotator input_anno;
+        input_anno.load(file);
+
+        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(), RowDiffAnnotator::kExtension);
+        std::string out_path
+                = (std::filesystem::path(outfbase).remove_filename() / outname).string()
+                + "_row_diff" + ColumnCompressed<std::string>::kExtension;
+        std::ofstream outstream(out_path, std::ios::binary);
+        logger->trace("Transforming {} to {}", file, out_path);
+
+        serialize_number(outstream, input_anno.num_objects());
+        input_anno.get_label_encoder().serialize(outstream);
+        input_anno.get_matrix().diffs().serialize(outstream);
+        outstream.close();
+    }
+}
 
 } // namespace annot
 } // namespace mtg

@@ -80,9 +80,9 @@ bsub -J "cluster" \
      -oo ~/metagenome/data/BIGSI/logs/cluster_columns.lsf \
      -W 120:00 \
      -n 48 -R "rusage[mem=42500] span[hosts=1]" \
-    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" \
+    "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 5000000 \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
             --parallel 96 \
@@ -92,9 +92,9 @@ bsub -J "cluster" \
      -oo ~/metagenome/data/BIGSI/logs/cluster_columns_1M.lsf \
      -W 120:00 \
      -n 48 -R "rusage[mem=37500] span[hosts=1]" \
-    "find ~/metagenome/data/BIGSI/annotation/columns/ -name \"*.column.annodbg\" \
+    "find ~/metagenome/data/BIGSI/annotation/columns_canonical/ -name \"*.column.annodbg\" \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 1000000 \
             -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_1M.csv \
             --parallel 96 \
@@ -121,6 +121,109 @@ bsub -J "relax_brwt_5M" \
         --relax-arity 16 \
         -o /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_5M.relaxed \
         /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_5M.brwt.annodbg \
+        2>&1"
+```
+
+## Transform to primary
+```bash
+bsub -J "BIGSI_to_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/transform_to_primary.lsf \
+     -W 12:00 \
+     -n 18 -R "rusage[mem=5600] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform -v \
+            --to-fasta --primary-kmers \
+            -o ~/metagenome/data/BIGSI/graph_primary \
+            ~/metagenome/data/BIGSI/graph.dbg \
+            -p 18 \
+            2>&1"
+
+bsub -J "BIGSI_primary_build" \
+     -oo ~/metagenome/data/BIGSI/logs/build_primary.lsf \
+     -W 12:00 \
+     -n 36 -R "rusage[mem=6000] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph build -v \
+            -k 31 \
+            --mem-cap-gb 100 \
+            -o ~/metagenome/data/BIGSI/graph_primary \
+            ~/metagenome/data/BIGSI/graph_primary.fasta.gz \
+            --disk-swap ~/metagenome/scratch/ \
+            --disk-cap-gb 1000 \
+            -p 36 \
+            2>&1"
+
+
+mkdir temp
+cd temp
+find ~/metagenome/data/BIGSI/data/ -name "*fasta.gz" > files_to_annotate.txt
+split -l 5000 files_to_annotate.txt
+cd ..
+
+cd temp
+for list in x*; do
+    bsub -J "annotate_${list}_primary" \
+         -oo ~/metagenome/data/BIGSI/logs/annotate_${list}_primary.lsf \
+         -W 48:00 \
+         -n 15 -R "rusage[mem=5000] span[hosts=1]" \
+        "cat ${list} \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph annotate -v \
+                -i ~/metagenome/data/BIGSI/graph_primary.dbg \
+                --fwd-and-reverse \
+                --parallel 15 \
+                --anno-filename \
+                --separately \
+                -o ~/metagenome/data/BIGSI/annotation/columns_primary \
+                2>&1"; \
+done
+cd ..
+
+
+find ~/metagenome/data/BIGSI/annotation/columns_primary/ -name "*.column.annodbg" > columns_primary.txt
+
+# bsub -J "build_rbbrwt_relax20_primary" \
+#      -oo ~/metagenome/data/BIGSI/logs/build_rbbrwt_primary.lsf \
+#      -W 120:00 \
+#      -n 36 -R "rusage[mem=13000] span[hosts=1]" \
+#     "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+#         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+#             --anno-type rb_brwt --relax-arity 20 \
+#             -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
+#             -p 36 \
+#             2>&1"
+
+
+bsub -J "cluster" \
+     -oo ~/metagenome/data/BIGSI/logs/cluster_columns_primary.lsf \
+     -W 360:00 \
+     -n 48 -R "rusage[mem=42500] span[hosts=1]" \
+    "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+        | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+            --linkage --greedy \
+            --subsample 5000000 \
+            -o ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            --parallel 96 \
+            2>&1";
+
+bsub -J "build_brwt_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/build_brwt_primary.lsf \
+     -W 72:00 \
+     -n 48 -R "rusage[mem=20000] span[hosts=1]" \
+    "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
+        | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
+            --anno-type brwt \
+            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
+            -p 48 --parallel-nodes 48 \
+            2>&1"
+
+bsub -J "relax_brwt_primary" \
+     -oo ~/metagenome/data/BIGSI/logs/relax_brwt_primary.lsf \
+     -W 72:00 \
+     -n 36 -R "rusage[mem=17000] span[hosts=1]" \
+    "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph relax_brwt -v \
+        -p 36 \
+        --relax-arity 16 \
+        -o /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_primary.relaxed \
+        /cluster/home/mikhaika/metagenome/data/BIGSI/annotation/annotation_primary.brwt.annodbg \
         2>&1"
 ```
 
@@ -326,13 +429,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_row_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rowy_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_row_${N}_primary.lsf \
          -W 24:00 \
          -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
-        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+        "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.column.annodbg\" \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type row \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.column.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
                 2>&1"; \
 done
@@ -341,13 +444,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_flat_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_flat_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_flat_${N}_primary.lsf \
          -W 24:00 \
          -n 1 -R "rusage[mem=$((N * 10 + 15000))] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type flat \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.row.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
                 2>&1"; \
 done
 
@@ -355,13 +458,13 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_rbfish_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_rbfish_${N}.lsf \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/row_to_rbfish_${N}_primary.lsf \
          -W 20:00 \
          -n 1 -R "rusage[mem=$((N * 17))] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
                 --anno-type rbfish \
-                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N} \
-                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}.row.annodbg \
+                -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
+                ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.row.annodbg \
                 2>&1"; \
 done
 

@@ -33,8 +33,8 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         auto last_op = seed.get_cigar().back().first;
         table_init.scores[start_pos] = seed.get_score();
         table_init.ops[start_pos] = last_op;
-        table_init.prev_nodes[start_pos] = SequenceGraph::npos;
-        table_init.gap_prev_nodes[start_pos] = SequenceGraph::npos;
+        table_init.prev_nodes[start_pos] = 0;
+        table_init.gap_prev_nodes[start_pos] = 0;
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::INSERTION
                 ? table_init.scores[start_pos]
@@ -189,8 +189,27 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
     auto i = start_pos;
     Cigar::Operator op = column->second.ops.at(i);
-    NodeType prev_node = column->second.prev_nodes.at(i);
-    NodeType prev_gap_node = column->second.gap_prev_nodes.at(i);
+    NodeType prev_node;
+    switch (column->second.prev_nodes.at(i)) {
+        case 0: { prev_node = SequenceGraph::npos; } break;
+        case 0xFF: { prev_node = column->first; } break;
+        default: {
+            prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+        }
+    }
+
+    NodeType prev_gap_node;
+    switch (column->second.gap_prev_nodes.at(i)) {
+        case 0: { prev_gap_node = SequenceGraph::npos; } break;
+        case 0xFF: { prev_gap_node = column->first; } break;
+        default: {
+            prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+        }
+    }
+
+    if (op == Cigar::INSERTION)
+        prev_node = prev_gap_node;
+
     uint8_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
 
     if (!i && prev_node == SequenceGraph::npos)
@@ -204,7 +223,7 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
     std::vector<typename DPTable<NodeType>::const_iterator> out_columns;
     while (prev_node != SequenceGraph::npos) {
-        auto prev_column = dp_table.find(op == Cigar::INSERTION ? prev_gap_node : prev_node);
+        auto prev_column = dp_table.find(prev_node);
         assert(prev_column != dp_table.end());
 
         switch (op) {
@@ -246,8 +265,23 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
             if (op == Cigar::INSERTION)
                 gap_count = column->second.gap_count.at(i) - 1;
         }
-        prev_node = column->second.prev_nodes.at(i);
-        prev_gap_node = column->second.gap_prev_nodes.at(i);
+        switch (column->second.prev_nodes.at(i)) {
+            case 0: { prev_node = SequenceGraph::npos; } break;
+            case 0xFF: { prev_node = column->first; } break;
+            default: {
+                prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+            }
+        }
+
+        switch (column->second.gap_prev_nodes.at(i)) {
+            case 0: { prev_gap_node = SequenceGraph::npos; } break;
+            case 0xFF: { prev_gap_node = column->first; } break;
+            default: {
+                prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+            }
+        }
+        if (op == Cigar::INSERTION)
+            prev_node = prev_gap_node;
     }
 
     const auto &score_col = column->second.scores;
@@ -256,7 +290,11 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
         score_track -= gap_diff;
 
     score_t correction = score_col.at(i) - score_track;
+    if (correction < 0)
+        logger->warn("Incorrect score found: {} -> {}", score_, score_ + correction);
+
     assert(correction >= 0);
+
     if (correction > 0)
         logger->trace("Fixing outdated score: {} -> {}", score_, score_ + correction);
 
@@ -361,51 +399,86 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
             + sequence_;
 
-        // if the alignment starts from a source k-mer, then this alignment can't
-        // be reversed
-        if (dynamic_cast<const DBGSuccinct*>(&graph) && rev_seq[0] == boss::BOSS::kSentinel) {
-            *this = Alignment();
-            return;
-        }
+        // if the alignment starts from a source k-mer, then traverse forwards
+        // until a non-dummy k-mer is hit and check if its reverse complement exists
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
+            const auto &boss = dbg_succ->get_boss();
+            assert(rev_seq.length() == graph.get_k());
+            auto edge = dbg_succ->kmer_to_boss_index(nodes_.back());
+            auto edge_label = boss.get_W(edge) % boss.alph_size;
 
-        assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-        std::vector<NodeType> rev_nodes = nodes_;
-        reverse_complement_seq_path(graph, rev_seq, rev_nodes);
-
-        assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                         DeBruijnGraph::npos) == rev_nodes.end());
-
-        // trim off ending from reverse complement (corresponding to the added prefix)
-        size_t trim_left = offset_;
-        while (trim_left && rev_nodes.size() > 1) {
-            rev_nodes.pop_back();
-            rev_seq.pop_back();
-            --trim_left;
-        }
-
-        for (size_t i = 0; i < trim_left; ++i) {
-            size_t indegree = 0;
-            graph.call_incoming_kmers(rev_nodes[0], [&](NodeType prev, char) {
-                ++indegree;
-                if (indegree > 1)
+            // TODO: for efficiency, the last outgoing edge is taken at each step.
+            // This is valid for canonical graphs since the reverse complement of
+            // the found non-dummy k-mer is guaranteed to exist, but this node may
+            // not exist in a non-canonical graph.
+            for (size_t i = 0; i < offset_; ++i) {
+                edge = boss.fwd(edge, edge_label);
+                edge_label = boss.get_W(edge) % boss.alph_size;
+                if (edge_label == boss::BOSS::kSentinelCode) {
+                    // reverse complement not found
+                    *this = Alignment();
                     return;
+                }
 
-                rev_nodes[0] = prev;
-            });
+                nodes_.push_back(dbg_succ->boss_to_kmer_index(edge));
+                rev_seq.push_back(boss.decode(edge_label));
+            }
+            nodes_.assign(nodes_.begin() + offset_, nodes_.end());
+            rev_seq.assign(rev_seq.begin() + offset_, rev_seq.end());
 
-            if (!indegree) {
-                *this = Alignment();
-                return;
+            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
+            std::vector<NodeType> rev_nodes = nodes_;
+            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+
+            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
+                             DeBruijnGraph::npos) == rev_nodes.end());
+
+            assert(rev_seq.size() > offset_);
+            sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
+            nodes_.assign(rev_nodes.begin(), rev_nodes.end());
+
+        } else {
+            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
+            std::vector<NodeType> rev_nodes = nodes_;
+            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+
+            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
+                             DeBruijnGraph::npos) == rev_nodes.end());
+
+            // trim off ending from reverse complement (corresponding to the added prefix)
+            size_t trim_left = offset_;
+            while (trim_left && rev_nodes.size() > 1) {
+                rev_nodes.pop_back();
+                rev_seq.pop_back();
+                --trim_left;
             }
 
-            rev_seq.pop_back();
-        }
+            for (size_t i = 0; i < trim_left; ++i) {
+                size_t indegree = 0;
+                graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
+                    ++indegree;
 
-        nodes_ = rev_nodes;
-        sequence_ = rev_seq;
-        offset_ = trim_left;
-        assert(!trim_left
-                || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+                    // TODO: there are multiple possible reverse complements, which
+                    // do we pick? Currently we pick the first one
+                    if (indegree == 1)
+                        rev_nodes[0] = prev;
+                });
+
+                if (!indegree) {
+                    *this = Alignment();
+                    return;
+                }
+
+                rev_seq.pop_back();
+            }
+
+            nodes_ = rev_nodes;
+            sequence_ = rev_seq;
+            offset_ = trim_left;
+            assert(!trim_left
+                    || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+        }
     }
 
     std::reverse(cigar_.begin(), cigar_.end());

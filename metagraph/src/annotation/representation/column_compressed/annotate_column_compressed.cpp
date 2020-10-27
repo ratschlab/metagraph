@@ -147,7 +147,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 }
             }
         },
-        get_num_threads()
+        filenames.size() > get_num_threads() ? get_num_threads() : 0
     );
 
     if (merge_successful && no_errors) {
@@ -542,7 +542,16 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 template <typename Label>
 const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
+    annotation_matrix_view_.update_pointer(bitmatrix_);
     return annotation_matrix_view_;
+}
+
+template <typename Label>
+binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
+    flush();
+    label_encoder_.clear();
+    cached_columns_.Clear();
+    return binmat::ColumnMajor(std::move(bitmatrix_));
 }
 
 template <typename Label>

@@ -8,8 +8,11 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
-      : data_(std::move(columns)) {}
+ColumnMajor::ColumnMajor(std::vector<std::unique_ptr<bit_vector>> &&data)
+    : data_(std::move(data)), columns_(&data_) {}
+
+ColumnMajor::ColumnMajor(ColumnMajor &&other)
+    : data_(std::move(other.data_)), columns_(&data_) {}
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_->size()) {
@@ -95,10 +98,9 @@ bool ColumnMajor::load(std::istream &in) {
         for (auto &column : data_) {
             assert(!column.get());
 
-            auto next = std::make_unique<bit_vector_sd>();
-            if (!next->load(in))
+            column = std::make_unique<bit_vector_sd>();
+            if (!column->load(in))
                 return false;
-            column = std::move(next);
         }
         return true;
     } catch (...) {
@@ -109,8 +111,14 @@ bool ColumnMajor::load(std::istream &in) {
 void ColumnMajor::serialize(std::ostream &out) const {
     serialize_number(out, columns_->size());
 
-    for (const auto &column : *columns_) {
+    for (auto &column : *columns_) {
         assert(column.get());
+        // conversion pilfers the converted object, so we place the result back into
+        // #column, to ensure the ColumnMajor instance is valid after serialization
+        // TODO: better to serialize in the original format and add a loader that is able
+        // to infer the format from the binary data
+        const_cast<std::unique_ptr<bit_vector> &>(column)
+                = std::make_unique<bit_vector_sd>(column->convert_to<bit_vector_sd>());
         column->serialize(out);
     }
 }

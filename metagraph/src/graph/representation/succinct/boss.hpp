@@ -121,8 +121,7 @@ class BOSS {
      * If |kmers_in_single_form| is false, set |trim_dummy| to true
      * to fetch paths without sentinels.
      */
-    void call_paths(Call<std::vector<edge_index>&&,
-                         std::vector<TAlphabet>&&> callback,
+    void call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&> callback,
                     size_t num_threads = 1,
                     bool unitigs = false,
                     bool kmers_in_single_form = false,
@@ -136,6 +135,21 @@ class BOSS {
                         size_t num_threads = 1,
                         bool kmers_in_single_form = false,
                         const bitmap *subgraph_mask = NULL) const;
+
+    /**
+     * Traversal starts at dummy source edges, then at forks and in the end at cycles.
+     * A contig is terminated when we reach dead end or a fork where the first edge
+     * is visited, but not marked as being near a terminal edge.
+     *
+     * @param num_threads parallelize the graph traversal on this many threads
+     * @param max_length maximum distance between two terminal nodes; this is a soft
+     *        limit - in the worst case the distance between to terminal nodes can
+     *        be 2*max_length
+     */
+    void row_diff_traverse(size_t num_threads,
+                           size_t max_length,
+                           sdsl::bit_vector *terminal,
+                           sdsl::bit_vector *dummy) const;
 
     /**
      * Call unitigs (dummy edges are skipped).
@@ -181,12 +195,10 @@ class BOSS {
      * @param[out] mask a bit mask where sink dummy edges are marked. Must have the same
      * size as #W_ or must be nullptr.
      * @param[in] num_threads number of threads to use in the traversal (1 thread if <=1).
-     * @param[in] verbose logging verbosity
      * @return the number of source dummy edges
      */
     uint64_t mark_source_dummy_edges(sdsl::bit_vector *mask = NULL,
-                                     size_t num_threads = 0,
-                                     bool verbose = false) const;
+                                     size_t num_threads = 0) const;
 
     /**
      * Mark sink dummy edges into mask. Does not include the main dummy edge (with

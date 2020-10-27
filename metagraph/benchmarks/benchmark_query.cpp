@@ -66,7 +66,6 @@ std::unique_ptr<AnnotatedDBG> build_query_graph(const AnnotatedDBG &anno_graph,
                 [&](kseq_t *stream) { call_sequence(stream->seq.s); }
             );
         },
-        0.0,
         1
     );
 }
@@ -153,7 +152,7 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
         if (!column)
             throw std::runtime_error("This shouldn't happen");
 
-        annotator = annot::convert_to_greedy_BRWT<annot::MultiBRWTAnnotator>(
+        annotator = annot::convert_to_greedy_BRWT(
             const_cast<annot::ColumnCompressed<>&&>(*column),
             state.range(0),
             state.range(0)

@@ -21,18 +21,18 @@ class BinRelWT : public BinaryMatrix {
 
     BinRelWT(std::vector<std::unique_ptr<bit_vector>>&& columns);
 
-    uint64_t num_columns() const;
-    uint64_t num_rows() const;
+    uint64_t num_columns() const override;
+    uint64_t num_rows() const override;
 
-    bool get(Row row, Column column) const;
-    SetBitPositions get_row(Row row) const;
-    std::vector<Row> get_column(Column column) const;
+    bool get(Row row, Column column) const override;
+    SetBitPositions get_row(Row row) const override;
+    std::vector<Row> get_column(Column column) const override;
 
-    bool load(std::istream &in);
-    void serialize(std::ostream &out) const;
+    bool load(std::istream &in) override;
+    void serialize(std::ostream &out) const override;
 
     // number of ones in the matrix
-    uint64_t num_relations() const;
+    uint64_t num_relations() const override;
 
   private:
     bool is_zero_row(Row row) const;

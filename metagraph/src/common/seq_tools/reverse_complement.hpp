@@ -67,4 +67,8 @@ inline void reverse_complement(const kstring_t &seq) {
     reverse_complement(seq.s, seq.s + seq.l);
 }
 
+inline void reverse_complement(std::string &seq) {
+    reverse_complement(seq.begin(), seq.end());
+}
+
 #endif // __REVERSE_COMPLEMENT_HPP__

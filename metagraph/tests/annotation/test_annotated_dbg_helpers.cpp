@@ -58,41 +58,5 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, annot::RowF
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, annot::RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&);
 
 
-MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
-                                       const std::vector<std::string> &ingroup,
-                                       const std::vector<std::string> &outgroup,
-                                       double mask_in_label_fraction,
-                                       double mask_out_label_fraction,
-                                       double other_label_fraction,
-                                       double lazy_evaluation_density_cutoff) {
-    size_t insize = ingroup.size();
-    size_t outsize = outgroup.size();
-    return MaskedDeBruijnGraph(
-        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
-        graph::mask_nodes_by_node_label(
-            anno_graph,
-            ingroup,
-            outgroup,
-            [=,&anno_graph](auto index, auto get_num_in_labels, auto get_num_out_labels) {
-                assert(index != DeBruijnGraph::npos);
-
-                size_t num_in_labels = get_num_in_labels();
-                if (num_in_labels < mask_in_label_fraction * insize)
-                    return false;
-
-                size_t num_out_labels = get_num_out_labels();
-                if (num_out_labels < mask_out_label_fraction * outsize)
-                    return false;
-
-                size_t num_total_labels = anno_graph.get_labels(index).size();
-
-                return (num_total_labels - num_in_labels - num_out_labels)
-                    <= other_label_fraction * num_total_labels;
-            },
-            lazy_evaluation_density_cutoff
-        )
-    );
-}
-
 } // namespace test
 } // namespace mtg

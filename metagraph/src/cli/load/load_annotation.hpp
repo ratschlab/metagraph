@@ -18,18 +18,17 @@ initialize_annotation(Config::AnnotationType anno_type,
                       bool row_compressed_sparse = false,
                       uint64_t num_rows = 0);
 
-inline auto initialize_annotation(Config::AnnotationType anno_type,
-                                  const Config &config,
-                                  uint64_t num_rows = 0) {
-    return initialize_annotation(anno_type,
-                                 config.num_columns_cached,
-                                 config.sparse,
+inline std::unique_ptr<annot::MultiLabelEncoded<std::string>>
+initialize_annotation(Config::AnnotationType anno_type,
+                      const Config &config,
+                      uint64_t num_rows = 0) {
+    return initialize_annotation(anno_type, config.num_columns_cached, config.sparse,
                                  num_rows);
 }
 
 template <typename... Args>
-inline auto initialize_annotation(const std::string &filename,
-                                  const Args&... args) {
+inline std::unique_ptr<annot::MultiLabelEncoded<std::string>>
+initialize_annotation(const std::string &filename, const Args &... args) {
     return initialize_annotation(parse_annotation_type(filename), args...);
 }
 

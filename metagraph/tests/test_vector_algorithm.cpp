@@ -2,6 +2,7 @@
 
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "common/threads/threading.hpp"
 #include "test_helpers.hpp"
 
 
@@ -155,6 +156,168 @@ TEST(IntVector, call_nonzeros_sparse_every_4) {
                                               << "\n" << vector;
                 }
             }
+        }
+    }
+}
+
+TEST(IntVector, atomic_exchange) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+        #pragma omp parallel for num_threads(3) schedule(static, 1)
+        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+        }
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+    }
+}
+
+TEST(IntVector, atomic_exchange_then_fetch_after_join) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+        #pragma omp parallel for num_threads(3) schedule(static, 1)
+        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+        }
+
+        #pragma omp parallel for num_threads(3) schedule(dynamic)
+        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+            EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+        }
+    }
+}
+
+TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
+    for (size_t w = 1; w <= 64; ++w) {
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+
+        #pragma omp parallel num_threads(3)
+        #pragma omp single
+        {
+            #pragma omp taskloop
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, __ATOMIC_RELEASE));
+
+                #pragma omp task
+                {
+                    EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+                }
+            }
+        }
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_val) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = std::min(uint64_t(129), sdsl::bits::lo_set[w]);
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+        #pragma omp parallel for num_threads(3) schedule(static, 1)
+        for (size_t j = 0; j < val; ++j) {
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                atomic_fetch_and_add(vector_atomic, i, 1, mu, memorder);
+
+                // some added contention
+                atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                size_t r = 2;
+                size_t i_min = i - std::min(i, r);
+                size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
+                for (size_t k = i_min; k < i_max; ++k) {
+                    atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                }
+            }
+        }
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_all_bits) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+        #pragma omp parallel for num_threads(3) schedule(static, 1)
+        for (size_t j = 0; j < w; ++j) {
+            uint64_t set_val = 1llu << j;
+            for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
+                                                   mu, memorder) & set_val);
+
+                // some added contention
+                atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                size_t r = 5; // this test is faster, so we can make this wider
+                size_t i_min = i - std::min(i, r);
+                size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
+                for (size_t k = i_min; k < i_max; ++k) {
+                    atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                }
+            }
+        }
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+    }
+}
+
+TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        size_t step = w < 17 ? 1 : 17;
+        for (size_t s = 0; s < w; s += step) {
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+            uint64_t val = sdsl::bits::lo_set[w] ^ (1llu << s);
+
+            std::mutex mu;
+            std::atomic_thread_fence(std::memory_order_release);
+            #pragma omp parallel for num_threads(3) schedule(static, 1)
+            for (size_t j = 0; j < w; ++j) {
+                if (j != s) {
+                    uint64_t set_val = 1llu << j;
+                    for (size_t i = 0; i < vector_atomic.size(); ++i) {
+                        EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
+                                                           mu, memorder) & set_val);
+
+                        // some added contention
+                        atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
+
+                        size_t r = 2;
+                        size_t i_min = i - std::min(i, r);
+                        size_t i_max = std::min(i + r, size_t(vector_atomic.size()));
+                        for (size_t k = i_min; k < i_max; ++k) {
+                            atomic_fetch_and_add(vector_atomic, k, 0, mu, memorder);
+                        }
+                    }
+                }
+            }
+
+            std::atomic_thread_fence(std::memory_order_acquire);
+            EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
         }
     }
 }
@@ -811,6 +974,183 @@ TEST(select_support_scan_offset, vector_random) {
                     << ", rank: " << r - rank_offset;
             }
         }
+    }
+}
+
+std::vector<uint64_t> get_test_size_range() {
+    std::vector<uint64_t> result;
+    for (size_t size = 1; size <= 1'000; ++size) {
+        result.push_back(size);
+    }
+    for (size_t l = 10; l <= 21; ++l) {
+        result.push_back(1llu << l);
+        result.push_back((1llu << l) + 1);
+        result.push_back((1llu << l) - 1);
+    }
+    return result;
+}
+
+TEST(generate_subindex, empty) {
+    ThreadPool thread_pool(5);
+    sdsl::bit_vector ref;
+    bit_vector_stat col;
+    ASSERT_EQ(sdsl::bit_vector(0),
+        generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+}
+
+TEST(generate_subindex, ref0_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 0);
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(0),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 1);
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(size, 0),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector ref(size, 1);
+        bit_vector_stat col(sdsl::bit_vector(size, 1));
+        ASSERT_EQ(sdsl::bit_vector(size, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1first0_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[0] = 0;
+        sdsl::bit_vector ref = bv;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1last0_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[bv.size() - 1] = 0;
+        sdsl::bit_vector ref = bv;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1),
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        sdsl::bit_vector ref = bv;
+        bv[0] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv,
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex, ref1_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        sdsl::bit_vector ref = bv;
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv,
+            generate_subindex(col, ref, sdsl::util::cnt_one_bits(ref), thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, empty) {
+    ThreadPool thread_pool(5);
+    bit_vector_stat ref;
+    bit_vector_stat col;
+    ASSERT_EQ(sdsl::bit_vector(0), generate_subindex(col, ref, thread_pool));
+}
+
+TEST(generate_subindex_sparse, ref0_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 0));
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(0), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 1));
+        bit_vector_stat col(sdsl::bit_vector(size, 0));
+        ASSERT_EQ(sdsl::bit_vector(size, 0), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        bit_vector_stat ref(sdsl::bit_vector(size, 1));
+        bit_vector_stat col(sdsl::bit_vector(size, 1));
+        ASSERT_EQ(sdsl::bit_vector(size, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1first0_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[0] = 0;
+        bit_vector_stat ref(bv);
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1last0_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat ref(bv);
+        bit_vector_stat col(bv);
+        ASSERT_EQ(sdsl::bit_vector(size - 1, 1), generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1first0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bit_vector_stat ref(bv);
+        bv[0] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv, generate_subindex(col, ref, thread_pool));
+    }
+}
+
+TEST(generate_subindex_sparse, ref1_col1last0) {
+    ThreadPool thread_pool(5);
+    for (uint64_t size : get_test_size_range()) {
+        sdsl::bit_vector bv(size, 1);
+        bit_vector_stat ref(bv);
+        bv[bv.size() - 1] = 0;
+        bit_vector_stat col(bv);
+        ASSERT_EQ(bv, generate_subindex(col, ref, thread_pool));
     }
 }
 

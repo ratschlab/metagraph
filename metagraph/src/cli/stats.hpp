@@ -21,8 +21,7 @@ void print_stats(const graph::DeBruijnGraph &graph);
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy = false,
-                      size_t num_threads = 0,
-                      bool verbose = false);
+                      size_t num_threads = 0);
 
 int print_stats(Config *config);
 

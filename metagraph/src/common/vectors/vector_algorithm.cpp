@@ -71,12 +71,11 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     return result;
 }
 
-sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
-                               uint8_t bits_per_number) {
-    if (bits_per_number == vector.width()) {
+sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width) {
+    if (width == vector.width()) {
         return std::move(vector);
     } else {
-        return pack_vector(vector, bits_per_number);
+        return pack_vector(vector, width);
     }
 }
 
@@ -468,7 +467,7 @@ void compute_subindex(const bit_vector &column,
     // check if all ones
     if (popcount == end - begin) {
         for ( ; i + 64 <= end; i += 64, offset += 64) {
-            subindex->set_int(offset, 0xFFFF, 64);
+            subindex->set_int(offset, sdsl::bits::lo_set[64], 64);
         }
         if (i < end) {
             subindex->set_int(offset, sdsl::bits::lo_set[end - i], end - i);

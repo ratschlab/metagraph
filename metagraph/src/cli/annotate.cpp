@@ -10,6 +10,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
@@ -20,18 +21,119 @@ using namespace mtg::seq_io;
 using mtg::common::logger;
 
 
-void annotate_data(const std::vector<std::string> &files,
-                   const std::string &ref_sequence_path,
-                   graph::AnnotatedDBG *anno_graph,
-                   bool forward_and_reverse,
-                   size_t min_count,
-                   size_t max_count,
-                   bool filename_anno,
-                   bool annotate_sequence_headers,
-                   const std::string &fasta_anno_comment_delim,
-                   const std::string &fasta_header_delimiter,
-                   const std::vector<std::string> &anno_labels) {
+template <class Callback>
+void call_annotations(const std::string &file,
+                      const std::string &ref_sequence_path,
+                      const graph::DeBruijnGraph &graph,
+                      bool forward_and_reverse,
+                      size_t min_count,
+                      size_t max_count,
+                      bool filename_anno,
+                      bool annotate_sequence_headers,
+                      const std::string &fasta_anno_comment_delim,
+                      const std::string &fasta_header_delimiter,
+                      const std::vector<std::string> &anno_labels,
+                      const Callback &callback) {
     size_t total_seqs = 0;
+
+    Timer timer;
+
+    logger->trace("Parsing '{}'", file);
+
+    std::vector<std::string> labels = anno_labels;
+    if (filename_anno) {
+        labels.push_back(file);
+    }
+    // remember the number of base labels to remove those unique to each sequence quickly
+    const size_t num_base_labels = labels.size();
+
+    if (file_format(file) == "VCF") {
+        read_vcf_file_with_annotations_critical(file, ref_sequence_path, graph.get_k(),
+            [&](auto&& seq, const auto &variant_labels) {
+                labels.insert(labels.end(),
+                              variant_labels.begin(), variant_labels.end());
+
+                callback(std::move(seq), labels);
+
+                total_seqs += 1;
+
+                if (logger->level() <= spdlog::level::level_enum::trace
+                                                && total_seqs % 10000 == 0) {
+                    logger->trace(
+                        "processed {} variants, last was annotated as <{}>, {} sec",
+                        total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                }
+
+                labels.resize(num_base_labels);
+            },
+            forward_and_reverse
+        );
+    } else if (file_format(file) == "KMC") {
+        read_kmers(
+            file,
+            [&](std::string_view sequence) {
+                callback(std::string(sequence), labels);
+
+                total_seqs += 1;
+
+                if (logger->level() <= spdlog::level::level_enum::trace
+                                                && total_seqs % 10000 == 0) {
+                    logger->trace(
+                        "processed {} sequences, trying to annotate as <{}>, {} sec",
+                        total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                }
+            },
+            !graph.is_canonical_mode(),
+            min_count,
+            max_count
+        );
+    } else if (file_format(file) == "FASTA"
+                || file_format(file) == "FASTQ") {
+        read_fasta_file_critical(
+            file,
+            [&](kseq_t *read_stream) {
+                // add sequence header to labels
+                if (annotate_sequence_headers) {
+                    for (const auto &label
+                            : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                                    ? utils::join_strings(
+                                                        { read_stream->name.s, read_stream->comment.s },
+                                                        fasta_anno_comment_delim,
+                                                        true)
+                                                    : read_stream->name.s,
+                                                  fasta_header_delimiter)) {
+                        labels.push_back(label);
+                    }
+                }
+
+                callback(read_stream->seq.s, labels);
+
+                total_seqs += 1;
+
+                if (logger->level() <= spdlog::level::level_enum::trace
+                                                && total_seqs % 10000 == 0) {
+                    logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                                  total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
+                }
+
+                labels.resize(num_base_labels);
+            },
+            forward_and_reverse
+        );
+    } else {
+        logger->error("Unknown filetype for file '{}'", file);
+        exit(1);
+    }
+
+    logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB",
+                  file, timer.elapsed(), get_curr_RSS() >> 20);
+}
+
+void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
+                   const Config &config,
+                   const std::vector<std::string> &files,
+                   const std::string &annotator_filename) {
+    auto anno_graph = initialize_annotated_dbg(graph, config);
 
     Timer timer;
 
@@ -39,121 +141,32 @@ void annotate_data(const std::vector<std::string> &files,
 
     // iterate over input files
     for (const auto &file : files) {
-        Timer data_reading_timer;
-
-        logger->trace("Parsing '{}'", file);
-
-        std::vector<std::string> labels = anno_labels;
-        if (filename_anno) {
-            labels.push_back(file);
-        }
-        // remember the number of base labels to remove those unique to each sequence quickly
-        const size_t num_base_labels = labels.size();
-
-        if (file_format(file) == "VCF") {
-            read_vcf_file_with_annotations_critical(
-                file,
-                ref_sequence_path,
-                anno_graph->get_graph().get_k(),
-                [&](auto&& seq, const auto &variant_labels) {
-                    labels.insert(labels.end(),
-                                  variant_labels.begin(), variant_labels.end());
-
-                    thread_pool.enqueue(
-                        [anno_graph](const std::string &sequence, const auto &labels) {
-                            anno_graph->annotate_sequence(sequence, labels);
-                        },
-                        std::move(seq),
-                        labels
-                    );
-
-                    total_seqs += 1;
-
-                    if (logger->level() <= spdlog::level::level_enum::trace
-                                                    && total_seqs % 10000 == 0) {
-                        logger->trace(
-                            "processed {} variants, last was annotated as <{}>, {} sec",
-                            total_seqs, fmt::join(labels, "><"), timer.elapsed());
-                    }
-
-                    labels.resize(num_base_labels);
-                },
-                forward_and_reverse
-            );
-        } else if (file_format(file) == "KMC") {
-            read_kmers(
-                file,
-                [&](std::string_view sequence) {
-                    thread_pool.enqueue(
-                        [anno_graph](const std::string &sequence, const auto &labels) {
-                            anno_graph->annotate_sequence(sequence, labels);
-                        },
-                        std::string(sequence),
-                        labels
-                    );
-
-                    total_seqs += 1;
-
-                    if (logger->level() <= spdlog::level::level_enum::trace
-                                                    && total_seqs % 10000 == 0) {
-                        logger->trace(
-                            "processed {} sequences, trying to annotate as <{}>, {} sec",
-                            total_seqs, fmt::join(labels, "><"), timer.elapsed());
-                    }
-                },
-                !anno_graph->get_graph().is_canonical_mode(),
-                min_count,
-                max_count
-            );
-        } else if (file_format(file) == "FASTA"
-                    || file_format(file) == "FASTQ") {
-            read_fasta_file_critical(
-                file,
-                [&](kseq_t *read_stream) {
-                    // add sequence header to labels
-                    if (annotate_sequence_headers) {
-                        for (const auto &label
-                                : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                                                        ? utils::join_strings(
-                                                            { read_stream->name.s, read_stream->comment.s },
-                                                            fasta_anno_comment_delim,
-                                                            true)
-                                                        : read_stream->name.s,
-                                                      fasta_header_delimiter)) {
-                            labels.push_back(label);
-                        }
-                    }
-
-                    thread_pool.enqueue(
-                        [anno_graph](const std::string &sequence, const auto &labels) {
-                            anno_graph->annotate_sequence(sequence, labels);
-                        },
-                        std::string(read_stream->seq.s),
-                        labels
-                    );
-
-                    total_seqs += 1;
-
-                    if (logger->level() <= spdlog::level::level_enum::trace
-                                                    && total_seqs % 10000 == 0) {
-                        logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
-                                      total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
-                    }
-
-                    labels.resize(num_base_labels);
-                },
-                forward_and_reverse
-            );
-        } else {
-            logger->error("Unknown filetype for file '{}'", file);
-            exit(1);
-        }
-
-        logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
+        call_annotations(
+            file,
+            config.refpath,
+            anno_graph->get_graph(),
+            config.forward_and_reverse,
+            config.min_count,
+            config.max_count,
+            config.filename_anno,
+            config.annotate_sequence_headers,
+            config.fasta_anno_comment_delim,
+            config.fasta_header_delimiter,
+            config.anno_labels,
+            [&](std::string sequence, auto labels) {
+                thread_pool.enqueue(
+                    [&anno_graph](const std::string &sequence, const auto &labels) {
+                        anno_graph->annotate_sequence(sequence, labels);
+                    },
+                    std::move(sequence), std::move(labels)
+                );
+            }
+        );
     }
 
     thread_pool.join();
+
+    anno_graph->get_annotation().serialize(annotator_filename);
 }
 
 
@@ -251,25 +264,11 @@ int annotate_graph(Config *config) {
 
     const auto graph = load_critical_dbg(config->infbase);
 
-    if (graph->is_canonical_mode())
+    if (graph->is_canonical_mode() || config->canonical)
         config->forward_and_reverse = false;
 
     if (!config->separately) {
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
-
-        annotate_data(files,
-                      config->refpath,
-                      anno_graph.get(),
-                      config->forward_and_reverse,
-                      config->min_count,
-                      config->max_count,
-                      config->filename_anno,
-                      config->annotate_sequence_headers,
-                      config->fasta_anno_comment_delim,
-                      config->fasta_header_delimiter,
-                      config->anno_labels);
-
-        anno_graph->get_annotation().serialize(config->outfbase);
+        annotate_data(graph, *config, files, config->outfbase);
 
     } else {
         // |config->separately| is true
@@ -283,25 +282,10 @@ int annotate_graph(Config *config) {
 
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
         for (size_t i = 0; i < files.size(); ++i) {
-            auto anno_graph = initialize_annotated_dbg(graph, *config);
-
-            annotate_data({ files[i] },
-                          config->refpath,
-                          anno_graph.get(),
-                          config->forward_and_reverse,
-                          config->min_count,
-                          config->max_count,
-                          config->filename_anno,
-                          config->annotate_sequence_headers,
-                          config->fasta_anno_comment_delim,
-                          config->fasta_header_delimiter,
-                          config->anno_labels);
-
-            anno_graph->get_annotation().serialize(
+            annotate_data(graph, *config, { files[i] },
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
-                    : files[i]
-            );
+                    : files[i]);
         }
     }
 

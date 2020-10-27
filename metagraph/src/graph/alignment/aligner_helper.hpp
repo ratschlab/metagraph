@@ -1,17 +1,18 @@
 #ifndef __ALIGNER_HELPER_HPP__
 #define __ALIGNER_HELPER_HPP__
 
+#include <cassert>
 #include <array>
 #include <memory>
 #include <numeric>
 #include <ostream>
 #include <string>
 #include <vector>
-#include <cassert>
 
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
 
+#include "common/aligned_vector.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -23,7 +24,7 @@ namespace align {
 
 class Cigar {
   public:
-    enum Operator : int32_t {
+    enum Operator : int8_t {
         CLIPPED,
         MISMATCH,
         MATCH,
@@ -121,10 +122,11 @@ class Cigar {
 };
 
 
+// TODO: move to a separate header file aligner_config.hpp
 class DBGAlignerConfig {
   public:
     typedef int32_t score_t;
-    typedef std::array<score_t, 128> ScoreMatrixRow;
+    typedef std::array<int8_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
 
     // Set parameters manually and call `set_scoring_matrix()`
@@ -170,6 +172,7 @@ class DBGAlignerConfig {
 
     double exact_kmer_match_fraction = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
+    double max_ram_per_alignment = std::numeric_limits<double>::max();
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
@@ -502,12 +505,13 @@ class DPTable {
                 last_priority_pos(priority_pos) {}
 
         size_t size_;
-        std::vector<score_t> scores;
-        std::vector<score_t> gap_scores;
-        std::vector<Cigar::Operator> ops;
-        std::vector<NodeType> prev_nodes;
-        std::vector<NodeType> gap_prev_nodes;
-        std::vector<int32_t> gap_count;
+        AlignedVector<score_t> scores;
+        AlignedVector<score_t> gap_scores;
+        AlignedVector<Cigar::Operator> ops;
+        AlignedVector<uint8_t> prev_nodes;
+        AlignedVector<uint8_t> gap_prev_nodes;
+        AlignedVector<int32_t> gap_count;
+        mutable std::vector<NodeType> incoming_nodes;
         char last_char;
         size_t best_pos;
         size_t last_priority_pos;
@@ -515,13 +519,44 @@ class DPTable {
         const score_t& best_score() const { return scores.at(best_pos); }
         const score_t& last_priority_value() const { return scores.at(last_priority_pos); }
         const Cigar::Operator& best_op() const { return ops.at(best_pos); }
-        const NodeType& best_prev_node() const { return prev_nodes.at(best_pos); }
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
         }
 
+        size_t cell_size() const {
+            return sizeof(score_t) * 2 + sizeof(Cigar::Operator)
+                 + sizeof(uint8_t) * 2 + sizeof(int32_t);
+        }
+
+        size_t bytes_taken() const {
+            return sizeof(Column)
+                + sizeof(score_t) * scores.capacity()
+                + sizeof(score_t) * gap_scores.capacity()
+                + sizeof(Cigar::Operator) * ops.capacity()
+                + sizeof(uint8_t) * prev_nodes.capacity()
+                + sizeof(uint8_t) * gap_prev_nodes.capacity()
+                + sizeof(int32_t) * gap_count.capacity()
+                + sizeof(NodeType) * incoming_nodes.capacity();
+        }
+
         size_t size() const { return size_; }
+
+        uint8_t rank_prev_node(NodeType node) const {
+            assert(incoming_nodes.size() < std::numeric_limits<uint8_t>::max());
+            for (uint8_t i = 0; i < incoming_nodes.size(); ++i) {
+                if (incoming_nodes[i] == node)
+                    return i + 1;
+            }
+
+            incoming_nodes.push_back(node);
+            return incoming_nodes.size();
+        }
+
+        NodeType select_prev_node(uint8_t rank) const {
+            assert(rank);
+            return incoming_nodes.at(rank - 1);
+        }
     };
 
     DPTable() {}
@@ -559,7 +594,7 @@ class DPTable {
     }
 
     void erase(NodeType key) { dp_table_.erase(key); }
-    size_t count(NodeType key) { return dp_table_.count(key); }
+    size_t count(NodeType key) const { return dp_table_.count(key); }
 
     void extract_alignments(const DeBruijnGraph &graph,
                             const DBGAlignerConfig &config,

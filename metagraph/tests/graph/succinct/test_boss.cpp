@@ -1,3 +1,4 @@
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include <zlib.h>
@@ -945,6 +946,20 @@ TEST(BOSS, CallUnitigsEmptyGraph) {
     }
 }
 
+TEST(BOSS, CallSequencesRowDiff_EmptyGraph) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 30; ++k) {
+            BOSS empty(k);
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            empty.row_diff_traverse(num_threads, 1, &terminal, &dummy);
+            ASSERT_EQ(sdsl::bit_vector(2, false), terminal)
+                << "Empty graph must have no anchors";
+        }
+    }
+}
+
 TEST(BOSS, CallPathsOneLoop) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
@@ -1043,6 +1058,25 @@ TEST(BOSS, CallUnitigsTwoLoops) {
     }
 }
 
+TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A') });
+            BOSS graph(&constructor);
+
+            ASSERT_EQ(2u, graph.num_edges());
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            graph.row_diff_traverse(num_threads, 1, &terminal, &dummy);
+            ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(sdsl::bit_vector({ 0, 0, 1 }), terminal);
+        }
+    }
+}
+
 TEST(BOSS, CallUnitigsTwoBigLoops) {
     for (size_t num_threads : { 1, 4 }) {
         size_t k = 10;
@@ -1076,9 +1110,35 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
             num_kmers += path.size();
         }, num_threads, 0, true);
 
-        EXPECT_EQ(2, num_sequences);
+        // There is no guarantee on the number of contigs in the primary mode
+        // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        size_t k = 10;
+        std::vector<std::string> sequences {
+                "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
+                "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
+        };
+        BOSSConstructor constructor(k);
+        constructor.add_sequences(std::vector<std::string>(sequences));
+        BOSS graph(&constructor);
+
+        sdsl::bit_vector terminal;
+        sdsl::bit_vector dummy;
+        graph.row_diff_traverse(num_threads, 100, &terminal, &dummy);
+        ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(2, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
+
+        graph.row_diff_traverse(num_threads, 1, &terminal, &dummy);
+        ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(104, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
     }
 }
 
@@ -1134,6 +1194,49 @@ TEST(BOSS, CallUnitigsFourLoops) {
             EXPECT_EQ(graph.num_edges(), num_paths);
             EXPECT_EQ(graph.num_edges() - 1, num_sequences);
         }
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_FourLoops) {
+    for (size_t num_threads : { 1, 4 }) {
+        for (size_t k = 1; k < 20; ++k) {
+            BOSSConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'G'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'T')});
+            BOSS graph(&constructor);
+
+            sdsl::bit_vector terminal;
+            sdsl::bit_vector dummy;
+            graph.row_diff_traverse(num_threads, 1, &terminal, &dummy);
+            ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+            ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+            ASSERT_EQ(4, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
+        }
+    }
+}
+
+TEST(BOSS, CallSequenceRowDiff_FourPaths) {
+    constexpr size_t k = 5;
+    BOSSConstructor constructor(k);
+    std::vector<std::string> sequences
+            = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
+    constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
+    BOSS graph(&constructor);
+    std::mutex mu;
+    for (size_t num_threads : { 1, 4 }) {
+        sdsl::bit_vector terminal;
+        sdsl::bit_vector dummy;
+        graph.row_diff_traverse(num_threads, 20, &terminal, &dummy);
+        ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(4, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
+
+        graph.row_diff_traverse(num_threads, 1, &terminal, &dummy);
+        ASSERT_EQ(graph.num_edges() + 1, dummy.size());
+        ASSERT_EQ(graph.num_edges() + 1, terminal.size());
+        ASSERT_EQ(19, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
     }
 }
 
@@ -1320,8 +1423,10 @@ TEST(BOSS, CallUnitigs) {
 TEST(BOSS, CallUnitigs1) {
     for (size_t num_threads : { 1, 4 }) {
         BOSSConstructor constructor(3);
-        constructor.add_sequences(std::vector<std::string> { "ACTAGCTAGCTAGCTAGCTAGC",
-                                    "ACTCT" });
+        constructor.add_sequences(std::vector<std::string> {
+            "ACTAGCTAGCTAGCTAGCTAGC",
+            "ACTCT"
+        });
         BOSS graph(&constructor);
 
         std::multiset<std::string> contigs {

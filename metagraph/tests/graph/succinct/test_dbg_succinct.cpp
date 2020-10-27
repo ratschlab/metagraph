@@ -171,7 +171,7 @@ TEST(DBGSuccinct, CallNodesWithSuffix) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -209,7 +209,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMinLength) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         { query.data(), std::min(size_t(query.size()), size_t(4)) },
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -236,7 +236,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixK) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -258,6 +258,32 @@ TEST(DBGSuccinct, CallNodesWithSuffixK) {
     EXPECT_EQ(ref_node_str, node_str);
 }
 
+TEST(DBGSuccinct, CallNodesWithSuffixK_v2) {
+    size_t k = 4;
+
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence("AGCCC");
+    graph->add_sequence("CGCC");
+    graph->add_sequence("GGCC");
+    graph->add_sequence("TGCC");
+    // graph->mask_dummy_kmers(1, false);
+
+    std::string query = "AGCC";
+
+    size_t nodes_called = 0;
+    graph->call_nodes_with_suffix_matching_longest_prefix(
+        query,
+        [&](DBGSuccinct::node_index /* i */, size_t length) {
+            EXPECT_EQ(query.size(), length);
+            nodes_called++;
+        },
+        k
+    );
+
+    EXPECT_EQ(1u, nodes_called) << *graph;
+}
+
 TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoff) {
     size_t k = 4;
     std::string reference = "GGCCCAGGGGTC";
@@ -270,7 +296,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKEarlyCutoff) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         { query.data(), std::min(size_t(query.size()), size_t(2)) },
         [&](auto node, auto length) {
             EXPECT_EQ(2u, length);
@@ -308,7 +334,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixEarlyCutoffKMinusOne) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         { query.data(), std::min(size_t(query.size()), size_t(3)) },
         [&](auto node, auto length) {
             EXPECT_EQ(3u, length);
@@ -344,7 +370,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKMinusOne) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -378,7 +404,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixKMinusOneBeginning) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -404,7 +430,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMinusTwoBeginning) {
 
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -438,7 +464,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleOut) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
 
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(query.size(), length);
@@ -486,7 +512,7 @@ TEST(DBGSuccinct, CallNodesWithSuffixMultipleInOut) {
     std::multiset<DBGSuccinct::node_index> nodes;
     std::multiset<std::string> node_str;
 
-    graph->call_nodes_with_suffix(
+    graph->call_nodes_with_suffix_matching_longest_prefix(
         query,
         [&](auto node, auto length) {
             EXPECT_EQ(2u, length);

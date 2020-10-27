@@ -4,7 +4,7 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- GNU GCC with C++17 (gcc-8.2.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- GNU GCC with C++17 (gcc-9 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - HTSlib
 - folly (optional)
 - Python 3 (for running integration tests)
@@ -60,9 +60,7 @@ popd
 `./metagraph annotate`
 3. Transform the built annotation to a different annotation scheme:\
 `./metagraph transform_anno`
-4. Merge annotations (optional):\
-`./metagraph merge_anno`
-5. Query annotated graph\
+4. Query annotated graph\
 `./metagraph query`
 
 ### Example
@@ -164,7 +162,7 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 ### Convert annotation to Multi-BRWT
 1) Cluster columns
 ```bash
-./metagraph transform_anno -v --linkage \
+./metagraph transform_anno -v --linkage --greedy \
                            -o linkage.txt \
                            --subsample R \
                            -p NCORES \
