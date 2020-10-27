@@ -139,11 +139,27 @@ set_size
 
 kmc_input="${kmc_dir}/sra_file_list"
 find "${fastq_dir}" -type f > "$kmc_input"
+bytes=$(du -sb "${fastq_dir}" | cut -f1)
+MB=$((1024*1024))
+if ((bytes < 300 * MB)); then
+  count=1
+elif ((bytes < 500 * MB)); then
+  count=3
+elif ((bytes < 1000 * MB)); then
+  count=10
+elif ((bytes < 3000 * MB)); then
+  count=20
+else
+  count=50
+fi
+
+echo "Size is $bytes, setting KMC count to $count"
+
 
 bin_count=$(( $(ulimit -n) - 10))
 bin_count=$(( bin_count > 2000 ? 2000 : bin_count))
 kmc_output="${output_dir}/stats"
-if ! (execute kmc -k31 -ci1 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"); then
+if ! (execute kmc -k31 -ci"${count}" -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"); then
   echo_err "[$sra_id] kmc command failed. Exiting with code 6"
   exit_with 6
 fi
@@ -153,22 +169,7 @@ if ! [ -f $kmc_output ]; then
 fi
 echo "[$sra_id] kmc command finished successfully"
 
-unique_kmers=$(jq -r ' .Stats | ."#Unique_k-mers"' $kmc_output)
-total_kmers=$(jq -r ' .Stats | ."#Total no. of k-mers"' $kmc_output)
-if (( unique_kmers == 0 )); then
-  echo_err "[$sra_id] No unique k-mers, probably all reads are shorter than k"
-  exit_with 8
-fi
-coverage=$((total_kmers/unique_kmers))
-if ((coverage >= 5)); then
-  echo "[$sra_id] Coverage is $coverage, eliminating singletons"
-  if ! (execute kmc -k31 -ci2 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "$tmp_dir"); then
-    echo_err "[$sra_id] kmc command run #2 failed. Exiting with code 7"
-    exit_with 7
-  fi
-else
-  echo "[$sra_id] Coverage is $coverage, keeping singletons"
-fi
+coverage=1
 # edit the KMC output and add the coverage property (this will also eliminate all stuff except for 'Stats')
 jq --arg cov $coverage  '.Stats | ."#k-mers_coverage" = $cov' $kmc_output > $tmp_dir/stats
 mv $tmp_dir/stats $kmc_output
