@@ -437,10 +437,10 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         // element fits in an aligned word
         uint64_t *word = &vector.data()[bit_pos >> 6];
         const uint8_t shift = bit_pos & 0x3F;
-        uint64_t desired;
-        uint64_t exp = *word;
         const uint64_t inv_mask = ~(mask << shift);
         val <<= shift;
+        uint64_t desired;
+        uint64_t exp = *word;
         do {
             desired = val | (inv_mask & exp);
         } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
@@ -450,13 +450,12 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         // element fits in an aligned double word
         __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
         const uint8_t shift = bit_pos & 0x7F;
-        __uint128_t desired;
-        __uint128_t exp;
         __uint128_t inv_mask = ~(__uint128_t(mask) << shift);
         __uint128_t big_val = __uint128_t(val) << shift;
+        __uint128_t desired;
+        __uint128_t exp = *word;
         // TODO: GCC only generates cmpxchg16b instruction with older __sync functions
         do {
-            exp = *word;
             desired = big_val | (inv_mask & exp);
         } while (!__sync_bool_compare_and_swap(word, exp, desired));
         return (exp >> shift) & mask;
@@ -464,12 +463,12 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
     } else {
         const uint8_t shift = bit_pos & 0x7;
         uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        val <<= shift;
         if (shift + width <= 8) {
             // read from a byte
+            const uint8_t inv_mask = ~(mask << shift);
             uint8_t desired;
             uint8_t exp = *word;
-            const uint8_t inv_mask = ~(mask << shift);
-            val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
             } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
@@ -477,10 +476,9 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         } else if (shift + width <= 16) {
             // unaligned read from two bytes
             uint16_t *this_word = (uint16_t*)word;
+            const uint16_t inv_mask = ~(mask << shift);
             uint16_t desired;
             uint16_t exp = *this_word;
-            const uint16_t inv_mask = ~(mask << shift);
-            val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
             } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
@@ -488,10 +486,9 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         } else if (shift + width <= 32) {
             // unaligned read from four bytes
             uint32_t *this_word = (uint32_t*)word;
+            const uint32_t inv_mask = ~(mask << shift);
             uint32_t desired;
             uint32_t exp = *this_word;
-            const uint32_t inv_mask = ~(mask << shift);
-            val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
             } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
@@ -499,19 +496,19 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         } else if (shift + width <= 64) {
             // unaligned read from eight bytes
             uint64_t *this_word = (uint64_t*)word;
+            const uint64_t inv_mask = ~(mask << shift);
             uint64_t desired;
             uint64_t exp = *this_word;
-            const uint64_t inv_mask = ~(mask << shift);
-            val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
             } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
             return (exp >> shift) & mask;
         } else {
-            assert(false);
+            assert(false && "this should never be reached");
         }
     }
 
+    assert(false && "this should never be reached");
     return 0;
 }
 
