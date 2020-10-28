@@ -313,7 +313,7 @@ def check_status():
             os.rename(log_file_name, log_new_file_name)
 
             download_path = download_dir(sra_id)
-            sra_dir = os.path.join(download_path, 'sra')
+            sra_dir = os.path.join(download_path, 'sra' if args.source == 'ncbi' else 'fastq')
             download_size_mb = util.dir_size_MB(sra_dir)
             size_file = os.path.join(download_dir(sra_id), 'size')
             if os.path.exists(size_file):
