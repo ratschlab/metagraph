@@ -140,14 +140,14 @@ set_size
 kmc_input="${kmc_dir}/sra_file_list"
 find "${fastq_dir}" -type f > "$kmc_input"
 bytes=$(du -sb "${fastq_dir}" | cut -f1)
-MB=$((1024*1024))
-if ((bytes < 300 * MB)); then
+MB=$((1000000))
+if ((bytes <= 300 * MB)); then
   count=1
-elif ((bytes < 500 * MB)); then
+elif ((bytes <= 500 * MB)); then
   count=3
-elif ((bytes < 1000 * MB)); then
+elif ((bytes <= 1000 * MB)); then
   count=10
-elif ((bytes < 3000 * MB)); then
+elif ((bytes <= 3000 * MB)); then
   count=20
 else
   count=50
