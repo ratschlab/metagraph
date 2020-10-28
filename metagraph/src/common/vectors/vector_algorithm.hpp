@@ -76,6 +76,12 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
                                      std::mutex &backup_mutex,
                                      int mo = __ATOMIC_SEQ_CST);
 
+inline void atomic_adds(sdsl::int_vector<> &vector, uint64_t i,
+                        uint64_t count,
+                        uint64_t max_val,
+                        std::mutex &backup_mutex,
+                        int mo = __ATOMIC_SEQ_CST);
+
 inline uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
                                 std::mutex &backup_mutex,
                                 int mo = __ATOMIC_SEQ_CST);
@@ -417,6 +423,108 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
     }
 
     return 0;
+}
+
+inline void atomic_adds(sdsl::int_vector<> &vector,
+                        uint64_t i,
+                        uint64_t val,
+                        uint64_t max_val,
+                        std::mutex &backup_mutex,
+                        int mo) {
+    const size_t width = vector.width();
+    max_val = std::min(max_val, sdsl::bits::lo_set[width]);
+    const size_t bit_pos = i * width;
+    uint64_t mask = (1llu << width) - 1;
+    if (width + 7 > 64) {
+        // there is no way to reliably modify without a mutex
+        std::lock_guard<std::mutex> lock(backup_mutex);
+        sdsl::int_vector_reference<sdsl::int_vector<>> ref = vector[i];
+        ref = std::min((uint64_t)ref, max_val - val) + val;
+    } else if ((bit_pos & 0x3F) + width <= 64) {
+        // element fits in an aligned word
+        uint64_t *word = &vector.data()[bit_pos >> 6];
+        const uint8_t shift = bit_pos & 0x3F;
+        uint64_t desired;
+        uint64_t exp = *word;
+        mask <<= shift;
+        const uint64_t inv_mask = ~mask;
+        max_val = (max_val - val) << shift;
+        val <<= shift;
+        do {
+            desired = (std::min(exp & mask, max_val) + val) | (inv_mask & exp);
+        } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+#if defined(MODE_TI) && defined(__CX16__)
+    } else if ((bit_pos & 0x7F) + width <= 128) {
+        // element fits in an aligned double word
+        __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+        const uint8_t shift = bit_pos & 0x7F;
+        __uint128_t desired;
+        __uint128_t big_mask = __uint128_t(mask) << shift;
+        __uint128_t inv_mask = ~big_mask;
+        __uint128_t big_max_val = (__uint128_t(max_val) - val) << shift;
+        __uint128_t big_val = __uint128_t(val) << shift;
+        __uint128_t exp = *word;
+        // TODO: GCC only generates cmpxchg16b instruction with older __sync functions
+        do {
+            desired = (std::min(exp & big_mask, big_max_val) + big_val) | (inv_mask & exp);
+        } while (!__sync_bool_compare_and_swap(word, exp, desired));
+#endif
+    } else {
+        const uint8_t shift = bit_pos & 0x7;
+        max_val = (max_val - val) << shift;
+        val <<= shift;
+        mask <<= shift;
+        uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        if (shift + width <= 8) {
+            // read from a byte
+            uint8_t this_mask = mask;
+            const uint8_t inv_mask = ~this_mask;
+            uint8_t this_max_val = max_val;
+            uint8_t this_val = val;
+            uint8_t desired;
+            uint8_t exp = *word;
+            do {
+                desired = (std::min((uint8_t)(exp & this_mask), this_max_val) + this_val) | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+        } else if (shift + width <= 16) {
+            // unaligned read from two bytes
+            uint16_t *this_word = (uint16_t*)word;
+            uint16_t this_mask = mask;
+            const uint16_t inv_mask = ~this_mask;
+            uint16_t this_max_val = max_val;
+            uint16_t this_val = val;
+            uint16_t desired;
+            uint16_t exp = *this_word;
+            do {
+                desired = (std::min((uint16_t)(exp & this_mask), this_max_val) + this_val) | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+        } else if (shift + width <= 32) {
+            // unaligned read from four bytes
+            uint32_t *this_word = (uint32_t*)word;
+            uint32_t this_mask = mask;
+            const uint32_t inv_mask = ~this_mask;
+            uint32_t this_max_val = max_val;
+            uint32_t this_val = val;
+            uint32_t desired;
+            uint32_t exp = *this_word;
+            do {
+                desired = (std::min(exp & this_mask, this_max_val) + this_val) | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+        } else if (shift + width <= 64) {
+            // unaligned read from eight bytes
+            uint64_t *this_word = (uint64_t*)word;
+            const uint64_t inv_mask = ~mask;
+            uint64_t desired;
+            uint64_t exp = *this_word;
+            do {
+                desired = (std::min(exp & mask, max_val) + val) | (inv_mask & exp);
+            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+        } else {
+            assert(false && "this should never be reached");
+        }
+    }
+
+    assert(false && "this should never be reached");
 }
 
 inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
