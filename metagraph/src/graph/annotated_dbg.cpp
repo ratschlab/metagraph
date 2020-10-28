@@ -90,8 +90,6 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     if (!indices.size())
         return;
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
     annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 

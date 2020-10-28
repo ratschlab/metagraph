@@ -11,6 +11,7 @@
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "common/threads/threading.hpp"
 
 
@@ -83,11 +84,20 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
     const auto &columns = get_matrix().data();
 
-    if (relation_counts_.size() != columns.size())
-        relation_counts_.resize(columns.size());
+    {
+        std::lock_guard<std::mutex> lock(count_mutex_);
+        if (relation_counts_.size() != columns.size()) {
+            relation_counts_.resize(columns.size());
+            label_mutex_vector_.resize(columns.size());
+        }
+    }
 
     for (const auto &label : labels) {
         const auto j = label_encoder_.insert_and_encode(label);
+
+        // acquire mutex lock
+        char *mu = &label_mutex_vector_[j];
+        while (!__atomic_test_and_set(mu, __ATOMIC_ACQUIRE)) {}
 
         if (!relation_counts_[j].size()) {
             relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
@@ -97,11 +107,17 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
             exit(1);
         }
 
+        // release mutex lock
+        __atomic_clear(mu, __ATOMIC_RELEASE);
+
         for (size_t i = 0; i < indices.size(); ++i) {
             if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
-                uint32_t count = std::min(counts[i], kMaxCount);
-                sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
-                ref = std::min((uint32_t)ref, kMaxCount - count) + count;
+                atomic_adds(relation_counts_[j],
+                            rank - 1,
+                            counts[i],
+                            kMaxCount,
+                            count_mutex_,
+                            __ATOMIC_RELAXED);
 
             } else {
                 logger->warn("Trying to add count {} for non-annotated object {}."
