@@ -136,7 +136,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
     if (!outstream.good()) {
-        logger.trace("Could not open {}", remove_suffix(filename, kExtension) + kExtension);
+        logger->trace("Could not open {}", remove_suffix(filename, kExtension) + kExtension);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -157,8 +157,8 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
                    std::ios::binary);
     if (!outstream.good()) {
-        logger.trace("Could not open {}",
-                     remove_suffix(filename, kExtension) + kExtension + ".counts");
+        logger->trace("Could not open {}",
+                      remove_suffix(filename, kExtension) + kExtension + ".counts");
         throw std::ofstream::failure("Bad stream");
     }
 
