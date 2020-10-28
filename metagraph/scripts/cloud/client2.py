@@ -510,7 +510,7 @@ def check_status():
                 # how much memory does it take to load all unique kmers into RAM: 8B for the kmer, 2B for the count
                 required_ram_all_mem_gb = num_kmers * (8 + 2) * 3.5 / 1e9;  # also account for dummy kmers
                 if required_ram_all_mem_gb < 5 and required_ram_all_mem_gb < not_reserved_ram_gb:
-                    required_ram_gb = max(required_ram_gb, required_ram_all_mem_gb)
+                    required_ram_gb = max(1, max(required_ram_gb, required_ram_all_mem_gb))
                     start_build(sra_id, time.time() - start_time, math.ceil(required_ram_all_mem_gb), 'vector',
                                 required_ram_gb, not_reserved_ram_gb)
                 else:
