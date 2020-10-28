@@ -123,6 +123,9 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
+        export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
+        export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+        export LIBRARY_PATH="/usr/local/lib:$LIBRARY_PATH"
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
