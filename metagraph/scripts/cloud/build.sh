@@ -34,7 +34,7 @@ mkdir -p "${tmp_dir}"
 
 if [ -z "$(ls -A ${input_dir})" ]; then
   echo_err "[$sra_id] No input files given. Good-bye."
-  exit 1
+  exit 100
 fi
 
 exit_code=0
