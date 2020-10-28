@@ -88,7 +88,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         std::lock_guard<std::mutex> lock(count_mutex_);
         if (relation_counts_.size() != columns.size()) {
             relation_counts_.resize(columns.size());
-            label_mutex_vector_.resize(columns.size());
+            relation_counts_resize_mutex_vector_.resize(columns.size());
         }
     }
 
@@ -96,7 +96,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         const auto j = label_encoder_.insert_and_encode(label);
 
         // acquire mutex lock
-        char *mu = &label_mutex_vector_[j];
+        char *mu = &relation_counts_resize_mutex_vector_[j];
         while (!__atomic_test_and_set(mu, __ATOMIC_ACQUIRE)) {}
 
         if (!relation_counts_[j].size()) {

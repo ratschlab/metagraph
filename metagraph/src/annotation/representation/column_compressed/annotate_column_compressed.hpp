@@ -121,7 +121,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     std::vector<sdsl::int_vector<>> relation_counts_;
 
     std::mutex count_mutex_;
-    std::vector<char> label_mutex_vector_;
+    std::vector<char> relation_counts_resize_mutex_vector_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
