@@ -100,7 +100,8 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         while (!__atomic_test_and_set(mu, __ATOMIC_ACQUIRE)) {}
 
         if (!relation_counts_[j].size()) {
-            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
+            relation_counts_[j] = aligned_int_vector(columns[j]->num_set_bits(),
+                                                     0, kCountBits, 16);
 
         } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
             logger->error("Binary relation matrix was changed while adding relation counts");
