@@ -77,17 +77,19 @@ function download_ncbi() {
 }
 
 function set_size() {
-  size=0
-  set +e
-  vdb-config --report-cloud-identity no  # the next command should work whether we use the cloud or not
-  size_str=$(vdb-dump --info "${sra_id}" | grep size | cut -f 2 -d:)
-  size=${size_str//,}
-  size="$(echo -e "${size}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  re='^[0-9]+$'
-  echo "Sra size is $size bytes"
-  if ! [[ $size =~ $re ]] ; then
-     echo_err "Result of vdb-info is not a number"
-     size=0
+  if [ "$source" == "ncbi" ]; then
+    size=0
+    set +e
+    vdb-config --report-cloud-identity no  # the next command should work whether we use the cloud or not
+    size_str=$(vdb-dump --info "${sra_id}" | grep size | cut -f 2 -d:)
+    size=${size_str//,}
+    size="$(echo -e "${size}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    re='^[0-9]+$'
+    echo "Sra size is $size bytes"
+    if ! [[ $size =~ $re ]] ; then
+       echo_err "Result of vdb-info is not a number"
+       size=0
+    fi
   fi
   set -e
   echo $size > "${output_dir}/size"
@@ -152,6 +154,7 @@ elif ((bytes <= 3000 * MB)); then
 else
   count=50
 fi
+echo $bytes > "${output_dir}/size"
 
 echo "Size is $bytes, setting KMC count to $count"
 
