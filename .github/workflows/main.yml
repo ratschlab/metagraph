@@ -95,11 +95,6 @@ jobs:
       matrix:
         build_type: [Debug, Release]
 
-    env:
-      CPLUS_INCLUDE_PATH: /usr/local/include
-      LD_LIBRARY_PATH: /usr/local/lib
-      LIBRARY_PATH: /usr/local/lib
-
     steps:
     - uses: actions/checkout@v1
 
@@ -126,6 +121,7 @@ jobs:
 
     - name: configure
       run: |
+        sudo xcode-select -s /Applications/Xcode_11.app/Contents/Developer
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
