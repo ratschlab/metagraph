@@ -21,8 +21,8 @@ using utils::remove_suffix;
 using mtg::common::logger;
 
 const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
-const uint8_t kCountWidth = 8;
-const uint32_t kMaxCount = sdsl::bits::lo_set[kCountWidth];
+const uint8_t kCountBits = 8;
+const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
 
 
 template <typename Label>
@@ -90,7 +90,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         const auto j = label_encoder_.insert_and_encode(label);
 
         if (!relation_counts_[j].size()) {
-            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountWidth);
+            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
 
         } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
             logger->error("Binary relation matrix was changed while adding relation counts");
@@ -135,8 +135,10 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
-    if (!outstream.good())
+    if (!outstream.good()) {
+        logger.trace("Could not open {}", remove_suffix(filename, kExtension) + kExtension);
         throw std::ofstream::failure("Bad stream");
+    }
 
     serialize_number(outstream, num_rows_);
 
@@ -154,21 +156,23 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
                    std::ios::binary);
-    if (!outstream.good())
+    if (!outstream.good()) {
+        logger.trace("Could not open {}",
+                     remove_suffix(filename, kExtension) + kExtension + ".counts");
         throw std::ofstream::failure("Bad stream");
+    }
 
     uint64_t num_counts = 0;
     uint64_t sum_counts = 0;
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountWidth).serialize(outstream);;
-
-        } else if (relation_counts_[j].size() != bitmatrix_[j]->num_set_bits()) {
-            logger->error("Binary relation matrix was changed while adding relation counts");
-            exit(1);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);;
 
         } else {
+            assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
+                && "Binary relation matrix must not be changed while adding relation counts");
+
             for (uint64_t v : relation_counts_[j]) {
                 num_counts++;
                 sum_counts += v;
@@ -179,7 +183,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountWidth).serialize(outstream);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
     }
 
     logger->info("Num relation counts: {}", num_counts);
