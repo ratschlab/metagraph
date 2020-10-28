@@ -22,6 +22,7 @@ using mtg::common::logger;
 
 const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 const uint8_t kCountWidth = 8;
+const uint32_t kMaxCount = sdsl::bits::lo_set[kCountWidth];
 
 
 template <typename Label>
@@ -73,6 +74,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
     }
 }
 
+// for each label and index 'indices[i]' add count 'counts[i]'
 template <typename Label>
 void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
                                                const VLabels &labels,
@@ -97,13 +99,13 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
         for (size_t i = 0; i < indices.size(); ++i) {
             if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
-                uint64_t count = std::min(counts[i], (uint32_t)sdsl::bits::lo_set[kCountWidth]);
+                uint32_t count = std::min(counts[i], kMaxCount);
                 sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
-                ref = std::min((uint64_t)ref, sdsl::bits::lo_set[kCountWidth] - count) + count;
+                ref = std::min((uint32_t)ref, kMaxCount - count) + count;
 
             } else {
-                logger->warn("Trying to add count {} for non-annotated object {}",
-                             counts[i], indices[i]);
+                logger->warn("Trying to add count {} for non-annotated object {}."
+                             " The count was ignored.", counts[i], indices[i]);
             }
         }
     }

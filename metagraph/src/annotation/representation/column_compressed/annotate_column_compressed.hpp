@@ -38,6 +38,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
+    // for each label and index 'indices[i]' add count 'counts[i]'
     void add_label_counts(const std::vector<Index> &indices,
                           const VLabels &labels,
                           const std::vector<uint32_t> &counts) override;
