@@ -238,6 +238,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     thread_pool.join();
 
     if (config.count_kmers) {
+        std::atomic_thread_fence(std::memory_order_release);
         // add k-mer counts
         for (const auto &file : files) {
             add_kmer_counts(
@@ -263,6 +264,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     thread_pool.join();
