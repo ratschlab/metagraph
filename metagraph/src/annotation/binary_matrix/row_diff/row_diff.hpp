@@ -10,11 +10,13 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "common/vector_map.hpp"
 #include "common/logger.hpp"
 #include "common/vector.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+
 
 namespace mtg {
 namespace annot {
@@ -79,6 +81,8 @@ class RowDiff : public BinaryMatrix {
     std::vector<Row> get_column(Column column) const override;
 
     SetBitPositions get_row(Row row) const override;
+
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
     bool load(std::istream &f) override;
     void serialize(std::ostream &f) const override ;
@@ -146,6 +150,70 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
         merge(&result, get_diff(row));
     };
     return result;
+}
+
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids;
+    rd_ids.reserve(row_ids.size() * 2);
+    // map row index to its index in |rd_rows|
+    VectorMap<Row, size_t> node_to_rd;
+    node_to_rd.reserve(row_ids.size() * 2);
+    // row-diff paths, indexes to |rd_rows|. The last index always points to
+    // an anchor or to a row which had been reconstructed and is stored in full.
+    std::vector<std::vector<size_t>> rd_paths(row_ids.size());
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        Row row = row_ids[i];
+
+        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
+                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+
+        while (true) {
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_->boss_to_kmer_index(boss_edge));
+
+            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+            rd_paths[i].push_back(it.value());
+            // If the node had been reached before, interrupt the diff path here.
+            if (!is_new)
+                break;
+
+            rd_ids.push_back(row);
+
+            if (terminal()[row])
+                break;
+
+            graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
+            assert(boss_edge > 1 && w != 0);
+            // fwd always selects the last outgoing edge for a given node
+            boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
+        }
+    }
+
+    node_to_rd = VectorMap<Row, size_t>();
+
+    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+
+    rd_ids = std::vector<Row>();
+
+    // reconstruct annotation rows from row-diff
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        SetBitPositions &result = rows[i];
+        // propagate back to reconstruct full annotations for predecessors
+        for (auto it = rd_paths[i].rbegin(); it != rd_paths[i].rend(); ++it) {
+            merge(&result, rd_rows[*it]);
+            rd_rows[*it] = result;
+        }
+    }
+
+    return rows;
 }
 
 template <class BaseMatrix>

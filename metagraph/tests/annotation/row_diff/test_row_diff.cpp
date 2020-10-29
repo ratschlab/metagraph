@@ -65,6 +65,54 @@ TEST(RowDiff, Serialize) {
     }
 }
 
+TEST(RowDiff, GetRows) {
+    graph::DBGSuccinct graph(4);
+    graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
+    graph.add_sequence("ACTCTAG");
+
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    anchor_bv_type terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0  }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat), fterm_temp.name());
+
+    auto rows = annot.get_rows({ 3, 3, 3, 3, 5, 5, 6, 7, 8, 9, 10, 11 });
+    EXPECT_EQ("CTAG", graph.get_node_sequence(4));
+    ASSERT_THAT(rows[3], ElementsAre(0, 1));
+
+    EXPECT_EQ("AGCT", graph.get_node_sequence(6));
+    ASSERT_THAT(rows[5], ElementsAre(1));
+
+    EXPECT_EQ("CTCT", graph.get_node_sequence(7));
+    ASSERT_THAT(rows[6], ElementsAre(0));
+
+    EXPECT_EQ("TAGC", graph.get_node_sequence(8));
+    ASSERT_THAT(rows[7], ElementsAre(1));
+
+    EXPECT_EQ("ACTA", graph.get_node_sequence(9));
+    ASSERT_THAT(rows[8], ElementsAre(1));
+
+    EXPECT_EQ("ACTC", graph.get_node_sequence(10));
+    ASSERT_THAT(rows[9], ElementsAre(0));
+
+    EXPECT_EQ("GCTA", graph.get_node_sequence(11));
+    ASSERT_THAT(rows[10], ElementsAre(1));
+
+    EXPECT_EQ("TCTA", graph.get_node_sequence(12));
+    ASSERT_THAT(rows[11], ElementsAre(0));
+}
 
 /**
  * Tests annotations on the graph in
