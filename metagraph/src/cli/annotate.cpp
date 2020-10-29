@@ -264,10 +264,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 }
             );
         }
-        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     thread_pool.join();
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     anno_graph->get_annotation().serialize(annotator_filename);
 }
