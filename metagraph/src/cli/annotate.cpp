@@ -265,6 +265,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         }
     }
 
+    thread_pool.join();
+
     anno_graph->get_annotation().serialize(annotator_filename);
 }
 
