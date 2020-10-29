@@ -179,6 +179,9 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
         matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
 
+    } else if constexpr(std::is_same_v<MatrixType, RowSparse>) {
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+
     } else {
         static_assert(utils::dependent_false<StaticAnnotation>::value);
     }
@@ -187,6 +190,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 }
 
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
+template std::unique_ptr<RowSparseAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RainbowfishAnnotator> convert(const std::string &filename);
 template std::unique_ptr<BinRelWTAnnotator> convert(const std::string &filename);
 template std::unique_ptr<BinRelWT_sdslAnnotator> convert(const std::string &filename);
@@ -207,6 +211,24 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
                                               annotator.get_label_encoder());
+}
+
+template <>
+std::unique_ptr<RowSparseAnnotator>
+convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<RowSparse>(
+        [&](auto callback) {
+            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                    .call_rows(callback);
+        },
+        num_columns, num_rows, num_set_bits
+    );
+    return std::make_unique<RowSparseAnnotator>(std::move(matrix),
+                                                annotator.get_label_encoder());
 }
 
 template <>
@@ -267,7 +289,6 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
     // we are going to take the columns from the annotator and thus
     // have to replace them with empty columns to keep the structure valid
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
-    std::string anchors_filename = annotator.get_matrix().anchors_filename();
     std::vector<std::unique_ptr<bit_vector>> columns
             = annotator.release_matrix()->diffs().release_columns();
 
@@ -279,7 +300,7 @@ convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
     );
 
     return std::make_unique<RowDiffBRWTAnnotator>(
-            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix), anchors_filename),
+            std::make_unique<RowDiff<BRWT>>(graph, std::move(*matrix)),
             annotator.get_label_encoder());
 }
 
@@ -385,6 +406,24 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    RowSparse matrix(
+        [&](auto callback) {
+            utils::RowsFromColumnsTransformer(annotator.get_matrix().diffs().data())
+                    .call_rows(callback);
+        },
+        num_columns, num_rows, num_set_bits
+    );
+    auto rd = std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(matrix));
+    return std::make_unique<RowDiffRowSparseAnnotator>(std::move(rd),
+                                                       annotator.get_label_encoder());
+}
+
+
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
         const std::string &linkage_matrix_file,
@@ -481,8 +520,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
                               tmp_path, get_columns, std::move(column_names));
 
     return std::make_unique<RowDiffBRWTAnnotator>(
-            std::make_unique<RowDiff<BRWT>>(
-                    nullptr, std::move(*annotator->release_matrix()), ""),
+            std::make_unique<RowDiff<BRWT>>(nullptr, std::move(*annotator->release_matrix())),
             annotator->get_label_encoder());
 }
 
@@ -1141,7 +1179,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         convert_batch_to_row_diff(
-                graph_fname, graph_fname + (optimize ? ".terminal" : ".terminal.unopt"),
+                graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
                 file_batch, dest_dir, row_reduction_fname);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
@@ -1168,6 +1206,35 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
         input_anno.get_matrix().diffs().serialize(outstream);
         outstream.close();
     }
+}
+
+void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
+                      const std::string &graph_file,
+                      const std::string &out_file) {
+
+    if (dynamic_cast<MultiBRWTAnnotator *>(&anno)) {
+        auto &brwt = const_cast<BRWT &>(dynamic_cast<const BRWT &>(anno.get_matrix()));
+        auto rd_brwt = std::make_unique<RowDiff<BRWT>>(nullptr, std::move(brwt));
+        StaticBinRelAnnotator<RowDiff<BRWT>> row_diff_anno(std::move(rd_brwt),
+                                                           anno.get_label_encoder());
+        if (graph_file.empty()) {
+            logger->error(
+                    "Please specify the anchor file location via `-i <anchor_location>'");
+            std::exit(1);
+        }
+        std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
+        if (!std::filesystem::exists(anchors_file)) {
+            logger->error("Couldn't find anchor file at {}", anchors_file);
+            std::exit(1);
+        }
+        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchors_file);
+        row_diff_anno.serialize(out_file);
+        return;
+    }
+    std::ofstream f(out_file, std::ios::binary);
+    anno.get_label_encoder().serialize(f);
+    anno.get_matrix().serialize(f);
+    f.close();
 }
 
 } // namespace annot

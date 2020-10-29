@@ -23,7 +23,9 @@ graph_file_extension = {'succinct': '.dbg',
 anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
+                       'row_sparse': '.row_sparse.annodbg',
                        'row_diff_brwt': '.row_diff_brwt.annodbg',
+                       'row_diff_sparse': '.row_diff_sparse.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'rbfish': '.rbfish.annodbg',
@@ -38,13 +40,14 @@ def product(graph_types, anno_types):
     result  = []
     for graph in graph_types:
         for anno in anno_types:
-            if graph == 'succinct' or (anno != 'row_diff' and anno != 'row_diff_brwt'):
+            if graph == 'succinct' or (
+                    anno != 'row_diff' and anno != 'row_diff_brwt' and anno != 'row_diff_sparse'):
                 result.append((graph, anno))
     return result
 
 def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, extra_params=''):
     target_anno = anno_repr
-    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'row_diff_brwt'}:
+    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'row_diff_brwt', 'row_diff_sparse', 'row_sparse'}:
         target_anno = anno_repr
         anno_repr = 'column'
     elif anno_repr in {'flat', 'rbfish'}:
@@ -68,7 +71,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         return
 
     final_anno = target_anno
-    if final_anno == 'row_diff_brwt':
+    if final_anno in ['row_diff_brwt', 'row_diff_sparse']:
         target_anno = 'row_diff'
 
     annotate_command = '{exe} transform_anno -p {num_threads} \
@@ -91,14 +94,14 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
         res = subprocess.run([annotate_command], shell=True)
         assert(res.returncode == 0)
 
-    os.remove(output_filename + anno_file_extension[anno_repr])
+        os.remove(output_filename + anno_file_extension[anno_repr])
 
-    if final_anno == 'row_diff_brwt':
-        annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
-                           f'-p {NUM_THREADS} {output_filename}.row_diff.annodbg'
-        res = subprocess.run([annotate_command], shell=True)
-        assert (res.returncode == 0)
-        os.remove(output_filename + anno_file_extension['row_diff'])
+        if final_anno in ['row_diff_brwt', 'row_diff_sparse']:
+            annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
+                               f'--anchors-file {graph_filename}.anchors -p {NUM_THREADS} {output_filename}.row_diff.annodbg'
+            res = subprocess.run([annotate_command], shell=True)
+            assert (res.returncode == 0)
+            os.remove(output_filename + anno_file_extension['row_diff'])
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),

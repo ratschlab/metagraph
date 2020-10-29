@@ -20,27 +20,23 @@ namespace annot {
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
 
-typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
+using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 
 
 void build_successor(const std::string &graph_fname,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
-    bool must_build = false;
-    for (const auto &suffix : { ".succ", ".pred", ".pred_boundary", ".terminal.unopt" }) {
-        if (!std::filesystem::exists(outfbase + suffix)) {
-            logger->trace(
-                    "Building and writing successor, predecessor and terminal files to {}.*",
-                    outfbase);
-            must_build = true;
-            break;
-        }
-    }
-    if (!must_build) {
-        logger->trace("Using existing pred/succ/terminal files in {}.*", outfbase);
+    if (std::filesystem::exists(outfbase + ".succ")
+        && std::filesystem::exists(outfbase + ".pred")
+        && std::filesystem::exists(outfbase + ".pred_boundary")
+        && std::filesystem::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
+        logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
         return;
+
     }
+    logger->trace("Building and writing successor, predecessor and anchor files to {}.*",
+                  outfbase);
 
     graph::DBGSuccinct graph(2);
     logger->trace("Loading graph...");
@@ -68,12 +64,14 @@ void build_successor(const std::string &graph_fname,
             term[anno_index] = 1;
         }
     }
+    logger->trace("Number of anchors before anchor optimization: {}",
+                  sdsl::util::cnt_one_bits(term));
 
-    std::ofstream fterm(outfbase + ".terminal.unopt", ios::binary);
+    std::ofstream fterm(outfbase + kRowDiffAnchorExt + ".unopt", ios::binary);
     anchor_bv_type(term).serialize(fterm);
     term = sdsl::bit_vector();
     fterm.close();
-    logger->trace("Anchor nodes written to {}.terminal.unopt", outfbase);
+    logger->trace("Anchor nodes written to {}.unopt", outfbase + kRowDiffAnchorExt);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -418,7 +416,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix), anchors_fname, false);
+                nullptr, std::move(matrix));
         row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
                                                              label_encoders[l_idx]);
         auto fname = std::filesystem::path(source_files[l_idx])
@@ -471,8 +469,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
                                   const std::filesystem::path &dest_dir,
                                   const std::string &row_reduction_extension) {
-    if (std::filesystem::exists(graph_fname + ".terminal")) {
-        logger->info("Found optimized anchors {}", graph_fname + ".terminal");
+    if (std::filesystem::exists(graph_fname + kRowDiffAnchorExt)) {
+        logger->info("Found optimized anchors {}", graph_fname + kRowDiffAnchorExt);
         return;
     }
 
@@ -528,7 +526,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     assert(filenames.size() == 1u && "All must be merged into one vector");
 
     anchor_bv_type old_anchors;
-    auto original_anchors_fname = graph_fname + ".terminal.unopt";
+    auto original_anchors_fname = graph_fname + kRowDiffAnchorExt + ".unopt";
     {
         std::ifstream f(original_anchors_fname, ios::binary);
         old_anchors.load(f);
@@ -554,9 +552,9 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     logger->trace("Number of anchors increased after optimization from {} to {}",
                   num_anchors_old, ranchors.num_set_bits());
 
-    std::ofstream f(graph_fname + ".terminal", ios::binary);
+    std::ofstream f(graph_fname + kRowDiffAnchorExt, ios::binary);
     ranchors.serialize(f);
-    logger->trace("Serialized optimized anchors to {}", graph_fname + ".terminal");
+    logger->trace("Serialized optimized anchors to {}", graph_fname + kRowDiffAnchorExt);
 }
 
 } // namespace annot
