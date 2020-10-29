@@ -22,6 +22,8 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
+const size_t RD_PATH_RESERVE_SIZE = 2;
+
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
  * successive nodes, rather than the full annotation.
@@ -157,13 +159,16 @@ std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
-    rd_ids.reserve(row_ids.size() * 2);
+    rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+
     // map row index to its index in |rd_rows|
     VectorMap<Row, size_t> node_to_rd;
-    node_to_rd.reserve(row_ids.size() * 2);
-    // row-diff paths, indexes to |rd_rows|. The last index always points to
-    // an anchor or to a row which had been reconstructed and is stored in full.
-    std::vector<std::vector<size_t>> rd_paths(row_ids.size());
+    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+
+    // Truncated row-diff paths, indexes to |rd_rows|.
+    // The last index in each path points to an anchor or to a row which had
+    // been reached before, and thus, will be reconstructed before this one.
+    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
 
@@ -178,7 +183,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
                     graph_->boss_to_kmer_index(boss_edge));
 
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
-            rd_paths[i].push_back(it.value());
+            rd_paths_trunc[i].push_back(it.value());
             // If the node had been reached before, interrupt the diff path here.
             if (!is_new)
                 break;
@@ -207,7 +212,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     for (size_t i = 0; i < row_ids.size(); ++i) {
         SetBitPositions &result = rows[i];
         // propagate back to reconstruct full annotations for predecessors
-        for (auto it = rd_paths[i].rbegin(); it != rd_paths[i].rend(); ++it) {
+        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
             merge(&result, rd_rows[*it]);
             rd_rows[*it] = result;
         }
