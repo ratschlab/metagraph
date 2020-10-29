@@ -76,6 +76,15 @@ class SortedSetDiskBase {
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/");
 
+    /**
+     * Insert already sorted data into the set. This data is written directly to a
+     * designated chunk without being sorted and de-duped.
+     * Use this method along with #insert when some of the data that is inserted into the
+     * set is known to be sorted.
+     * Note: #data must be globally sorted between multiple calls to #insert_sorted.
+     */
+    void insert_sorted(const std::vector<T> &data);
+
   protected:
     /** Advances #it by step or points to #end, whichever comes first. */
     template <typename Iterator>

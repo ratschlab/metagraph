@@ -147,6 +147,19 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 }
 
 template <typename T>
+void SortedSetDiskBase<T>::insert_sorted(const std::vector<T> &data) {
+    std::string file_name = chunk_file_prefix_ + "sorted";
+    constexpr bool append = true;
+
+    EliasFanoEncoder<T> encoder(data.size(), utils::get_first(data.front()),
+                                utils::get_first(data.back()), file_name, append);
+    for (const auto &v : data) {
+        encoder.add(v);
+    }
+    total_chunk_size_bytes_ += encoder.finish();
+}
+
+template <typename T>
 void SortedSetDiskBase<T>::try_reserve(size_t size, size_t min_size) {
     size = std::max(size, min_size);
     size_t original_size = size;
@@ -223,6 +236,11 @@ std::vector<std::string> SortedSetDiskBase<T>::get_file_names() {
     for (size_t i = MERGE_L1_COUNT * l1_chunk_count_; i < chunk_count_; ++i) {
         file_names.push_back(chunk_file_prefix_ + std::to_string(i));
     }
+    std::string sorted_file_name = chunk_file_prefix_ + "sorted";
+    if (std::filesystem::exists(sorted_file_name)) {
+        file_names.push_back(sorted_file_name);
+    }
+
     return file_names;
 }
 
