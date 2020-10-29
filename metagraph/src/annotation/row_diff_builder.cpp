@@ -319,6 +319,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         targets_size[i].assign(sources[i].num_labels(), 0U);
         set_rows_fwd[i].resize(sources[i].num_labels());
         set_rows_bwd[i].resize(sources[i].num_labels());
+
         for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             const std::filesystem::path tmp_dir
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);

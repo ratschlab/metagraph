@@ -178,9 +178,9 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       bool append)
     : declared_size_(size), offset_(min_value) {
     auto mode = append ? std::ios::binary | std::ios::app : std::ios::binary;
-    sink_internal_ = std::ofstream(out_filename, mode);
+    sink_internal_ = std::ofstream(out_filename, mode | std::ios::binary);
     sink_ = &sink_internal_;
-    sink_internal_upper_ = std::ofstream(out_filename + ".up", mode);
+    sink_internal_upper_ = std::ofstream(out_filename + ".up", mode | std::ios::binary);
     sink_upper_ = &sink_internal_upper_;
     if (!sink_->good() || !sink_upper_->good()) {
         logger->error("Unable to write to {}", out_filename);
