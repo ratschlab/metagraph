@@ -83,8 +83,25 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
     assert(indices.size() == counts.size());
 
     const auto &columns = get_matrix().data();
+    {
+        std::lock_guard<std::mutex> lock(count_mutex_);
+        if (relation_counts_.size() != columns.size()) {
+            relation_counts_.resize(columns.size());
+            relation_counts_resize_mutex_vector_.resize(columns.size());
+        }
+    }
+
     for (const auto &label : labels) {
         const auto j = label_encoder_.insert_and_encode(label);
+
+        // lock mutex for this label
+        char *mu = &relation_counts_resize_mutex_vector_[j];
+        while (!__atomic_test_and_set(mu, __ATOMIC_SEQ_CST)) {}
+        if (!relation_counts_[j].size()) {
+            relation_counts_[j] = aligned_int_vector(columns[j]->num_set_bits(), 0, kCountBits, 16);
+        }
+        // unlock mutex
+        __atomic_clear(mu, __ATOMIC_SEQ_CST);
 
         for (size_t i = 0; i < indices.size(); ++i) {
             if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
@@ -222,16 +239,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         },
         filenames.size() > get_num_threads() ? get_num_threads() : 0
     );
-
-    const auto &columns = get_matrix().data();
-    if (relation_counts_.size() != columns.size()) {
-        for (size_t j = 0; j < columns.size(); ++j) {
-            relation_counts_.emplace_back(
-                aligned_int_vector(columns[j]->num_set_bits(), 0, kCountBits, 16)
-            );
-        }
-    }
-
 
     if (merge_successful && no_errors) {
         logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
