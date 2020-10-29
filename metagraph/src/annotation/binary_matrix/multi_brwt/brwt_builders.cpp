@@ -191,6 +191,8 @@ BRWT BRWTBottomUpBuilder::build(std::vector<std::unique_ptr<bit_vector>>&& colum
     return merge(std::move(nodes), partitioner, num_nodes_parallel, num_threads);
 }
 
+// linkage[i] is a vector of ids of clusters merged into cluster 'i'
+// linkage[c] = {} for each c < num_columns
 BRWT BRWTBottomUpBuilder::build(
         const std::function<void(const CallColumn &)> &get_columns,
         const std::vector<std::vector<uint64_t>> &linkage,
@@ -303,8 +305,10 @@ BRWT BRWTBottomUpBuilder::build(
         // replace the child nodes with dummy empty matrices
         std::swap(child_nodes, node.child_nodes_);
         // serialize the node without its child nodes
-        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
-        node.serialize(out);
+        {
+            std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
+            node.serialize(out);
+        }
 
         // compute column assignments for the parent
         for (size_t j : linkage[i]) {

@@ -346,6 +346,8 @@ Config::Config(int argc, char *argv[]) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
+        } else if (!strcmp(argv[i], "--anchors-file")) {
+            anchors = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -639,6 +641,10 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffRowSparse:
+            return "row_diff_sparse";
+        case RowSparse:
+            return "row_sparse";
         default:
             assert(false);
             return "Never happens";
@@ -666,6 +672,10 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiff;
     } else if (string == "row_diff_brwt") {
         return AnnotationType::RowDiffBRWT;
+    } else if (string == "row_diff_sparse") {
+        return AnnotationType::RowDiffRowSparse;
+    } else if (string == "row_sparse") {
+        return AnnotationType::RowSparse;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -969,6 +979,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
+            fprintf(stderr, "\t   --anchors [STR]\t\tlocation of the anchor file (for row_diff) []\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
