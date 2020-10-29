@@ -175,7 +175,7 @@ using CallOnes = std::function<void(const bit_vector &source_col,
 
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
- * BLOC_SIZE rows at a time and invokes #call_ones for each set bit.
+ * BLOCK_SIZE rows at a time and invokes #call_ones for each set bit.
  * @param log_header label to be displayed in the progress bar
  * @param num_rows number of rows in the annotation
  * @param pred_succ_fprefix prefix for the pred/succ files containg the predecessors and
