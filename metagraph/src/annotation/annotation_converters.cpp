@@ -1237,6 +1237,5 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
     f.close();
 }
 
-
 } // namespace annot
 } // namespace mtg

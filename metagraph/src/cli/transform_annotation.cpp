@@ -528,6 +528,7 @@ int transform_annotation(Config *config) {
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
                         .load_anchor(config->anchors);
                 brwt_annotator->serialize(config->outfbase);
+
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
                 auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
@@ -543,7 +544,7 @@ int transform_annotation(Config *config) {
             }
         }
     } else if (config->anno_type == Config::RowDiff) {
-        for(const auto &file : files) {
+        for (const auto &file : files) {
             std::unique_ptr<MultiLabelEncoded<std::string>> annotator
                     = initialize_annotation(file, *config);
             if (!annotator->load(file)) {
@@ -566,7 +567,6 @@ int transform_annotation(Config *config) {
                 "annotator", Config::annotype_to_string(input_anno_type));
         exit(1);
     }
-
 
     logger->trace("Done");
 

@@ -49,7 +49,6 @@ const std::string kRowDiffAnchorExt = ".anchors";
 template <class BaseMatrix>
 class RowDiff : public BinaryMatrix {
   public:
-    static const std::string kAnchorExt;
     using anchor_bv_type = bit_vector_small;
 
     RowDiff() {}
@@ -85,7 +84,7 @@ class RowDiff : public BinaryMatrix {
     bool load(const std::string &filename);
 
     void load_anchor(const std::string& filename);
-    const anchor_bv_type &anchor() const { return anchor_; }
+    const anchor_bv_type& anchor() const { return anchor_; }
 
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }

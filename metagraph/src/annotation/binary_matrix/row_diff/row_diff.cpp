@@ -22,7 +22,6 @@ template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(const std::string &filename) {
     std::ifstream f(filename, ios::binary);
     bool result = load(f);
-    f.close();
     return result;
 }
 

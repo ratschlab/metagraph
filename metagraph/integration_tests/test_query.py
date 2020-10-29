@@ -96,7 +96,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
 
         os.remove(output_filename + anno_file_extension[anno_repr])
 
-        if final_anno == 'row_diff_brwt' or final_anno == 'row_diff_sparse':
+        if final_anno in ['row_diff_brwt', 'row_diff_sparse']:
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} -o {output_filename} ' \
                                f'--anchors-file {graph_filename}.anchors -p {NUM_THREADS} {output_filename}.row_diff.annodbg'
             res = subprocess.run([annotate_command], shell=True)
