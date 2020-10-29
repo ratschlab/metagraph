@@ -61,6 +61,13 @@ template <>
 bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
         const std::vector<std::string> &filenames);
 
+using ColumnCallback = std::function<void(uint64_t offset,
+                                          const std::string &,
+                                          std::unique_ptr<bit_vector>&&)>;
+bool merge_load_row_diff(const std::vector<std::string> &filenames,
+                         const ColumnCallback &callback,
+                         size_t num_threads);
+
 } // namespace annot
 } // namespace mtg
 

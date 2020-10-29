@@ -40,6 +40,12 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
+    } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
+        return Config::AnnotationType::RowSparse;
+
+    } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
+        return Config::AnnotationType::RowDiffRowSparse;
+
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
@@ -74,12 +80,20 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RowDiffAnnotator());
             break;
         }
+        case Config::RowSparse: {
+            annotation.reset(new annot::RowSparseAnnotator());
+            break;
+        }
         case Config::BRWT: {
             annotation.reset(new annot::MultiBRWTAnnotator());
             break;
         }
         case Config::RowDiffBRWT: {
             annotation.reset(new annot::RowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::RowDiffRowSparse: {
+            annotation.reset(new annot::RowDiffRowSparseAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {
