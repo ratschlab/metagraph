@@ -19,8 +19,6 @@ namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
-/** Marker type to indicate a value represent a node index in a BOSS graph */
-using node_index = graph::boss::BOSS::node_index;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 
