@@ -32,7 +32,6 @@ void build_successor(const std::string &graph_fname,
     if (std::filesystem::exists(outfbase + ".succ")
         && std::filesystem::exists(outfbase + ".pred")
         && std::filesystem::exists(outfbase + ".pred_boundary")
-        && std::filesystem::exists(outfbase + ".succ")
         && std::filesystem::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
         logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
         return;
@@ -74,7 +73,7 @@ void build_successor(const std::string &graph_fname,
     anchor_bv_type(term).serialize(fterm);
     term = sdsl::bit_vector();
     fterm.close();
-    logger->trace("Anchor nodes written to {}.anchors.unopt", outfbase);
+    logger->trace("Anchor nodes written to {}.unopt", outfbase + kRowDiffAnchorExt);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;

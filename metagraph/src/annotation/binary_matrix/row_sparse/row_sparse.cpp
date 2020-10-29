@@ -32,13 +32,6 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     elements_ = sdsl::enc_vector<>(elements);
 }
 
-RowSparse::RowSparse(RowSparse &&other) {
-    num_rows_ = other.num_rows_;
-    num_columns_ = other.num_columns_;
-    elements_ = std::move(other.elements_);
-    boundary_ = std::move(other.boundary_);
-}
-
 bool RowSparse::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);

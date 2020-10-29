@@ -217,7 +217,7 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
     bool no_errors = true;
     bool merge_successful = merge_load_row_diff(
             filenames,
-            [&](uint64_t, const std::string & label, std::unique_ptr<bit_vector> &&column) {
+            [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
                 #pragma omp critical
                 {
                     uint64_t num_set_bits = column->num_set_bits();
@@ -227,7 +227,7 @@ bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
 
                     if (columns.empty() || columns.back()->size() == column->size()) {
                         size_t col = label_encoder_.insert_and_encode(label);
-                        if(col != columns.size()) {
+                        if (col != columns.size()) {
                             common::logger->error("Duplicate columns {}", label);
                             no_errors = false;
                         }
