@@ -148,6 +148,9 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
 template <typename T>
 void SortedSetDiskBase<T>::insert_sorted(const std::vector<T> &data) {
+    if (data.empty())
+        return;
+
     std::string file_name = chunk_file_prefix_ + "sorted";
     constexpr bool append = true;
 
