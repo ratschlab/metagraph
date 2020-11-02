@@ -17,8 +17,8 @@ void build_successor(const std::string &graph_filename,
                      uint32_t max_length,
                      uint32_t num_threads);
 
-void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
-                               const std::string &anchors_fname,
+void convert_batch_to_row_diff(const std::string &s,
+                               const std::string &c,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
                                const std::string &row_reduction_fname);
