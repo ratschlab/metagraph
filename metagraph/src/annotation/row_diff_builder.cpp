@@ -378,29 +378,29 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 for (uint32_t nbits : row_nbits_batch) {
                     source_row_nbits.push_back(nbits);
                 }
-
-                #pragma omp parallel for num_threads(num_threads)
-                for (size_t s = 0; s < sources.size(); ++s) {
-                    for (size_t j = 0; j < set_rows_fwd[s].size(); ++j) {
-                        auto &fwd = set_rows_fwd[s][j];
-                        std::ofstream f(tmp_dir(s, j)/"chunk_sorted",
-                               std::ios::binary | std::ios::app);
-                        f.write(reinterpret_cast<char *>(fwd.data()),
-                                fwd.size() * sizeof(fwd[0]));
-                        f.close();
-
-                        auto &bwd = set_rows_bwd[s][j];
-                        if (!bwd.empty()) {
-                            ips4o::parallel::sort(bwd.begin(), bwd.end(), std::less<uint64_t>(), num_threads);
-                            f.open(tmp_file(s, j, chunks[s][j]), std::ios::binary);
-                            f.write(reinterpret_cast<char *>(bwd.data()),
-                                    bwd.size() * sizeof(bwd[0]));
-                            chunks[s][j]++;
-                        }
-                        col_size[s][j] += fwd.size() + bwd.size();
-                    }
-                }
             });
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t s = 0; s < sources.size(); ++s) {
+        for (size_t j = 0; j < set_rows_fwd[s].size(); ++j) {
+            auto &fwd = set_rows_fwd[s][j];
+            std::ofstream f(tmp_dir(s, j)/"chunk_sorted",
+                            std::ios::binary | std::ios::app);
+            f.write(reinterpret_cast<char *>(fwd.data()),
+                    fwd.size() * sizeof(fwd[0]));
+            f.close();
+
+            auto &bwd = set_rows_bwd[s][j];
+            if (!bwd.empty()) {
+                ips4o::parallel::sort(bwd.begin(), bwd.end(), std::less<uint64_t>(), num_threads);
+                f.open(tmp_file(s, j, chunks[s][j]), std::ios::binary);
+                f.write(reinterpret_cast<char *>(bwd.data()),
+                        bwd.size() * sizeof(bwd[0]));
+                chunks[s][j]++;
+            }
+            col_size[s][j] += fwd.size() + bwd.size();
+        }
+    }
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
