@@ -267,10 +267,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     uint32_t num_threads = get_num_threads();
 
-    anchor_bv_type terminal;
+    anchor_bv_type anchor;
     {
         std::ifstream f(anchors_fname, std::ios::binary);
-        terminal.load(f);
+        anchor.load(f);
     }
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
@@ -279,11 +279,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (size_t i = 0; i < source_files.size(); ++i) {
         sources[i].load(source_files[i]);
 
-        if (sources[i].num_labels() && sources[i].num_objects() != terminal.size()) {
+        if (sources[i].num_labels() && sources[i].num_objects() != anchor.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
                           " Vector size: {}, number of rows: {}",
-                          anchors_fname, source_files[i],
-                          terminal.size(), sources[i].num_objects());
+                          anchors_fname, source_files[i], anchor.size(), sources[i].num_objects());
             std::exit(1);
         }
     }
@@ -331,7 +330,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
                                              1024 * 1024, ROW_REDUCTION_WIDTH);
     traverse_anno_chunked(
-            "Compute diffs", terminal.size(), pred_succ_fprefix, sources,
+            "Compute diffs", anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
             },
@@ -342,9 +341,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 __atomic_add_fetch(&row_nbits_batch[chunk_idx], 1, __ATOMIC_RELAXED);
 
-                // check successor node and add current node if it's either terminal
+                // check successor node and add current node if it's either an anchor
                 // or if its successor is 0
-                if (terminal[row_idx] || !source_col[succ]) {
+                if (anchor[row_idx] || !source_col[succ]) {
                     auto &v = set_rows_fwd[source_idx][j];
                     v.push_back(row_idx);
                     if (v.size() == v.capacity()) {
@@ -356,9 +355,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 }
 
-                // check non-terminal predecessor nodes and add them if they are zero
+                // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                    if (!source_col[*pred_p] && !terminal[*pred_p]) {
+                    if (!source_col[*pred_p] && !anchor[*pred_p]) {
                         auto &v = set_rows_bwd[source_idx][j];
                         v.push_back(*pred_p);
                         if (v.size() == v.capacity()) {
@@ -447,7 +446,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 filenames.push_back(tmp_dir(l_idx, j)/"chunk_sorted");
                 common::merge_files<uint64_t>(filenames, [&](const uint64_t &v) { call(v); });
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, terminal.size(),
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
                                                          col_size[l_idx][j]);
         }
 
