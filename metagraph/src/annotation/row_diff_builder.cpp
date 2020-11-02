@@ -318,7 +318,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
             std::filesystem::create_directories(tmp_dir);
             targets[i].emplace_back(new SSD(1, num_elements, tmp_dir,
-                                            std::numeric_limits<uint64_t>::max()));
+                                            std::numeric_limits<uint64_t>::max(), 0));
         }
     }
 
