@@ -48,7 +48,7 @@ class MergeHeap {
     inline bool empty() const { return els.empty(); }
 
   private:
-    // elements stored in decreasing order of the first tuple member
+    // elements stored as a min-heap
     std::vector<value_type> els;
     Compare compare_ = Compare();
     std::function<int(const value_type &a, const value_type &b)> cmp_ =
@@ -71,7 +71,7 @@ class FileMerger {
     FileMerger(const std::vector<std::string> &source_names) {
         sources_.reserve(source_names.size());
         for (uint32_t i = 0; i < source_names.size(); ++i) {
-            sources_.emplace_back(source_names[i], std::ios::binary);
+            sources_.push_back(std::ifstream(source_names[i], std::ios::binary));
             T v;
             if (sources_.back().read(reinterpret_cast<char *>(&v), sizeof(T))) {
                 heap_.emplace(v, i);
