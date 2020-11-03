@@ -349,7 +349,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     if (v.size() == v.capacity()) {
                         std::ofstream f(tmp_dir(source_idx, j)/"chunk_sorted",
                                         std::ios::binary | std::ios::app);
-                        f.write(reinterpret_cast<char *>(v.data()), v.size() * sizeof(v[0]));
+                        f.write(reinterpret_cast<char *>(v.data()), v.size() * sizeof(uint64_t));
                         col_size[source_idx][j] += v.size();
                         v.resize(0);
                     }
@@ -364,7 +364,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                             ips4o::parallel::sort(v.begin(), v.end(), std::less<uint64_t>(), num_threads);
                             std::ofstream f(tmp_file(source_idx, j, chunks[source_idx][j]),
                                             std::ios::binary);
-                            f.write(reinterpret_cast<char *>(v.data()), v.size() * sizeof(v[0]));
+                            f.write(reinterpret_cast<char *>(v.data()), v.size() * sizeof(uint64_t));
                             col_size[source_idx][j] += v.size();
                             chunks[source_idx][j]++;
                             v.resize(0);
@@ -386,7 +386,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             std::ofstream f(tmp_dir(s, j)/"chunk_sorted",
                             std::ios::binary | std::ios::app);
             f.write(reinterpret_cast<char *>(fwd.data()),
-                    fwd.size() * sizeof(fwd[0]));
+                    fwd.size() * sizeof(uint64_t));
             f.close();
 
             auto &bwd = set_rows_bwd[s][j];
@@ -394,7 +394,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 ips4o::parallel::sort(bwd.begin(), bwd.end(), std::less<uint64_t>(), num_threads);
                 f.open(tmp_file(s, j, chunks[s][j]), std::ios::binary);
                 f.write(reinterpret_cast<char *>(bwd.data()),
-                        bwd.size() * sizeof(bwd[0]));
+                        bwd.size() * sizeof(uint64_t));
                 chunks[s][j]++;
             }
             col_size[s][j] += fwd.size() + bwd.size();
