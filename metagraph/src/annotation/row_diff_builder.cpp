@@ -401,6 +401,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     }
 
+    set_rows_fwd.clear(); // free up memory
+    set_rows_bwd.clear();
+
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
         label_encoders.push_back(source.get_label_encoder());
