@@ -313,9 +313,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             continue;
 
         col_size[i].assign(sources[i].num_labels(), 0U);
+        chunks[i].assign(sources[i].num_labels(), 0);
         set_rows_fwd[i].resize(sources[i].num_labels());
         set_rows_bwd[i].resize(sources[i].num_labels());
-        chunks[i].resize(sources[i].num_labels(), 0);
 
         for (size_t c = 0; c < sources[i].num_labels(); ++c) {
             set_rows_bwd[i][c].reserve(std::min(BUF_SIZE, sources[i].num_relations()));
