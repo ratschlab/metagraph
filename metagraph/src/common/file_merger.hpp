@@ -32,15 +32,21 @@ class MergeHeap {
 
   public:
     inline void emplace(T el, uint32_t idx) {
-        els.push_back({ el, idx });
-        std::push_heap(els.begin(), els.end(), cmp_);
+        els.emplace_back(el, idx);
+        std::push_heap(els.begin(), els.end(),
+                       [&](const value_type &a, const value_type &b) {
+                           return compare_(a.first, b.first);
+                       });
     }
 
     inline const value_type& top() const { return els.front(); }
 
     inline value_type pop() {
-        value_type result = els.front();
-        std::pop_heap(els.begin(), els.end(), cmp_);
+        std::pop_heap(els.begin(), els.end(),
+                      [&](const value_type &a, const value_type &b) {
+                          return compare_(a.first, b.first);
+                      });
+        value_type result = els.back();
         els.pop_back();
         return result;
     }
@@ -51,10 +57,6 @@ class MergeHeap {
     // elements stored as a min-heap
     std::vector<value_type> els;
     Compare compare_ = Compare();
-    std::function<int(const value_type &a, const value_type &b)> cmp_ =
-            [&](const value_type &a, const value_type &b) {
-                return compare_(a.first, b.first);
-            };
 };
 
 
@@ -70,8 +72,8 @@ class FileMerger {
 
     FileMerger(const std::vector<std::string> &source_names) {
         sources_.reserve(source_names.size());
-        for (uint32_t i = 0; i < source_names.size(); ++i) {
-            sources_.push_back(std::ifstream(source_names[i], std::ios::binary));
+        for (size_t i = 0; i < source_names.size(); ++i) {
+            sources_.emplace_back(source_names[i], std::ios::binary);
             T v;
             if (sources_.back().read(reinterpret_cast<char *>(&v), sizeof(T))) {
                 heap_.emplace(v, i);
@@ -118,14 +120,16 @@ void merge_files(const std::vector<std::string> &sources,
         return;
 
     T last = decoder.pop();
+    on_new_item(last);
+
     while (!decoder.empty()) {
         T curr = decoder.pop();
         if (curr != last) {
-            on_new_item(last);
+            assert(curr > last);
+            on_new_item(curr);
             last = curr;
         }
     }
-    on_new_item(last);
 }
 
 } // namespace common
