@@ -475,8 +475,7 @@ def check_status():
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {not_reserved_ram_gb} GB')
                 size = sra_info[sra_id][1]
                 kmer_count_singletons = sra_info[sra_id][4]
-                MB = 1000000
-                threshold = 1 if size <= 300*MB else 3 if size <= 500*MB else 10 if size <= 1000 * MB else 20 if size <= 3000 * MB else 50
+                threshold = 1 if size <= 300 else 3 if size <= 500 else 10 if size <= 1000 else 20 if size <= 3000 else 50
 
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
                 start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, threshold, required_ram_gb,
