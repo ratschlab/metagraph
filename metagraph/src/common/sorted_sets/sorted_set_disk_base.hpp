@@ -188,7 +188,7 @@ class SortedSetDiskBase {
      * Thread pool for doing the "level 1" merging, i.e. merging #merge_count_ chunk
      * files at a time, while new files are still being added to the data structure.
      */
-    ThreadPool async_merge_l1_;;
+    ThreadPool async_merge_l1_;
 
     std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
