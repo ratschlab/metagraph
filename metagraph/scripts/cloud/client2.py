@@ -189,7 +189,7 @@ def start_build(sra_id, wait_time, buffer_size_gb, container_type, required_ram_
     return True
 
 
-def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram_gb, available_ram_gb):
+def start_clean(sra_id, wait_time, kmer_count_singletons, threshold, required_ram_gb, available_ram_gb):
     input_file = build_file(sra_id)
     output_file = os.path.join(clean_dir(sra_id), sra_id)
     num_cores = max(4, round(required_ram_gb / 3.75))
@@ -199,7 +199,7 @@ def start_clean(sra_id, wait_time, kmer_count_singletons, fallback, required_ram
     write_log_header(log_file, 'clean', sra_id, required_ram_gb, available_ram_gb)
     clean_processes[sra_id] = (
         subprocess.Popen(
-            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(fallback), str(num_cores)],
+            ['./clean.sh', sra_id, input_file, output_file, str(kmer_count_singletons), str(threshold), str(num_cores)],
             stdout=log_file,
             stderr=log_file),
         time.time(), wait_time, required_ram_gb)
@@ -473,13 +473,13 @@ def check_status():
             if not_reserved_ram_gb > required_ram_gb:
                 logging.info(
                     f'[{sra_id}] Estimated {required_ram_gb}GB needed for cleaning, available {not_reserved_ram_gb} GB')
-                kmer_count_unique = sra_info[sra_id][2]
-                kmer_coverage = sra_info[sra_id][3]
+                size = sra_info[sra_id][1]
                 kmer_count_singletons = sra_info[sra_id][4]
-                fallback = 5 if kmer_coverage > 5 else 2 if kmer_coverage > 2 or kmer_count_unique > 1e6 else 1
+                MB = 1000000
+                threshold = 1 if size <= 300*MB else 3 if size <= 500*MB else 10 if size <= 1000 * MB else 20 if size <= 3000 * MB else 50
 
                 # multiplying singletons by 2 bc we compute canonical graph and KMC doesn't
-                start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, fallback, required_ram_gb,
+                start_clean(sra_id, time.time() - start_time, 2 * kmer_count_singletons, threshold, required_ram_gb,
                             not_reserved_ram_gb)
                 not_reserved_ram_gb -= required_ram_gb
                 del waiting_cleans[sra_id]

@@ -142,6 +142,11 @@ set_size
 kmc_input="${kmc_dir}/sra_file_list"
 find "${fastq_dir}" -type f > "$kmc_input"
 bytes=$(du -sb "${fastq_dir}" | cut -f1)
+
+if [ -z "$bytes" ]; then
+  bytes=0
+fi
+
 MB=$((1000000))
 if ((bytes <= 300 * MB)); then
   count=1
@@ -156,13 +161,13 @@ else
 fi
 echo $bytes > "${output_dir}/size"
 
-echo "Size is $bytes, setting KMC count to $count"
+echo "Size is $bytes, setting cleaning to $count"
 
 
 bin_count=$(( $(ulimit -n) - 10))
 bin_count=$(( bin_count > 2000 ? 2000 : bin_count))
 kmc_output="${output_dir}/stats"
-if ! (execute kmc -k23 -ci"${count}" -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"); then
+if ! (execute kmc -k31 -ci1 -m2 -fq -cs65535 -t4 -n$bin_count -j"$kmc_output" "@${kmc_input}" "${kmc_dir}/${sra_id}.kmc" "${tmp_dir}"); then
   echo_err "[$sra_id] kmc command failed. Exiting with code 6"
   exit_with 6
 fi

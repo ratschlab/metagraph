@@ -39,7 +39,7 @@ fi
 
 exit_code=0
 set +e
-if execute metagraph build -v -p "$cores" -k 23 --canonical --state small --count-kmers -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --disk-swap ${tmp_dir} --disk-cap-gb 400 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
+if execute metagraph build -v -p "$cores" -k 31 --canonical --state small --count-kmers -o "${output_dir}/${sra_id}" --mem-cap-gb ${mem_cap_gb} --disk-swap ${tmp_dir} --disk-cap-gb 400 --count-width 16 ${input_dir}/${sra_id}.kmc.kmc_pre; then
   exit_code=0
 else
   exit_code=1
