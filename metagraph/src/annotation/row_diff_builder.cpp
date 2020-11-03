@@ -441,6 +441,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
+                //TODO: benchmark using Elias-Fano encoders + merger
                 common::merge_files<uint64_t>(filenames, call);
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
