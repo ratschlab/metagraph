@@ -5,8 +5,8 @@
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "common/sorted_sets/sorted_set_disk.hpp"
 #include "common/threads/threading.hpp"
+#include "common/file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -266,10 +266,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     uint32_t num_threads = get_num_threads();
 
-    anchor_bv_type terminal;
+    anchor_bv_type anchor;
     {
         std::ifstream f(anchors_fname, std::ios::binary);
-        terminal.load(f);
+        anchor.load(f);
     }
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
@@ -278,47 +278,55 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (size_t i = 0; i < source_files.size(); ++i) {
         sources[i].load(source_files[i]);
 
-        if (sources[i].num_labels() && sources[i].num_objects() != terminal.size()) {
+        if (sources[i].num_labels() && sources[i].num_objects() != anchor.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
                           " Vector size: {}, number of rows: {}",
-                          anchors_fname, source_files[i],
-                          terminal.size(), sources[i].num_objects());
+                          anchors_fname, source_files[i], anchor.size(), sources[i].num_objects());
             std::exit(1);
         }
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    // accumulate the indices for the set bits in each column into a #SortedSetDisk
-    using SSD = common::SortedSetDisk<uint64_t>;
-    std::vector<std::vector<std::unique_ptr<SSD>>> targets(sources.size());
-    std::vector<std::vector<uint64_t>> targets_size(sources.size());
     const std::filesystem::path tmp_path = utils::create_temp_dir(
             std::filesystem::path(dest_dir).remove_filename(), "col");
-    std::filesystem::remove_all(tmp_path);
     logger->trace("Using temporary directory {}", tmp_path);
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
     std::vector<std::vector<std::vector<uint64_t>>> set_rows_bwd(sources.size());
     std::vector<std::vector<std::vector<uint64_t>>> set_rows_fwd(sources.size());
+    std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
+    std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
-    for (size_t i = 0; i < sources.size(); ++i) {
-        if (sources[i].num_labels() == 0)
-            continue;
+    auto tmp_dir = [&](size_t s, size_t j) {
+        return tmp_path/fmt::format("{}/col_{}_{}", s / 100, s, j);
+    };
+    auto tmp_file = [&](size_t source_idx, size_t col_idx, size_t chunk) {
+        return tmp_dir(source_idx, col_idx)/fmt::format("chunk_{}", chunk);
+    };
+    auto dump_chunk_to_disk = [&](const auto &v, size_t s, size_t j, size_t chunk) {
+        assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
+        std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
+        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(decltype(v.front())));
+        row_diff_bits[s][j] += v.size();
+    };
 
-        uint64_t num_elements
-                = std::max((uint64_t)2,  //CWQ needs a buffer size of at least 2
-                           std::min((uint64_t)1'000'000, sources[i].num_relations()));
-        targets_size[i].assign(sources[i].num_labels(), 0U);
-        set_rows_fwd[i].resize(sources[i].num_labels());
-        set_rows_bwd[i].resize(sources[i].num_labels());
+    constexpr uint64_t BUF_SIZE = 1'000'000;
 
-        for (size_t j = 0; j < sources[i].num_labels(); ++j) {
-            const std::filesystem::path tmp_dir
-                    = tmp_path/fmt::format("{}/col_{}_{}", i / 100, i, j);
-            std::filesystem::create_directories(tmp_dir);
-            targets[i].emplace_back(new SSD(1, num_elements, tmp_dir,
-                                            std::numeric_limits<uint64_t>::max()));
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t s = 0; s < sources.size(); ++s) {
+        set_rows_fwd[s].resize(sources[s].num_labels());
+        set_rows_bwd[s].resize(sources[s].num_labels());
+        row_diff_bits[s].assign(sources[s].num_labels(), 0);
+        // The first chunk will contain forward bits, all sorted.
+        // The other ones (added later) will contain chunks of sorted pred bits.
+        num_chunks[s].assign(sources[s].num_labels(), 1);
+
+        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
+            std::filesystem::create_directories(tmp_dir(s, j));
+            uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
+            set_rows_bwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
+            set_rows_fwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
         }
     }
 
@@ -328,15 +336,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
                                              1024 * 1024, ROW_REDUCTION_WIDTH);
     traverse_anno_chunked(
-            "Compute diffs", terminal.size(), pred_succ_fprefix, sources,
+            "Compute diffs", anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
                 row_nbits_batch.assign(chunk_size, 0);
-                for (uint32_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
-                    for (uint32_t col = 0; col < set_rows_bwd[source_idx].size(); ++col) {
-                        set_rows_bwd[source_idx][col].resize(0);
-                        set_rows_fwd[source_idx][col].resize(0);
-                    }
-                }
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
@@ -345,15 +347,31 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 __atomic_add_fetch(&row_nbits_batch[chunk_idx], 1, __ATOMIC_RELAXED);
 
-                // check successor node and add current node if it's either terminal
-                // or if its successor is 0
-                if (terminal[row_idx] || !source_col[succ])
-                    set_rows_fwd[source_idx][j].push_back(row_idx);
+                // add current bit if this node is an anchor
+                // or if the successor has zero bit
+                if (anchor[row_idx] || !source_col[succ]) {
+                    auto &v = set_rows_fwd[source_idx][j];
+                    v.push_back(row_idx);
 
-                // check non-terminal predecessor nodes and add them if they are zero
+                    if (v.size() == v.capacity()) {
+                        // dump chunk to disk
+                        dump_chunk_to_disk(v, source_idx, j, 0);
+                        v.resize(0);
+                    }
+                }
+
+                // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                    if (!source_col[*pred_p] && !terminal[*pred_p])
-                        set_rows_bwd[source_idx][j].push_back(*pred_p);
+                    if (!source_col[*pred_p] && !anchor[*pred_p]) {
+                        auto &v = set_rows_bwd[source_idx][j];
+                        v.push_back(*pred_p);
+
+                        if (v.size() == v.capacity()) {
+                            std::sort(v.begin(), v.end());
+                            dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
+                            v.resize(0);
+                        }
+                    }
                 }
             },
             [&]() {
@@ -361,18 +379,25 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 for (uint32_t nbits : row_nbits_batch) {
                     source_row_nbits.push_back(nbits);
                 }
-
-                #pragma omp parallel for num_threads(num_threads)
-                for (size_t s = 0; s < sources.size(); ++s) {
-                    for (size_t j = 0; j < set_rows_fwd[s].size(); ++j) {
-                        targets[s][j]->insert(set_rows_bwd[s][j].begin(),
-                                              set_rows_bwd[s][j].end());
-                        targets[s][j]->insert_sorted(set_rows_fwd[s][j]);
-                        targets_size[s][j]
-                                += (set_rows_fwd[s][j].size() + set_rows_bwd[s][j].size());
-                    }
-                }
             });
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t s = 0; s < sources.size(); ++s) {
+        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
+            auto &fwd = set_rows_fwd[s][j];
+            if (fwd.size())
+                dump_chunk_to_disk(fwd, s, j, 0);
+
+            auto &bwd = set_rows_bwd[s][j];
+            if (bwd.size()) {
+                std::sort(bwd.begin(), bwd.end());
+                dump_chunk_to_disk(bwd, s, j, num_chunks[s][j]++);
+            }
+        }
+    }
+
+    set_rows_fwd.clear(); // free up memory
+    set_rows_bwd.clear();
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
@@ -404,29 +429,29 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::filesystem::rename(temp_row_reduction_fname, row_reduction_fname);
     }
 
-    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(targets.size());
+    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(label_encoders.size());
 
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint32_t l_idx = 0; l_idx < targets.size(); ++l_idx) {
-        std::vector<std::unique_ptr<bit_vector>> columns(targets[l_idx].size());
-        for (size_t j = 0; j < targets[l_idx].size(); ++j) {
+    for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
+        std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
+        for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
-                auto &queue = targets[l_idx][j]->data(true);
-                for (auto &it = queue.begin(); it != queue.end(); ++it) {
-                    call(*it);
+                std::vector<std::string> filenames;
+                for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
+                    filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
+                //TODO: benchmark using Elias-Fano encoders + merger
+                common::merge_files<uint64_t>(filenames, call);
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, terminal.size(),
-                                                         targets_size[l_idx][j]);
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
+                                                         row_diff_bits[l_idx][j]);
         }
-        targets[l_idx].clear();
 
-        ColumnMajor matrix(std::move(columns));
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, std::move(matrix));
+                nullptr, ColumnMajor(std::move(columns)));
         row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
-                                                             label_encoders[l_idx]);
+                                                             std::move(label_encoders[l_idx]));
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
                 .replace_extension()
