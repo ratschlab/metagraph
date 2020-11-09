@@ -36,7 +36,8 @@ using mtg::common::logger;
 
 typedef LabelEncoder<std::string> LEncoder;
 
-size_t kNumRowsInBlock = 50'000;
+const size_t kNumRowsInBlock = 50'000;
+const uint64_t ROW_DIFF_BUFFER_SIZE = 500'000;
 
 
 template <class RowCallback>
@@ -1142,16 +1143,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
-            // *2 in order to account for constructing the sparsified column
-            // TODO: *1 + size(SortedSetDisk)?
-            size_t file_size = 2 * std::filesystem::file_size(files[i]);
+            // also include two buffers (fwd and back) for each column transformed
+            uint64_t file_size = std::filesystem::file_size(files[i])
+                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * 2;
             if (file_size > mem_bytes) {
                 logger->warn(
                         "Not enough memory to process {}, requires {} MB, skipped",
-                        files[i], file_size/1e6);
+                        files[i], file_size / 1e6);
                 continue;
             }
-            if (file_size > mem_bytes_left || file_batch.size() >= 15'000)
+            if (file_size > mem_bytes_left)
                 break;
 
             mem_bytes_left -= file_size;
@@ -1180,7 +1181,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         convert_batch_to_row_diff(
                 graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, dest_dir, row_reduction_fname);
+                file_batch, dest_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
