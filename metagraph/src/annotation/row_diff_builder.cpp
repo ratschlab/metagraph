@@ -260,7 +260,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
-                               const std::string &row_reduction_fname) {
+                               const std::string &row_reduction_fname,
+                               uint64_t buf_size) {
     if (source_files.empty())
         return;
 
@@ -311,8 +312,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_diff_bits[s][j] += v.size();
     };
 
-    constexpr uint64_t BUF_SIZE = 500'000;
-
     #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {
         set_rows_fwd[s].resize(sources[s].num_labels());
@@ -325,8 +324,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             std::filesystem::create_directories(tmp_dir(s, j));
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
-            set_rows_bwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
-            set_rows_fwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
+            set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
+            set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
         }
     }
 
