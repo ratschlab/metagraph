@@ -19,7 +19,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annot::RowDiffAnnotator::kExtension)) {
+    } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
 
     } else if (utils::ends_with(filename, annot::RowCompressed<>::kExtension)) {
@@ -77,7 +77,7 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::RowDiff: {
-            annotation.reset(new annot::RowDiffAnnotator());
+            annotation.reset(new annot::RowDiffColumnAnnotator());
             break;
         }
         case Config::RowSparse: {

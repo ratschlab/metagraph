@@ -427,7 +427,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::filesystem::rename(temp_row_reduction_fname, row_reduction_fname);
     }
 
-    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(label_encoders.size());
+    std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -448,12 +448,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
                 nullptr, ColumnMajor(std::move(columns)));
-        row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
-                                                             std::move(label_encoders[l_idx]));
+        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(std::move(diff_annotation),
+                                                                   std::move(label_encoders[l_idx]));
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
                 .replace_extension()
-                .replace_extension(RowDiffAnnotator::kExtension);
+                .replace_extension(RowDiffColumnAnnotator::kExtension);
         auto fpath = dest_dir/fname;
         row_diff[l_idx]->serialize(fpath);
         logger->trace("Serialized {}", fpath);

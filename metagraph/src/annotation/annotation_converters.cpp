@@ -283,7 +283,7 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
 }
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_row_diff_to_BRWT(RowDiffAnnotator &&annotator,
+convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
@@ -323,7 +323,7 @@ convert_to_greedy_BRWT(ColumnCompressed<std::string> &&annotation,
 }
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
+convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t num_parallel_nodes,
                        size_t num_threads,
                        uint64_t num_rows_subsampled) {
@@ -352,7 +352,7 @@ convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
     );
 }
 
-std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffAnnotator&& annotation,
+std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnotator&& annotation,
                                                              size_t grouping_arity,
                                                              size_t num_parallel_nodes,
                                                              size_t num_threads) {
@@ -407,7 +407,7 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator) {
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator) {
     uint64_t num_set_bits = annotator.num_relations();
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
@@ -498,21 +498,20 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
     std::mutex mu;
 
     auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
-        for (const auto &fname : annotation_files) {
-            RowDiffAnnotator annotator;
-            if (!annotator.merge_load({fname})) {
-                logger->error("Could not load {}", fname);
-                std::exit(1);
-            }
-            std::vector<std::unique_ptr<bit_vector>> cols
-                    = std::move(annotator.release_matrix()->diffs().release_columns());
-            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
-                std::string label = annotator.get_label_encoder().get_labels()[idx];
-                call_column(idx, std::move(cols[idx]));
-
+        bool success = merge_load_row_diff(
+            annotation_files,
+            [&](uint64_t column_index,
+                    const std::string &label,
+                    std::unique_ptr<bit_vector>&& column) {
+                call_column(column_index, std::move(column));
                 std::lock_guard<std::mutex> lock(mu);
-                column_names.emplace_back(idx, label);
-            };
+                column_names.emplace_back(column_index, label);
+            },
+            num_threads
+        );
+        if (!success) {
+            logger->error("Can't load annotation columns");
+            exit(1);
         }
     };
 
@@ -986,7 +985,7 @@ void merge<MultiBRWTAnnotator, std::string>(
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
-        for (const auto &label : annotator->get_label_encoder().get_labels()) {
+        for (const auto &label : annotator->get_all_labels()) {
             if (label_encoder.label_exists(label))
                 throw std::runtime_error("merging of BRWT with same labels is not implemented");
 
@@ -1192,10 +1191,11 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (uint32_t i = 0; i < files.size(); ++i) {
         std::string file = files[i];
-        RowDiffAnnotator input_anno;
+        RowDiffColumnAnnotator input_anno;
         input_anno.load(file);
 
-        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(), RowDiffAnnotator::kExtension);
+        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(),
+                                                   RowDiffColumnAnnotator::kExtension);
         std::string out_path
                 = (std::filesystem::path(outfbase).remove_filename() / outname).string()
                 + "_row_diff" + ColumnCompressed<std::string>::kExtension;

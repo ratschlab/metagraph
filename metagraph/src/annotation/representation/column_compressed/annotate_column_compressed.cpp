@@ -202,13 +202,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     bool merge_successful = merge_load(filenames,
         [&](uint64_t, const Label &label, std::unique_ptr<bit_vector>&& column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("Column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
             #pragma omp critical
             {
-                uint64_t num_set_bits = column->num_set_bits();
-                logger->trace("Column: {}, Density: {}, Set bits: {}", label,
-                              static_cast<double>(num_set_bits) / column->size(),
-                              num_set_bits);
-
                 // set |num_rows_| with the first column inserted
                 if (!bitmatrix_.size())
                     num_rows_ = column->size();
@@ -228,7 +228,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 }
             }
         },
-        filenames.size() > get_num_threads() ? get_num_threads() : 0
+        filenames.size() > 1u ? get_num_threads() : 0
     );
 
     if (merge_successful && no_errors) {
