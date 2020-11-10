@@ -177,7 +177,6 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
     std::vector<std::string> labels(offsets.back());
     std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
 
-
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
@@ -197,9 +196,11 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
                 common::logger->warn("No labels in {}", filenames[i]);
 
             std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
-            for (uint32_t idx = 0; idx < cols.size(); ++idx) {
-                callback(offsets[i] + idx, label_encoder.decode(idx), std::move(cols[idx]));
-            };
+
+            for (uint32_t j = 0; j < cols.size(); ++j) {
+                callback(offsets[i] + j, label_encoder.decode(j), std::move(cols[j]));
+            }
+
         } catch (...) {
             error_occurred = true;
         }
@@ -208,39 +209,40 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
     return !error_occurred;
 }
 
-// template specialization of merge_load for RowDiffAnnotator
+// template specialization of merge_load for RowDiffColumnAnnotator
 template <>
-bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
-        const std::vector<std::string> &filenames) {
+bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>
+::merge_load(const std::vector<std::string> &filenames) {
     std::vector<std::unique_ptr<bit_vector>> columns;
 
     bool no_errors = true;
     bool merge_successful = merge_load_row_diff(
-            filenames,
-            [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
-                #pragma omp critical
-                {
-                    uint64_t num_set_bits = column->num_set_bits();
-                    common::logger->trace("Column: {}, Density: {}, Set bits: {}", label,
-                                          static_cast<double>(num_set_bits) / column->size(),
-                                          num_set_bits);
+        filenames,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            common::logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                                  static_cast<double>(num_set_bits) / column->size(),
+                                  num_set_bits);
 
-                    if (columns.empty() || columns.back()->size() == column->size()) {
-                        size_t col = label_encoder_.insert_and_encode(label);
-                        if (col != columns.size()) {
-                            common::logger->error("Duplicate columns {}", label);
-                            no_errors = false;
-                        }
-                        columns.push_back(std::move(column));
-                    } else {
-                        common::logger->error(
-                                "Column {} has {} rows, previous column has {} rows",
-                                label, columns.size(), columns.back()->size());
+            #pragma omp critical
+            {
+                if (columns.empty() || columns.back()->size() == column->size()) {
+                    size_t col = label_encoder_.insert_and_encode(label);
+                    if (col != columns.size()) {
+                        common::logger->error("Duplicate columns {}", label);
                         no_errors = false;
                     }
+                    columns.push_back(std::move(column));
+                } else {
+                    common::logger->error(
+                            "Column {} has {} rows, previous column has {} rows",
+                            label, columns.size(), columns.back()->size());
+                    no_errors = false;
                 }
-            },
-            get_num_threads());
+            }
+        },
+        filenames.size() > 1u ? get_num_threads() : 0
+    );
 
     matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
             nullptr, binmat::ColumnMajor(std::move(columns)));
