@@ -311,7 +311,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_diff_bits[s][j] += v.size();
     };
 
-    constexpr uint64_t BUF_SIZE = 1'000'000;
+    constexpr uint64_t BUF_SIZE = 500'000;
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {
