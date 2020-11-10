@@ -11,7 +11,7 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 20;
+constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 16;
 
 namespace mtg {
@@ -33,7 +33,6 @@ void build_successor(const std::string &graph_fname,
         && std::filesystem::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
         logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
         return;
-
     }
     logger->trace("Building and writing successor, predecessor and anchor files to {}.*",
                   outfbase);
