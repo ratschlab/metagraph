@@ -20,7 +20,9 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
+const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
+const uint8_t kCountBits = 8;
+const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
 
 
 template <typename Label>
@@ -72,6 +74,43 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
     }
 }
 
+// for each label and index 'indices[i]' add count 'counts[i]'
+template <typename Label>
+void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
+                                               const VLabels &labels,
+                                               const std::vector<uint32_t> &counts) {
+    assert(indices.size() == counts.size());
+
+    const auto &columns = get_matrix().data();
+
+    if (relation_counts_.size() != columns.size())
+        relation_counts_.resize(columns.size());
+
+    for (const auto &label : labels) {
+        const auto j = label_encoder_.insert_and_encode(label);
+
+        if (!relation_counts_[j].size()) {
+            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
+
+        } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
+            logger->error("Binary relation matrix was changed while adding relation counts");
+            exit(1);
+        }
+
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
+                uint32_t count = std::min(counts[i], kMaxCount);
+                sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
+                ref = std::min((uint32_t)ref, kMaxCount - count) + count;
+
+            } else {
+                logger->warn("Trying to add count {} for non-annotated object {}."
+                             " The count was ignored.", counts[i], indices[i]);
+            }
+        }
+    }
+}
+
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
@@ -96,8 +135,10 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
-    if (!outstream.good())
+    if (!outstream.good()) {
+        logger->trace("Could not open {}", remove_suffix(filename, kExtension) + kExtension);
         throw std::ofstream::failure("Bad stream");
+    }
 
     serialize_number(outstream, num_rows_);
 
@@ -107,6 +148,46 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
         assert(column.get());
         column->serialize(outstream);
     }
+
+    if (!relation_counts_.size())
+        return;
+
+    outstream.close();
+
+    outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
+                   std::ios::binary);
+    if (!outstream.good()) {
+        logger->trace("Could not open {}",
+                      remove_suffix(filename, kExtension) + kExtension + ".counts");
+        throw std::ofstream::failure("Bad stream");
+    }
+
+    uint64_t num_counts = 0;
+    uint64_t sum_counts = 0;
+
+    for (size_t j = 0; j < relation_counts_.size(); ++j) {
+        if (!relation_counts_[j].size()) {
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);;
+
+        } else {
+            assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
+                && "Binary relation matrix must not be changed while adding relation counts");
+
+            for (uint64_t v : relation_counts_[j]) {
+                num_counts++;
+                sum_counts += v;
+            }
+
+            relation_counts_[j].serialize(outstream);;
+        }
+    }
+
+    for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
+    }
+
+    logger->info("Num relation counts: {}", num_counts);
+    logger->info("Total relation count: {}", sum_counts);
 }
 
 template <typename Label>
@@ -147,7 +228,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 }
             }
         },
-        get_num_threads()
+        filenames.size() > get_num_threads() ? get_num_threads() : 0
     );
 
     if (merge_successful && no_errors) {

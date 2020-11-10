@@ -38,6 +38,10 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
+    // for each label and index 'indices[i]' add count 'counts[i]'
+    void add_label_counts(const std::vector<Index> &indices,
+                          const VLabels &labels,
+                          const std::vector<uint32_t> &counts) override;
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
@@ -113,6 +117,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     caches::fixed_sized_cache<size_t,
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
+
+    std::vector<sdsl::int_vector<>> relation_counts_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };

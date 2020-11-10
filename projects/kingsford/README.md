@@ -9,23 +9,25 @@ bsub -J "build_single[1-2652]%500" \
         /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA build -v \
             -k 20 \
             --canonical \
+            --count-kmers \
             --mem-cap-gb 8 \
             -p 1 \
             -o ~/metagenome/data/kingsford/single_graphs/\$(basename \${file%.fasta.gz.kmc.kmc_suf}) \
             \$file \
         2>&1"
 
-bsub -J "extract_contigs[1-2652]%500" \
+bsub -w "done(build_single[*])" \
+     -J "extract_contigs[1-2652]%500" \
      -o ~/metagenome/data/kingsford/extract_contigs.lsf \
      -W 4:00 \
      -n 1 -R "rusage[mem=2000] span[hosts=1]" \
         "file=\"\$(sed -n \${LSB_JOBINDEX}p ~/metagenome/data/kingsford/kingsford_list_kmc.txt)\"; \
         file=\$(basename \${file%.fasta.gz.kmc.kmc_suf})
-        /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform -v \
+        /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA clean -v \
             --to-fasta --primary-kmers \
             -p 1 \
             -o ~/metagenome/data/kingsford/single_graphs/\$file \
-            \${file}.dbg \
+            ~/metagenome/data/kingsford/single_graphs/\${file}.dbg \
         2>&1"
 
 bsub -J "kingsford_build" \
@@ -78,7 +80,8 @@ for list in x*; do
         "cat ${list} \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph annotate -v \
                 -i ~/metagenome/data/kingsford/kingsford_primary.dbg \
-                --fwd-and-reverse \
+                --canonical \
+                --count-kmers \
                 --parallel 15 \
                 --anno-filename \
                 --separately \
@@ -107,7 +110,7 @@ bsub -J "kingsford_cluster_columns_primary" \
      -n 36 -R "rusage[mem=2100] span[hosts=1]" \
     "cat ~/metagenome/data/kingsford/annotation/columns_primary.txt \
         | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
-            --linkage \
+            --linkage --greedy \
             --subsample 100000000 \
             -o ~/metagenome/data/kingsford/annotation/linkage_kingsford_primary.csv \
             -p 36 \

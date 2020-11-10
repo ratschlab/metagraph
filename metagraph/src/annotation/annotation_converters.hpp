@@ -104,13 +104,29 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  */
 void convert_to_row_diff(const std::vector<std::string> &files,
-                         const std::string& graph_fname,
+                         const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         const std::filesystem::path &dest_dir);
+                         std::filesystem::path dest_dir,
+                         bool optimize = false);
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
+
+/**
+ * Converts a RowDiff annotation into RowDiff<RowSparse>.
+ */
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator);
+
+/**
+ * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this
+ * happens when transforming RowDiff columns back to column compress, manipulate the
+ * column compressed into some other format, and then wrapping the result back into a
+ * RowDiff.
+ */
+void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
+                      const std::string &graph_file,
+                      const std::string &out_file);
 
 } // namespace annot
 } // namespace mtg

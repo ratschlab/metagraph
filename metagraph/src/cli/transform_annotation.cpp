@@ -169,9 +169,50 @@ int transform_annotation(Config *config) {
     /********************************************************/
 
     if (config->cluster_linkage) {
-        if (input_anno_type != Config::ColumnCompressed) {
-            logger->error("Column clustering is only supported for ColumnCompressed");
+        if (input_anno_type != Config::ColumnCompressed
+            && input_anno_type != Config::RowDiff) {
+            logger->error(
+                    "Column clustering is only supported for ColumnCompressed and "
+                    "RowDiff");
             exit(1);
+        }
+
+        if (!config->greedy_brwt) {
+            logger->trace("Computing total number of columns");
+            size_t num_columns = 0;
+            std::string extension = input_anno_type == Config::ColumnCompressed
+                    ? ColumnCompressed<>::kExtension
+                    : RowDiffAnnotator::kExtension;
+            for (std::string file : files) {
+                file = utils::remove_suffix(file, extension) + extension;
+                std::ifstream instream(file, std::ios::binary);
+                if (!instream.good()) {
+                    logger->error("Can't read from {}", file);
+                    exit(1);
+                }
+                if (input_anno_type == Config::ColumnCompressed)
+                    std::ignore = load_number(instream);
+
+                annot::LabelEncoder<std::string> label_encoder;
+                if (!label_encoder.load(instream)) {
+                    logger->error("Can't load label encoder from {}", file);
+                    exit(1);
+                }
+
+                num_columns += label_encoder.size();
+            }
+
+            logger->trace("Generating trivial linkage matrix for {} columns",
+                          num_columns);
+
+            binmat::LinkageMatrix linkage_matrix
+                    = binmat::agglomerative_linkage_trivial(num_columns);
+
+            std::ofstream out(config->outfbase);
+            out << linkage_matrix.format(CSVFormat) << std::endl;
+
+            logger->trace("Linkage matrix is written to {}", config->outfbase);
+            return 0;
         }
 
         logger->trace("Loading annotation and sampling subcolumns of size {}",
@@ -186,37 +227,41 @@ int transform_annotation(Config *config) {
         ThreadPool subsampling_pool(get_num_threads(), 1);
 
         // Load columns from disk
-        bool success = ColumnCompressed<>::merge_load(files,
-            [&](uint64_t i, const std::string &label, auto&& column) {
-                subsampling_pool.enqueue([&,i,label,column{std::move(column)}]() {
-                    sdsl::bit_vector *subvector;
-                    {
-                        std::lock_guard<std::mutex> lock(mu);
-                        if (row_indexes.empty()) {
-                            num_rows = column->size();
-                            row_indexes
+        bool success;
+        auto on_column = [&](uint64_t i, const std::string &label,
+                             std::unique_ptr<bit_vector> &&column) {
+            subsampling_pool.enqueue([&, i, label, column { std::move(column) }]() {
+                sdsl::bit_vector *subvector;
+                {
+                    std::lock_guard<std::mutex> lock(mu);
+                    if (row_indexes.empty()) {
+                        num_rows = column->size();
+                        row_indexes
                                 = binmat::sample_row_indexes(num_rows,
                                                              config->num_rows_subsampled);
-                        } else if (column->size() != num_rows) {
-                            logger->error("Size of column {} is {} != {}",
-                                          label, column->size(), num_rows);
-                            exit(1);
-                        }
-                        subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
-                        subvector = subcolumn_ptrs.back().get();
-                        column_ids.push_back(i);
-                        logger->trace("Column {}: {}", i, label);
+                    } else if (column->size() != num_rows) {
+                        logger->error("Size of column {} is {} != {}", label,
+                                      column->size(), num_rows);
+                        exit(1);
                     }
+                    subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                    subvector = subcolumn_ptrs.back().get();
+                    column_ids.push_back(i);
+                    logger->trace("Column {}: {}", i, label);
+                }
 
-                    *subvector = sdsl::bit_vector(row_indexes.size(), false);
-                    for (size_t j = 0; j < row_indexes.size(); ++j) {
-                        if ((*column)[row_indexes[j]])
-                            (*subvector)[j] = true;
-                    }
-                });
-            },
-            get_num_threads()
-        );
+                *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                for (size_t j = 0; j < row_indexes.size(); ++j) {
+                    if ((*column)[row_indexes[j]])
+                        (*subvector)[j] = true;
+                }
+            });
+        };
+        if (input_anno_type == Config::ColumnCompressed) {
+            success = ColumnCompressed<>::merge_load(files, on_column, get_num_threads());
+        } else {
+            success = merge_load_row_diff(files, on_column, get_num_threads());
+        }
 
         if (!success) {
             logger->error("Cannot load annotations");
@@ -264,6 +309,11 @@ int transform_annotation(Config *config) {
         switch (config->anno_type) {
             case Config::RowFlat: {
                 auto annotator = annot::convert<RowFlatAnnotator>(files.at(0));
+                target_annotator = std::move(annotator);
+                break;
+            }
+            case Config::RowSparse: {
+                auto annotator = annot::convert<RowSparseAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
@@ -333,10 +383,15 @@ int transform_annotation(Config *config) {
                 return 0;
 
             }
+            case Config::RowDiffRowSparse: {
+                logger->error("Convert to row_diff first, and then to row_diff_sparse");
+                return 0;
+
+            }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
-                                    config->max_path_length, out_dir);
+                                    config->max_path_length, out_dir, config->optimize);
                 break;
             }
             case Config::RowCompressed: {
@@ -405,6 +460,10 @@ int transform_annotation(Config *config) {
                 convert<RowFlatAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
+            case Config::RowSparse: {
+                convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
+                break;
+            }
             case Config::RBFish: {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
                 break;
@@ -421,47 +480,91 @@ int transform_annotation(Config *config) {
 
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
-            && config->anno_type != Config::ColumnCompressed) {
+            && config->anno_type != Config::ColumnCompressed
+            && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to `column` and `row_diff_brwt` supported for "
-                    "row_diff");
+                    "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
+                    "supported for row_diff");
             exit(1);
         }
-        if (config->anno_type == Config::RowDiffBRWT) {
-            std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
-            if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+        if (config->anno_type == Config::ColumnCompressed) {
+            convert_row_diff_to_col_compressed(files, config->outfbase);
+        } else {
+            if (config->anchors.empty()) {
+                logger->error(
+                        "Please specify the location of the anchor file via --anchors-file "
+                        "The anchor file is in the same directory as the annotated graph");
+                std::exit(1);
+            }
+            if (config->anno_type == Config::RowDiffBRWT) {
+                std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
+                if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+                    logger->trace("Loading annotation from disk...");
+                    auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                    if (!row_diff_anno->merge_load(files))
+                        std::exit(1);
+
+                    logger->trace("Annotation loaded in {} sec", timer.elapsed());
+                    brwt_annotator = config->greedy_brwt
+                            ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
+                                                     config->parallel_nodes,
+                                                     get_num_threads(),
+                                                     config->num_rows_subsampled)
+                            : convert_to_simple_BRWT(std::move(*row_diff_anno),
+                                                     config->arity_brwt,
+                                                     config->parallel_nodes,
+                                                     get_num_threads());
+                } else {
+                    std::string tmp_dir = config->tmp_dir.empty()
+                            ? std::filesystem::path(config->outfbase).remove_filename()
+                            : config->tmp_dir;
+                    brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
+                            files, config->infbase, config->parallel_nodes,
+                            get_num_threads(), tmp_dir);
+                }
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                logger->trace("Serializing to '{}'", config->outfbase);
+                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                        .load_anchor(config->anchors);
+                brwt_annotator->serialize(config->outfbase);
+
+            } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
                 auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
                 if (!row_diff_anno->merge_load(files))
                     std::exit(1);
-                logger->trace("Annotation loaded in {} sec", timer.elapsed());
-                brwt_annotator = config->greedy_brwt
-                        ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
-                                                 config->parallel_nodes, get_num_threads(),
-                                                 config->num_rows_subsampled)
-                        : convert_to_simple_BRWT(std::move(*row_diff_anno), config->arity_brwt,
-                                                 config->parallel_nodes, get_num_threads());
-            } else {
-                std::string tmp_dir = config->tmp_dir.empty()
-                        ? std::filesystem::path(config->outfbase).remove_filename()
-                        : config->tmp_dir;
-                brwt_annotator
-                        = convert_to_BRWT<RowDiffBRWTAnnotator>(files, config->infbase,
-                                                                config->parallel_nodes,
-                                                                get_num_threads(), tmp_dir);
+                std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
+                        = convert(*row_diff_anno);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
+                        .load_anchor(config->anchors);
+                logger->trace("Serializing to '{}'", config->outfbase);
+                row_sparse->serialize(config->outfbase);
             }
-            logger->trace("Annotation converted in {} sec", timer.elapsed());
-
-            logger->trace("Serializing to '{}'", config->outfbase);
-            brwt_annotator->serialize(config->outfbase);
-        } else {
-            convert_row_diff_to_col_compressed(files, config->outfbase);
         }
+    } else if (config->anno_type == Config::RowDiff) {
+        for (const auto &file : files) {
+            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+                    = initialize_annotation(file, *config);
+            if (!annotator->load(file)) {
+                logger->error("Cannot load annotations from file '{}'", file);
+                exit(1);
+            }
 
+            using std::filesystem::path;
+            path out_dir = path(config->outfbase).remove_filename();
+            path file_name = path(file).filename().replace_extension("");
+            std::string old_extension = file_name.extension();
+            file_name = file_name.replace_extension("row_diff_" + old_extension.substr(1));
+            std::string out_file = out_dir/(file_name.string() + ".annodbg");
+
+            wrap_in_row_diff(std::move(*annotator), config->infbase, out_file);
+        }
     } else {
-        logger->error("Conversion to other representations"
-                      " is not implemented for {} annotator",
-                      Config::annotype_to_string(input_anno_type));
+        logger->error(
+                "Conversion to other representations is not implemented for {} "
+                "annotator", Config::annotype_to_string(input_anno_type));
         exit(1);
     }
 

@@ -213,13 +213,13 @@ TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGT", BuildMode::BASE, true));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", DBGMode::NORMAL, true));
 }
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", BuildMode::BASE, false));
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", DBGMode::NORMAL, false));
     EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
-              check_graph<TypeParam>("ACGTN", BuildMode::BASE, true));
+              check_graph<TypeParam>("ACGTN", DBGMode::NORMAL, true));
 }
 
 TYPED_TEST(DeBruijnGraphTest, Alphabet) {
