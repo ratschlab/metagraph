@@ -89,7 +89,7 @@ endif()
 
 
 string(APPEND CMAKE_CXX_FLAGS
-  " -Wall -Wextra -Werror -Wno-poison-system-directories"
+  " -Wall -Wextra -Werror"
   " -D_THREAD_SAFE -pthread"
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
@@ -105,6 +105,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(APPLE)
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
+  if(SUPPORT_NO_POISON_SYS_DIR)
+  add_compile_options(-Wno-poison-system-directories)
+  else()
+  message(STATUS "-Wno-poison-system-directories is not supported")
+  endif()
+
   # Fix include directories on 10.14+, as they are not added by default any longer
   INCLUDE_DIRECTORIES(SYSTEM /usr/local/include)
   # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
