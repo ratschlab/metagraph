@@ -106,7 +106,7 @@ endif()
 
 if(APPLE)
   # Fix include directories on 10.14+, as they are not added by default any longer
-  #INCLUDE_DIRECTORIES(/usr/local/include)
+  INCLUDE_DIRECTORIES(SYSTEM /usr/local/include)
   # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
   #LINK_DIRECTORIES(/usr/lib)
   #LINK_DIRECTORIES(/usr/local/lib)
