@@ -220,7 +220,8 @@ BRWT BRWTBottomUpBuilder::build(
 
         BRWT node;
         node.assignments_ = RangePartition(Partition(1, { 0 }));
-        node.nonzero_rows_ = std::move(column);
+        node.nonzero_rows_ = std::make_unique<bit_vector_smart>(
+                                column->convert_to<bit_vector_smart>());
 
         std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
         node.serialize(out);
