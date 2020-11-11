@@ -235,11 +235,11 @@ void traverse_anno_chunked(
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
-                const std::unique_ptr<bit_vector> &source_col
-                        = col_annotations[l_idx].get_matrix().data()[j];
-                source_col->call_ones_in_range(chunk, chunk + block_size,
+                const bit_vector &source_col
+                        = *col_annotations[l_idx].get_matrix().data()[j];
+                source_col.call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
-                        call_ones(*source_col, i, i - chunk, l_idx, j,
+                        call_ones(source_col, i, i - chunk, l_idx, j,
                                   succ_chunk[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
@@ -433,6 +433,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
+
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
                 std::vector<std::string> filenames;
@@ -472,8 +473,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
             const auto &columns = row_diff[l_idx]->get_matrix().diffs().data();
             for (size_t j = 0; j < columns.size(); ++j) {
-                const std::unique_ptr<bit_vector> &source_col = columns[j];
-                source_col->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+                const bit_vector &source_col = *columns[j];
+                source_col.call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
                     [&](uint64_t i) {
                         __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
                     }

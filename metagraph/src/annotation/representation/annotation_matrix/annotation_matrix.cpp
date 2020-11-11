@@ -175,7 +175,6 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     std::vector<std::string> labels(offsets.back());
-    std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
