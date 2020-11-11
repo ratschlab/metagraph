@@ -108,9 +108,7 @@ if(APPLE)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
-  add_compile_options(-Wno-poison-system-directories)
-  else()
-  message(STATUS "-Wno-poison-system-directories is not supported")
+    add_compile_options(-Wno-poison-system-directories)
   endif()
 
   # Fix include directories on 10.14+, as they are not added by default any longer
