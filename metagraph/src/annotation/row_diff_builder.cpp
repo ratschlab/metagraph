@@ -214,20 +214,28 @@ void traverse_anno_chunked(
         before_chunk(block_size);
 
         succ_chunk.resize(block_size);
-        pred_chunk.resize(0);
-        pred_chunk_idx.resize(block_size + 1);
-        pred_chunk_idx[0] = 0;
-
         for (uint64_t i = 0; i < block_size; ++i) {
             succ_chunk[i] = succ[chunk + i];
-            pred_chunk_idx[i + 1] = pred_chunk_idx[i];
+        }
+
+        // read predecessor offsets
+        pred_chunk_idx.resize(block_size + 1);
+        pred_chunk_idx[0] = 0;
+        for (uint64_t i = 1; i <= block_size; ++i) {
+            // find where the last predecessor for the node ends
+            pred_chunk_idx[i] = pred_chunk_idx[i - 1];
             while (*pred_boundary_it == 0) {
-                ++pred_chunk_idx[i + 1];
-                pred_chunk.push_back(*pred_it);
-                ++pred_it;
+                ++pred_chunk_idx[i];
                 ++pred_boundary_it;
             }
             ++pred_boundary_it;
+        }
+
+        // read all predecessors for the block
+        pred_chunk.resize(pred_chunk_idx.back());
+        for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
+            pred_chunk[i] = *pred_it;
+            ++pred_it;
         }
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
