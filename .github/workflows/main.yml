@@ -121,6 +121,8 @@ jobs:
 
     - name: configure
       run: |
+        export CC=$(which clang)
+        export CXX=$(which clang++)
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
