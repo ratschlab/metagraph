@@ -483,8 +483,8 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
             exit(1);
         }
     };
-    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads, tmp_path,
-                    get_columns, std::move(column_names));
+    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+                           tmp_path, get_columns, std::move(column_names));
 }
 
 template<>
