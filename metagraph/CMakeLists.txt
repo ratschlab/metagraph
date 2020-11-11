@@ -106,13 +106,13 @@ endif()
 
 if(APPLE)
   # add path to system libraries but avoid cross-compilation errors
+  include_directories(SYSTEM /usr/local/include)
+  link_directories(/usr/local/lib)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
     add_compile_options(-Wno-poison-system-directories)
   endif()
-  include_directories(SYSTEM /usr/local/include)
-  link_directories(/usr/local/lib)
 endif()
 
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
