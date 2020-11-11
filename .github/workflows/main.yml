@@ -121,7 +121,6 @@ jobs:
 
     - name: configure
       run: |
-        sudo xcode-select -s /Applications/Xcode_11.app/Contents/Developer
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..

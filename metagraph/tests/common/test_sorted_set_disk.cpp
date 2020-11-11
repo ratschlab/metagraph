@@ -40,13 +40,13 @@ void expect_equals(common::SortedSetDisk<TypeParam> &underTest,
 }
 
 template <typename T>
-common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8) {
+common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8, size_t merge_count = 4) {
     constexpr size_t thread_count = 1;
     constexpr size_t max_disk_space = 1e6;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     return common::SortedSetDisk<T>(thread_count, container_size,
-                                    "./test_chunk_", max_disk_space);
+                                    "./test_chunk_", max_disk_space, merge_count);
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
@@ -102,16 +102,19 @@ TYPED_TEST(SortedSetDiskTest, OneInsertLargerThanBuffer) {
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
     constexpr size_t container_size = 8;
-    common::SortedSetDisk<TypeParam> underTest
-            = create_sorted_set_disk<TypeParam>(container_size);
-    std::vector<TypeParam> expected_result;
-    for (uint32_t i = 0; i < 100; ++i) {
-        std::array<TypeParam, 4> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
-                                              TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
-        underTest.insert(elements.begin(), elements.end());
-        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+    for (size_t merge_count : {0,4}) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(container_size, merge_count);
+        std::vector<TypeParam> expected_result;
+        for (uint32_t i = 0; i < 100; ++i) {
+            std::array<TypeParam, 4> elements
+                    = { TypeParam(4 * i), TypeParam(4 * i + 1), TypeParam(4 * i + 2),
+                        TypeParam(4 * i + 3) };
+            underTest.insert(elements.begin(), elements.end());
+            expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+        }
+        expect_equals(underTest, expected_result);
     }
-    expect_equals(underTest, expected_result);
 }
 
 /**
@@ -119,15 +122,18 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
  * across multiple inserts.
  */
 TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
-    common::SortedSetDisk<TypeParam> underTest = create_sorted_set_disk<TypeParam>();
-    for (uint32_t i = 0; i < 100; ++i) {
-        std::array<TypeParam, 4> elements
+    for (size_t merge_count : {0,4}) {
+        common::SortedSetDisk<TypeParam> underTest
+                = create_sorted_set_disk<TypeParam>(8, merge_count);
+        for (uint32_t i = 0; i < 100; ++i) {
+            std::array<TypeParam, 4> elements
+                    = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
+            underTest.insert(elements.begin(), elements.end());
+        }
+        std::vector<TypeParam> expected_result
                 = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
-        underTest.insert(elements.begin(), elements.end());
+        expect_equals(underTest, expected_result);
     }
-    std::vector<TypeParam> expected_result
-            = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
-    expect_equals(underTest, expected_result);
 }
 
 /**
@@ -196,6 +202,74 @@ TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
         underTest.insert(elements.begin(), elements.end());
     }
     expect_equals(underTest, elements);
+}
+
+TYPED_TEST(SortedSetDiskTest, InsertSortedOnly) {
+    constexpr size_t container_size = 8;
+    common::SortedSetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(container_size);
+    std::vector<TypeParam> expected_result;
+    for (uint32_t i = 0; i < 100; ++i) {
+        std::vector<TypeParam> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
+                                            TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
+        underTest.insert_sorted(elements);
+        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+    }
+    expect_equals(underTest, expected_result);
+}
+
+/**
+ * Test #insert_sorted combined with #insert gives correct results
+ */
+TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Overlap) {
+    constexpr size_t container_size = 8;
+    common::SortedSetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(container_size);
+    std::vector<TypeParam> expected_result;
+    for (uint32_t i = 0; i < 100; ++i) {
+        std::vector<TypeParam> elements = { TypeParam(4 * i), TypeParam(4 * i + 1),
+                                            TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
+        underTest.insert_sorted(elements);
+        underTest.insert(elements.begin(), elements.end());
+        expected_result.insert(expected_result.end(), elements.begin(), elements.end());
+    }
+    expect_equals(underTest, expected_result);
+}
+
+/**
+ * Test #insert_sorted combined with #insert gives correct results
+ */
+TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Distinct) {
+    constexpr size_t container_size = 8;
+    common::SortedSetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(container_size);
+    for (uint32_t i = 0; i < 100; ++i) {
+        std::vector<TypeParam> elements1 = { TypeParam(4 * i), TypeParam(4 * i + 1) };
+        std::vector<TypeParam> elements2 = { TypeParam(4 * i + 2), TypeParam(4 * i + 3) };
+        underTest.insert_sorted(elements1);
+        underTest.insert(elements2.begin(), elements2.end());
+    }
+    std::vector<TypeParam> expected_result(400);
+    std::iota(expected_result.begin(), expected_result.end(), 0);
+    expect_equals(underTest, expected_result);
+}
+
+/**
+ * Test #insert_sorted combined with #insert gives correct results
+ */
+TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Intertwined) {
+    constexpr size_t container_size = 8;
+    common::SortedSetDisk<TypeParam> underTest
+            = create_sorted_set_disk<TypeParam>(container_size);
+    for (uint32_t i = 0; i < 100; ++i) {
+        std::vector<TypeParam> elements1 = { TypeParam(4 * i), TypeParam(4 * i + 2) };
+        std::vector<TypeParam> elements2 = { TypeParam(4 * i + 1), TypeParam(4 * i + 3) };
+        underTest.insert_sorted(elements1);
+        underTest.insert(elements2.begin(), elements2.end());
+    }
+    std::vector<TypeParam> expected_result(400);
+    std::iota(expected_result.begin(), expected_result.end(), 0);
+    expect_equals(underTest, expected_result);
 }
 
 } // namespace
