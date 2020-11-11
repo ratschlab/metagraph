@@ -89,7 +89,7 @@ endif()
 
 
 string(APPEND CMAKE_CXX_FLAGS
-  " -Wall -Wextra -Werror"
+  " -Wall -Wextra -Werror -Wno-poison-system-directories"
   " -D_THREAD_SAFE -pthread"
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
