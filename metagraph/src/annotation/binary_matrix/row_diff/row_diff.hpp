@@ -21,8 +21,9 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
+const std::string kRowDiffAnchorExt = ".anchors";
+
 const size_t RD_PATH_RESERVE_SIZE = 2;
-constexpr auto kRowDiffAnchorExt = ".anchors";
 
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
@@ -184,7 +185,11 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
             rd_paths_trunc[i].push_back(it.value());
-            // If the node had been reached before, interrupt the diff path here.
+
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
             if (!is_new)
                 break;
 
@@ -211,9 +216,11 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         SetBitPositions &result = rows[i];
-        // propagate back to reconstruct full annotations for predecessors
+        // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             merge(&result, rd_rows[*it]);
+            // replace diff row with full reconstructed annotation
             rd_rows[*it] = result;
         }
     }
