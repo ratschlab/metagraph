@@ -4,13 +4,10 @@
 #include <string>
 #include <vector>
 
-#include <sdsl/enc_vector.hpp>
-#include <sdsl/bit_vectors.hpp>
-#include <sdsl/util.hpp>
-
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "common/vector_map.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vector.hpp"
@@ -19,11 +16,14 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
+
 namespace mtg {
 namespace annot {
 namespace binmat {
 
 const std::string kRowDiffAnchorExt = ".anchors";
+
+const size_t RD_PATH_RESERVE_SIZE = 2;
 
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
@@ -35,11 +35,11 @@ const std::string kRowDiffAnchorExt = ".anchors";
  * RowDiff sparsification can be applied to any BinaryMatrix instance.
  * The row-diff binary matrix is defined by three data structures:
  *   1. #diffs_ the underlying sparsified (diffed) #BinaryMatrix
- *   2. #terminal_ rows marked as terminal are stored in full
+ *   2. #anchor_ rows marked as anchors are stored in full
  *   3. #graph_ the graph that was used to determine adjacent rows for sparsification
  * Retrieving data from RowDiff requires the associated #graph_. In order to get the
  * annotation for  i-th row, we start traversing the node corresponding to i in #graph_
- * and accumulate the values in #diffs until we hit a terminal node, which is stored in
+ * and accumulate the values in #diffs until we hit an anchor node, which is stored in
  * full.
  */
 //NOTE: Clang aggressively abuses the clause in the C++ standard (14.7.1/11) that allows
@@ -76,6 +76,8 @@ class RowDiff : public BinaryMatrix {
     std::vector<Row> get_column(Column column) const override;
 
     SetBitPositions get_row(Row row) const override;
+
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
     inline bool load(std::istream &f) override;
     inline void serialize(std::ostream &f) const override;
@@ -151,6 +153,79 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
     }
 
     return result;
+}
+
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids;
+    rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+
+    // map row index to its index in |rd_rows|
+    VectorMap<Row, size_t> node_to_rd;
+    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+
+    // Truncated row-diff paths, indexes to |rd_rows|.
+    // The last index in each path points to an anchor or to a row which had
+    // been reached before, and thus, will be reconstructed before this one.
+    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        Row row = row_ids[i];
+
+        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
+                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+
+        while (true) {
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_->boss_to_kmer_index(boss_edge));
+
+            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+            rd_paths_trunc[i].push_back(it.value());
+
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
+            if (!is_new)
+                break;
+
+            rd_ids.push_back(row);
+
+            if (anchor()[row])
+                break;
+
+            graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
+            assert(boss_edge > 1 && w != 0);
+            // fwd always selects the last outgoing edge for a given node
+            boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
+        }
+    }
+
+    node_to_rd = VectorMap<Row, size_t>();
+
+    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+
+    rd_ids = std::vector<Row>();
+
+    // reconstruct annotation rows from row-diff
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        SetBitPositions &result = rows[i];
+        // propagate back and reconstruct full annotations for predecessors
+        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+            merge(&result, rd_rows[*it]);
+            // replace diff row with full reconstructed annotation
+            rd_rows[*it] = result;
+        }
+    }
+
+    return rows;
 }
 
 template <class BaseMatrix>
