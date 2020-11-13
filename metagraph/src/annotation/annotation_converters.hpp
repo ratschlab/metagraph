@@ -38,7 +38,7 @@ convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t num_threads = 1);
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
+convert_to_simple_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
@@ -50,7 +50,7 @@ convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
                        uint64_t num_rows_subsampled = 1'000'000);
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
+convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
@@ -116,7 +116,7 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 /**
  * Converts a RowDiff annotation into RowDiff<RowSparse>.
  */
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffAnnotator &annotator);
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator);
 
 /**
  * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this

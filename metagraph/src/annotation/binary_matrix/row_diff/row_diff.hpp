@@ -103,7 +103,7 @@ class RowDiff : public BinaryMatrix {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
-    assert("Please call load_anchor first " && anchor_.size() == diffs_.num_rows());
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
@@ -116,7 +116,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
  */
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
-    assert("Please call load_anchor first " && anchor_.size() == diffs_.num_rows());
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     std::vector<Row> result;
     for (Row row = 0; row < num_rows(); ++row) {
@@ -128,9 +128,10 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
-    assert("Please call load_anchor first " && anchor_.size() == diffs_.num_rows());
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
     Vector<uint64_t> result = get_diff(row);
+    std::sort(result.begin(), result.end());
 
     uint64_t boss_edge = graph_->kmer_to_boss_index(
             graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
@@ -144,8 +145,12 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
         boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
-        merge(&result, get_diff(row));
-    };
+
+        auto diff_row = get_diff(row);
+        std::sort(diff_row.begin(), diff_row.end());
+        merge(&result, diff_row);
+    }
+
     return result;
 }
 
@@ -234,11 +239,12 @@ inline void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
-    assert(std::is_sorted(result->begin(), result->end())
-                   && std::is_sorted(diff2.begin(), diff2.end()));
-    if (diff2.empty()) {
+    assert(std::is_sorted(result->begin(), result->end()));
+    assert(std::is_sorted(diff2.begin(), diff2.end()));
+
+    if (diff2.empty())
         return;
-    }
+
     Vector<uint64_t> diff1;
     std::swap(*result, diff1);
     result->reserve(std::max(diff1.size(), diff2.size()));
@@ -260,6 +266,8 @@ void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t>
     while (idx2 < diff2.size()) {
         result->push_back(diff2[idx2++]);
     }
+
+    assert(std::is_sorted(result->begin(), result->end()));
 }
 
 } // namespace binmat
