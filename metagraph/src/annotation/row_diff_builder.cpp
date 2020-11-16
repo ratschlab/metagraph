@@ -199,27 +199,23 @@ void traverse_anno_chunked(
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
 
-    std::vector<uint64_t> succ_chunk;
-    std::vector<uint64_t> pred_chunk;
-    std::vector<uint64_t> pred_chunk_idx;
-
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
 
     ProgressBar progress_bar(num_rows, log_header, std::cerr, !common::get_verbose());
 
-    for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        uint64_t block_size = std::min(BLOCK_SIZE, num_rows - chunk);
+    auto read_next_block = [&](uint64_t begin, uint64_t end) {
+        assert(begin <= end);
 
-        before_chunk(block_size);
+        uint64_t block_size = end - begin;
 
-        succ_chunk.resize(block_size);
+        std::vector<uint64_t> succ_chunk(block_size);
         for (uint64_t i = 0; i < block_size; ++i) {
-            succ_chunk[i] = succ[chunk + i];
+            succ_chunk[i] = succ[begin + i];
         }
 
         // read predecessor offsets
-        pred_chunk_idx.resize(block_size + 1);
+        std::vector<uint64_t> pred_chunk_idx(block_size + 1);
         pred_chunk_idx[0] = 0;
         for (uint64_t i = 1; i <= block_size; ++i) {
             // find where the last predecessor for the node ends
@@ -232,11 +228,36 @@ void traverse_anno_chunked(
         }
 
         // read all predecessors for the block
-        pred_chunk.resize(pred_chunk_idx.back());
+        std::vector<uint64_t> pred_chunk(pred_chunk_idx.back());
         for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
             pred_chunk[i] = *pred_it;
             ++pred_it;
         }
+
+        return std::make_tuple(std::move(succ_chunk),
+                               std::move(pred_chunk_idx),
+                               std::move(pred_chunk));
+    };
+
+    ThreadPool async_reader(1, 1);
+    auto block_future = async_reader.enqueue([&]() {
+        return read_next_block(0, std::min(BLOCK_SIZE, num_rows));
+    });
+
+    for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
+        uint64_t block_size = std::min(BLOCK_SIZE, num_rows - chunk);
+
+        before_chunk(block_size);
+
+        std::vector<uint64_t> succ_chunk;
+        std::vector<uint64_t> pred_chunk_idx;
+        std::vector<uint64_t> pred_chunk;
+        std::tie(succ_chunk, pred_chunk_idx, pred_chunk) = block_future.get();
+
+        // schedule reading next block
+        block_future = async_reader.enqueue([&,begin{chunk + block_size}]() {
+            return read_next_block(begin, std::min(begin + BLOCK_SIZE, num_rows));
+        });
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
 
