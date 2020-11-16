@@ -12,7 +12,7 @@
 #include "graph/annotated_dbg.hpp"
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
-constexpr uint64_t ROW_REDUCTION_WIDTH = 16;
+constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
 
 namespace mtg {
 namespace annot {
