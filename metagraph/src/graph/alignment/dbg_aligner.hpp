@@ -370,7 +370,10 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
     );
 
     alignment_generator(
-        [&](DBGAlignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
+        [&](DBGAlignment&& alignment) {
+            alignment.trim_offset(&graph_);
+            path_queue.add_alignment(std::move(alignment));
+        },
         [&](const DBGAlignment &seed) { return path_queue.get_min_path_score(seed); }
     );
 

@@ -1,6 +1,7 @@
 #include "canonical_dbg.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 
@@ -19,7 +20,8 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         alph_map_({ graph_.alphabet().size() }),
-        primary_(primary && !graph->is_canonical_mode()),
+        primary_(primary && !graph->is_canonical_mode()
+                     && !dynamic_cast<const DBGSuccinctRange*>(graph.get())),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
         rev_comp_cache_(primary_ ? 0 : cache_size),
@@ -73,6 +75,14 @@ void CanonicalDBG
         ? path.end()
         : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
 
+    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph_);
+    if (range_graph) {
+        first_not_found = std::find_if(path.begin(), first_not_found,
+                                       [&](node_index node) -> bool {
+                                           return range_graph->get_offset(node);
+                                       });
+    }
+
     for (auto jt = path.begin(); jt != first_not_found; ++jt) {
         if (terminate())
             return;
@@ -83,17 +93,40 @@ void CanonicalDBG
     if (first_not_found == path.end())
         return;
 
-    std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
-                        sequence.end());
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    size_t start = first_not_found - path.begin();
 
-    auto it = rev_path.rbegin();
+    std::string rev_seq(sequence.begin() + start, sequence.end());
+    std::vector<node_index> rev_path(path.begin() + start, path.end());
+    reverse_complement_seq_path(graph_, rev_seq, rev_path);
+    std::reverse(rev_path.begin(), rev_path.end());
+
+    assert(range_graph || rev_path.size() + start == path.size());
+    if (range_graph) {
+        if (path.size() > rev_path.size() + start) {
+            rev_path.resize(path.size() - start);
+        } else if (path.size() < rev_path.size() + start) {
+            path.resize(rev_path.size() + start);
+        }
+    }
+
+    assert(rev_path.size() + start == path.size());
+
+    auto it = rev_path.begin();
     for (auto jt = first_not_found; jt != path.end(); ++jt) {
-        assert(it != rev_path.rend());
+        assert(it != rev_path.end());
 
         if (terminate())
             return;
+
+        if (range_graph) {
+            size_t fwd_offset = range_graph->get_offset(*jt);
+            size_t rev_offset = range_graph->get_offset(*it);
+            if (fwd_offset < rev_offset) {
+                *it = DeBruijnGraph::npos;
+            } else if (fwd_offset > rev_offset) {
+                *jt = DeBruijnGraph::npos;
+            }
+        }
 
         if (*jt != DeBruijnGraph::npos) {
             if (!primary_)
@@ -445,7 +478,10 @@ void CanonicalDBG::reverse_complement(std::string &seq,
         std::swap(path, rev_path);
 
     } else {
+        size_t old_size = path.size();
         path = map_sequence_to_nodes(*this, seq);
+        assert(path.size() == old_size || dynamic_cast<const DBGSuccinctRange*>(&graph_));
+        path.resize(old_size);
     }
 }
 

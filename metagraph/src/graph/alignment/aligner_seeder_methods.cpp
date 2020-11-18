@@ -1,6 +1,8 @@
 #include "aligner_methods.hpp"
 
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 
 
 namespace mtg {
@@ -14,7 +16,7 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
     query_nodes_.clear();
     num_matching_kmers_ = 0;
 
-    if (query_.size() < graph_.get_k())
+    if (query_.size() < config_.min_seed_length)
         return;
 
     query_nodes_ = map_sequence_to_nodes(graph_, query_);
@@ -22,6 +24,37 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
         - std::count(query_nodes_.begin(), query_nodes_.end(), NodeType());
 
     offsets_.assign(query_nodes_.size(), 0);
+    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph_);
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph_);
+
+    if (!range_graph && canonical)
+        range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph());
+
+    if (range_graph) {
+        for (size_t i = 0; i < query_nodes_.size(); ++i) {
+            NodeType node = query_nodes_[i];
+            if (node && canonical)
+                node = canonical->get_base_node(node);
+
+            if (!node) {
+                offsets_[i] = 0;
+
+            } else {
+                size_t offset = range_graph->get_offset(node);
+                if (offset)
+                    --num_matching_kmers_;
+
+                if (graph_.get_k() - offset >= config_.min_seed_length) {
+                    offsets_[i] = offset;
+                } else {
+                    query_nodes_[i] = 0;
+                    offsets_[i] = 0;
+                }
+            }
+
+            assert(!query_nodes_[i] || i + graph_.get_k() - offsets_[i] <= query_.size());
+        }
+    }
 
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
@@ -231,12 +264,16 @@ void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     ExactMapSeeder<NodeType>::initialize(query, orientation);
 
     const auto &query_nodes = this->get_query_nodes();
+    auto &offsets = this->get_offsets();
 
     query_node_flags_.assign(query_nodes.size(), 0);
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos) {
-            query_node_flags_[i] = 2 | (*is_mem_terminus_)[query_nodes[i]];
+            query_node_flags_[i] = 2 | (*is_mem_terminus_)[query_nodes[i]]
+                | (offsets[i] > 0)
+                | (i + 1 < query_nodes.size() && offsets[i + 1] > 0)
+                | (i && offsets[i - 1] > 0);
         }
     }
 }

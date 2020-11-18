@@ -4,6 +4,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
@@ -94,18 +95,20 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < graph.get_k()) {
-        // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
+        auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph);
+        if (!range_graph) {
+            auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            if (canonical)
+                range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph());
         }
 
-        // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
+        if (!range_graph) {
+            logger->error("Seeds of length < k can only be found with the succinct graph representation");
+            exit(1);
+        }
+    }
 
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
-
+    if (aligner_config.max_seed_length == graph.get_k()) {
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
 
@@ -117,7 +120,6 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           std::shared_ptr<DBGSuccinct> dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
@@ -154,25 +156,9 @@ void map_sequences_in_file(const std::string &file,
         assert(config.alignment_length <= graph.get_k());
 
         std::vector<DeBruijnGraph::node_index> graphindices;
-        if (config.alignment_length == graph.get_k()) {
-            graph.map_to_nodes(read_stream->seq.s,
-                               [&](const auto &node) {
-                                   graphindices.emplace_back(node);
-                               });
-        } else if (config.query_presence || config.count_kmers) {
-            // TODO: make more efficient
-            // TODO: canonicalization
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
-                    std::string_view(read_stream->seq.s + i, config.alignment_length),
-                    [&](auto node, auto) {
-                        if (graphindices.empty())
-                            graphindices.emplace_back(node);
-                    },
-                    config.alignment_length
-                );
-            }
-        }
+        graph.map_to_nodes(read_stream->seq.s, [&](const auto &node) {
+            graphindices.emplace_back(node);
+        });
 
         size_t num_discovered = std::count_if(graphindices.begin(), graphindices.end(),
                                               [](const auto &x) { return x > 0; });
@@ -209,25 +195,22 @@ void map_sequences_in_file(const std::string &file,
             return;
         }
 
-        if (config.alignment_length == graph.get_k()) {
-            for (size_t i = 0; i < graphindices.size(); ++i) {
-                assert(i + config.alignment_length <= read_stream->seq.l);
-                *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
-                     << ": " << graphindices[i] << "\n";
-            }
-        } else {
-            // map input subsequences to multiple nodes
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                // TODO: make more efficient
-                std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
+        const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph);
+        assert(config.alignment_length == graph.get_k() || range_graph);
 
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
-                    subseq,
-                    [&](auto node, auto) {
-                        *out << subseq << ": " << node << "\n";
-                    },
-                    config.alignment_length
-                );
+        for (size_t i = 0; i < graphindices.size(); ++i) {
+            assert(i + config.alignment_length <= read_stream->seq.l);
+            std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
+
+            size_t offset = range_graph && graphindices[i]
+                ? range_graph->get_offset(graphindices[i])
+                : 0;
+            if (!offset) {
+                *out << subseq << ": " << graphindices[i] << "\n";
+            } else {
+                range_graph->call_nodes_in_range(graphindices[i], [&](auto node) {
+                    *out << subseq << ": " << node << "\n";
+                });
             }
         }
 
@@ -256,6 +239,11 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
+    if (dbg && config->alignment_min_seed_length < graph->get_k()) {
+        logger->trace("Wrap as suffix range succinct DBG");
+        graph.reset(new DBGSuccinctRange(*dbg));
+    }
+
     if (config->canonical && !graph->is_canonical_mode()) {
         logger->trace("Wrap as canonical DBG");
         // TODO: check and wrap into canonical only if the graph is primary
@@ -274,10 +262,8 @@ int align_to_graph(Config *config) {
             config->alignment_length = graph->get_k();
         }
 
-        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
-                && config->alignment_length != graph->get_k()) {
-            logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct without --canonical flag");
+        if (!dbg && config->alignment_length != graph->get_k()) {
+            logger->error("Matching k-mers shorter than k only supported for DBGSuccinct");
             exit(1);
         }
 
@@ -290,7 +276,6 @@ int align_to_graph(Config *config) {
 
             map_sequences_in_file(file,
                                   *graph,
-                                  dbg,
                                   *config,
                                   timer,
                                   &thread_pool,
@@ -304,9 +289,8 @@ int align_to_graph(Config *config) {
 
     auto aligner = build_aligner(*graph, *config);
 
-    if (aligner->get_config().min_seed_length < graph->get_k()
-            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
+    if (!dbg && aligner->get_config().min_seed_length < graph->get_k()) {
+        logger->error("Matching k-mers shorter than k only supported for DBGSuccinct");
         exit(1);
     }
 

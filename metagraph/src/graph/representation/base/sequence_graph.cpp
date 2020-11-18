@@ -9,6 +9,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 
 
 namespace mtg {
@@ -480,6 +481,11 @@ void reverse_complement_seq_path(const SequenceGraph &graph,
                                  std::vector<SequenceGraph::node_index> &path) {
     if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
         canonical_dbg->reverse_complement(seq, path);
+        return;
+    }
+
+    if (const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph)) {
+        range_graph->reverse_complement(seq, path);
         return;
     }
 
