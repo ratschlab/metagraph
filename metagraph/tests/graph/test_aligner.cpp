@@ -1425,7 +1425,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 2;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
@@ -1454,7 +1453,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.min_seed_length = 1;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
@@ -1492,7 +1490,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;
@@ -1529,7 +1526,6 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;

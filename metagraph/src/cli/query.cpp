@@ -14,6 +14,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -122,30 +123,47 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                                  const std::vector<node_index> &nodes_in_full,
                                  const std::function<void(std::string&&,
                                                           node_index)> &callback,
-                                 size_t sub_k,
-                                 size_t max_num_nodes_per_suffix) {
+                                 size_t sub_k) {
     assert(sub_k < dbg_succ.get_k());
     assert(nodes_in_full.size() == contig.length() - dbg_succ.get_k() + 1);
+
+    DBGSuccinctRange range_graph(dbg_succ);
 
     for (size_t prev_match_len = 0, i = 0; i < nodes_in_full.size(); ++i) {
         if (!nodes_in_full[i]) {
             // if prefix[i:i+prev_match_len] was a match on the previous step, then
             // prefix[i+1:i+prev_match_len] of length prev_match_len-1 must be a match on this step
             size_t cur_match_len = prev_match_len ? prev_match_len - 1 : 0;
-            // TODO: call first |max_num_nodes_per_suffix| matches
-            //       and, if there are too many of them, discard them here
-            // TODO: test if this heuristic works and we need to discard large ranges at all
-            dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
+
+            bool checked = false;
+            node_index suffix_match = 0;
+            range_graph.map_to_nodes_sequentially(
                 std::string_view(&contig[i], dbg_succ.get_k()),
-                [&](node_index node, size_t match_len) {
-                    assert(match_len >= cur_match_len);
-                    cur_match_len = match_len;
-                    callback(dbg_succ.get_node_sequence(node), node);
+                [&](node_index node) {
+                    if (node) {
+                        size_t match_len = dbg_succ.get_k() - range_graph.get_offset(node);
+                        if (match_len >= std::max(sub_k, prev_match_len)) {
+                            assert(match_len >= cur_match_len);
+                            cur_match_len = match_len;
+                            suffix_match = node;
+                        }
+                    }
+
+                    checked = true;
                 },
-                std::max(sub_k, prev_match_len), // new match must be at least as long as previous
-                max_num_nodes_per_suffix
+                [&checked]() { return checked; }
             );
+
+            if (!suffix_match)
+                continue;
+
+            // TODO: call only a subset of these?
+            range_graph.call_nodes_in_range(suffix_match, [&](node_index node) {
+                callback(dbg_succ.get_node_sequence(node), node);
+            });
+
             prev_match_len = cur_match_len;
+
         } else {
             prev_match_len = dbg_succ.get_k();
         }
@@ -385,7 +403,6 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
 void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
                                    size_t sub_k,
-                                   size_t max_num_nodes_per_suffix,
                                    std::vector<std::pair<std::string, std::vector<node_index>>> *contigs,
                                    bool check_reverse_complement) {
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
@@ -402,15 +419,14 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
 
             added_nodes.emplace_back(std::move(kmer), node);
         };
-        call_suffix_match_sequences(full_dbg, contig, path,
-                                    callback, sub_k, max_num_nodes_per_suffix);
+        call_suffix_match_sequences(full_dbg, contig, path, callback, sub_k);
 
         if (check_reverse_complement) {
             std::string rev_contig = contig;
             reverse_complement(rev_contig);
             call_suffix_match_sequences(full_dbg, rev_contig,
                                         map_sequence_to_nodes(full_dbg, rev_contig),
-                                        callback, sub_k, max_num_nodes_per_suffix);
+                                        callback, sub_k);
         }
 
         #pragma omp critical
@@ -595,7 +611,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     size_t sub_k = full_dbg.get_k();
     size_t max_hull_forks = 0;
     size_t max_hull_depth = 0;
-    size_t max_num_nodes_per_suffix = 1;
     double max_hull_depth_per_seq_char = 0.0;
     if (config) {
         if (config->alignment_min_seed_length > full_dbg.get_k()) {
@@ -615,7 +630,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         max_hull_forks = config->max_hull_forks;
         max_hull_depth = config->max_hull_depth;
         max_hull_depth_per_seq_char = config->alignment_max_nodes_per_seq_char;
-        max_num_nodes_per_suffix = config->alignment_max_num_seeds_per_locus;
     }
 
     Timer timer;
@@ -694,8 +708,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       "suffixes of length {}...", sub_k);
         timer.reset();
 
-        add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
-                                      &contigs, canonical);
+        add_nodes_with_suffix_matches(*dbg_succ, sub_k, &contigs, canonical);
 
         logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
                       contigs.size() - original_size, timer.elapsed());

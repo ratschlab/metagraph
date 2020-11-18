@@ -164,7 +164,6 @@ class DBGAlignerConfig {
     size_t num_alternative_paths = 1;
     size_t min_seed_length = 1;
     size_t max_seed_length = std::numeric_limits<size_t>::max();
-    size_t max_num_seeds_per_locus = 1;
     // thresholds for scores
     score_t min_cell_score = 0;
     score_t min_path_score = 0;
@@ -207,16 +206,11 @@ class DBGAlignerConfig {
 template <typename NodeType>
 class DPTable;
 
-template <typename NodeType>
-class SuffixSeeder;
-
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 template <typename NodeType = SequenceGraph::node_index>
 class Alignment {
-  friend SuffixSeeder<NodeType>;
-
   public:
     typedef NodeType node_index;
     typedef DBGAlignerConfig::score_t score_t;

@@ -32,7 +32,7 @@ class IDBGAligner {
     virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
-template <class Seeder = ExactSeeder<>,
+template <class Seeder = ExactMapSeeder<>,
           class Extender = DefaultColumnExtender<>>
 class SeedAndExtendAligner : public IDBGAligner {
   public:
@@ -97,7 +97,7 @@ class SeedAndExtendAligner : public IDBGAligner {
 };
 
 
-template <class Seeder = ExactSeeder<>,
+template <class Seeder = ExactMapSeeder<>,
           class Extender = DefaultColumnExtender<>,
           class AlignmentCompare = std::less<Alignment<>>>
 class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {

@@ -33,7 +33,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.num_alternative_paths = config.alignment_num_alternative_paths;
     aligner_config.min_seed_length = config.alignment_min_seed_length;
     aligner_config.max_seed_length = config.alignment_max_seed_length;
-    aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
     aligner_config.max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char;
     aligner_config.max_ram_per_alignment = config.alignment_max_ram;
     aligner_config.min_cell_score = config.alignment_min_cell_score;
@@ -59,7 +58,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     logger->trace("\t Priority queue size: {}", aligner_config.queue_size);
     logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
     logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
-    logger->trace("\t Max num seeds per locus: {}", aligner_config.max_num_seeds_per_locus);
     logger->trace("\t Max num nodes per sequence char: {}", aligner_config.max_nodes_per_seq_char);
     logger->trace("\t Max RAM per alignment: {}", aligner_config.max_ram_per_alignment);
     logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
