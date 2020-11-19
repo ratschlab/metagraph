@@ -12,7 +12,7 @@
 #include "graph/annotated_dbg.hpp"
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
-constexpr uint64_t ROW_REDUCTION_WIDTH = 16;
+constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
 
 namespace mtg {
 namespace annot {
@@ -184,7 +184,7 @@ void traverse_anno_chunked(
         const std::vector<annot::ColumnCompressed<>> &col_annotations,
         const std::function<void(uint64_t chunk_size)> &before_chunk,
         const CallOnes &call_ones,
-        const std::function<void()> &after_chunk) {
+        const std::function<void(uint64_t chunk_begin)> &after_chunk) {
     if (col_annotations.empty())
         return;
 
@@ -255,7 +255,7 @@ void traverse_anno_chunked(
                 );
             }
         }
-        after_chunk();
+        after_chunk(chunk);
 
         progress_bar += succ_chunk.size();
     }
@@ -336,22 +336,39 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     }
 
+    ThreadPool async_writer(1, 1);
+
+    const bool new_reduction_vector = !std::filesystem::exists(row_reduction_fname);
+    if (new_reduction_vector) {
+        // create an empty vector
+        sdsl::int_vector_buffer(row_reduction_fname,
+                                std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
+    }
+
+    sdsl::int_vector_buffer row_reduction(row_reduction_fname,
+                                          std::ios::in | std::ios::out, 1024 * 1024);
+
+    if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
+        logger->error("Incompatible sizes of '{}': {} and '{}': {}",
+                      row_reduction_fname, row_reduction.size(),
+                      anchors_fname, anchor.size());
+        exit(1);
+    }
+
     // total number of set bits in the original rows
-    std::vector<uint32_t> row_nbits_batch;
-    const std::string temp_row_reduction_fname = row_reduction_fname + ".temp";
-    sdsl::int_vector_buffer source_row_nbits(temp_row_reduction_fname, std::ios::out,
-                                             1024 * 1024, ROW_REDUCTION_WIDTH);
+    std::vector<uint32_t> row_nbits_block;
+
     traverse_anno_chunked(
             "Compute diffs", anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
-                row_nbits_batch.assign(chunk_size, 0);
+                row_nbits_block.assign(chunk_size, 0);
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
                     uint64_t succ,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
 
-                __atomic_add_fetch(&row_nbits_batch[chunk_idx], 1, __ATOMIC_RELAXED);
+                __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
 
                 // add current bit if this node is an anchor
                 // or if the successor has zero bit
@@ -380,11 +397,20 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 }
             },
-            [&]() {
+            [&](uint64_t block_begin) {
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
-                for (uint32_t nbits : row_nbits_batch) {
-                    source_row_nbits.push_back(nbits);
-                }
+                std::vector<uint32_t> nbits_block;
+                nbits_block.swap(row_nbits_block);
+
+                async_writer.enqueue([&,block_begin,to_write{std::move(nbits_block)}]() {
+                    for (size_t i = 0; i < to_write.size(); ++i) {
+                        if (new_reduction_vector) {
+                            row_reduction.push_back(to_write[i]);
+                        } else {
+                            row_reduction[block_begin + i] += to_write[i];
+                        }
+                    }
+                });
             });
 
     #pragma omp parallel for num_threads(num_threads)
@@ -402,6 +428,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     }
 
+    async_writer.join();
+
     set_rows_fwd.clear(); // free up memory
     set_rows_bwd.clear();
 
@@ -410,30 +438,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         label_encoders.push_back(source.get_label_encoder());
     }
 
-    // free memory occupied by sources
+    // free memory occupied by original columns
     sources.clear();
-
-    if (std::filesystem::exists(row_reduction_fname)) {
-        logger->trace("Merging row reduction vectors {} and {}",
-                      row_reduction_fname, temp_row_reduction_fname);
-
-        sdsl::int_vector_buffer result(row_reduction_fname, std::ios::in | std::ios::out, 1024 * 1024);
-        if (result.size() != source_row_nbits.size()) {
-            logger->error("Incompatible sizes of '{}': {} and '{}': {}",
-                          row_reduction_fname, result.size(),
-                          temp_row_reduction_fname, source_row_nbits.size());
-            exit(1);
-        }
-        for (uint64_t i = 0; i < result.size(); ++i) {
-            result[i] += source_row_nbits[i];
-        }
-        source_row_nbits.close();
-        std::filesystem::remove(temp_row_reduction_fname);
-
-    } else {
-        source_row_nbits.close();
-        std::filesystem::rename(temp_row_reduction_fname, row_reduction_fname);
-    }
 
     std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
@@ -469,19 +475,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
 
-    sdsl::int_vector_buffer row_reduction(row_reduction_fname, std::ios::in | std::ios::out, 1024 * 1024);
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
-        row_nbits_batch.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
+        std::vector<uint32_t> row_nbits_batch(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
-            const auto &columns = row_diff[l_idx]->get_matrix().diffs().data();
-            for (size_t j = 0; j < columns.size(); ++j) {
-                const bit_vector &source_col = *columns[j];
-                source_col.call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+            for (const auto &col_ptr : row_diff[l_idx]->get_matrix().diffs().data()) {
+                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
                     [&](uint64_t i) {
                         __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
                     }
@@ -491,15 +494,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-        for (uint64_t i = 0; i < row_nbits_batch.size(); ++i) {
-            row_reduction[chunk + i] -= row_nbits_batch[i];
-            // check if the row reduction is negative
-            if (row_reduction[chunk + i] >> (row_reduction.width() - 1))
-                num_larger_rows++;
-        }
-
-        progress_bar += row_nbits_batch.size();
+        async_writer.enqueue([&,chunk,to_minus{std::move(row_nbits_batch)}]() {
+            for (uint64_t i = 0; i < to_minus.size(); ++i) {
+                row_reduction[chunk + i] -= to_minus[i];
+                // check if the row reduction is negative
+                if (row_reduction[chunk + i] >> (row_reduction.width() - 1))
+                    num_larger_rows++;
+            }
+            progress_bar += to_minus.size();
+        });
     }
+
+    async_writer.join();
 
     logger->trace("Rows with negative row reduction: {} in vector {}",
                   num_larger_rows, row_reduction_fname);
