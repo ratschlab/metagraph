@@ -800,6 +800,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
 }
 
+
 int query_graph(Config *config) {
     assert(config);
 
