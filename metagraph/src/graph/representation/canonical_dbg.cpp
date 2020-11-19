@@ -118,7 +118,7 @@ void CanonicalDBG
         if (terminate())
             return;
 
-        if (range_graph) {
+        if (range_graph && *it && *jt) {
             size_t fwd_offset = range_graph->get_offset(*jt);
             size_t rev_offset = range_graph->get_offset(*it);
             if (fwd_offset < rev_offset) {
@@ -180,7 +180,7 @@ void CanonicalDBG
                 callback(children[i], alphabet[i]);
         }
 
-    } catch (...) {
+    } catch (const std::range_error&) {
         size_t alph_size = alphabet.size();
         std::vector<node_index> children(alph_size);
 
@@ -248,7 +248,7 @@ void CanonicalDBG
                 callback(parents[i], alphabet[i]);
         }
 
-    } catch (...) {
+    } catch (const std::range_error&) {
         size_t alph_size = alphabet.size();
         std::vector<node_index> parents(alph_size);
 
@@ -436,7 +436,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
         try {
             return rev_comp_cache_.Get(node);
 
-        } catch (...) {
+        } catch (const std::range_error&) {
             std::string rev_seq = graph_.get_node_sequence(node);
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
@@ -450,7 +450,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     try {
         return is_palindrome_cache_.Get(node) ? node : node + offset_;
 
-    } catch (...) {
+    } catch (const std::range_error&) {
         std::string seq = graph_.get_node_sequence(node);
         std::string rev_seq = seq;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());

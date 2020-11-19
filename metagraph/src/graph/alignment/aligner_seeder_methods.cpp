@@ -122,10 +122,11 @@ void MEMSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos) {
-            query_node_flags_[i] = 2 | (*is_mem_terminus_)[query_nodes[i]]
-                | (offsets[i] > 0)
-                | (i + 1 < query_nodes.size() && offsets[i + 1] > 0)
-                | (i && offsets[i - 1] > 0);
+            query_node_flags_[i] = 2
+                | ((offsets[i] > 0)
+                || (i + 1 < query_nodes.size() && offsets[i + 1] > 0)
+                || (i && offsets[i - 1] > 0)
+                || (*is_mem_terminus_)[query_nodes[i]]);
         }
     }
 }
