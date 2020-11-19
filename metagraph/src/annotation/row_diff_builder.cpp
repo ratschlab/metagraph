@@ -460,16 +460,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
                                                          row_diff_bits[l_idx][j]);
         }
+        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
+                std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                std::move(label_encoders[l_idx]));
 
-        auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, ColumnMajor(std::move(columns)));
-        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(std::move(diff_annotation),
-                                                                   std::move(label_encoders[l_idx]));
         auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
                                 .filename()
                                 .replace_extension()
                                 .replace_extension(RowDiffColumnAnnotator::kExtension);
         row_diff[l_idx]->serialize(fpath);
+
         logger->trace("Serialized {}", fpath);
     }
     logger->trace("Removing temp directory: {}", tmp_path);
