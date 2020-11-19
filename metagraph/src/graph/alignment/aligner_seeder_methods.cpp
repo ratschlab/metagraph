@@ -197,6 +197,7 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
 }
 
 
+template class ExactMapSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
 
