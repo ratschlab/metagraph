@@ -215,35 +215,31 @@ BRWT BRWTBottomUpBuilder::build(
     uint64_t num_rows = 0;
 
     // prepare leaves
-    {
-        ThreadPool writing_pool(num_threads, 1);
-        get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
-            writing_pool.enqueue([&,i,column{column.release()}] {
-                uint64_t size = column->size();
+    get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
+        uint64_t size = column->size();
 
-                BRWT node;
-                node.assignments_ = RangePartition(Partition(1, { 0 }));
-                node.nonzero_rows_.reset(column);
+        BRWT node;
+        node.assignments_ = RangePartition(Partition(1, { 0 }));
+        node.nonzero_rows_ = std::make_unique<bit_vector_smart>(
+                                column->convert_to<bit_vector_smart>());
 
-                std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
-                node.serialize(out);
+        std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
+        node.serialize(out);
 
-                std::unique_lock<std::mutex> lock(done_mu);
-                done[i] = true;
+        std::unique_lock<std::mutex> lock(done_mu);
+        done[i] = true;
 
-                if (!num_rows)
-                    num_rows = size;
+        if (!num_rows)
+            num_rows = size;
 
-                if (size != num_rows) {
-                    logger->error("Can't merge columns of different size");
-                    exit(1);
-                }
+        if (size != num_rows) {
+            logger->error("Can't merge columns of different size");
+            exit(1);
+        }
 
-                ++progress_bar;
-                num_leaves++;
-            });
-        });
-    }
+        ++progress_bar;
+        num_leaves++;
+    });
 
     for (size_t i = 0; i < num_leaves; ++i) {
         if (linkage[i].size()) {

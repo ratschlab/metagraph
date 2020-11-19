@@ -182,7 +182,7 @@ int transform_annotation(Config *config) {
             size_t num_columns = 0;
             std::string extension = input_anno_type == Config::ColumnCompressed
                     ? ColumnCompressed<>::kExtension
-                    : RowDiffAnnotator::kExtension;
+                    : RowDiffColumnAnnotator::kExtension;
             for (std::string file : files) {
                 file = utils::remove_suffix(file, extension) + extension;
                 std::ifstream instream(file, std::ios::binary);
@@ -262,13 +262,12 @@ int transform_annotation(Config *config) {
         } else {
             success = merge_load_row_diff(files, on_column, get_num_threads());
         }
+        subsampling_pool.join();
 
         if (!success) {
             logger->error("Cannot load annotations");
             exit(1);
         }
-
-        subsampling_pool.join();
 
         // arrange the columns in their original order
         std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
@@ -500,7 +499,7 @@ int transform_annotation(Config *config) {
                 std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
                 if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
                     logger->trace("Loading annotation from disk...");
-                    auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                    auto row_diff_anno = std::make_unique<RowDiffColumnAnnotator>();
                     if (!row_diff_anno->merge_load(files))
                         std::exit(1);
 
@@ -531,7 +530,7 @@ int transform_annotation(Config *config) {
 
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
-                auto row_diff_anno = std::make_unique<RowDiffAnnotator>();
+                auto row_diff_anno = std::make_unique<RowDiffColumnAnnotator>();
                 if (!row_diff_anno->merge_load(files))
                     std::exit(1);
                 std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse

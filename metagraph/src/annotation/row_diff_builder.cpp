@@ -11,7 +11,7 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 20;
+constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 16;
 
 namespace mtg {
@@ -33,7 +33,6 @@ void build_successor(const std::string &graph_fname,
         && std::filesystem::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
         logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
         return;
-
     }
     logger->trace("Building and writing successor, predecessor and anchor files to {}.*",
                   outfbase);
@@ -215,20 +214,28 @@ void traverse_anno_chunked(
         before_chunk(block_size);
 
         succ_chunk.resize(block_size);
-        pred_chunk.resize(0);
-        pred_chunk_idx.resize(block_size + 1);
-        pred_chunk_idx[0] = 0;
-
         for (uint64_t i = 0; i < block_size; ++i) {
             succ_chunk[i] = succ[chunk + i];
-            pred_chunk_idx[i + 1] = pred_chunk_idx[i];
+        }
+
+        // read predecessor offsets
+        pred_chunk_idx.resize(block_size + 1);
+        pred_chunk_idx[0] = 0;
+        for (uint64_t i = 1; i <= block_size; ++i) {
+            // find where the last predecessor for the node ends
+            pred_chunk_idx[i] = pred_chunk_idx[i - 1];
             while (*pred_boundary_it == 0) {
-                ++pred_chunk_idx[i + 1];
-                pred_chunk.push_back(*pred_it);
-                ++pred_it;
+                ++pred_chunk_idx[i];
                 ++pred_boundary_it;
             }
             ++pred_boundary_it;
+        }
+
+        // read all predecessors for the block
+        pred_chunk.resize(pred_chunk_idx.back());
+        for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
+            pred_chunk[i] = *pred_it;
+            ++pred_it;
         }
 
         assert(pred_chunk.size() == pred_chunk_idx.back());
@@ -236,11 +243,11 @@ void traverse_anno_chunked(
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
-                const std::unique_ptr<bit_vector> &source_col
-                        = col_annotations[l_idx].get_matrix().data()[j];
-                source_col->call_ones_in_range(chunk, chunk + block_size,
+                const bit_vector &source_col
+                        = *col_annotations[l_idx].get_matrix().data()[j];
+                source_col.call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
-                        call_ones(*source_col, i, i - chunk, l_idx, j,
+                        call_ones(source_col, i, i - chunk, l_idx, j,
                                   succ_chunk[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
@@ -260,7 +267,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
-                               const std::string &row_reduction_fname) {
+                               const std::string &row_reduction_fname,
+                               uint64_t buf_size) {
     if (source_files.empty())
         return;
 
@@ -311,8 +319,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_diff_bits[s][j] += v.size();
     };
 
-    constexpr uint64_t BUF_SIZE = 1'000'000;
-
     #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {
         set_rows_fwd[s].resize(sources[s].num_labels());
@@ -325,8 +331,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             std::filesystem::create_directories(tmp_dir(s, j));
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
-            set_rows_bwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
-            set_rows_fwd[s][j].reserve(std::min(BUF_SIZE, original_nbits));
+            set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
+            set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
         }
     }
 
@@ -429,12 +435,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::filesystem::rename(temp_row_reduction_fname, row_reduction_fname);
     }
 
-    std::vector<std::unique_ptr<RowDiffAnnotator>> row_diff(label_encoders.size());
+    std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
+
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             auto call_ones = [&](const std::function<void(uint64_t)>& call) {
                 std::vector<std::string> filenames;
@@ -450,12 +457,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
                 nullptr, ColumnMajor(std::move(columns)));
-        row_diff[l_idx] = std::make_unique<RowDiffAnnotator>(std::move(diff_annotation),
-                                                             std::move(label_encoders[l_idx]));
+        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(std::move(diff_annotation),
+                                                                   std::move(label_encoders[l_idx]));
         auto fname = std::filesystem::path(source_files[l_idx])
                 .filename()
                 .replace_extension()
-                .replace_extension(RowDiffAnnotator::kExtension);
+                .replace_extension(RowDiffColumnAnnotator::kExtension);
         auto fpath = dest_dir/fname;
         row_diff[l_idx]->serialize(fpath);
         logger->trace("Serialized {}", fpath);
@@ -474,8 +481,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
             const auto &columns = row_diff[l_idx]->get_matrix().diffs().data();
             for (size_t j = 0; j < columns.size(); ++j) {
-                const std::unique_ptr<bit_vector> &source_col = columns[j];
-                source_col->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+                const bit_vector &source_col = *columns[j];
+                source_col.call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
                     [&](uint64_t i) {
                         __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
                     }

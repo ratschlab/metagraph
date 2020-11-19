@@ -202,13 +202,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     bool merge_successful = merge_load(filenames,
         [&](uint64_t, const Label &label, std::unique_ptr<bit_vector>&& column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("Column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
             #pragma omp critical
             {
-                uint64_t num_set_bits = column->num_set_bits();
-                logger->trace("Column: {}, Density: {}, Set bits: {}", label,
-                              static_cast<double>(num_set_bits) / column->size(),
-                              num_set_bits);
-
                 // set |num_rows_| with the first column inserted
                 if (!bitmatrix_.size())
                     num_rows_ = column->size();
@@ -228,7 +228,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 }
             }
         },
-        filenames.size() > get_num_threads() ? get_num_threads() : 0
+        filenames.size() > 1u ? get_num_threads() : 0
     );
 
     if (merge_successful && no_errors) {
@@ -287,33 +287,26 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
             std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
-                throw std::ifstream::failure("can't open stream");
+                throw std::ifstream::failure("can't open stream " + filename);
 
             const auto num_rows = load_number(instream);
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
-                throw std::ifstream::failure("can't load label encoder");
+                throw std::ifstream::failure("can't load label encoder from " + filename);
 
             if (!label_encoder_load.size())
                 logger->warn("No labels in {}", filename);
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
+                auto new_column = std::make_unique<bit_vector_smart>();
 
-                auto pos = instream.tellg();
-
-                if (!new_column->load(instream)) {
-                    instream.seekg(pos, instream.beg);
-
-                    new_column = std::make_unique<bit_vector_sd>();
-                    if (!new_column->load(instream))
-                        throw std::ifstream::failure("can't load next column");
-                }
+                if (!new_column->load(instream))
+                    throw std::ifstream::failure("can't load next column " + filename);
 
                 if (new_column->size() != num_rows)
-                    throw std::ifstream::failure("inconsistent column size");
+                    throw std::ifstream::failure("inconsistent column size " + filename);
 
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
