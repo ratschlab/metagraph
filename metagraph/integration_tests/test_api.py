@@ -209,7 +209,7 @@ class TestAPIRawChain(TestAPIBase):
 
         return Popen(shlex.split(construct_command))
 
-    @parameterized.expand([(1,1), (3,1)])
+    @parameterized.expand([(1, 1), (3, 1)])
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
