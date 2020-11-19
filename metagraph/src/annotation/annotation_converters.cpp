@@ -37,7 +37,7 @@ using mtg::common::logger;
 typedef LabelEncoder<std::string> LEncoder;
 
 const size_t kNumRowsInBlock = 50'000;
-const uint64_t ROW_DIFF_BUFFER_SIZE = 500'000;
+const uint64_t ROW_DIFF_BUFFER_SIZE = 10;
 
 
 template <class RowCallback>
