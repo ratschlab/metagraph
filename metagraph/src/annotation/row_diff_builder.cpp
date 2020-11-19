@@ -459,11 +459,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 nullptr, ColumnMajor(std::move(columns)));
         row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(std::move(diff_annotation),
                                                                    std::move(label_encoders[l_idx]));
-        auto fname = std::filesystem::path(source_files[l_idx])
-                .filename()
-                .replace_extension()
-                .replace_extension(RowDiffColumnAnnotator::kExtension);
-        auto fpath = dest_dir/fname;
+        auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
+                                .filename()
+                                .replace_extension()
+                                .replace_extension(RowDiffColumnAnnotator::kExtension);
         row_diff[l_idx]->serialize(fpath);
         logger->trace("Serialized {}", fpath);
     }
