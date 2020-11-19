@@ -310,10 +310,6 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
         score_track -= gap_diff;
 
     score_t correction = score_col.at(i) - score_track;
-    if (correction < 0) {
-        logger->warn("Incorrect score found: {} -> {}\nQuery: {}",
-                     score_, score_ + correction, query_view);
-    }
 
     // assert(correction >= 0);
 
@@ -347,6 +343,14 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                    out_columns.rend(),
                    sequence_.begin(),
                    [](const auto &iter) { return iter->second.last_char; });
+
+    if (correction < 0) {
+        logger->warn("Incorrect score found: {} -> {}\nQuery: {}\nTarget: {}\nCIGAR: {}",
+                     score_, score_ + correction,
+                     seed.get_sequence() + std::string(query_view),
+                     seed.get_sequence() + sequence_,
+                     seed.get_cigar().to_string() + cigar_.to_string());
+    }
 }
 
 template <typename NodeType>
@@ -552,6 +556,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
     mapping["position"] = position;
 
+    // handle alignment to the first node
     while (cur_pos < node_size && cigar_it != cigar_.end()) {
         assert(cigar_it->second > cigar_offset);
         size_t next_pos = std::min(node_size,
@@ -575,12 +580,16 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
+
+                // the target is not consumed, so reset the position
+                next_pos = cur_pos;
             } break;
             case Cigar::INSERTION: {
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 //edit["to_length"] = 0;
             } break;
             case Cigar::MATCH: {
+                assert(query_start + next_size <= query_end_);
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 query_start += next_size;
@@ -607,6 +616,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     mapping["rank"] = rank++;
     path["mapping"].append(mapping);
 
+    // handle the rest of the alignment
     for (auto node_it = nodes_.begin() + 1; node_it != nodes_.end(); ++node_it) {
         assert(cigar_it != cigar_.end());
         assert(cigar_it->second > cigar_offset);
