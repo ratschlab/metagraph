@@ -109,8 +109,10 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     // e.g., suppose node: GTCC$$, prev_char: c
     // then traverse_back: GTCC$$ -> CGTCC$
 
-    // TODO: more efficient implementation
+    // In the actual implementation, the range is represented by $$GTCC, so
+    // this function does $$GTCC -> $CGTCC, then sets is_sink to true
 
+    // TODO: more efficient implementation
     std::string tmp = get_node_sequence(node);
     std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
     tmp[0] = prev_char;
@@ -442,8 +444,8 @@ void DBGSuccinctRange
 
     const auto &boss_graph = dbg_succ_.get_boss();
     auto [edge_range, is_sink] = fetch_edge_range(kmer);
+    auto [first, last, offset] = edge_range;
     if (!is_sink) {
-        auto [first, last, offset] = edge_range;
         if (offset == boss_graph.get_k()) {
             callback(toggle_node_sink_source(kmer), boss::BOSS::kSentinel);
             return;
@@ -452,12 +454,46 @@ void DBGSuccinctRange
         throw std::runtime_error("Not implemented: use an LCS array");
     }
 
-    for (boss::BOSS::TAlphabet s = 1; s < boss_graph.alph_size; ++s) {
-        char c = boss_graph.decode(s);
-        auto prev_node = traverse_back(kmer, c);
-        if (prev_node)
-            callback(prev_node, c);
+    // TODO: more efficient
+    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
+        last, boss_graph.get_k() - offset - 1
+    );
+
+    if (!last_char)
+        return;
+
+    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
+        first, boss_graph.get_k() - offset - 1
+    );
+
+    first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
+
+    std::string tmp = get_node_sequence(kmer);
+    std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
+    for (auto s = first_char; s <= last_char; ++s) {
+        tmp[0] = boss_graph.decode(s);
+
+        node_index prev_node = kmer_to_node(tmp);
+        assert(!prev_node || tmp == get_node_sequence(prev_node));
+
+        if (!prev_node)
+            continue;
+
+        assert(prev_node < offset_ || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
+
+        callback(prev_node, tmp[0]);
     }
+}
+
+void DBGSuccinctRange
+::adjacent_incoming_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    if (node < offset_) {
+        dbg_succ_.adjacent_incoming_nodes(node, callback);
+        return;
+    }
+
+    call_incoming_kmers(node, [&](node_index prev_node, char) { callback(prev_node); });
 }
 
 void DBGSuccinctRange
@@ -509,29 +545,39 @@ void DBGSuccinctRange
     }
 }
 
-void DBGSuccinctRange
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    if (node < offset_) {
-        dbg_succ_.adjacent_incoming_nodes(node, callback);
-        return;
-    }
-
-    // TODO: more efficient
-    call_incoming_kmers(node, [&](node_index prev_node, char) { callback(prev_node); });
-}
-
 std::string DBGSuccinctRange::get_node_sequence(node_index node) const {
     if (node < offset_)
         return dbg_succ_.get_node_sequence(node);
 
     auto [edge_range, is_sink] = fetch_edge_range(node);
     auto [first, last, offset] = edge_range;
-    std::string base = dbg_succ_.get_boss().get_node_str(last).substr(offset);
-    assert(base.length() < dbg_succ_.get_k());
 
-    return is_sink ? base + std::string(dbg_succ_.get_k() - base.length(), '$')
-                   : std::string(dbg_succ_.get_k() - base.length(), '$') + base;
+    const auto &boss_graph = dbg_succ_.get_boss();
+
+    std::vector<boss::BOSS::TAlphabet> seq;
+
+    size_t match_size = boss_graph.get_k() - offset;
+    size_t indexed_suffix_length = boss_graph.get_indexed_suffix_length();
+    if (match_size >= indexed_suffix_length) {
+        seq = boss_graph.get_node_seq(last);
+        seq.push_back(boss::BOSS::kSentinelCode);
+        std::fill(seq.begin(), seq.begin() + offset, boss::BOSS::kSentinelCode);
+        std::rotate(seq.begin(),
+                    is_sink ? seq.begin() + offset : seq.end() - 1,
+                    seq.end());
+
+    } else {
+        seq.resize(match_size + 1, boss::BOSS::kSentinelCode);
+        for (auto it = seq.rbegin(); it != seq.rend() - 1; ++it) {
+            *it = boss_graph.get_node_last_value(last);
+            last = boss_graph.bwd(last);
+        }
+
+        if (is_sink)
+            std::rotate(seq.begin(), seq.begin() + offset + 1, seq.end());
+    }
+
+    return boss_graph.decode(seq);
 }
 
 size_t DBGSuccinctRange::get_offset(node_index node) const {
