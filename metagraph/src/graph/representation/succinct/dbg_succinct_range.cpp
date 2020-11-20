@@ -553,30 +553,11 @@ std::string DBGSuccinctRange::get_node_sequence(node_index node) const {
 
     const auto &boss_graph = dbg_succ_.get_boss();
 
-    std::vector<boss::BOSS::TAlphabet> seq;
-
     size_t match_size = boss_graph.get_k() - offset;
-    size_t indexed_suffix_length = boss_graph.get_indexed_suffix_length();
-    if (indexed_suffix_length) {
-        // TODO: fetch only the part that's needed
-        seq = boss_graph.get_node_seq(last);
-        seq.push_back(boss::BOSS::kSentinelCode);
-        std::fill(seq.begin(), seq.begin() + offset, boss::BOSS::kSentinelCode);
-        std::rotate(seq.begin(),
-                    is_sink ? seq.begin() + offset : seq.end() - 1,
-                    seq.end());
-
-    } else {
-        seq.resize(dbg_succ_.get_k(), boss::BOSS::kSentinelCode);
-        auto end = seq.rbegin() + match_size;
-        for (auto it = seq.rbegin(); it != end; ++it) {
-            *it = boss_graph.get_node_last_value(last);
-            last = boss_graph.bwd(last);
-        }
-
-        if (is_sink)
-            std::rotate(seq.begin(), seq.begin() + offset + 1, seq.end());
-    }
+    std::vector<boss::BOSS::TAlphabet> seq = boss_graph.get_node_seq(last, match_size);
+    seq.resize(dbg_succ_.get_k(), boss::BOSS::kSentinelCode);
+    if (!is_sink)
+        std::rotate(seq.begin(), seq.begin() + match_size, seq.end());
 
     assert(seq.size() == dbg_succ_.get_k());
 
