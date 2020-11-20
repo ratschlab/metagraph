@@ -50,7 +50,6 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         return 0;
 
     if (!offset) {
-        assert(boss_graph.succ_last(first) == last);
         auto edge = boss_graph.pick_edge(last, c);
         node_index next_node = edge ? dbg_succ_.boss_to_kmer_index(edge) : 0;
         assert(!next_node
@@ -102,11 +101,47 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     if (!is_sink)
         return 0;
 
+    const auto &boss_graph = dbg_succ_.get_boss();
+    auto [first, last, offset] = edge_range;
+    auto s = boss_graph.encode(prev_char);
+
     // e.g., suppose node: GTCC$$, prev_char: c
     // then traverse_back: GTCC$$ -> CGTCC$
 
     // In the actual implementation, the range is represented by $$GTCC, so
     // this function does $$GTCC -> $CGTCC, then sets is_sink to true
+
+    if (!offset) {
+        return dbg_succ_.boss_to_kmer_index(
+            boss_graph.pick_incoming_edge(boss_graph.bwd(last), s)
+        );
+    }
+
+    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
+        last, boss_graph.get_k() - offset
+    );
+
+    if (last_char < s)
+        return 0;
+
+    if (first == last) {
+        if (last_char != s)
+            return 0;
+
+        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
+        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
+        lock.unlock();
+
+        return toggle_node_sink_source(next_index);
+    }
+
+    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
+        first, boss_graph.get_k() - offset
+    );
+
+    if (first_char > s)
+        return 0;
 
     // TODO: more efficient implementation
     std::string tmp = get_node_sequence(node);
@@ -403,9 +438,9 @@ void DBGSuccinctRange
     }
 
     if (!offset) {
-        assert(boss_graph.succ_last(first) == last);
-        for (size_t i = first; i <= last; ++i) {
+        for (size_t i = boss_graph.pred_last(last - 1) + 1; i <= last; ++i) {
             auto next_node = dbg_succ_.boss_to_kmer_index(i);
+            assert(traverse(kmer, boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size)) == next_node);
             if (next_node)
                 callback(next_node, boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size));
         }
@@ -432,6 +467,56 @@ void DBGSuccinctRange
 }
 
 void DBGSuccinctRange
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    if (node < offset_) {
+        dbg_succ_.adjacent_outgoing_nodes(node, callback);
+        return;
+    }
+
+    const auto &boss_graph = dbg_succ_.get_boss();
+    auto [edge_range, is_sink] = fetch_edge_range(node);
+    auto [first, last, offset] = edge_range;
+    if (is_sink) {
+        if (offset == boss_graph.get_k()) {
+            callback(toggle_node_sink_source(node));
+            return;
+        }
+
+        // TODO: Use an LCS array to create a sink dummy k-mer
+        return;
+    }
+
+    if (!offset) {
+        for (size_t i = boss_graph.pred_last(last - 1) + 1; i <= last; ++i) {
+            auto next_node = dbg_succ_.boss_to_kmer_index(i);
+            assert(traverse(node, boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size)) == next_node);
+            if (next_node)
+                callback(next_node);
+        }
+
+        return;
+    }
+
+    // TODO: reimplement with sdsl::wt_pc::interval_symbols?
+    for (boss::BOSS::TAlphabet c = 1; c < boss_graph.alph_size; ++c) {
+        auto next_first = first;
+        auto next_last = last;
+        if (!boss_graph.tighten_range(&next_first, &next_last, c))
+            continue;
+
+        assert(next_first <= next_last);
+        assert(offset > 1 || boss_graph.succ_last(next_first) == next_last);
+
+        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(next_first, next_last, offset - 1).first;
+        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
+        lock.unlock();
+        callback(next_index);
+    }
+}
+
+void DBGSuccinctRange
 ::call_incoming_kmers(node_index kmer, const IncomingEdgeCallback &callback) const {
     if (kmer < offset_) {
         dbg_succ_.call_incoming_kmers(kmer, callback);
@@ -452,18 +537,23 @@ void DBGSuccinctRange
     }
 
     if (!offset) {
-        node_index node = dbg_succ_.boss_to_kmer_index(last);
-        if (node) {
-            dbg_succ_.call_incoming_kmers(node, callback);
-        } else {
-            // we're at a dummy sink k-mer in the underlying graph
-            assert(false);
-        }
+        boss_graph.call_incoming_to_target(boss_graph.bwd(last),
+            boss_graph.get_node_last_value(last),
+            [&](boss::BOSS::edge_index incoming_boss_edge) {
+                auto prev = dbg_succ_.boss_to_kmer_index(incoming_boss_edge);
+                if (prev != npos) {
+                    callback(prev,
+                        boss_graph.decode(
+                            boss_graph.get_minus_k_value(incoming_boss_edge, boss_graph.get_k() - 1).first
+                        )
+                    );
+                }
+            }
+        );
 
         return;
     }
 
-    // TODO: more efficient
     auto [last_char, last_minus] = boss_graph.get_minus_k_value(
         last, boss_graph.get_k() - offset
     );
@@ -488,6 +578,7 @@ void DBGSuccinctRange
     assert(first_char <= last_char);
     first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
 
+    // TODO: better implementation
     std::string tmp = get_node_sequence(kmer);
     std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
 
@@ -513,56 +604,71 @@ void DBGSuccinctRange
         return;
     }
 
-    call_incoming_kmers(node, [&](node_index prev_node, char) { callback(prev_node); });
-}
-
-void DBGSuccinctRange
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    if (node < offset_) {
-        dbg_succ_.adjacent_outgoing_nodes(node, callback);
-        return;
-    }
-
     const auto &boss_graph = dbg_succ_.get_boss();
     auto [edge_range, is_sink] = fetch_edge_range(node);
     auto [first, last, offset] = edge_range;
-    if (is_sink) {
+    if (!is_sink) {
         if (offset == boss_graph.get_k()) {
             callback(toggle_node_sink_source(node));
             return;
         }
 
-        // TODO: Use an LCS array to create a sink dummy k-mer
+        // TODO: Use an LCS array to create a source dummy k-mer
         return;
     }
 
     if (!offset) {
-        assert(boss_graph.succ_last(first) == last);
-        for (size_t i = first; i <= last; ++i) {
-            auto next_node = dbg_succ_.boss_to_kmer_index(i);
-            if (next_node)
-                callback(next_node);
-        }
+        boss_graph.call_incoming_to_target(boss_graph.bwd(last),
+            boss_graph.get_node_last_value(last),
+            [&](boss::BOSS::edge_index incoming_boss_edge) {
+                auto prev = dbg_succ_.boss_to_kmer_index(incoming_boss_edge);
+                if (prev != npos)
+                    callback(prev);
+            }
+        );
 
         return;
     }
 
-    // TODO: reimplement with sdsl::wt_pc::interval_symbols?
-    for (boss::BOSS::TAlphabet c = 1; c < boss_graph.alph_size; ++c) {
-        auto next_first = first;
-        auto next_last = last;
-        if (!boss_graph.tighten_range(&next_first, &next_last, c))
-            continue;
+    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
+        last, boss_graph.get_k() - offset
+    );
 
-        assert(next_first <= next_last);
-        assert(offset > 1 || boss_graph.succ_last(next_first) == next_last);
+    if (!last_char)
+        return;
 
+    if (first == last) {
         std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(next_first, next_last, offset - 1).first;
+        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
         size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
         lock.unlock();
-        callback(next_index);
+
+        callback(toggle_node_sink_source(next_index));
+        return;
+    }
+
+    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
+        first, boss_graph.get_k() - offset
+    );
+
+    assert(first_char <= last_char);
+    first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
+
+    // TODO: better implementation
+    std::string tmp = get_node_sequence(node);
+    std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
+
+    for (auto s = first_char; s <= last_char; ++s) {
+        tmp[0] = boss_graph.decode(s);
+
+        node_index prev_node = kmer_to_node(tmp);
+
+        if (prev_node) {
+            assert(tmp == get_node_sequence(prev_node));
+            assert(prev_node < offset_
+                || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
+            callback(prev_node);
+        }
     }
 }
 
