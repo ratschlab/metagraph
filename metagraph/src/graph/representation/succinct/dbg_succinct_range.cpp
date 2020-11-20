@@ -171,28 +171,6 @@ void DBGSuccinctRange::traverse(node_index start,
     }
 }
 
-DBGSuccinctRange::node_index DBGSuccinctRange
-::kmer_to_node(const boss::BOSS::TAlphabet *begin,
-               const boss::BOSS::TAlphabet *end) const {
-    const auto &boss_graph = dbg_succ_.get_boss();
-    assert(begin <= end);
-    assert(boss_graph.get_k() >= static_cast<size_t>(end - begin));
-
-    if (std::find(begin, end, boss_graph.alph_size) != end)
-        return 0;
-
-    auto [first, last, seq_it] = boss_graph.index_range(begin, end);
-
-    if (first == 0 || last == 0 || seq_it == begin) {
-        return 0;
-    } else {
-        std::lock_guard<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last,
-                                      boss_graph.get_k() - (seq_it - begin)).first;
-        return offset_ + ((it - edge_pairs_.begin()) * 2);
-    }
-}
-
 void DBGSuccinctRange
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
@@ -378,43 +356,65 @@ bool DBGSuccinctRange::has_single_incoming(node_index node) const {
     return indegree(node) == 1;
 }
 
+DBGSuccinctRange::node_index DBGSuccinctRange
+::kmer_to_node(const boss::BOSS::TAlphabet *begin,
+               const boss::BOSS::TAlphabet *end) const {
+    const auto &boss_graph = dbg_succ_.get_boss();
+    assert(begin <= end);
+    assert(boss_graph.get_k() >= static_cast<size_t>(end - begin));
+
+    if (std::find(begin, end, boss_graph.alph_size) != end)
+        return 0;
+
+    auto [first, last, seq_it] = boss_graph.index_range(begin, end);
+
+    if (first == 0 || last == 0 || seq_it == begin) {
+        return 0;
+    } else {
+        std::lock_guard<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(first, last,
+                                      boss_graph.get_k() - (seq_it - begin)).first;
+        return offset_ + ((it - edge_pairs_.begin()) * 2);
+    }
+}
+
 DBGSuccinctRange::node_index DBGSuccinctRange::kmer_to_node(std::string_view kmer) const {
     assert(kmer.size() <= dbg_succ_.get_k());
-    node_index ret_val = 0;
-    bool mapped = false;
-
-    // only check this string, not its suffixes
-    map_to_nodes_sequentially(kmer,
-        [&](node_index node) {
-            ret_val = node;
-            mapped = true;
-        },
-        [&]() { return mapped; }
-    );
-
-    if (ret_val < offset_)
-        return ret_val;
-
-    auto [edge_range, is_sink] = fetch_edge_range(ret_val);
-    auto [first, last, offset] = edge_range;
-    ++offset;
-    if (offset) {
-        if (kmer[0] == boss::BOSS::kSentinel) {
-            size_t seq_offset = kmer.rfind(boss::BOSS::kSentinel) + 1;
-            assert(offset >= seq_offset);
-            if (offset > seq_offset)
-                return 0;
-        } else if (kmer.back() == boss::BOSS::kSentinel) {
-            size_t seq_offset = kmer.size() - kmer.find(boss::BOSS::kSentinel);
-            assert(offset >= seq_offset);
-            if (offset > seq_offset)
-                return 0;
-        } else {
-            return 0;
-        }
+    if (kmer.size() == dbg_succ_.get_k() && kmer.front() != boss::BOSS::kSentinel
+            && kmer.back() != boss::BOSS::kSentinel) {
+        return dbg_succ_.kmer_to_node(kmer);
     }
 
-    return ret_val;
+    const auto &boss_graph = dbg_succ_.get_boss();
+    auto encoded = encode_sequence(dbg_succ_.get_boss(), kmer);
+    boss::BOSS::TAlphabet *start;
+    boss::BOSS::TAlphabet *end;
+    bool is_sink = false;
+    if (kmer.size() < dbg_succ_.get_k()) {
+        assert(kmer.front() != boss::BOSS::kSentinel);
+        assert(kmer.back() != boss::BOSS::kSentinel);
+        start = encoded.data();
+        end = start + encoded.size();
+    } else if (kmer.front() == boss::BOSS::kSentinel) {
+        end = encoded.data() + encoded.size();
+        start = end - (std::find(encoded.rbegin(), encoded.rend(),
+                                 boss::BOSS::kSentinelCode) - encoded.rbegin());
+    } else {
+        assert(kmer.back() == boss::BOSS::kSentinel);
+        is_sink = true;
+        start = encoded.data();
+        end = std::find(start, start + encoded.size(), boss::BOSS::kSentinelCode);
+    }
+
+    assert(start + boss_graph.get_k() >= end);
+
+    auto base_node = kmer_to_node(start, end);
+    size_t offset = std::get<2>(fetch_edge_range(base_node).first);
+    assert(static_cast<size_t>(end - start) + offset >= boss_graph.get_k());
+    if (static_cast<size_t>(end - start) + offset > boss_graph.get_k())
+        return 0;
+
+    return base_node + is_sink;
 }
 
 void DBGSuccinctRange
