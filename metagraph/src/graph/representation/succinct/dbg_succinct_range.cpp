@@ -453,6 +453,18 @@ void DBGSuccinctRange
         throw std::runtime_error("Not implemented: use an LCS array");
     }
 
+    if (!offset) {
+        node_index node = dbg_succ_.boss_to_kmer_index(last);
+        if (node) {
+            dbg_succ_.call_incoming_kmers(node, callback);
+        } else {
+            // we're at a dummy sink k-mer in the underlying graph
+            throw std::runtime_error("Not implemented yet");
+        }
+
+        return;
+    }
+
     // TODO: more efficient
     auto [last_char, last_minus] = boss_graph.get_minus_k_value(
         last, boss_graph.get_k() - offset
@@ -461,20 +473,21 @@ void DBGSuccinctRange
     if (!last_char)
         return;
 
-    boss::BOSS::TAlphabet first_char;
-    boss::BOSS::edge_index first_minus;
-
     if (first == last) {
-        first_char = last_char;
-        first_minus = last_minus;
-    } else {
-        std::tie(first_char, first_minus) = boss_graph.get_minus_k_value(
-            first, boss_graph.get_k() - offset
-        );
+        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
+        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
+        lock.unlock();
 
-        assert(first_char <= last_char);
+        callback(toggle_node_sink_source(next_index), boss_graph.decode(last_char));
+        return;
     }
 
+    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
+        first, boss_graph.get_k() - offset
+    );
+
+    assert(first_char <= last_char);
     first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
 
     std::string tmp = get_node_sequence(kmer);
