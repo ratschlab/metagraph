@@ -734,7 +734,6 @@ void DBGSuccinctRange
 
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
-    // TODO: if dbg_succ_.is_canonical_mode(), skip k-mers not found in forward
     std::vector<node_index> rev_path = map_sequence_to_nodes(*this, rev_seq);
 
     if (path.size() < rev_path.size()) {
