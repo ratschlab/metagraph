@@ -457,8 +457,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 //TODO: benchmark using Elias-Fano encoders + merger
                 common::merge_files<uint64_t>(filenames, call);
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
-                                                         row_diff_bits[l_idx][j]);
+            try {
+                columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
+                                                             row_diff_bits[l_idx][j]);
+            } catch (const std::exception &e) {
+                logger->error("Error when building column {}. Exception: {}",
+                              source_files[l_idx], e.what());
+                columns[j] = std::make_unique<bit_vector_sd>([](auto) {}, anchor.size(), 0);
+            }
         }
         row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
                 std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
