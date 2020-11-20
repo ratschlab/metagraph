@@ -150,17 +150,14 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     if (std::find(begin, end, boss_graph.alph_size) != end)
         return 0;
 
-    auto index_range = boss_graph.index_range(begin, end);
+    auto [first, last, seq_it] = boss_graph.index_range(begin, end);
 
-    if (std::get<0>(index_range) == 0 || std::get<1>(index_range) == 0
-            || std::get<2>(index_range) == begin) {
+    if (first == 0 || last == 0 || seq_it == begin) {
         return 0;
     } else {
         std::lock_guard<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(
-            std::get<0>(index_range), std::get<1>(index_range),
-            boss_graph.get_k() - (std::get<2>(index_range) - begin)
-        ).first;
+        auto it = edge_pairs_.emplace(first, last,
+                                      boss_graph.get_k() - (seq_it - begin)).first;
         return offset_ + ((it - edge_pairs_.begin()) * 2);
     }
 }
@@ -249,6 +246,8 @@ void DBGSuccinctRange::map_to_nodes(std::string_view sequence,
     if (terminate())
         return;
 
+    // TODO: in the reverse complement, skip those which have matched at length k
+    //       in the forward mapping
     auto nodes = map_sequence_to_nodes(*this, sequence);
 
     std::string rev_seq(sequence.begin(), sequence.end());
