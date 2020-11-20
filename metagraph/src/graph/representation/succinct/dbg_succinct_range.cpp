@@ -455,32 +455,34 @@ void DBGSuccinctRange
 
     // TODO: more efficient
     auto [last_char, last_minus] = boss_graph.get_minus_k_value(
-        last, boss_graph.get_k() - offset - 1
+        last, boss_graph.get_k() - offset
     );
 
     if (!last_char)
         return;
 
     auto [first_char, first_minus] = boss_graph.get_minus_k_value(
-        first, boss_graph.get_k() - offset - 1
+        first, boss_graph.get_k() - offset
     );
+
+    assert(first_char <= last_char);
 
     first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
 
     std::string tmp = get_node_sequence(kmer);
     std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
+
     for (auto s = first_char; s <= last_char; ++s) {
         tmp[0] = boss_graph.decode(s);
 
         node_index prev_node = kmer_to_node(tmp);
         assert(!prev_node || tmp == get_node_sequence(prev_node));
 
-        if (!prev_node)
-            continue;
-
-        assert(prev_node < offset_ || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
-
-        callback(prev_node, tmp[0]);
+        if (prev_node) {
+            assert(prev_node < offset_
+                || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
+            callback(prev_node, tmp[0]);
+        }
     }
 }
 
