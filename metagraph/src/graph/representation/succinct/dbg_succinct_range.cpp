@@ -25,8 +25,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         if (next_char != boss::BOSS::kSentinel)
             return dbg_succ_.traverse(node, next_char);
 
-        // create a sink dummy k-mer
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a sink dummy k-mer
         return 0;
     }
 
@@ -39,8 +38,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         if (!is_sink)
             return offset == boss_graph.get_k() ? toggle_node_sink_source(node) : 0;
 
-        // create a sink dummy k-mer
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a sink dummy k-mer
         return 0;
     }
 
@@ -84,8 +82,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         if (prev_char != boss::BOSS::kSentinel)
             return dbg_succ_.traverse_back(node, prev_char);
 
-        // create a dummy source k-mer
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a source dummy k-mer
         return 0;
     }
 
@@ -98,8 +95,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
                 : 0;
         }
 
-        // create a dummy source k-mer
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a source dummy k-mer
         return 0;
     }
 
@@ -402,7 +398,8 @@ void DBGSuccinctRange
             return;
         }
 
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a sink dummy k-mer
+        return;
     }
 
     if (!offset) {
@@ -450,7 +447,8 @@ void DBGSuccinctRange
             return;
         }
 
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a source dummy k-mer
+        return;
     }
 
     if (!offset) {
@@ -459,7 +457,7 @@ void DBGSuccinctRange
             dbg_succ_.call_incoming_kmers(node, callback);
         } else {
             // we're at a dummy sink k-mer in the underlying graph
-            throw std::runtime_error("Not implemented yet");
+            assert(false);
         }
 
         return;
@@ -535,7 +533,8 @@ void DBGSuccinctRange
             return;
         }
 
-        throw std::runtime_error("Not implemented: use an LCS array");
+        // TODO: Use an LCS array to create a sink dummy k-mer
+        return;
     }
 
     if (!offset) {
@@ -719,8 +718,11 @@ void DBGSuccinctRange
 
     const auto &boss_graph = dbg_succ_.get_boss();
 
-    if (is_sink)
+    if (is_sink) {
+        assert(false);
         throw std::runtime_error("Not implemented: find all nodes with matching prefixes");
+        return;
+    }
 
     while (!terminate() && first <= last) {
         boss::BOSS::edge_index e = boss_graph.bwd(last);
