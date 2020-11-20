@@ -164,15 +164,17 @@ void CanonicalDBG
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
             assert(rev_seq[0] == '\0');
             for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (children[i] != DeBruijnGraph::npos)
+                char c = alphabet[i];
+
+                if (children[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     continue;
 
-                char c = alphabet[i];
                 ::reverse_complement(&c, &c + 1);
 
                 rev_seq[0] = c;
                 next = graph_.kmer_to_node(rev_seq);
                 if (next != DeBruijnGraph::npos) {
+                    assert(!graph_.traverse(node, alphabet[i]));
                     if (!primary_)
                         rev_comp_cache_.Put(next, next + offset_);
 
@@ -230,15 +232,17 @@ void CanonicalDBG
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
             assert(rev_seq.back() == '\0');
             for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (parents[i] != DeBruijnGraph::npos)
+                char c = alphabet[i];
+
+                if (parents[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     continue;
 
-                char c = alphabet[i];
                 ::reverse_complement(&c, &c + 1);
 
                 rev_seq.back() = c;
                 prev = graph_.kmer_to_node(rev_seq);
                 if (prev != DeBruijnGraph::npos) {
+                    assert(!graph_.traverse_back(node, alphabet[i]));
                     if (!primary_)
                         rev_comp_cache_.Put(prev, prev + offset_);
 
