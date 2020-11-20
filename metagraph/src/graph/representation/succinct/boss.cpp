@@ -827,11 +827,12 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index x, size_t max_suffix_length) const {
+    assert(max_suffix_length);
     CHECK_INDEX(x);
 
-    std::vector<TAlphabet> ret(k_);
-    size_t i = k_;
+    std::vector<TAlphabet> ret(std::min(k_, max_suffix_length));
+    size_t i = ret.size();
 
     if (indexed_suffix_length_) {
         while (i > indexed_suffix_length_) {
@@ -848,12 +849,18 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
             [](const auto &range, edge_index edge) { return (range.second < edge); }
         );
 
+        size_t size_diff = indexed_suffix_length_ - i;
+
         if (it != indexed_suffix_ranges_.end() && it->first <= x) {
             assert(x <= it->second);
             uint64_t index = it - indexed_suffix_ranges_.begin();
-            for (i = 0; i < indexed_suffix_length_; ++i) {
+            for (size_t i = 0; i < size_diff; ++i) {
+                index /= alph_size - 1;
+            }
+
+            for (size_t i = size_diff; i < indexed_suffix_length_; ++i) {
                 uint64_t next_index = index / (alph_size - 1);
-                ret[i] = index - next_index * (alph_size - 1) + 1;
+                ret[i - size_diff] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
             return ret;

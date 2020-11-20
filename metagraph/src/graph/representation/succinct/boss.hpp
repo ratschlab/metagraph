@@ -251,7 +251,8 @@ class BOSS {
      * Given an edge index i, this function returns the k-mer sequence of its
      * source node.
      */
-    std::vector<TAlphabet> get_node_seq(edge_index i) const;
+    std::vector<TAlphabet> get_node_seq(edge_index i,
+                                        size_t max_suffix_length = std::numeric_limits<size_t>::max()) const;
 
     /**
      * Given index i of an edge and a value k, this function
