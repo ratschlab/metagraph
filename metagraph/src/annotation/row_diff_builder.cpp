@@ -461,26 +461,38 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             uint64_t num_rd_bits = 0;
             call_ones([&](uint64_t) { num_rd_bits++; });
 
-            if (num_rd_bits != row_diff_bits[l_idx][j]) {
-                logger->error("Error when building column {}."
-                              " Num bits: {}, excepted {}.",
-                              source_files[l_idx],
-                              num_rd_bits, row_diff_bits[l_idx][j]);
-                columns[j] = std::make_unique<bit_vector_sd>([](auto) {}, anchor.size(), 0);
-            }
+            try {
+                if (num_rd_bits != row_diff_bits[l_idx][j]) {
+                    logger->error("Error when building column {}."
+                                  " Num bits: {}, excepted {}.",
+                                  source_files[l_idx],
+                                  num_rd_bits, row_diff_bits[l_idx][j]);
+                    columns[j] = std::make_unique<bit_vector_sd>([](auto) {}, anchor.size(), 0);
+                }
 
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
-                                                         num_rd_bits);
+                columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
+                                                             num_rd_bits);
+            } catch (...) {
+                logger->error("Error SD init {}", source_files[l_idx]);
+            }
         }
-        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
-                std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
-                std::move(label_encoders[l_idx]));
+        try {
+            row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
+                    std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                    std::move(label_encoders[l_idx]));
+        } catch (...) {
+            logger->error("Error RowDiff init {}", source_files[l_idx]);
+        }
 
         auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
                                 .filename()
                                 .replace_extension()
                                 .replace_extension(RowDiffColumnAnnotator::kExtension);
-        row_diff[l_idx]->serialize(fpath);
+        try {
+            row_diff[l_idx]->serialize(fpath);
+        } catch (...) {
+            logger->error("Error serialize {}", source_files[l_idx]);
+        }
 
         logger->trace("Serialized {}", fpath);
     }
