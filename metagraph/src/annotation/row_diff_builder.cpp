@@ -317,6 +317,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
         f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(decltype(v.front())));
         row_diff_bits[s][j] += v.size();
+        f.close();
     };
 
     #pragma omp parallel for num_threads(num_threads)
@@ -446,16 +447,30 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
+    try {
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
-            auto call_ones = [&](const std::function<void(uint64_t)>& call) {
+            auto call_ones = [&](const std::function<void(uint64_t)> &call) {
                 std::vector<std::string> filenames;
                 for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
                 //TODO: benchmark using Elias-Fano encoders + merger
-                common::merge_files<uint64_t>(filenames, call);
+                try {
+                    common::merge_files<uint64_t>(filenames, call);
+                    try {
+                        for (const auto &file : filenames) {
+                            std::filesystem::remove(file);
+                        }
+                    } catch (...) {
+                        logger->warn("Could not remove temp files for {}. First is {}.",
+                                     source_files[l_idx], filenames.front());
+                    }
+                } catch(...) {
+                    logger->error("Couldn't merge chunks for {}. First is {}.",
+                                  source_files[l_idx], filenames.front());
+                }
             };
 
             uint64_t num_rd_bits = 0;
@@ -495,6 +510,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
 
         logger->trace("Serialized {}", fpath);
+    } catch (...) {
+        logger->error("Error {}", source_files[l_idx]);
+    }
     }
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
