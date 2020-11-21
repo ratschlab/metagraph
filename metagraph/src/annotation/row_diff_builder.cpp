@@ -459,14 +459,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 //TODO: benchmark using Elias-Fano encoders + merger
                 try {
                     common::merge_files<uint64_t>(filenames, call);
-                    try {
-                        for (const auto &file : filenames) {
-                            std::filesystem::remove(file);
-                        }
-                    } catch (...) {
-                        logger->warn("Could not remove temp files for {}. First is {}.",
-                                     source_files[l_idx], filenames.front());
-                    }
                 } catch(...) {
                     logger->error("Couldn't merge chunks for {}. First is {}.",
                                   source_files[l_idx], filenames.front());
@@ -482,11 +474,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                   " Num bits: {}, excepted {}.",
                                   source_files[l_idx],
                                   num_rd_bits, row_diff_bits[l_idx][j]);
-                    columns[j] = std::make_unique<bit_vector_sd>([](auto) {}, anchor.size(), 0);
                 }
-
-                columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
-                                                             num_rd_bits);
+                columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(), num_rd_bits);
             } catch (...) {
                 logger->error("Error SD init {}", source_files[l_idx]);
             }
