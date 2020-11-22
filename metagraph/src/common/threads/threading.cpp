@@ -15,7 +15,8 @@ unsigned int get_num_threads() {
 
 
 ThreadPool::ThreadPool(size_t num_workers, size_t max_num_tasks)
-      : max_num_tasks_(std::max(max_num_tasks, size_t(1))), stop_(false) {
+      : max_num_tasks_(std::max(max_num_tasks, size_t(1))), stop_(false),
+        exception_thrown_(false), exception_(nullptr) {
     initialize(num_workers);
 }
 
@@ -40,6 +41,11 @@ void ThreadPool::join() {
         worker.join();
     }
     workers.clear();
+
+    if (exception_thrown_) {
+        stop_ = true;
+        std::rethrow_exception(exception_);
+    }
 
     if (!stop_)
         initialize(num_workers);
