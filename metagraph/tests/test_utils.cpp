@@ -487,6 +487,8 @@ TEST(ThreadPool, MultiThreadException) {
         } catch (...) {
             continue;
         }
+
+        ASSERT_TRUE(false) << "Exception not caught\n";
     }
 }
 
