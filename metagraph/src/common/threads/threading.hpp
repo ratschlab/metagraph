@@ -48,7 +48,6 @@ class ThreadPool {
 
     std::vector<std::thread> workers;
     std::queue<std::function<void()>> tasks;
-    std::exception_ptr exception_;
     size_t max_num_tasks_;
 
     std::mutex queue_mutex;
@@ -56,36 +55,44 @@ class ThreadPool {
     std::condition_variable full_condition;
 
     bool joining_;
-    std::atomic<bool> stop_;
+    bool stop_;
 
     template <class F, typename... Args>
     auto emplace(bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
+        auto wrap = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+        auto task_exception = std::make_shared<std::exception_ptr>(nullptr);
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            [this,f=std::bind(std::forward<F>(f), std::forward<Args>(args)...)]() {
+            [f=std::move(wrap),task_exception]() mutable -> return_type {
                 try {
                     return f();
                 } catch (...) {
                     // catch and store the exception
-                    if (!stop_.exchange(true))
-                        exception_ = std::current_exception();
+                    *task_exception = std::current_exception();
+                    std::rethrow_exception(*task_exception);
                 }
-
-                // create a dummy object to return
-                return return_type();
             }
         );
 
-        if (!workers.size()) {
+        auto wrapped_task = [task,task_exception]() {
             (*task)();
+
+            // if an exception was caught, throw it here
+            if (*task_exception)
+                std::rethrow_exception(*task_exception);
+        };
+
+        if (!workers.size()) {
+            wrapped_task();
             return task->get_future();
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace([task](){ (*task)(); });
+            tasks.emplace(std::move(wrapped_task));
         }
+
         empty_condition.notify_one();
 
         return task->get_future();
