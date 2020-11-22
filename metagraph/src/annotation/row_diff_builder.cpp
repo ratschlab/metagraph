@@ -13,6 +13,7 @@
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
+constexpr uint64_t MAX_CHUNKS = 20;
 
 namespace mtg {
 namespace annot {
@@ -317,7 +318,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
         f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(decltype(v.front())));
         row_diff_bits[s][j] += v.size();
-        f.close();
     };
 
     #pragma omp parallel for num_threads(num_threads)
@@ -394,6 +394,33 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                             std::sort(v.begin(), v.end());
                             dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
                             v.resize(0);
+
+                            // keep the number of chunks limited
+                            if (num_chunks[source_idx][j] < MAX_CHUNKS)
+                                continue;
+
+                            // merge all accumulated bwd chunks into a single one
+                            std::vector<std::string> bwd_chunk_files;
+                            // chunk 0 stores fwd bits and hence skipped
+                            for (uint32_t chunk = 1; chunk < num_chunks[source_idx][j]; ++chunk) {
+                                bwd_chunk_files.push_back(tmp_file(source_idx, j, chunk));
+                            }
+                            assert(bwd_chunk_files.size() >= 2);
+
+                            std::ofstream f(tmp_file(source_idx, j, num_chunks[source_idx][j]),
+                                            std::ios::binary);
+                            common::merge_files<uint64_t>(bwd_chunk_files, [&](uint64_t i) {
+                                f.write(reinterpret_cast<const char *>(&i), sizeof(uint64_t));
+                            });
+                            f.close();
+                            // remove small chunks
+                            for (const std::string &chunk_file : bwd_chunk_files) {
+                                std::filesystem::remove(chunk_file);
+                            }
+                            // rename the new merged chunk
+                            std::filesystem::rename(tmp_file(source_idx, j, num_chunks[source_idx][j]),
+                                                    tmp_file(source_idx, j, 1));
+                            num_chunks[source_idx][j] = 2;
                         }
                     }
                 }
@@ -457,12 +484,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
                 //TODO: benchmark using Elias-Fano encoders + merger
-                try {
-                    common::merge_files<uint64_t>(filenames, call);
-                } catch(...) {
-                    logger->error("Couldn't merge chunks for {}. First is {}.",
-                                  source_files[l_idx], filenames.front());
-                }
+                common::merge_files<uint64_t>(filenames, call);
             };
 
             uint64_t num_rd_bits = 0;
