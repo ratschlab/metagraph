@@ -212,7 +212,7 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
     if (op == Cigar::INSERTION)
         prev_node = prev_gap_node;
 
-    uint8_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
+    uint32_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
 
     if (!i && prev_node == SequenceGraph::npos)
         return;
