@@ -57,11 +57,24 @@ class ThreadPool {
     bool joining_;
     bool stop_;
 
+    std::atomic<bool> exception_thrown_;
+    std::exception_ptr exception_;
+
     template <class F, typename... Args>
     auto emplace(bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+            [this,fc=std::bind(std::forward<F>(f), std::forward<Args>(args)...)]() mutable -> return_type {
+                try {
+                    return fc();
+                } catch (...) {
+                    // catch and store the exception
+                    if (!exception_thrown_.exchange(true))
+                        exception_ = std::current_exception();
+
+                    return return_type();
+                }
+            }
         );
 
         if (!workers.size()) {
@@ -72,8 +85,9 @@ class ThreadPool {
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace([task](){ (*task)(); });
+            tasks.emplace([task]() { (*task)(); });
         }
+
         empty_condition.notify_one();
 
         return task->get_future();
