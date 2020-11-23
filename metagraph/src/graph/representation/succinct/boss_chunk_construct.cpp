@@ -752,6 +752,8 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         // compute the reverse complements of #kmers, then merge back into #kmers
         add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
                                 async_worker, &kmers, checkpoint);
+    } else {
+        checkpoint->set_checkpoint(2);
     }
 
     auto [dummy_sink_names, real_F_W]
