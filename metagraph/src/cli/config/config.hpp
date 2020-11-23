@@ -58,6 +58,7 @@ class Config {
     bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
+    bool optimize = false;
 
     unsigned int k = 3;
     // For succinct graphs by default, cache ranges of nodes
@@ -141,6 +142,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     uint32_t max_path_length = 50;
+    std::string anchors;
 
     std::filesystem::path tmp_dir;
 
@@ -183,7 +185,9 @@ class Config {
         BinRelWT,
         RowDiff,
         RowDiffBRWT,
+        RowDiffRowSparse,
         RowFlat,
+        RowSparse,
         RBFish,
         RbBRWT,
     };

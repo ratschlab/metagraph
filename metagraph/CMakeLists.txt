@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.6.1)
 cmake_policy(SET CMP0015 NEW)
 
-project(Metagraph)
+project(MetaGraph)
 
 include(CheckFunctionExists)
 include(CheckLibraryExists)
@@ -105,11 +105,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(APPLE)
-  # Fix include directories on 10.14+, as they are not added by default any longer
-  INCLUDE_DIRECTORIES(/usr/local/include)
-  # Fix linking on 10.14+. See https://stackoverflow.com/questions/54068035
-  LINK_DIRECTORIES(/usr/lib)
-  LINK_DIRECTORIES(/usr/local/lib)
+  # add path to system libraries but avoid cross-compilation errors
+  include_directories(SYSTEM /usr/local/include)
+  link_directories(/usr/local/lib)
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
+  if(SUPPORT_NO_POISON_SYS_DIR)
+    add_compile_options(-Wno-poison-system-directories)
+  endif()
 endif()
 
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
@@ -129,7 +132,7 @@ try_compile(MODE_TI
   "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
 )
 if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
+  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI -mcx16")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

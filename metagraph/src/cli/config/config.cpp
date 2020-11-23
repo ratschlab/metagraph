@@ -314,6 +314,8 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--optimize")) {
+            optimize = true;
         } else if (!strcmp(argv[i], "--linkage")) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
@@ -346,6 +348,8 @@ Config::Config(int argc, char *argv[]) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
         } else if (!strcmp(argv[i], "--phase")) {
             phase = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--anchors-file")) {
+            anchors = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -663,6 +667,10 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffRowSparse:
+            return "row_diff_sparse";
+        case RowSparse:
+            return "row_sparse";
         default:
             assert(false);
             return "Never happens";
@@ -690,6 +698,10 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiff;
     } else if (string == "row_diff_brwt") {
         return AnnotationType::RowDiffBRWT;
+    } else if (string == "row_diff_sparse") {
+        return AnnotationType::RowDiffRowSparse;
+    } else if (string == "row_sparse") {
+        return AnnotationType::RowSparse;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -994,6 +1006,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
+            fprintf(stderr, "\t   --anchors [STR]\t\tlocation of the anchor file (for row_diff) []\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1044,6 +1059,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
+            fprintf(stderr, "\t   --optimize \t\t\toptimize anchors in row_diff annotation [off]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

@@ -71,12 +71,11 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     return result;
 }
 
-sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector,
-                               uint8_t bits_per_number) {
-    if (bits_per_number == vector.width()) {
+sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width) {
+    if (width == vector.width()) {
         return std::move(vector);
     } else {
-        return pack_vector(vector, bits_per_number);
+        return pack_vector(vector, width);
     }
 }
 
@@ -259,9 +258,10 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 }
 
-std::unique_ptr<bit_vector> compute_or(const std::vector<const bit_vector *> &columns,
-                                       uint64_t *buffer,
-                                       ThreadPool &thread_pool) {
+std::unique_ptr<bit_vector_adaptive>
+compute_or(const std::vector<const bit_vector *> &columns,
+           uint64_t *buffer,
+           ThreadPool &thread_pool) {
     const uint64_t vector_size = columns.at(0)->size();
     const uint64_t block_size = std::max(vector_size / 100,
                                          static_cast<uint64_t>(100'000));

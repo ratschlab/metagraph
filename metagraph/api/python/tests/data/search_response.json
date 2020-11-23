@@ -1,0 +1,84 @@
+[
+  {
+    "results": [
+      {
+        "kmer_count": 1072,
+        "properties": {
+          "city": "offa",
+          "city_latitude": 8.0,
+          "city_longitude": 4.0,
+          "city_total_population": 90000.0,
+          "continent": "sub_saharan_africa",
+          "latitude": 8.154850006103516,
+          "longitude": 4.726465225219727,
+          "metasub_name": "CSD16-OFA-058",
+          "num_reads": 29212708.0,
+          "sample_type": "environmental_microbiome",
+          "station": null,
+          "surface_material": "wood"
+        },
+        "sample": "haib17CEM4890_H2NYMCCXY_SL254770"
+      },
+      {
+        "kmer_count": 1090,
+        "properties": {
+          "city": "offa",
+          "city_latitude": 8.0,
+          "city_longitude": 4.0,
+          "city_total_population": 90000.0,
+          "continent": "sub_saharan_africa",
+          "latitude": 8.154584884643555,
+          "longitude": 4.726504802703857,
+          "metasub_name": "CSD16-OFA-065",
+          "num_reads": 43393240.0,
+          "sample_type": "environmental_microbiome",
+          "station": null,
+          "surface_material": "wood"
+        },
+        "sample": "haib17CEM4890_H2NYMCCXY_SL254854"
+      },
+      {
+        "kmer_count": 1090,
+        "properties": {
+          "city": "lisbon",
+          "city_latitude": 38.75381851196289,
+          "city_longitude": -9.230830192565918,
+          "city_total_population": 505526.0,
+          "continent": "europe",
+          "latitude": null,
+          "longitude": null,
+          "metasub_name": "CSD16-LIS-140",
+          "num_reads": 3734660.0,
+          "sample_type": null,
+          "station": null,
+          "surface_material": null
+        },
+        "sample": "haib17KIU4866_H7HJMCCXY_SL272814"
+      }
+    ],
+    "seq_description": "5"
+  },
+  {
+    "results": [
+      {
+        "kmer_count": 795,
+        "properties": {
+          "city": "tokyo",
+          "city_latitude": 35.68949890136719,
+          "city_longitude": 139.69171142578125,
+          "city_total_population": 13839910.0,
+          "continent": "east_asia",
+          "latitude": 35.600860595703125,
+          "longitude": 139.68492126464844,
+          "metasub_name": "CSD16-TOK-039",
+          "num_reads": 37855856.0,
+          "sample_type": "environmental_microbiome",
+          "station": null,
+          "surface_material": "vinyl"
+        },
+        "sample": "haib17CEM4890_HKC32ALXX_SL254714"
+      }
+    ],
+    "seq_description": "11"
+  }
+]

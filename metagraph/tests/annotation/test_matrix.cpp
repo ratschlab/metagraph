@@ -9,6 +9,7 @@
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 
 
 namespace {
@@ -25,6 +26,7 @@ typedef ::testing::Types<BRWT,
                          BinRelWT,
                          BinRelWT_sdsl,
                          RowConcatenated<>,
+                         RowSparse,
                          UniqueRowBinmat,
                          Rainbow<BRWT>,
                          Rainbowfish> BinMatTypes;
@@ -57,6 +59,16 @@ TYPED_TEST(BinaryMatrixTest, BuildOneColumn) {
     copy.emplace_back(new bit_vector_stat(10, true));
 
     test_matrix(build_matrix_from_columns<TypeParam>(std::move(copy), 10), columns);
+}
+
+TYPED_TEST(BinaryMatrixTest, Move) {
+    BitVectorPtrArray columns, copy;
+    columns.emplace_back(new bit_vector_stat(10, true));
+    copy.emplace_back(new bit_vector_stat(10, true));
+    TypeParam matrix = build_matrix_from_columns<TypeParam>(std::move(copy), 10);
+    TypeParam moved = std::move(matrix);
+
+    test_matrix(moved, columns);
 }
 
 TYPED_TEST(BinaryMatrixTest, BuildOneBigColumn) {

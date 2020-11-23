@@ -38,7 +38,7 @@ convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t num_threads = 1);
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_to_simple_BRWT(RowDiffAnnotator &&annotation,
+convert_to_simple_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
@@ -50,7 +50,7 @@ convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
                        uint64_t num_rows_subsampled = 1'000'000);
 
 std::unique_ptr<RowDiffBRWTAnnotator>
-convert_to_greedy_BRWT(RowDiffAnnotator &&annotation,
+convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
@@ -107,10 +107,26 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         const std::filesystem::path &dest_dir);
+                         std::filesystem::path dest_dir,
+                         bool optimize = false);
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
+
+/**
+ * Converts a RowDiff annotation into RowDiff<RowSparse>.
+ */
+std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator);
+
+/**
+ * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this
+ * happens when transforming RowDiff columns back to column compress, manipulate the
+ * column compressed into some other format, and then wrapping the result back into a
+ * RowDiff.
+ */
+void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
+                      const std::string &graph_file,
+                      const std::string &out_file);
 
 } // namespace annot
 } // namespace mtg

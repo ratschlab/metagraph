@@ -192,7 +192,7 @@ class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_cols = 99
+    sample_query_expected_rows = 99
 
     @classmethod
     def setUpClass(cls):
@@ -206,20 +206,20 @@ class TestAPIClient(TestAPIBase):
         repetitions = 5
         ret = self.graph_client.search([self.sample_query] * repetitions, discovery_threshold=0.01)
         df = ret[self.graph_name]
-        self.assertEqual((self.sample_query_expected_cols * repetitions, 3), df.shape)
+        self.assertEqual((self.sample_query_expected_rows * repetitions, 3), df.shape)
 
     def test_api_simple_query_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_cols, 2), df.shape)
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
         self.assertIn('cigar', df.columns)
-        self.assertEqual((self.sample_query_expected_cols, 5), df.shape)
+        self.assertEqual((self.sample_query_expected_rows, 6), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -329,7 +329,7 @@ class TestAPIClientWithProperties(TestAPIBase):
         self.assertEqual(df['kmer_count'].dtype, int)
         self.assertIn('latitude', df.columns)
         self.assertEqual(df['latitude'].dtype, float)
-        self.assertEqual(df.shape, (3, 9))
+        self.assertEqual(df.shape, (3, 10))
 
     def test_api_search_property_df_empty(self):
         df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST")[self.graph_name]
