@@ -50,6 +50,7 @@ common::SortedSetDisk<T> create_sorted_set_disk(size_t container_size = 8, size_
 }
 
 TYPED_TEST(SortedSetDiskTest, Empty) {
+    std::filesystem::remove_all("./test_chunk_");
     constexpr size_t container_size = 8;
     common::SortedSetDisk<TypeParam> underTest
             = create_sorted_set_disk<TypeParam>(container_size);
@@ -234,6 +235,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Overlap) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     expect_equals(underTest, expected_result);
+    std::filesystem::remove_all("./test_chunk_");
 }
 
 /**
@@ -252,6 +254,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Distinct) {
     std::vector<TypeParam> expected_result(400);
     std::iota(expected_result.begin(), expected_result.end(), 0);
     expect_equals(underTest, expected_result);
+    std::filesystem::remove_all("./test_chunk_");
 }
 
 /**
@@ -270,6 +273,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Intertwined) {
     std::vector<TypeParam> expected_result(400);
     std::iota(expected_result.begin(), expected_result.end(), 0);
     expect_equals(underTest, expected_result);
+    std::filesystem::remove_all("./test_chunk_");
 }
 
 } // namespace
