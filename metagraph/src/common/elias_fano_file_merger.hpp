@@ -112,6 +112,11 @@ class MergeDecoder {
         sources_.reserve(source_names.size());
         for (uint32_t i = 0; i < source_names.size(); ++i) {
             sources_.emplace_back(source_names[i], remove_sources);
+            if (!sources_.back()) {
+                logger->error("Error while merging. File {} could not be opened.",
+                              source_names[i]);
+                exit(1);
+            }
             std::optional<T> data_item = sources_.back().next();
             if (data_item.has_value()) {
                 heap_.emplace(data_item.value(), i);
