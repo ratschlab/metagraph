@@ -148,17 +148,17 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        size_t alph_size = alphabet.size();
-        std::vector<node_index> children(alph_size);
+        size_t max_num_edges_left = alphabet.size();
+        std::vector<node_index> children(max_num_edges_left);
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel)
                 children[alphabet_encoder_[c]] = next;
 
-            --alph_size;
+            --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && alph_size) {
+        if (!graph_.is_canonical_mode() && max_num_edges_left) {
             node_index next;
             std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
@@ -214,17 +214,17 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        size_t alph_size = alphabet.size();
-        std::vector<node_index> parents(alph_size);
+        size_t max_num_edges_left = alphabet.size();
+        std::vector<node_index> parents(max_num_edges_left);
 
         graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
             if (c != boss::BOSS::kSentinel)
                 parents[alphabet_encoder_[c]] = prev;
 
-            --alph_size;
+            --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && alph_size) {
+        if (!graph_.is_canonical_mode() && max_num_edges_left) {
             node_index prev;
             std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
