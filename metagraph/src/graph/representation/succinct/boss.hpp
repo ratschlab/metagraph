@@ -438,6 +438,8 @@ class BOSS {
     inline std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const;
 
+    inline bool tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const;
+
     /**
      * The size of the alphabet for kmers that this graph encodes.
      * For DNA, this value is 5 ($,A,C,G,T).
@@ -613,6 +615,19 @@ BOSS::get_initial_range(RandomAccessIt begin, RandomAccessIt end) const {
     return std::make_tuple(rl, ru, offset);
 }
 
+inline bool BOSS::tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const {
+    // Tighten the range of edges including only those ending with |s| and do fwd.
+    uint64_t rk_rl = rank_W(*rl - 1, s) + 1;
+    uint64_t rk_ru = rank_W(*ru, s);
+    if (rk_rl > rk_ru)
+        return false;
+
+    // select the index of the position in last that is rank many positions after offset
+    *rl = select_last(NF_[s] + rk_rl - 1) + 1;
+    *ru = select_last(NF_[s] + rk_ru);
+    return true;
+}
+
 template <typename RandomAccessIt>
 BOSS::edge_index BOSS::index(RandomAccessIt begin, RandomAccessIt end) const {
     static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>,
@@ -631,18 +646,8 @@ BOSS::edge_index BOSS::index(RandomAccessIt begin, RandomAccessIt end) const {
 
     // update range iteratively while scanning through s
     for (auto it = begin + offset; it != end; ++it) {
-        TAlphabet s = *it;
-
-        // Tighten the range including all edges where
-        // the source nodes have the given suffix.
-        uint64_t rk_rl = rank_W(rl - 1, s) + 1;
-        uint64_t rk_ru = rank_W(ru, s);
-        if (rk_rl > rk_ru)
+        if (!tighten_range(&rl, &ru, *it))
             return npos;
-
-        // select the index of the position in last that is rank many positions after offset
-        ru = select_last(NF_[s] + rk_ru);
-        rl = select_last(NF_[s] + rk_rl - 1) + 1;
     }
     assert(succ_last(rl) <= ru);
     return ru;
@@ -687,18 +692,8 @@ BOSS::index_range(RandomAccessIt begin, RandomAccessIt end) const {
     auto it = begin + offset;
     // update range iteratively while scanning through s
     for (; it != end; ++it) {
-        TAlphabet s = *it;
-
-        // Tighten the range including all edges where
-        // the source nodes have the given suffix.
-        uint64_t rk_rl = rank_W(rl - 1, s) + 1;
-        uint64_t rk_ru = rank_W(ru, s);
-        if (rk_rl > rk_ru)
+        if (!tighten_range(&rl, &ru, *it))
             return std::make_tuple(succ_last(rl), ru, it);
-
-        // select the index of the position in last that is rank many positions after offset
-        ru = select_last(NF_[s] + rk_ru);
-        rl = select_last(NF_[s] + rk_rl - 1) + 1;
     }
     assert(succ_last(rl) <= ru);
     return std::make_tuple(succ_last(rl), ru, it);
