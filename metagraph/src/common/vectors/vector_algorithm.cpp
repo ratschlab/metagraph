@@ -224,7 +224,7 @@ void compute_or(const std::vector<const bit_vector *> &columns,
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
-    std::vector<std::future<void>> results;
+    std::vector<std::shared_future<void>> results;
 
     for (uint64_t i = 0; i < size; i += block_size) {
         results.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
@@ -269,7 +269,7 @@ compute_or(const std::vector<const bit_vector *> &columns,
     std::vector<std::pair<uint64_t *, uint64_t *>>
             results((vector_size + block_size - 1) / block_size);
 
-    std::vector<std::future<void>> futures;
+    std::vector<std::shared_future<void>> futures;
     std::atomic<uint64_t> num_set_bits = 0;
 
     for (uint64_t i = 0; i < vector_size; i += block_size) {
@@ -361,7 +361,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
-    std::vector<std::future<void>> futures;
+    std::vector<std::shared_future<void>> futures;
 
     uint64_t block_end = 0;
 
@@ -414,7 +414,7 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
     // Each block is a multiple of 64 bits for thread safety
     assert(!(block_size & 0x3F));
 
-    std::vector<std::future<void>> futures;
+    std::vector<std::shared_future<void>> futures;
 
     uint64_t end = 0;
 
