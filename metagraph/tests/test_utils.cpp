@@ -478,7 +478,7 @@ void throw_from_worker() {
                 }, 1));
             }
 
-        } catch (std::exception &e) {
+        } catch (...) {
             ASSERT_TRUE(false); // all exceptions must be thrown in workers
         }
     }
