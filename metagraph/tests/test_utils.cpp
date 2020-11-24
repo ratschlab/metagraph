@@ -488,6 +488,7 @@ void throw_from_worker() {
 TEST(ThreadPool, MultiThreadException) {
     // check that a worker throws even if we don't
     // wait for the result in the returned 'future'
+    std::ignore = throw_from_worker;
     ASSERT_DEATH(throw_from_worker(), "");
 }
 
