@@ -463,6 +463,7 @@ TEST(ThreadPool, MultiThreadFuture) {
     }
 }
 
+#ifndef _NO_DEATH_TEST
 void throw_from_worker() {
     for (size_t i = 2; i < 20; ++i) {
         try {
@@ -488,9 +489,9 @@ void throw_from_worker() {
 TEST(ThreadPool, MultiThreadException) {
     // check that a worker throws even if we don't
     // wait for the result in the returned 'future'
-    std::ignore = throw_from_worker;
     ASSERT_DEATH(throw_from_worker(), "");
 }
+#endif // ifndef _NO_DEATH_TEST
 
 TEST(ThreadPool, DummyEmptyJoin) {
     ThreadPool pool(0);
