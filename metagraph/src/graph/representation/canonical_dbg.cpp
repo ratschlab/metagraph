@@ -18,14 +18,14 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
                            size_t cache_size)
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
-        alph_map_({ graph_.alphabet().size() }),
+        alphabet_encoder_({ graph_.alphabet().size() }),
         primary_(primary && !graph->is_canonical_mode()),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
         rev_comp_cache_(primary_ ? 0 : cache_size),
         is_palindrome_cache_(graph_.get_k() % 2 || !primary_ ? 0 : cache_size) {
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
-        alph_map_[graph_.alphabet()[i]] = i;
+        alphabet_encoder_[graph_.alphabet()[i]] = i;
     }
 }
 
@@ -153,7 +153,7 @@ void CanonicalDBG
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel)
-                children[alph_map_[c]] = next;
+                children[alphabet_encoder_[c]] = next;
 
             --alph_size;
         });
@@ -219,7 +219,7 @@ void CanonicalDBG
 
         graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
             if (c != boss::BOSS::kSentinel)
-                parents[alph_map_[c]] = prev;
+                parents[alphabet_encoder_[c]] = prev;
 
             --alph_size;
         });
