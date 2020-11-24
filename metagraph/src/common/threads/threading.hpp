@@ -57,16 +57,15 @@ class ThreadPool {
     bool joining_;
     bool stop_;
 
-    std::atomic<bool> exception_thrown_;
-    std::exception_ptr exception_;
-
     template <class F, typename... Args>
     auto emplace(bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
+        auto wrap = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+        auto task_exception = std::make_shared<std::exception_ptr>(nullptr);
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            [this,fc=std::bind(std::forward<F>(f), std::forward<Args>(args)...)]() mutable -> return_type {
+            [f=std::move(wrap),task_exception]() mutable -> return_type {
                 try {
-                    return fc();
+                    return f();
                 } catch (...) {
                     // catch and store the exception
                     *task_exception = std::current_exception();
@@ -75,15 +74,23 @@ class ThreadPool {
             }
         );
 
-        if (!workers.size()) {
+        auto wrapped_task = [task,task_exception]() {
             (*task)();
+
+            // if an exception was caught, throw it here
+            if (*task_exception)
+                std::rethrow_exception(*task_exception);
+        };
+
+        if (!workers.size()) {
+            wrapped_task();
             return task->get_future();
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace([task]() { (*task)(); });
+            tasks.emplace(std::move(wrapped_task));
         }
 
         empty_condition.notify_one();

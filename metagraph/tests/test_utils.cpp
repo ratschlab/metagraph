@@ -483,10 +483,9 @@ TEST(ThreadPool, MultiThreadException) {
                 }, 1));
             }
 
-
             ASSERT_EQ(1000u, result.size());
             for (auto &value : result) {
-                value.get();
+                ASSERT_EQ(1u, value.get());
             }
 
             ASSERT_EQ(1000u, exception_count);
