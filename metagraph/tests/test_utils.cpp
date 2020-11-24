@@ -469,9 +469,16 @@ TEST(ThreadPool, MultiThreadException) {
             ThreadPool pool(i);
 
             std::vector<std::future<size_t>> result;
+            std::atomic<size_t> exception_count(0);
+            std::exception_ptr exception = nullptr;
             for (size_t t = 0; t < 1000; ++t) {
                 result.emplace_back(pool.enqueue([&](size_t i) {
-                    throw std::runtime_error("error");
+                    try {
+                        throw std::runtime_error("error in test");
+                    } catch (...) {
+                        if (!exception_count.fetch_add(1))
+                            exception = std::current_exception();
+                    }
                     return i;
                 }, 1));
             }
@@ -482,13 +489,16 @@ TEST(ThreadPool, MultiThreadException) {
                 value.get();
             }
 
-            pool.join();
+            ASSERT_EQ(1000u, exception_count);
+            ASSERT_NE(nullptr, exception);
 
-        } catch (...) {
+            std::rethrow_exception(exception);
+        } catch (std::exception &e) {
+            EXPECT_EQ(std::string("error in test"), std::string(e.what()));
             continue;
         }
 
-        ASSERT_TRUE(false) << "Exception not caught\n";
+        ASSERT_TRUE(false);
     }
 }
 

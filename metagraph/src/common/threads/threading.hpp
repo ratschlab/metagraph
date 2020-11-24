@@ -69,9 +69,7 @@ class ThreadPool {
                     return fc();
                 } catch (...) {
                     // catch and store the exception
-                    if (!exception_thrown_.exchange(true))
-                        exception_ = std::current_exception();
-
+                    *task_exception = std::current_exception();
                     return return_type();
                 }
             }
