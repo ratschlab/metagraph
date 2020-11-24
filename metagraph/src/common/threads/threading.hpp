@@ -60,7 +60,6 @@ class ThreadPool {
     template <class F, typename... Args>
     auto emplace(bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
-        auto task_exception = std::make_shared<std::exception_ptr>(nullptr);
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
