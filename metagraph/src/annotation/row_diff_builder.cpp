@@ -307,16 +307,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
-    auto tmp_dir = [&](size_t s, size_t j) {
-        return tmp_path/fmt::format("{}/col_{}_{}", s / 100, s, j);
+    auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
+        return tmp_path/fmt::format("{}/col_{}_{}/chunk_{}", s / 100, s, j, chunk);
     };
-    auto tmp_file = [&](size_t source_idx, size_t col_idx, size_t chunk) {
-        return tmp_dir(source_idx, col_idx)/fmt::format("chunk_{}", chunk);
-    };
-    auto dump_chunk_to_disk = [&](const auto &v, size_t s, size_t j, size_t chunk) {
+    auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
+                                  size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
         std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(decltype(v.front())));
+        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -330,7 +328,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         num_chunks[s].assign(sources[s].num_labels(), 1);
 
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            std::filesystem::create_directories(tmp_dir(s, j));
+            std::filesystem::create_directories(tmp_file(s, j, 0).parent_path());
+            // make sure the first chunk exists even if empty
+            dump_chunk_to_disk({}, s, j, 0);
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
             set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
             set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
