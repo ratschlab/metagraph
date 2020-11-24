@@ -436,7 +436,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
         try {
             return rev_comp_cache_.Get(node);
 
-        } catch (const std::range_error&) {
+        } catch (...) {
             std::string rev_seq = graph_.get_node_sequence(node);
             ::reverse_complement(rev_seq.begin(), rev_seq.end());
 
@@ -450,7 +450,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     try {
         return is_palindrome_cache_.Get(node) ? node : node + offset_;
 
-    } catch (const std::range_error&) {
+    } catch (...) {
         std::string seq = graph_.get_node_sequence(node);
         std::string rev_seq = seq;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
