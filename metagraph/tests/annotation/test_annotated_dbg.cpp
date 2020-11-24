@@ -1840,7 +1840,6 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 }
 
 TEST(AnnotatedDBG, score_kmer_presence_mask) {
-    common::logger->set_level(spdlog::level::trace);
     auto anno_graph = build_anno_graph<DBGSuccinct>(31, {}, {});
     std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
        { sdsl::bit_vector(), 0},
