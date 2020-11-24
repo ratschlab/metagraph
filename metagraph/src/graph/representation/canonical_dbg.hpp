@@ -160,7 +160,7 @@ class CanonicalDBG : public DeBruijnGraph {
 
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
-    std::array<size_t, 256> alph_map_;
+    std::array<size_t, 256> alphabet_encoder_;
 
     mutable bool primary_;
 

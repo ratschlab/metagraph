@@ -72,9 +72,10 @@ class FileMerger {
         sources_.reserve(source_names.size());
         for (size_t i = 0; i < source_names.size(); ++i) {
             sources_.emplace_back(source_names[i], std::ios::binary);
-            if (!sources_.back().good()) {
-                logger->error("Can't open source {}", source_names[i]);
-                continue;
+            if (!sources_.back()) {
+                logger->error("Error while merging. File {} could not be opened.",
+                              source_names[i]);
+                exit(1);
             }
             T v;
             if (sources_.back().read(reinterpret_cast<char *>(&v), sizeof(T))) {
