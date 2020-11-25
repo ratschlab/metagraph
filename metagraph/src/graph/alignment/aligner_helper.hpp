@@ -492,19 +492,24 @@ class DPTable {
                score_t min_score,
                char start_char,
                size_t pos = 0,
-               size_t priority_pos = 0)
+               size_t priority_pos = 0,
+               size_t start = 0,
+               size_t end = std::numeric_limits<size_t>::max())
               : size_(size),
-                scores(size + 8, min_score),
-                gap_scores(size + 8, min_score),
+                min_score_(min_score),
+                scores(std::min(end, size) - start + 8, min_score),
+                gap_scores(scores.size(), min_score),
                 ops(scores.size()),
                 prev_nodes(scores.size()),
                 gap_prev_nodes(scores.size()),
                 gap_count(scores.size()),
                 last_char(start_char),
-                best_pos(pos),
-                last_priority_pos(priority_pos) {}
+                best_pos(std::min(std::max(pos, start), start + scores.size() - size_t(8))),
+                last_priority_pos(std::min(std::max(priority_pos, start), start + scores.size() - size_t(8))),
+                start_index(start) {}
 
         size_t size_;
+        score_t min_score_;
         AlignedVector<score_t> scores;
         AlignedVector<score_t> gap_scores;
         AlignedVector<Cigar::Operator> ops;
@@ -515,10 +520,59 @@ class DPTable {
         char last_char;
         size_t best_pos;
         size_t last_priority_pos;
+        size_t start_index;
 
-        const score_t& best_score() const { return scores.at(best_pos); }
-        const score_t& last_priority_value() const { return scores.at(last_priority_pos); }
-        const Cigar::Operator& best_op() const { return ops.at(best_pos); }
+        void expand_to_cover(size_t begin, size_t end) {
+            if (begin >= start_index) {
+                if (end <= start_index + scores.size() - 8)
+                    return;
+
+                scores.resize(end + 8 - start_index);
+                gap_scores.resize(end + 8 - start_index);
+                ops.resize(end + 8 - start_index);
+                prev_nodes.resize(end + 8 - start_index);
+                gap_prev_nodes.resize(end + 8 - start_index);
+                gap_count.resize(end + 8 - start_index);
+            } else if (end <= start_index + scores.size() - 8) {
+                size_t shift = start_index - begin;
+                start_index = begin;
+                scores.insert(scores.begin(), shift, min_score_);
+                gap_scores.insert(gap_scores.begin(), shift, min_score_);
+                ops.insert(ops.begin(), shift, Cigar::CLIPPED);
+                prev_nodes.insert(prev_nodes.begin(), shift, 0);
+                gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
+                gap_count.insert(gap_count.begin(), shift, 0);
+                best_pos += shift;
+                last_priority_pos += shift;
+            } else {
+                size_t shift = start_index - begin;
+                start_index = begin;
+                end += 8;
+                size_t new_size = end - begin;
+                AlignedVector<score_t> new_scores(new_size, min_score_);
+                AlignedVector<score_t> new_gap_scores(new_size, min_score_);
+                AlignedVector<Cigar::Operator> new_ops(new_size, Cigar::CLIPPED);
+                AlignedVector<uint8_t> new_prev_nodes(new_size);
+                AlignedVector<uint8_t> new_gap_prev_nodes(new_size);
+                AlignedVector<int32_t> new_gap_count(new_size);
+                std::copy(scores.begin(), scores.end(), new_scores.begin() + shift);
+                std::copy(gap_scores.begin(), gap_scores.end(), new_gap_scores.begin() + shift);
+                std::copy(ops.begin(), ops.end(), new_ops.begin() + shift);
+                std::copy(prev_nodes.begin(), prev_nodes.end(), new_prev_nodes.begin() + shift);
+                std::copy(gap_prev_nodes.begin(), gap_prev_nodes.end(), new_gap_prev_nodes.begin() + shift);
+                std::copy(gap_count.begin(), gap_count.end(), new_gap_count.begin() + shift);
+                std::swap(scores, new_scores);
+                std::swap(gap_scores, new_gap_scores);
+                std::swap(ops, new_ops);
+                std::swap(prev_nodes, new_prev_nodes);
+                std::swap(gap_prev_nodes, new_gap_prev_nodes);
+                std::swap(gap_count, new_gap_count);
+            }
+        }
+
+        const score_t& best_score() const { return scores.at(best_pos - start_index); }
+        const score_t& last_priority_value() const { return scores.at(last_priority_pos - start_index); }
+        const Cigar::Operator& best_op() const { return ops.at(best_pos - start_index); }
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
