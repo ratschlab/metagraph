@@ -206,6 +206,7 @@ template <class t_wt_sdsl>
 void wavelet_tree_sdsl_fast<t_wt_sdsl>::clear() {
     int_vector_ = sdsl::int_vector<>(0, 0, int_vector_.width());
     wwt_ = t_wt_sdsl();
+    count_.assign(count_.size(), 0);
 }
 
 

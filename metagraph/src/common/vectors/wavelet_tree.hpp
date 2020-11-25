@@ -207,7 +207,7 @@ class wavelet_tree_sdsl : public wavelet_tree {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
-    void clear() { wwt_ = t_wt_sdsl(); }
+    void clear() { wwt_ = t_wt_sdsl(); count_.assign(count_.size(), 0); }
 
     sdsl::int_vector<> to_vector() const;
 
