@@ -218,11 +218,9 @@ class wavelet_tree_sdsl : public wavelet_tree {
 };
 
 
-typedef wavelet_tree_sdsl_fast<> wavelet_tree_stat;
+typedef wavelet_tree_sdsl<> wavelet_tree_stat;
 
-typedef wavelet_tree_sdsl<> wavelet_tree_small;
-
-typedef wavelet_tree_sdsl<sdsl::wt_huff<sdsl::rrr_vector<63>>> wavelet_tree_compr;
+typedef wavelet_tree_sdsl<sdsl::wt_huff<sdsl::rrr_vector<63>>> wavelet_tree_small;
 
 typedef partite_vector<> wavelet_tree_fast;
 

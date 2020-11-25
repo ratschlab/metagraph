@@ -259,7 +259,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
 
     assert(graph->W_);
     delete graph->W_;
-    graph->W_ = new wavelet_tree_small(get_W_width(), W_);
+    graph->W_ = new wavelet_tree_stat(get_W_width(), W_);
 
     assert(graph->last_);
     delete graph->last_;
@@ -274,7 +274,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     // TODO:
     // graph->alph_size = alph_size_;
 
-    graph->state = BOSS::State::SMALL;
+    graph->state = BOSS::State::STAT;
 
     assert(graph->is_valid());
 

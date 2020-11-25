@@ -712,10 +712,6 @@ bool DBGSuccinct::load(const std::string &filename) {
             valid_edges_.reset(new bit_vector_small());
             break;
         }
-        case BOSS::State::COMPR: {
-            valid_edges_.reset(new bit_vector_small());
-            break;
-        }
     }
 
     // load the mask of valid edges (all non-dummy including npos 0)
@@ -790,8 +786,6 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         || (boss_graph_->get_state() == BOSS::State::DYN
                 && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
         || (boss_graph_->get_state() == BOSS::State::SMALL
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == BOSS::State::COMPR
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = prefix + kDummyMaskExtension;
@@ -840,12 +834,6 @@ void DBGSuccinct::switch_state(BOSS::State new_state) {
                 );
                 break;
             }
-            case BOSS::State::COMPR: {
-                valid_edges_ = std::make_unique<bit_vector_small>(
-                    valid_edges_->convert_to<bit_vector_small>()
-                );
-                break;
-            }
         }
     }
 
@@ -864,9 +852,6 @@ BOSS::State DBGSuccinct::get_state() const {
                 || dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()));
     assert(!valid_edges_.get()
                 || boss_graph_->get_state() != BOSS::State::SMALL
-                || dynamic_cast<const bit_vector_small*>(valid_edges_.get()));
-    assert(!valid_edges_.get()
-                || boss_graph_->get_state() != BOSS::State::COMPR
                 || dynamic_cast<const bit_vector_small*>(valid_edges_.get()));
 
     return boss_graph_->get_state();
@@ -895,10 +880,6 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
             break;
         }
         case BOSS::State::SMALL: {
-            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
-            break;
-        }
-        case BOSS::State::COMPR: {
             valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }

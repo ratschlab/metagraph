@@ -44,10 +44,10 @@ typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 typedef BOSS::TAlphabet TAlphabet;
 
-const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_FAST = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
-const size_t MAX_ITER_WAVELET_TREE_COMPR = 5; // TODO: tune
+const size_t MAX_ITER_WAVELET_TREE_STAT = 20;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 5; // TODO: tune
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
@@ -279,10 +279,6 @@ bool BOSS::load(std::ifstream &instream) {
                 break;
             case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_stat();
-                break;
-            case State::COMPR:
-                W_ = new wavelet_tree_compr(bits_per_char_W_);
                 last_ = new bit_vector_small();
                 break;
         }
@@ -397,10 +393,7 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) con
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
-            break;
-        case COMPR:
-            max_iter = MAX_ITER_WAVELET_TREE_COMPR;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -458,10 +451,7 @@ BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
-            break;
-        case COMPR:
-            max_iter = MAX_ITER_WAVELET_TREE_COMPR;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -1059,7 +1049,7 @@ void BOSS::switch_state(State new_state) {
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
         case State::FAST: {
@@ -1068,10 +1058,6 @@ void BOSS::switch_state(State new_state) {
         }
         case State::DYN: {
             convert<wavelet_tree_dyn, bit_vector_dyn>(&W_, &last_);
-            break;
-        }
-        case State::COMPR: {
-            convert<wavelet_tree_compr, bit_vector_small>(&W_, &last_);
             break;
         }
     }

@@ -282,12 +282,11 @@ class BOSS {
     /**
      * Representation states of the BOSS table.
      *
-     * SMALL provides the best space/time trade-off
-     * STAT (deprecated) makes some special routines faster but takes more space
+     * SMALL is the smallest
+     * STAT provides the best space/time trade-off
      * FAST is the fastest but large
-     * COMPR is the smallest
      */
-    enum State { STAT = 1, DYN, SMALL, FAST, COMPR };
+    enum State { SMALL = 1, DYN, STAT, FAST };
 
     State get_state() const { return state; }
     void switch_state(State state);

@@ -512,9 +512,8 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
     template class wt; \
     template wt wavelet_tree::convert_to<wt>(); \
 
-INSTANTIATE_WT(wavelet_tree_sdsl_fast<sdsl::wt_huff<>>);
-
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<>>);
+
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<sdsl::rrr_vector<63>>>);
 
 INSTANTIATE_WT(partite_vector<bit_vector_stat>);
