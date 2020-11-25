@@ -599,6 +599,8 @@ std::string Config::state_to_string(BOSS::State state) {
             return "small";
         case BOSS::State::FAST:
             return "fast";
+        case BOSS::State::COMPR:
+            return "compr";
         default:
             assert(false);
             return "Never happens";
@@ -614,6 +616,8 @@ BOSS::State Config::string_to_state(const std::string &string) {
         return BOSS::State::SMALL;
     } else if (string == "fast") {
         return BOSS::State::FAST;
+    } else if (string == "compr") {
+        return BOSS::State::COMPR;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }
@@ -905,7 +909,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [10]\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [small]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast / compr [small]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");

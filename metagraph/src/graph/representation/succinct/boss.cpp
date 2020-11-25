@@ -47,6 +47,7 @@ typedef BOSS::TAlphabet TAlphabet;
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
+const size_t MAX_ITER_WAVELET_TREE_COMPR = 5; // TODO: tune
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
@@ -280,6 +281,10 @@ bool BOSS::load(std::ifstream &instream) {
                 W_ = new wavelet_tree_small(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
+            case State::COMPR:
+                W_ = new wavelet_tree_compr(bits_per_char_W_);
+                last_ = new bit_vector_small();
+                break;
         }
         if (!W_->load(instream)) {
             std::cerr << "ERROR: failed to load W vector" << std::endl;
@@ -394,6 +399,9 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) con
         case FAST:
             max_iter = MAX_ITER_WAVELET_TREE_STAT;
             break;
+        case COMPR:
+            max_iter = MAX_ITER_WAVELET_TREE_COMPR;
+            break;
     }
 
     edge_index end = i - std::min(i, max_iter);
@@ -451,6 +459,9 @@ BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
             break;
         case FAST:
             max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            break;
+        case COMPR:
+            max_iter = MAX_ITER_WAVELET_TREE_COMPR;
             break;
     }
 
@@ -1057,6 +1068,10 @@ void BOSS::switch_state(State new_state) {
         }
         case State::DYN: {
             convert<wavelet_tree_dyn, bit_vector_dyn>(&W_, &last_);
+            break;
+        }
+        case State::COMPR: {
+            convert<wavelet_tree_compr, bit_vector_small>(&W_, &last_);
             break;
         }
     }

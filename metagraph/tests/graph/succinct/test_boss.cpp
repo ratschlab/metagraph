@@ -75,11 +75,11 @@ void test_graph(BOSS *graph, const std::string &last,
                              const std::string &F) {
     test_graph(graph, last, W, F, BOSS::State::DYN);
     test_graph(graph, last, W, F, BOSS::State::DYN);
-    test_graph(graph, last, W, F, BOSS::State::STAT);
-    test_graph(graph, last, W, F, BOSS::State::STAT);
+    test_graph(graph, last, W, F, BOSS::State::COMPR);
+    test_graph(graph, last, W, F, BOSS::State::COMPR);
     test_graph(graph, last, W, F, BOSS::State::SMALL);
     test_graph(graph, last, W, F, BOSS::State::SMALL);
-    test_graph(graph, last, W, F, BOSS::State::STAT);
+    test_graph(graph, last, W, F, BOSS::State::COMPR);
     test_graph(graph, last, W, F, BOSS::State::DYN);
     test_graph(graph, last, W, F, BOSS::State::SMALL);
     test_graph(graph, last, W, F, BOSS::State::DYN);
@@ -1248,7 +1248,7 @@ TEST(BOSS, CallPaths) {
                 BOSS graph(k);
                 graph.add_sequence("AAACACTAG", true);
                 graph.add_sequence("AACGACATG", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1265,7 +1265,7 @@ TEST(BOSS, CallPaths) {
                 graph.add_sequence("AGACACTGA", true);
                 graph.add_sequence("GACTACGTA", true);
                 graph.add_sequence("ACTAACGTA", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1282,7 +1282,7 @@ TEST(BOSS, CallPaths) {
                 graph.add_sequence("AGACACAGT", true);
                 graph.add_sequence("GACTTGCAG", true);
                 graph.add_sequence("ACTAGTCAG", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1298,7 +1298,7 @@ TEST(BOSS, CallPaths) {
                 BOSS graph(k);
                 graph.add_sequence("AAACTCGTAGC", true);
                 graph.add_sequence("AAATGCGTAGC", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1314,7 +1314,7 @@ TEST(BOSS, CallPaths) {
                 BOSS graph(k);
                 graph.add_sequence("AAACT", false);
                 graph.add_sequence("AAATG", false);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1338,7 +1338,7 @@ TEST(BOSS, CallUnitigs) {
                 BOSS graph(k);
                 graph.add_sequence("AAACACTAG", true);
                 graph.add_sequence("AACGACATG", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1355,7 +1355,7 @@ TEST(BOSS, CallUnitigs) {
                 graph.add_sequence("AGACACTGA", true);
                 graph.add_sequence("GACTACGTA", true);
                 graph.add_sequence("ACTAACGTA", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1372,7 +1372,7 @@ TEST(BOSS, CallUnitigs) {
                 graph.add_sequence("AGACACAGT", true);
                 graph.add_sequence("GACTTGCAG", true);
                 graph.add_sequence("ACTAGTCAG", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1388,7 +1388,7 @@ TEST(BOSS, CallUnitigs) {
                 BOSS graph(k);
                 graph.add_sequence("AAACTCGTAGC", true);
                 graph.add_sequence("AAATGCGTAGC", true);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
@@ -1404,7 +1404,7 @@ TEST(BOSS, CallUnitigs) {
                 BOSS graph(k);
                 graph.add_sequence("AAACT", false);
                 graph.add_sequence("AAATG", false);
-                graph.switch_state(BOSS::State::STAT);
+                graph.switch_state(BOSS::State::SMALL);
 
                 BOSS reconstructed(k);
 
