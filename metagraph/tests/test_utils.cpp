@@ -451,7 +451,7 @@ TEST(ThreadPool, MultiThreadFuture) {
     for (size_t i = 2; i < 20; ++i) {
         ThreadPool pool(i);
 
-        std::vector<std::future<size_t>> result;
+        std::vector<std::shared_future<size_t>> result;
         for (size_t t = 0; t < 1000; ++t) {
             result.emplace_back(pool.enqueue([&](size_t i) { return i; }, 1));
         }
@@ -463,43 +463,35 @@ TEST(ThreadPool, MultiThreadFuture) {
     }
 }
 
-TEST(ThreadPool, MultiThreadException) {
+#ifndef _NO_DEATH_TEST
+void throw_from_worker() {
     for (size_t i = 2; i < 20; ++i) {
         try {
             ThreadPool pool(i);
 
-            std::vector<std::future<size_t>> result;
-            std::atomic<size_t> exception_count(0);
-            std::exception_ptr exception = nullptr;
+            std::vector<std::shared_future<size_t>> result;
             for (size_t t = 0; t < 1000; ++t) {
                 result.emplace_back(pool.enqueue([&](size_t i) {
-                    try {
-                        throw std::runtime_error("error in test");
-                    } catch (...) {
-                        if (!exception_count.fetch_add(1))
-                            exception = std::current_exception();
-                    }
+                    // This exception will be thrown in a worker thread, which
+                    // should kill the main thread and the whole process as well
+                    throw std::runtime_error("test exception");
                     return i;
                 }, 1));
             }
 
-            ASSERT_EQ(1000u, result.size());
-            for (auto &value : result) {
-                ASSERT_EQ(1u, value.get());
-            }
-
-            ASSERT_EQ(1000u, exception_count);
-            ASSERT_NE(nullptr, exception);
-
-            std::rethrow_exception(exception);
-        } catch (std::exception &e) {
-            EXPECT_EQ(std::string("error in test"), std::string(e.what()));
-            continue;
+        } catch (...) {
+            FAIL() << "all exceptions must be thrown in workers";
         }
-
-        ASSERT_TRUE(false);
     }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 }
+
+TEST(ThreadPool, MultiThreadException) {
+    // check that a worker throws even if we don't
+    // wait for the result in the returned 'future'
+    ASSERT_DEATH(throw_from_worker(), "");
+}
+#endif // ifndef _NO_DEATH_TEST
 
 TEST(ThreadPool, DummyEmptyJoin) {
     ThreadPool pool(0);
@@ -531,7 +523,7 @@ TEST(ThreadPool, DummyPoolRun) {
 TEST(ThreadPool, DummyFuture) {
     ThreadPool pool(0);
 
-    std::vector<std::future<size_t>> result;
+    std::vector<std::shared_future<size_t>> result;
     for (size_t t = 0; t < 1000; ++t) {
         result.emplace_back(pool.enqueue([&](size_t i) { return i; }, 1));
     }
