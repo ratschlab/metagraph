@@ -18,12 +18,6 @@ namespace {
 
 using namespace mtg;
 
-// run death tests only for debug to check assertions
-#ifdef NDEBUG
-#undef ASSERT_DEATH
-#define ASSERT_DEATH(...) (void)0
-#endif
-
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
@@ -69,9 +63,9 @@ void test_next_subvector(const bit_vector &vector, uint64_t idx) {
 }
 
 void test_next(const bit_vector &vector) {
-    ASSERT_DEATH(vector.next1(vector.size()), "");
-    ASSERT_DEATH(vector.next1(vector.size() + 1), "");
-    ASSERT_DEATH(vector.next1(vector.size() * 2), "");
+    ASSERT_DEBUG_DEATH(vector.next1(vector.size()), "");
+    ASSERT_DEBUG_DEATH(vector.next1(vector.size() + 1), "");
+    ASSERT_DEBUG_DEATH(vector.next1(vector.size() * 2), "");
 
     test_next_subvector(vector, 0);
     test_next_subvector(vector, 0);
@@ -111,9 +105,9 @@ void test_prev_subvector(const bit_vector &vector, uint64_t idx) {
 }
 
 void test_prev(const bit_vector &vector) {
-    ASSERT_DEATH(vector.prev1(vector.size()), "");
-    ASSERT_DEATH(vector.prev1(vector.size() + 1), "");
-    ASSERT_DEATH(vector.prev1(vector.size() * 2), "");
+    ASSERT_DEBUG_DEATH(vector.prev1(vector.size()), "");
+    ASSERT_DEBUG_DEATH(vector.prev1(vector.size() + 1), "");
+    ASSERT_DEBUG_DEATH(vector.prev1(vector.size() * 2), "");
 
     test_prev_subvector(vector, 0);
     if (vector.size() >= 64)
@@ -132,16 +126,16 @@ void reference_based_test(const bit_vector &vector,
 
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
 
-    ASSERT_DEATH(vector.select1(0), "");
+    ASSERT_DEBUG_DEATH(vector.select1(0), "");
 
     for (size_t i : {1, 2, 10, 100, 1000}) {
-        ASSERT_DEATH(vector.select1(max_rank + i), "");
+        ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
         EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2))
             << bit_vector_stat(reference);
     }
-    ASSERT_DEATH(vector.select1(vector.size() + 1), "");
-    ASSERT_DEATH(vector[vector.size()], "");
-    ASSERT_DEATH(vector[vector.size() + 1], "");
+    ASSERT_DEBUG_DEATH(vector.select1(vector.size() + 1), "");
+    ASSERT_DEBUG_DEATH(vector[vector.size()], "");
+    ASSERT_DEBUG_DEATH(vector[vector.size() + 1], "");
 
     for (size_t i = 1; i <= max_rank; ++i) {
         EXPECT_TRUE(vector[vector.select1(i)]);
@@ -183,7 +177,7 @@ void test_bit_vector_queries() {
         EXPECT_EQ(0, (*vector)[i]);
         EXPECT_EQ(i + 1, vector->rank0(i));
         EXPECT_EQ(0u, vector->rank1(i));
-        ASSERT_DEATH(vector->select1(i), "");
+        ASSERT_DEBUG_DEATH(vector->select1(i), "");
     }
     EXPECT_EQ(0u, vector->rank1(0));
     EXPECT_EQ(0u, vector->rank1(1'000));
@@ -205,8 +199,8 @@ void test_bit_vector_queries() {
     EXPECT_EQ(10u, vector->rank1(1'000));
     EXPECT_EQ(0u, vector->rank0(1'000));
     EXPECT_EQ(0u, vector->rank0(0));
-    ASSERT_DEATH(vector->select1(1'000), "");
-    ASSERT_DEATH(vector->select1(0), "");
+    ASSERT_DEBUG_DEATH(vector->select1(1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select1(0), "");
 
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
@@ -250,7 +244,7 @@ TYPED_TEST(BitVectorTest, select0) {
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
-        ASSERT_DEATH(vector->select0(i), "");
+        ASSERT_DEBUG_DEATH(vector->select0(i), "");
     }
 
     vector.reset(new TypeParam(10, 0));
