@@ -8,8 +8,6 @@
 
 #include "dbg_succinct.hpp"
 
-#include "common/hashers/hash.hpp"
-
 #include <tsl/ordered_set.h>
 
 namespace mtg {
@@ -34,9 +32,22 @@ class DBGSuccinctRange : public DeBruijnGraph {
                                  boss::BOSS::edge_index /* last edge */,
                                  size_t /* offset - 1 */>;
 
+    struct EdgeRangeHash {
+        uint64_t operator()(const EdgeRange &range) const {
+            // combine hashes of offset and the range end
+            // https://stackoverflow.com/questions/8513911/how-to-create-a-good-hash-combine-with-64-bit-output-inspired-by-boosthash-co
+            auto [first, last, offset] = range;
+            constexpr uint64_t kMul = 0x9ddfea08eb382d69ULL;
+            uint64_t a = (offset ^ last) * kMul;
+            a ^= (a >> 47);
+            uint64_t b = (last ^ a) * kMul;
+            b ^= (b >> 47);
+            return b * kMul;
+        }
+    };
+
     using EdgeDescriptor = std::pair<EdgeRange, bool /* is_sink_k-mer */>;
-    using EdgeRangeStorage = tsl::ordered_set<EdgeRange,
-                                              utils::Hash<EdgeRange>,
+    using EdgeRangeStorage = tsl::ordered_set<EdgeRange, EdgeRangeHash,
                                               std::equal_to<EdgeRange>,
                                               std::allocator<EdgeRange>,
                                               std::vector<EdgeRange>,
