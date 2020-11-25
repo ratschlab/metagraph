@@ -77,7 +77,8 @@ void SortedMultiset<T, C, Container>::insert(Iterator begin, Iterator end) {
     if (data_.size() + batch_size > data_.capacity()) {
         std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy_);
 
-        shrink_data();
+        if (data_.size() != sorted_end_)
+            shrink_data();
 
         try {
             try_reserve(data_.size() + data_.size() / 2,
