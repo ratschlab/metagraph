@@ -480,7 +480,7 @@ void throw_from_worker() {
             }
 
         } catch (...) {
-            ASSERT_TRUE(false); // all exceptions must be thrown in workers
+            FAIL() << "all exceptions must be thrown in workers";
         }
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
