@@ -18,6 +18,12 @@ namespace {
 
 using namespace mtg;
 
+// run death tests only for debug to check assertions
+#ifdef NDEBUG
+#undef ASSERT_DEATH
+#define ASSERT_DEATH(...) (void)0
+#endif
+
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
