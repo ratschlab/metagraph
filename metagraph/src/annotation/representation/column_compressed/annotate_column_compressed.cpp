@@ -29,15 +29,13 @@ template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached)
       : num_rows_(num_rows),
-        cached_columns_(num_columns_cached,
+        cached_columns_(std::max(num_columns_cached, (size_t)1),
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
                             assert(column_builder);
                             this->flush(j, *column_builder);
                             delete column_builder;
-                        }) {
-    assert(num_columns_cached > 0);
-}
+                        }) {}
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {

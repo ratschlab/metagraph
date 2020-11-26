@@ -26,8 +26,11 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
     score_t last_char_score = config.get_row(start_char)[seed.get_sequence().back()];
 
     auto &table_init = dp_table_[seed.back()];
-    if (!table_init.size())
+    if (!table_init.size()) {
         table_init = Column(size, config.min_cell_score, start_char, start_pos);
+    } else {
+        table_init.expand_to_cover(0, size);
+    }
 
     bool update = false;
 
@@ -184,35 +187,38 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                                const Alignment &seed)
       : query_begin_(NULL),
         query_end_(NULL),
-        score_(column->second.scores.at(start_pos)),
         orientation_(seed.get_orientation()),
         offset_(offset) {
     assert(start_node);
 
     auto i = start_pos;
-    Cigar::Operator op = column->second.ops.at(i);
+    size_t shift = column->second.start_index;
+    assert(i >= shift);
+    assert(i - shift < column->second.scores.size());
+    score_ = column->second.scores.at(i - shift);
+    Cigar::Operator op = column->second.ops.at(i - shift);
     NodeType prev_node;
-    switch (column->second.prev_nodes.at(i)) {
+    switch (column->second.prev_nodes.at(i - shift)) {
         case 0: { prev_node = SequenceGraph::npos; } break;
         case 0xFF: { prev_node = column->first; } break;
         default: {
-            prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+            prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i - shift));
         }
     }
 
     NodeType prev_gap_node;
-    switch (column->second.gap_prev_nodes.at(i)) {
+    switch (column->second.gap_prev_nodes.at(i - shift)) {
         case 0: { prev_gap_node = SequenceGraph::npos; } break;
         case 0xFF: { prev_gap_node = column->first; } break;
         default: {
-            prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+            prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i - shift));
         }
     }
 
     if (op == Cigar::INSERTION)
         prev_node = prev_gap_node;
 
-    uint32_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i) - 1 : 0;
+    uint32_t gap_count = op == Cigar::INSERTION ? column->second.gap_count.at(i - shift) - 1 : 0;
 
     if (!i && prev_node == SequenceGraph::npos)
         return;
@@ -261,10 +267,13 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                 assert(column == prev_column);
                 --i;
 
+                assert(i >= shift);
+                assert(i - shift < column->second.scores.size());
+
                 // assert(column->second.prev_nodes.at(i + 1) == 0xFF);
                 // assert(column->second.scores.at(i + 1) >= score_track);
-                assert(column->second.ops.at(i) != Cigar::INSERTION);
-                score_track -= column->second.ops.at(i) == Cigar::DELETION
+                assert(column->second.ops.at(i - shift) != Cigar::INSERTION);
+                score_track -= column->second.ops.at(i - shift) == Cigar::DELETION
                     ? config.gap_extension_penalty
                     : config.gap_opening_penalty;
                 // assert(column->second.scores.at(i) >= score_track);
@@ -278,27 +287,30 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
         last_op = op;
 
         column = prev_column;
+        shift = prev_column->second.start_index;
+        assert(i >= shift);
+        assert(i - shift < column->second.scores.size());
         if (gap_count) {
             --gap_count;
         } else {
-            op = column->second.ops.at(i);
+            op = column->second.ops.at(i - shift);
 
             if (op == Cigar::INSERTION)
-                gap_count = column->second.gap_count.at(i) - 1;
+                gap_count = column->second.gap_count.at(i - shift) - 1;
         }
-        switch (column->second.prev_nodes.at(i)) {
+        switch (column->second.prev_nodes.at(i - shift)) {
             case 0: { prev_node = SequenceGraph::npos; } break;
             case 0xFF: { prev_node = column->first; } break;
             default: {
-                prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i));
+                prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i - shift));
             }
         }
 
-        switch (column->second.gap_prev_nodes.at(i)) {
+        switch (column->second.gap_prev_nodes.at(i - shift)) {
             case 0: { prev_gap_node = SequenceGraph::npos; } break;
             case 0xFF: { prev_gap_node = column->first; } break;
             default: {
-                prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i));
+                prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i - shift));
             }
         }
 
@@ -311,14 +323,14 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
     if (last_op == Cigar::INSERTION)
         score_track -= gap_diff;
 
-    score_t correction = score_col.at(i) - score_track;
+    score_t correction = score_col.at(i - shift) - score_track;
 
     // assert(correction >= 0);
 
     if (correction > 0)
         logger->trace("Fixing outdated score: {} -> {}", score_, score_ + correction);
 
-    score_ -= score_col.at(i) - correction;
+    score_ -= score_col.at(i - shift) - correction;
 
     *start_node = column->first;
 

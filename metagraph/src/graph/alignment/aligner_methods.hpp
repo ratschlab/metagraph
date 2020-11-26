@@ -193,7 +193,8 @@ class DefaultColumnExtender : public Extender<NodeType> {
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
     emplace_node(NodeType node, NodeType incoming_node, char c, size_t size,
-                 size_t best_pos = 0, size_t last_priority_pos = 0);
+                 size_t best_pos = 0, size_t last_priority_pos = 0,
+                 size_t begin = 0, size_t end = std::numeric_limits<size_t>::max());
 
     virtual bool add_seed(size_t clipping);
 
