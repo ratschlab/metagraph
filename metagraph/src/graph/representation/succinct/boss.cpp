@@ -47,7 +47,7 @@ typedef BOSS::TAlphabet TAlphabet;
 const size_t MAX_ITER_WAVELET_TREE_FAST = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
 const size_t MAX_ITER_WAVELET_TREE_STAT = 20;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 5; // TODO: tune
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 1;
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
