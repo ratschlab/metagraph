@@ -524,9 +524,11 @@ class DPTable {
 
         void expand_to_cover(size_t begin, size_t end) {
             if (begin >= start_index) {
+                // the current range already covers [begin, end)
                 if (end <= start_index + scores.size() - 8)
                     return;
 
+                // extend the range to the right to reach end
                 scores.resize(end + 8 - start_index);
                 gap_scores.resize(end + 8 - start_index);
                 ops.resize(end + 8 - start_index);
@@ -534,6 +536,7 @@ class DPTable {
                 gap_prev_nodes.resize(end + 8 - start_index);
                 gap_count.resize(end + 8 - start_index);
             } else if (end <= start_index + scores.size() - 8) {
+                // extend the range to the left to reach begin
                 size_t shift = start_index - begin;
                 start_index = begin;
                 scores.insert(scores.begin(), shift, min_score_);
@@ -545,6 +548,7 @@ class DPTable {
                 best_pos += shift;
                 last_priority_pos += shift;
             } else {
+                // extend the range in both directions
                 size_t shift = start_index - begin;
                 start_index = begin;
                 end += 8;
