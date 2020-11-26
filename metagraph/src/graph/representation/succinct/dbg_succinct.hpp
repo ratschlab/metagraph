@@ -129,25 +129,25 @@ class DBGSuccinct : public DeBruijnGraph {
      *      Representation:
      *            BOSS::last -- bit_vector_stat
      *               BOSS::W -- wavelet_tree_stat
-     *          valid_edges_ -- bit_vector_small
+     *           valid_edges -- bit_vector_small
      *
      *  SMALL: is the smallest, useful for storage or when RAM is limited
      *      Representation:
      *            BOSS::last -- bit_vector_small
      *               BOSS::W -- wavelet_tree_small
-     *          valid_edges_ -- bit_vector_small
+     *           valid_edges -- bit_vector_small
      *
      *  FAST: is the fastest but large
      *      Representation:
      *            BOSS::last -- bit_vector_stat
      *               BOSS::W -- wavelet_tree_fast
-     *          valid_edges_ -- bit_vector_stat
+     *           valid_edges -- bit_vector_stat
      *
      *  DYN: is a dynamic representation supporting insert and delete
      *      Representation:
      *            BOSS::last -- bit_vector_dyn
      *               BOSS::W -- wavelet_tree_dyn
-     *          valid_edges_ -- bit_vector_dyn
+     *           valid_edges -- bit_vector_dyn
      */
     virtual void switch_state(boss::BOSS::State new_state) final;
     virtual boss::BOSS::State get_state() const final;
