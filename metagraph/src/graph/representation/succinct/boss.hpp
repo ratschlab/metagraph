@@ -280,11 +280,27 @@ class BOSS {
     void print_internal_representation(std::ostream &os = std::cout) const;
 
     /**
-     * Representation states of the BOSS table.
+     * Alternative representation states of the BOSS table.
      *
-     * SMALL is the smallest
-     * STAT provides the best space/time trade-off
-     * FAST is the fastest but large
+     * STAT: provides the best space/time trade-off
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_stat
+     *
+     * SMALL: is the smallest, useful for storage or when RAM is limited
+     *      Representation:
+     *          last -- bit_vector_small
+     *             W -- wavelet_tree_small
+     *
+     * FAST: is the fastest but large
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_fast
+     *
+     * DYN: is a dynamic representation supporting insert and delete
+     *      Representation:
+     *          last -- bit_vector_dyn
+     *             W -- wavelet_tree_dyn
      */
     enum State { SMALL = 1, DYN, STAT, FAST };
 
