@@ -12,6 +12,12 @@ namespace {
 
 using namespace mtg;
 
+// run debug death tests only for debug to check assertions
+#ifdef NDEBUG
+#undef ASSERT_DEBUG_DEATH
+#define ASSERT_DEBUG_DEATH(...) (void)0
+#endif
+
 #ifdef _NO_DEATH_TEST
 // Disable death tests
 
