@@ -448,7 +448,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads);
     if (files_open_per_thread < 3) {
         logger->error("Can't merge with less than 3 files open per thread."
-                      " Max number of files open: {}. Number of threads {}.",
+                      " Max number of files open: {}. Current number of threads {}.",
                       MAX_NUM_FILES_OPEN, num_threads);
         exit(1);
     }
