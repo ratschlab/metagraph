@@ -447,7 +447,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     const uint32_t files_open_per_thread
             = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads);
     if (files_open_per_thread < 3) {
-        logger->error("Can't merge with less than 3 files open per thread");
+        logger->error("Can't merge with less than 3 files open per thread."
+                      " Max number of files open: {}. Number of threads {}.",
+                      MAX_NUM_FILES_OPEN, num_threads);
         exit(1);
     }
 
@@ -464,6 +466,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
 
                 // if there are too many chunks, merge them into larger ones
+                // TODO: move this pre-merging to common::merge_files
+                //       and implement it for SortedSetDisk too.
                 while (filenames.size() > files_open_per_thread) {
                     // chunk 0 stores fwd bits and hence not merged
                     std::vector<std::string> new_chunks = { filenames.at(0) };
