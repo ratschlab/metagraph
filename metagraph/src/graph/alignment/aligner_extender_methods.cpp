@@ -55,17 +55,21 @@ std::pair<size_t, size_t> get_column_boundaries(Column &column,
     auto &scores = column.scores;
     size_t size = column.size();
     size_t best_pos = column.best_pos;
+    assert(best_pos >= column.start_index);
+    assert(best_pos - column.start_index < scores.size());
+
     size_t shift = column.start_index;
     if (xdrop_cutoff > scores[best_pos - shift])
         return std::make_pair(best_pos, best_pos);
 
-    assert(best_pos < size);
     size_t begin = best_pos >= bandwidth ? best_pos - bandwidth : 0;
     size_t end = bandwidth <= size - best_pos ? best_pos + bandwidth : size;
 
     if (column.min_score_ < xdrop_cutoff) {
         begin = std::max(begin, column.start_index);
-        end = std::min(end, column.start_index + scores.size());
+        assert(column.start_index + scores.size() >= 8);
+        end = std::min(end, column.start_index + scores.size() - 8);
+        assert(begin < end);
     } else {
         column.expand_to_cover(begin, end);
         shift = column.start_index;
@@ -98,9 +102,11 @@ std::pair<size_t, size_t> get_column_boundaries(Column &column,
     end = std::min(begin + ((end - begin + 7) / 8) * 8, size);
     column.expand_to_cover(begin, end);
 
-    assert(begin <= best_pos);
-    assert(end > best_pos);
     assert(begin < end);
+    assert(begin <= best_pos);
+    if (end <= best_pos)
+        std::cerr << begin << " " << best_pos << " " << end << std::endl;
+    assert(end > best_pos);
 
     return std::make_pair(begin, end);
 }
@@ -780,6 +786,8 @@ void DefaultColumnExtender<NodeType>
             if (updated_mask[j] && (!best_update || next_column.scores[i - shift] > *best_update)) {
                 best_update = &next_column.scores[i - shift];
                 best_pos = i;
+                assert(i >= shift);
+                assert(i < next_column.size());
             }
         }
 

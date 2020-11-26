@@ -498,8 +498,8 @@ class DPTable {
                 gap_prev_nodes(scores.size()),
                 gap_count(scores.size()),
                 last_char(start_char),
-                best_pos(std::min(std::max(pos, start), start + scores.size() - size_t(8))),
-                last_priority_pos(std::min(std::max(priority_pos, start), start + scores.size() - size_t(8))),
+                best_pos(std::min(std::max(pos, start), start + scores.size() - size_t(9))),
+                last_priority_pos(std::min(std::max(priority_pos, start), start + scores.size() - size_t(9))),
                 start_index(start) {}
 
         size_t size_;
@@ -517,6 +517,11 @@ class DPTable {
         size_t start_index;
 
         void expand_to_cover(size_t begin, size_t end) {
+            assert(best_pos >= start_index);
+            assert(best_pos - start_index < scores.size());
+            assert(last_priority_pos >= start_index);
+            assert(last_priority_pos - start_index < scores.size());
+
             if (begin >= start_index) {
                 // the current range already covers [begin, end)
                 if (end <= start_index + scores.size() - 8)
@@ -539,8 +544,6 @@ class DPTable {
                 prev_nodes.insert(prev_nodes.begin(), shift, 0);
                 gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
                 gap_count.insert(gap_count.begin(), shift, 0);
-                best_pos += shift;
-                last_priority_pos += shift;
             } else {
                 // extend the range in both directions
                 size_t shift = start_index - begin;
@@ -566,6 +569,11 @@ class DPTable {
                 std::swap(gap_prev_nodes, new_gap_prev_nodes);
                 std::swap(gap_count, new_gap_count);
             }
+
+            assert(best_pos >= start_index);
+            assert(best_pos - start_index < scores.size());
+            assert(last_priority_pos >= start_index);
+            assert(last_priority_pos - start_index < scores.size());
         }
 
         const score_t& best_score() const { return scores.at(best_pos - start_index); }
