@@ -88,7 +88,7 @@ void DBGSuccinctRange
 
     // TODO: this can be done more efficiently with an LCS array
 
-    assert(offset > 1);
+    assert(offset);
     assert(s);
 
     const auto &boss_graph = dbg_succ_.get_boss();
