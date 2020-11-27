@@ -114,6 +114,7 @@ void DBGSuccinctRange
         lock.unlock();
 
         assert(get_node_sequence(next_index).rfind('$') == offset);
+        assert(fetch_edge_range(next_index + 1).second);
 
         callback(next_index + 1, last_char);
         return;
@@ -135,6 +136,7 @@ void DBGSuccinctRange
         lock.unlock();
 
         assert(get_node_sequence(prev_node - 1).rfind('$') == offset);
+        assert(fetch_edge_range(prev_node).second);
 
         callback(prev_node, last_char);
         return;
@@ -153,10 +155,11 @@ void DBGSuccinctRange
                                             last_seq.data() + last_seq.size(),
                                             true);
 
-        assert(!prev_node || get_node_sequence(prev_node).rfind('$') == offset);
-
-        if (prev_node)
+        if (prev_node) {
+            assert(get_node_sequence(prev_node).rfind('$') == offset);
+            assert(fetch_edge_range(prev_node + 1).second);
             callback(prev_node + 1, s);
+        }
     }
 }
 
@@ -197,12 +200,23 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         );
     }
 
+#ifndef NDEBUG
+    std::string tmp = get_node_sequence(node - 1);
+    assert(tmp[offset] == '$');
+#endif
+
     node_index prev_node = 0;
     call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto c) {
+        assert(c != boss::BOSS::kSentinelCode);
         std::ignore = c;
         assert(c == s);
         assert(prev_node == 0);
         assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
+
+#ifndef NDEBUG
+        tmp[offset] = boss_graph.decode(c);
+        assert(tmp == get_node_sequence(prev - 1));
+#endif
         prev_node = prev;
     }, s);
 
@@ -600,8 +614,20 @@ void DBGSuccinctRange
         return;
     }
 
+#ifndef NDEBUG
+    std::string tmp = get_node_sequence(kmer - 1);
+    assert(tmp[offset] == '$');
+#endif
+
     call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto s) {
+        assert(s != boss::BOSS::kSentinelCode);
         assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
+#ifndef NDEBUG
+        tmp[offset] = boss_graph.decode(s);
+        if (tmp != get_node_sequence(prev - 1))
+            std::cerr << tmp << "\n" << get_node_sequence(prev - 1) << "\n";
+        assert(tmp == get_node_sequence(prev - 1));
+#endif
         callback(prev, boss_graph.decode(s));
     });
 }
@@ -640,8 +666,19 @@ void DBGSuccinctRange
         return;
     }
 
-    call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto) {
+#ifndef NDEBUG
+    std::string tmp = get_node_sequence(node - 1);
+    assert(tmp[offset] == '$');
+#endif
+
+    call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto s) {
+        assert(s != boss::BOSS::kSentinelCode);
+        std::ignore = s;
         assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
+#ifndef NDEBUG
+        tmp[offset] = boss_graph.decode(s);
+        assert(tmp == get_node_sequence(prev - 1));
+#endif
         callback(prev);
     });
 }
