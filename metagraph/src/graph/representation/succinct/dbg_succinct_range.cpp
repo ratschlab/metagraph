@@ -74,6 +74,88 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     return next_node;
 }
 
+void DBGSuccinctRange
+::call_left_tightened_ranges(boss::BOSS::TAlphabet first,
+                             boss::BOSS::TAlphabet last,
+                             size_t offset,
+                             const std::function<void(node_index, boss::BOSS::TAlphabet)> &callback,
+                             boss::BOSS::TAlphabet s) const {
+    // e.g., suppose node: GTCC$$, prev_char: c
+    // then traverse_back: GTCC$$ -> CGTCC$
+
+    // In the actual implementation, the range is represented by $$GTCC, so
+    // this function does $$GTCC -> $CGTCC, then sets is_sink to true
+
+    // TODO: this can be done more efficiently with an LCS array
+
+    assert(offset);
+
+    const auto &boss_graph = dbg_succ_.get_boss();
+    s = std::min(s, boss_graph.alph_size);
+
+    auto last_seq = boss_graph.get_node_seq(last, boss_graph.get_k() - offset + 1);
+    boss::BOSS::TAlphabet last_char = last_seq.front();
+
+    if (s != boss_graph.alph_size && last_char < s)
+        return;
+
+    if (first == last) {
+        if (s != boss_graph.alph_size && last_char != s)
+            return;
+
+        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
+        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
+        lock.unlock();
+
+        callback(toggle_node_sink_source(next_index), last_char);
+        return;
+    }
+
+    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
+        first, boss_graph.get_k() - offset
+    );
+
+    if (first_char > s)
+        return;
+
+    if (first_char == last_char) {
+        assert(s == boss_graph.alph_size || first_char == s);
+
+        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
+        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
+        node_index prev_node = toggle_node_sink_source(
+            offset_ + ((it - edge_pairs_.begin()) * 2)
+        );
+        lock.unlock();
+
+        callback(prev_node, last_char);
+        return;
+    }
+
+    if (s == boss_graph.alph_size) {
+        first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
+    } else {
+        first_char = s;
+        last_char = s;
+    }
+
+    for (boss::BOSS::TAlphabet s = first_char; s <= last_char; ++s) {
+        last_seq.front() = s;
+        node_index prev_node = toggle_node_sink_source(
+            kmer_to_node(last_seq.data(), last_seq.data() + last_seq.size())
+        );
+
+        auto [prev_edge_range, prev_is_sink] = fetch_edge_range(prev_node);
+        assert(prev_is_sink);
+
+        if (std::get<2>(prev_edge_range) != offset - 1)
+            continue;
+
+        callback(prev_node, s);
+    }
+}
+
 DBGSuccinctRange::node_index DBGSuccinctRange
 ::traverse_back(node_index node, char prev_char) const {
     if (node < offset_) {
@@ -105,56 +187,19 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     auto [first, last, offset] = edge_range;
     auto s = boss_graph.encode(prev_char);
 
-    // e.g., suppose node: GTCC$$, prev_char: c
-    // then traverse_back: GTCC$$ -> CGTCC$
-
-    // In the actual implementation, the range is represented by $$GTCC, so
-    // this function does $$GTCC -> $CGTCC, then sets is_sink to true
-
     if (!offset) {
         return dbg_succ_.boss_to_kmer_index(
             boss_graph.pick_incoming_edge(boss_graph.bwd(last), s)
         );
     }
 
-    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
-        last, boss_graph.get_k() - offset
-    );
-
-    if (last_char < s)
-        return 0;
-
-    if (first == last) {
-        if (last_char != s)
-            return 0;
-
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
-
-        return toggle_node_sink_source(next_index);
-    }
-
-    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
-        first, boss_graph.get_k() - offset
-    );
-
-    if (first_char > s)
-        return 0;
-
-    // TODO: more efficient implementation
-    std::string tmp = get_node_sequence(node);
-    std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
-    tmp[0] = prev_char;
-
-    node_index prev_node = kmer_to_node(tmp);
-    assert(!prev_node || tmp == get_node_sequence(prev_node));
-
-    if (prev_node < offset_)
-        return prev_node;
-
-    assert(std::get<1>(fetch_edge_range(prev_node)) == is_sink);
+    node_index prev_node = 0;
+    call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto c) {
+        std::ignore = c;
+        assert(c == s);
+        assert(prev_node == 0);
+        prev_node = dbg_succ_.boss_to_kmer_index(prev);
+    }, s);
 
     return prev_node;
 }
@@ -554,46 +599,9 @@ void DBGSuccinctRange
         return;
     }
 
-    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
-        last, boss_graph.get_k() - offset
-    );
-
-    if (!last_char)
-        return;
-
-    if (first == last) {
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
-
-        callback(toggle_node_sink_source(next_index), boss_graph.decode(last_char));
-        return;
-    }
-
-    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
-        first, boss_graph.get_k() - offset
-    );
-
-    assert(first_char <= last_char);
-    first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
-
-    // TODO: better implementation
-    std::string tmp = get_node_sequence(kmer);
-    std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
-
-    for (auto s = first_char; s <= last_char; ++s) {
-        tmp[0] = boss_graph.decode(s);
-
-        node_index prev_node = kmer_to_node(tmp);
-
-        if (prev_node) {
-            assert(tmp == get_node_sequence(prev_node));
-            assert(prev_node < offset_
-                || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
-            callback(prev_node, tmp[0]);
-        }
-    }
+    call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto s) {
+        callback(prev, boss_graph.decode(s));
+    });
 }
 
 void DBGSuccinctRange
@@ -630,46 +638,9 @@ void DBGSuccinctRange
         return;
     }
 
-    auto [last_char, last_minus] = boss_graph.get_minus_k_value(
-        last, boss_graph.get_k() - offset
-    );
-
-    if (!last_char)
-        return;
-
-    if (first == last) {
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last, offset - 1).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
-
-        callback(toggle_node_sink_source(next_index));
-        return;
-    }
-
-    auto [first_char, first_minus] = boss_graph.get_minus_k_value(
-        first, boss_graph.get_k() - offset
-    );
-
-    assert(first_char <= last_char);
-    first_char = std::max(first_char, boss::BOSS::TAlphabet(1));
-
-    // TODO: better implementation
-    std::string tmp = get_node_sequence(node);
-    std::rotate(tmp.begin(), tmp.end() - 1, tmp.end());
-
-    for (auto s = first_char; s <= last_char; ++s) {
-        tmp[0] = boss_graph.decode(s);
-
-        node_index prev_node = kmer_to_node(tmp);
-
-        if (prev_node) {
-            assert(tmp == get_node_sequence(prev_node));
-            assert(prev_node < offset_
-                || std::get<1>(fetch_edge_range(prev_node)) == is_sink);
-            callback(prev_node);
-        }
-    }
+    call_left_tightened_ranges(first, last, offset, [&](node_index prev, auto) {
+        callback(prev);
+    });
 }
 
 std::string DBGSuccinctRange::get_node_sequence(node_index node) const {
