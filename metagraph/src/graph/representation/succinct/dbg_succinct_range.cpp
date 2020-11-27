@@ -108,7 +108,7 @@ void DBGSuccinctRange
         size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
         lock.unlock();
 
-        callback(toggle_node_sink_source(next_index), last_char);
+        callback(next_index + 1, last_char);
         return;
     }
 
@@ -124,9 +124,7 @@ void DBGSuccinctRange
 
         std::unique_lock<std::mutex> lock(edge_pair_mutex_);
         auto it = edge_pairs_.emplace(first, last, offset - 1).first;
-        node_index prev_node = toggle_node_sink_source(
-            offset_ + ((it - edge_pairs_.begin()) * 2)
-        );
+        node_index prev_node = offset_ + ((it - edge_pairs_.begin()) * 2 + 1);
         lock.unlock();
 
         callback(prev_node, last_char);
@@ -142,17 +140,12 @@ void DBGSuccinctRange
 
     for (boss::BOSS::TAlphabet s = first_char; s <= last_char; ++s) {
         last_seq.front() = s;
-        node_index prev_node = toggle_node_sink_source(
-            kmer_to_node(last_seq.data(), last_seq.data() + last_seq.size())
-        );
+        node_index prev_node = kmer_to_node(last_seq.data(),
+                                            last_seq.data() + last_seq.size(),
+                                            true) + 1;
 
-        auto [prev_edge_range, prev_is_sink] = fetch_edge_range(prev_node);
-        assert(prev_is_sink);
-
-        if (std::get<2>(prev_edge_range) != offset - 1)
-            continue;
-
-        callback(prev_node, s);
+        if (prev_node)
+            callback(prev_node, s);
     }
 }
 
@@ -403,7 +396,8 @@ bool DBGSuccinctRange::has_single_incoming(node_index node) const {
 
 DBGSuccinctRange::node_index DBGSuccinctRange
 ::kmer_to_node(const boss::BOSS::TAlphabet *begin,
-               const boss::BOSS::TAlphabet *end) const {
+               const boss::BOSS::TAlphabet *end,
+               bool require_exact_length) const {
     const auto &boss_graph = dbg_succ_.get_boss();
     assert(begin <= end);
     assert(boss_graph.get_k() >= static_cast<size_t>(end - begin));
@@ -413,7 +407,8 @@ DBGSuccinctRange::node_index DBGSuccinctRange
 
     auto [first, last, seq_it] = boss_graph.index_range(begin, end);
 
-    if (first == 0 || last == 0 || seq_it == begin) {
+    if (first == 0 || last == 0 || seq_it == begin
+            || (require_exact_length && seq_it != end)) {
         return 0;
     } else {
         std::lock_guard<std::mutex> lock(edge_pair_mutex_);
@@ -431,7 +426,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange::kmer_to_node(std::string_view kme
     }
 
     const auto &boss_graph = dbg_succ_.get_boss();
-    auto encoded = encode_sequence(dbg_succ_.get_boss(), kmer);
+    auto encoded = encode_sequence(boss_graph, kmer);
     boss::BOSS::TAlphabet *start;
     boss::BOSS::TAlphabet *end;
     bool is_sink = false;
@@ -453,13 +448,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange::kmer_to_node(std::string_view kme
 
     assert(start + boss_graph.get_k() >= end);
 
-    auto base_node = kmer_to_node(start, end);
-    size_t offset = std::get<2>(fetch_edge_range(base_node).first);
-    assert(static_cast<size_t>(end - start) + offset >= boss_graph.get_k());
-    if (static_cast<size_t>(end - start) + offset > boss_graph.get_k())
-        return 0;
-
-    return base_node + is_sink;
+    return kmer_to_node(start, end, true) + is_sink;
 }
 
 void DBGSuccinctRange

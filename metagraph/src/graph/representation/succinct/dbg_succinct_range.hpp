@@ -254,7 +254,8 @@ class DBGSuccinctRange : public DeBruijnGraph {
     size_t offset_;
 
     node_index kmer_to_node(const boss::BOSS::TAlphabet *begin,
-                            const boss::BOSS::TAlphabet *end) const;
+                            const boss::BOSS::TAlphabet *end,
+                            bool require_exact_length = false) const;
 
     EdgeDescriptor fetch_edge_range(node_index node) const;
 
