@@ -259,8 +259,9 @@ class DBGSuccinctRange : public DeBruijnGraph {
 
     EdgeDescriptor fetch_edge_range(node_index node) const;
 
-    void call_left_tightened_ranges(boss::BOSS::TAlphabet first,
-                                    boss::BOSS::TAlphabet last,
+    void call_left_tightened_ranges(node_index node,
+                                    boss::BOSS::edge_index first,
+                                    boss::BOSS::edge_index last,
                                     size_t offset,
                                     const std::function<void(node_index, boss::BOSS::TAlphabet)> &callback,
                                     boss::BOSS::TAlphabet s = std::numeric_limits<boss::BOSS::TAlphabet>::max()) const;
