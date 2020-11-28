@@ -22,7 +22,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size);
+                               uint64_t buf_size,
+                               bool with_counts = false);
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
                                   const std::filesystem::path &dest_dir,

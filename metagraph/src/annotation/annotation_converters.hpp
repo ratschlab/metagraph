@@ -108,7 +108,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          std::filesystem::path dest_dir,
-                         bool optimize = false);
+                         bool optimize = false,
+                         bool with_counts = false);
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);

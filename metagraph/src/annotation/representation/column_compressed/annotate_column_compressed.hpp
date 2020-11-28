@@ -25,6 +25,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using counts_container = sdsl::int_vector<>;
 
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1);
@@ -118,7 +119,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
-    std::vector<sdsl::int_vector<>> relation_counts_;
+    std::vector<counts_container> relation_counts_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };

@@ -11,9 +11,13 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
+
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
 constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
+
+const uint8_t kCountBits = 9;
+
 
 namespace mtg {
 namespace annot {
@@ -263,7 +267,42 @@ void traverse_anno_chunked(
     assert(pred_boundary_it == pred_boundary.end());
 }
 
+template <typename T = uint64_t>
+void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
+                               const std::string &anchors_fname,
+                               const std::vector<std::string> &source_files,
+                               const std::filesystem::path &dest_dir,
+                               const std::string &row_reduction_fname,
+                               uint64_t buf_size);
 
+void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
+                               const std::string &anchors_fname,
+                               const std::vector<std::string> &source_files,
+                               const std::filesystem::path &dest_dir,
+                               const std::string &row_reduction_fname,
+                               uint64_t buf_size,
+                               bool with_counts) {
+    if (with_counts) {
+        convert_batch_to_row_diff<std::pair<uint64_t, uint64_t>>(
+                pred_succ_fprefix,
+                anchors_fname,
+                source_files,
+                dest_dir,
+                row_reduction_fname,
+                buf_size);
+    } else {
+        convert_batch_to_row_diff<uint64_t>(
+                pred_succ_fprefix,
+                anchors_fname,
+                source_files,
+                dest_dir,
+                row_reduction_fname,
+                buf_size);
+    }
+}
+
+// 'T' is either a row index, or a pair (row index, relation count)
+template <typename T>
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
@@ -272,6 +311,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                uint64_t buf_size) {
     if (source_files.empty())
         return;
+
+    constexpr bool with_counts = utils::is_pair_v<T>;
 
     uint32_t num_threads = get_num_threads();
 
@@ -282,6 +323,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
+    std::vector<std::vector<annot::ColumnCompressed<>::counts_container>> counts(source_files.size());
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < source_files.size(); ++i) {
@@ -293,6 +335,26 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                           anchors_fname, source_files[i], anchor.size(), sources[i].num_objects());
             std::exit(1);
         }
+
+        if (!with_counts)
+            continue;
+
+        const auto &counts_fname = source_files[i] + ".counts";
+        std::ifstream instream(counts_fname, std::ios::binary);
+        if (!instream.good()) {
+            logger->error("Could not open file with relation counts {}", counts_fname);
+            exit(1);
+        }
+
+        counts[i].resize(sources[i].num_labels());
+        for (size_t j = 0; j < counts[i].size(); ++j) {
+            try {
+                counts[i][j].load(instream);
+            } catch (...) {
+                logger->error("Couldn't read relation counts from {}", counts_fname);
+                exit(1);
+            }
+        }
     }
     logger->trace("Done loading {} annotations", sources.size());
 
@@ -302,19 +364,19 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
-    std::vector<std::vector<std::vector<uint64_t>>> set_rows_bwd(sources.size());
-    std::vector<std::vector<std::vector<uint64_t>>> set_rows_fwd(sources.size());
+    std::vector<std::vector<std::vector<T>>> set_rows_bwd(sources.size());
+    std::vector<std::vector<std::vector<T>>> set_rows_fwd(sources.size());
     std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
     auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
         return tmp_path/fmt::format("{}/col_{}_{}/chunk_{}", s / 100, s, j, chunk);
     };
-    auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
+    auto dump_chunk_to_disk = [&](const std::vector<T> &v,
                                   size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
         std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
+        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(T));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -359,6 +421,20 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     // total number of set bits in the original rows
     std::vector<uint32_t> row_nbits_block;
 
+    // get bit at position |i| or its relation count
+    auto get_value = [&](const bit_vector &col,
+                         size_t s, size_t j, uint64_t i) {
+        if constexpr(!with_counts) {
+            return col[i];
+        } else {
+            if (uint64_t rk = col.conditional_rank1(i)) {
+                return (uint64_t)counts[s][j][rk - 1];
+            } else {
+                return (uint64_t)0;
+            }
+        }
+    };
+
     traverse_anno_chunked(
             "Compute diffs", anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
@@ -371,11 +447,24 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
 
+                // get bits for these positions (or relation counts, hence uint64_t)
+                uint64_t curr_value;
+                if constexpr(with_counts) {
+                    curr_value = counts[source_idx][j][source_col.rank1(row_idx) - 1];
+                } else {
+                    curr_value = 1;
+                }
                 // add current bit if this node is an anchor
-                // or if the successor has zero bit
-                if (anchor[row_idx] || !source_col[succ]) {
+                // or if the successor has zero diff
+                bool is_anchor = anchor[row_idx];
+                uint64_t succ_value = is_anchor ? 0 : get_value(source_col, source_idx, j, succ);
+                if (is_anchor || succ_value != curr_value) {
                     auto &v = set_rows_fwd[source_idx][j];
-                    v.push_back(row_idx);
+                    if constexpr(with_counts) {
+                        v.emplace_back(row_idx, curr_value - succ_value);
+                    } else {
+                        v.push_back(row_idx);
+                    }
 
                     if (v.size() == v.capacity()) {
                         // dump chunk to disk
@@ -386,9 +475,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                    if (!source_col[*pred_p] && !anchor[*pred_p]) {
+                    if (anchor[*pred_p])
+                        continue;
+
+                    uint64_t pred_value = get_value(source_col, source_idx, j, *pred_p);
+                    if (!pred_value && curr_value) {
                         auto &v = set_rows_bwd[source_idx][j];
-                        v.push_back(*pred_p);
+                        if constexpr(with_counts) {
+                            v.emplace_back(*pred_p, pred_value - curr_value);
+                        } else {
+                            v.push_back(*pred_p);
+                        }
 
                         if (v.size() == v.capacity()) {
                             std::sort(v.begin(), v.end());
@@ -441,6 +538,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     // free memory occupied by original columns
     sources.clear();
+    counts.clear();
+    counts.resize(label_encoders.size());
 
     std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
@@ -459,6 +558,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
+            if constexpr(with_counts) {
+                counts[l_idx].emplace_back(row_diff_bits[l_idx][j], 0, kCountBits);
+            }
+
             auto call_ones = [&](const std::function<void(uint64_t)> &call) {
                 std::vector<std::string> filenames;
                 for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
@@ -490,20 +593,20 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         new_chunks.push_back(to_merge.at(0) + "_");
                         std::ofstream f(new_chunks.back(), std::ios::binary);
 
-                        std::vector<uint64_t> buf;
+                        std::vector<T> buf;
                         buf.reserve(1024 * 1024);
 
-                        common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
+                        common::merge_files<T>(to_merge, [&](T i) {
                             buf.push_back(i);
                             if (buf.size() == buf.capacity()) {
                                 f.write(reinterpret_cast<const char *>(buf.data()),
-                                        buf.size() * sizeof(decltype(buf.front())));
+                                        buf.size() * sizeof(T));
                                 buf.resize(0);
                             }
                         });
                         if (buf.size()) {
                             f.write(reinterpret_cast<const char *>(buf.data()),
-                                    buf.size() * sizeof(decltype(buf.front())));
+                                    buf.size() * sizeof(T));
                         }
 
                         // remove merged chunks
@@ -515,7 +618,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
 
                 //TODO: benchmark using Elias-Fano encoders + merger
-                common::merge_files<uint64_t>(filenames, call);
+                uint64_t rk = 0;
+                common::merge_files<T>(filenames, [&](T v) {
+                    call(utils::get_first(v));
+                    if constexpr(with_counts) {
+                        counts[l_idx][j][rk] = v.second;
+                    }
+                    rk++;
+                });
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
                                                          row_diff_bits[l_idx][j]);
@@ -528,9 +638,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
                                 .filename()
                                 .replace_extension()
-                                .replace_extension(RowDiffColumnAnnotator::kExtension);
+                                .replace_extension(row_diff[l_idx]->kExtension);
 
         row_diff[l_idx]->serialize(fpath);
+
+        if constexpr(with_counts) {
+            std::ofstream outstream(std::string(fpath) + ".counts", std::ios::binary);
+            for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
+                counts[l_idx][j].serialize(outstream);
+            }
+        }
 
         logger->trace("Serialized {}", fpath);
     }

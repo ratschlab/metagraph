@@ -1122,7 +1122,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          std::filesystem::path dest_dir,
-                         bool optimize) {
+                         bool optimize,
+                         bool with_counts) {
     if (!files.size())
         return;
 
@@ -1142,9 +1143,24 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
-            // also include two buffers (fwd and back) for each column transformed
-            uint64_t file_size = std::filesystem::file_size(files[i])
-                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * 2;
+            // take annotation size
+            uint64_t file_size = std::filesystem::file_size(files[i]);
+            if (!with_counts) {
+                // also include two buffers (fwd and back) for each column transformed
+                file_size += ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * 2;
+            } else {
+                // each buffer will store pairs (idx, count)
+                file_size += ROW_DIFF_BUFFER_SIZE * (sizeof(uint64_t) * 2) * 2;
+                // also add k-mer counts
+                const auto &counts_fname = files[i] + ".counts";
+                file_size += std::filesystem::file_size(counts_fname);
+                if (!std::filesystem::exists(counts_fname)) {
+                    logger->warn("Could not find counts for annotation {}, skipped",
+                                 counts_fname);
+                    continue;
+                }
+            }
+
             if (file_size > mem_bytes) {
                 logger->warn(
                         "Not enough memory to process {}, requires {} MB, skipped",
@@ -1180,7 +1196,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         convert_batch_to_row_diff(
                 graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, dest_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE);
+                file_batch, dest_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE,
+                with_counts);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
