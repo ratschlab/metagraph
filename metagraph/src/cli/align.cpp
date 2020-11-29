@@ -332,14 +332,14 @@ int align_to_graph(Config *config) {
                         *out << "\t*\t*\t" << config->alignment_min_path_score
                              << "\t*\t*\t*";
                     } else {
-                        size_t sum = 0;
+                        size_t total_score = 0;
                         for (const auto &path : paths) {
-                            sum += path.get_score();
+                            total_score += path.get_score();
                             *out << "\t" << path;
                         }
 
                         if (config->alignment_chain_alignments)
-                            *out << "\t" << sum;
+                            *out << "\t" << total_score;
                     }
 
                     *out << "\n";

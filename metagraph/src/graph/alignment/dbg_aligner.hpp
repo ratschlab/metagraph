@@ -154,8 +154,6 @@ inline void SeedAndExtendAligner<Seeder, Extender>
         seeds.emplace_back(std::move(seed));
     });
 
-    mtg::common::logger->trace("Found {} seeds", seeds.size());
-
     for (auto &seed : seeds) {
         mtg::common::logger->trace("Seed: {}", seed);
         score_t min_path_score = get_min_path_score(seed);

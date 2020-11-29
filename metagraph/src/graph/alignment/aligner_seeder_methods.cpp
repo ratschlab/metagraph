@@ -7,8 +7,6 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-using mtg::common::logger;
-
 template <typename NodeType>
 void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
     query_ = query;
@@ -22,8 +20,6 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
     query_nodes_ = map_sequence_to_nodes(graph_, query_);
     num_matching_kmers_ = query_nodes_.size()
         - std::count(query_nodes_.begin(), query_nodes_.end(), NodeType());
-
-    logger->trace("Number of matching k-mers: {}", num_matching_kmers_);
 
     offsets_.assign(query_nodes_.size(), 0);
 
@@ -125,8 +121,6 @@ void SuffixSeeder<NodeType>
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
     auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
 
-    size_t added_node_count = 0;
-
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos)
             continue;
@@ -155,7 +149,6 @@ void SuffixSeeder<NodeType>
                     assert(offsets.at(i) == k - seed_length);
                 } else {
                     query_nodes.at(i) = alt_node;
-                    ++added_node_count;
                     offsets.at(i) = k - seed_length;
 
                     if (query_node_flags) {
@@ -175,9 +168,6 @@ void SuffixSeeder<NodeType>
             config.max_num_seeds_per_locus
         );
     }
-
-    logger->trace("Number of additional k-mers after matching suffixes: {}",
-                  added_node_count);
 }
 
 template <typename NodeType>
