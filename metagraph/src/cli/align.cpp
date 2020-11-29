@@ -131,9 +131,11 @@ void map_sequences_in_file(const std::string &file,
 
     Timer data_reading_timer;
 
-    seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-        logger->trace("Sequence: {}", read_stream->seq.s);
+    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph);
+    assert(config.alignment_length <= graph.get_k());
+    assert(config.alignment_length == graph.get_k() || range_graph);
 
+    seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
         if (config.query_presence
                 && config.alignment_length == graph.get_k()) {
 
@@ -151,12 +153,22 @@ void map_sequences_in_file(const std::string &file,
             return;
         }
 
-        assert(config.alignment_length <= graph.get_k());
-
         std::vector<DeBruijnGraph::node_index> graphindices;
-        graph.map_to_nodes(read_stream->seq.s, [&](const auto &node) {
-            graphindices.emplace_back(node);
-        });
+        graph.map_to_nodes(read_stream->seq.s,
+            [&](auto node) {
+                if (range_graph) {
+                    size_t match_length = graph.get_k() - range_graph->get_offset(node);
+                    if (match_length < config.alignment_length)
+                        node = 0;
+                }
+
+                graphindices.emplace_back(node);
+            },
+            [&]() {
+                return graphindices.size() + config.alignment_length - 1
+                    == read_stream->seq.l;
+            }
+        );
 
         size_t num_discovered = std::count_if(graphindices.begin(), graphindices.end(),
                                               [](const auto &x) { return x > 0; });
@@ -164,8 +176,9 @@ void map_sequences_in_file(const std::string &file,
         const size_t num_kmers = graphindices.size();
 
         if (config.query_presence) {
-            const size_t min_kmers_discovered =
-                num_kmers - num_kmers * (1 - config.discovery_fraction);
+            const size_t min_kmers_discovered = std::ceil(
+                config.discovery_fraction * num_kmers
+            );
             if (config.filter_present) {
                 if (num_discovered >= min_kmers_discovered)
                     *out << ">" << read_stream->name.s << "\n"
@@ -183,18 +196,13 @@ void map_sequences_in_file(const std::string &file,
                 graphindices.begin(),
                 size_t(graphindices.front() != DeBruijnGraph::npos),
                 std::plus<size_t>(),
-                [](DeBruijnGraph::node_index next, DeBruijnGraph::node_index prev) {
-                    return next != DeBruijnGraph::npos && next != prev;
-                }
+                [](auto next, auto prev) { return next && next != prev; }
             );
             *out << read_stream->name.s << "\t"
                  << num_discovered << "/" << num_kmers << "/"
                  << num_unique_matching_kmers << "\n";
             return;
         }
-
-        const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph);
-        assert(config.alignment_length == graph.get_k() || range_graph);
 
         for (size_t i = 0; i < graphindices.size(); ++i) {
             assert(i + config.alignment_length <= read_stream->seq.l);
