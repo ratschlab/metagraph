@@ -13,7 +13,7 @@
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
-constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
+// constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
 
 namespace mtg {
 namespace annot {
@@ -269,7 +269,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size) {
+                               uint64_t ) {
     if (source_files.empty())
         return;
 
@@ -296,45 +296,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    const std::filesystem::path tmp_path = utils::create_temp_dir(
-            std::filesystem::path(dest_dir).remove_filename(), "col");
-    logger->trace("Using temporary directory {}", tmp_path);
+    std::vector<std::vector<std::vector<uint64_t>>> set_rows(sources.size());
 
-    // stores the row indices that were set because of differences to incoming/outgoing
-    // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
-    std::vector<std::vector<std::vector<uint64_t>>> set_rows_bwd(sources.size());
-    std::vector<std::vector<std::vector<uint64_t>>> set_rows_fwd(sources.size());
-    std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
-    std::vector<std::vector<uint64_t>> num_chunks(sources.size());
-
-    auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
-        return tmp_path/fmt::format("{}/col_{}_{}/chunk_{}", s / 100, s, j, chunk);
-    };
-    auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
-                                  size_t s, size_t j, size_t chunk) {
-        assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
-        std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
-        row_diff_bits[s][j] += v.size();
-    };
-
-    #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {
-        set_rows_fwd[s].resize(sources[s].num_labels());
-        set_rows_bwd[s].resize(sources[s].num_labels());
-        row_diff_bits[s].assign(sources[s].num_labels(), 0);
-        // The first chunk will contain forward bits, all sorted.
-        // The other ones (added later) will contain chunks of sorted pred bits.
-        num_chunks[s].assign(sources[s].num_labels(), 1);
-
-        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            std::filesystem::create_directories(tmp_file(s, j, 0).parent_path());
-            // make sure the first chunk exists even if empty
-            dump_chunk_to_disk({}, s, j, 0);
-            uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
-            set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
-            set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
-        }
+        set_rows[s].resize(sources[s].num_labels());
     }
 
     ThreadPool async_writer(1, 1);
@@ -374,27 +339,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 // add current bit if this node is an anchor
                 // or if the successor has zero bit
                 if (anchor[row_idx] || !source_col[succ]) {
-                    auto &v = set_rows_fwd[source_idx][j];
-                    v.push_back(row_idx);
-
-                    if (v.size() == v.capacity()) {
-                        // dump chunk to disk
-                        dump_chunk_to_disk(v, source_idx, j, 0);
-                        v.resize(0);
-                    }
+                    set_rows[source_idx][j].push_back(row_idx);
                 }
 
                 // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
                     if (!source_col[*pred_p] && !anchor[*pred_p]) {
-                        auto &v = set_rows_bwd[source_idx][j];
-                        v.push_back(*pred_p);
-
-                        if (v.size() == v.capacity()) {
-                            std::sort(v.begin(), v.end());
-                            dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
-                            v.resize(0);
-                        }
+                        set_rows[source_idx][j].push_back(*pred_p);
                     }
                 }
             },
@@ -414,25 +365,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 });
             });
 
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t s = 0; s < sources.size(); ++s) {
-        for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            auto &fwd = set_rows_fwd[s][j];
-            if (fwd.size())
-                dump_chunk_to_disk(fwd, s, j, 0);
-
-            auto &bwd = set_rows_bwd[s][j];
-            if (bwd.size()) {
-                std::sort(bwd.begin(), bwd.end());
-                dump_chunk_to_disk(bwd, s, j, num_chunks[s][j]++);
-            }
-        }
-    }
-
     async_writer.join();
-
-    set_rows_fwd.clear(); // free up memory
-    set_rows_bwd.clear();
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
@@ -444,82 +377,21 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
-    const uint32_t files_open_per_thread
-            = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads);
-    if (files_open_per_thread < 3) {
-        logger->error("Can't merge with less than 3 files per thread open. "
-                      "Max num files open: {}. Current number of threads: {}.",
-                      MAX_NUM_FILES_OPEN, num_threads);
-        exit(1);
-    }
-
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
+            auto &v = set_rows[l_idx][j];
             auto call_ones = [&](const std::function<void(uint64_t)> &call) {
-                std::vector<std::string> filenames;
-                for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
-                    filenames.push_back(tmp_file(l_idx, j, chunk));
-                }
-
-                // if there are too many chunks, merge them into larger ones
-                // TODO: move this pre-merging to common::merge_files
-                //       and implement it for SortedSetDisk too.
-                while (filenames.size() > files_open_per_thread) {
-                    // chunk 0 stores fwd bits and hence not merged
-                    std::vector<std::string> new_chunks = { filenames.at(0) };
-                    size_t i = 1;
-                    while (i < filenames.size()) {
-                        std::vector<std::string> to_merge;
-                        while (i < filenames.size()
-                                && to_merge.size() + 1 < files_open_per_thread) {
-                            to_merge.push_back(filenames[i++]);
-                        }
-
-                        if (to_merge.size() < 2) {
-                            // nothing to merge
-                            new_chunks.push_back(to_merge.at(0));
-                            continue;
-                        }
-
-                        assert(to_merge.size() < files_open_per_thread);
-
-                        new_chunks.push_back(to_merge.at(0) + "_");
-                        std::ofstream f(new_chunks.back(), std::ios::binary);
-
-                        std::vector<uint64_t> buf;
-                        buf.reserve(1024 * 1024);
-
-                        common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
-                            buf.push_back(i);
-                            if (buf.size() == buf.capacity()) {
-                                f.write(reinterpret_cast<const char *>(buf.data()),
-                                        buf.size() * sizeof(decltype(buf.front())));
-                                buf.resize(0);
-                            }
-                        });
-                        if (buf.size()) {
-                            f.write(reinterpret_cast<const char *>(buf.data()),
-                                    buf.size() * sizeof(decltype(buf.front())));
-                        }
-
-                        // remove merged chunks
-                        for (const std::string &chunk_file : to_merge) {
-                            std::filesystem::remove(chunk_file);
-                        }
-                    }
-                    filenames.swap(new_chunks);
-                }
-
-                //TODO: benchmark using Elias-Fano encoders + merger
-                common::merge_files<uint64_t>(filenames, call);
+                std::sort(v.begin(), v.end());
+                std::for_each(v.begin(), v.end(), call);
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
-                                                         row_diff_bits[l_idx][j]);
+                                                         v.size());
         }
+        set_rows[l_idx].clear();
 
         row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
                 std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
@@ -534,8 +406,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         logger->trace("Serialized {}", fpath);
     }
-    logger->trace("Removing temp directory: {}", tmp_path);
-    std::filesystem::remove_all(tmp_path);
 
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
