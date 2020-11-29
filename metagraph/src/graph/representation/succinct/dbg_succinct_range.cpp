@@ -217,7 +217,6 @@ DBGSuccinctRange::node_index DBGSuccinctRange
         std::ignore = c;
         assert(c == s);
         assert(prev_node == 0);
-        assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
         prev_node = prev;
     }, s);
 
@@ -618,7 +617,6 @@ void DBGSuccinctRange
 
     call_left_tightened_ranges(kmer, first, last, offset, [&](node_index prev, auto s) {
         assert(s != boss::BOSS::kSentinelCode);
-        assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
         callback(prev, boss_graph.decode(s));
     });
 }
@@ -657,10 +655,7 @@ void DBGSuccinctRange
         return;
     }
 
-    call_left_tightened_ranges(node, first, last, offset, [&](node_index prev, auto s) {
-        assert(s != boss::BOSS::kSentinelCode);
-        std::ignore = s;
-        assert(std::get<2>(fetch_edge_range(prev).first) == offset - 1);
+    call_left_tightened_ranges(node, first, last, offset, [&](node_index prev, auto) {
         callback(prev);
     });
 }
