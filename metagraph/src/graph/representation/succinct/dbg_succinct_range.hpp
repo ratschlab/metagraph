@@ -53,13 +53,16 @@ class DBGSuccinctRange : public DeBruijnGraph {
                                               std::vector<EdgeRange>,
                                               uint64_t>;
 
-    DBGSuccinctRange(std::shared_ptr<const DBGSuccinct> graph)
+    DBGSuccinctRange(std::shared_ptr<const DBGSuccinct> graph, size_t min_seed_length = 1)
           : dbg_succ_ptr_(graph),
             dbg_succ_(*dbg_succ_ptr_),
-            offset_(dbg_succ_.max_index() + 1) {}
+            offset_(dbg_succ_.max_index() + 1),
+            min_length_(min_seed_length) {}
 
-    DBGSuccinctRange(const DBGSuccinct &graph)
-          : dbg_succ_(graph), offset_(dbg_succ_.max_index() + 1) {}
+    DBGSuccinctRange(const DBGSuccinct &graph, size_t min_seed_length = 1)
+          : dbg_succ_(graph),
+            offset_(dbg_succ_.max_index() + 1),
+            min_length_(min_seed_length) {}
 
     virtual ~DBGSuccinctRange() override {}
 
@@ -252,6 +255,7 @@ class DBGSuccinctRange : public DeBruijnGraph {
     mutable EdgeRangeStorage edge_pairs_;
     mutable std::mutex edge_pair_mutex_;
     size_t offset_;
+    size_t min_length_;
 
     node_index kmer_to_node(const boss::BOSS::TAlphabet *begin,
                             const boss::BOSS::TAlphabet *end,
