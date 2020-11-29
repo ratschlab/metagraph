@@ -9,6 +9,7 @@
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 
 
@@ -16,6 +17,8 @@ namespace mtg {
 namespace annot {
 
 typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowSparse, std::string> RowSparseAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::Rainbowfish, std::string> RainbowfishAnnotator;
 
@@ -29,13 +32,17 @@ typedef StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string> UniqueRowAnn
 
 typedef StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string> RbBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string> RowDiffAnnotator;
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string> RowDiffColumnAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDiffBRWTAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
+template <>
+inline const std::string RowSparseAnnotator::kExtension = ".row_sparse.annodbg";
 template <>
 inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
 template <>
@@ -49,9 +56,11 @@ inline const std::string UniqueRowAnnotator::kExtension = ".unique_row.annodbg";
 template <>
 inline const std::string RbBRWTAnnotator::kExtension = ".rb_brwt.annodbg";
 template <>
-inline const std::string RowDiffAnnotator::kExtension = ".row_diff.annodbg";
+inline const std::string RowDiffColumnAnnotator::kExtension = ".row_diff.annodbg";
 template <>
 inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.annodbg";
+template <>
+inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 } // namespace annot
 } // namespace mtg
 

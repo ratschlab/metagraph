@@ -143,6 +143,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     uint32_t max_path_length = 50;
+    std::string anchors;
 
     std::filesystem::path tmp_dir;
 
@@ -183,7 +184,9 @@ class Config {
         BinRelWT,
         RowDiff,
         RowDiffBRWT,
+        RowDiffRowSparse,
         RowFlat,
+        RowSparse,
         RBFish,
         RbBRWT,
     };

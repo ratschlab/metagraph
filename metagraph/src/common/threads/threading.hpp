@@ -64,19 +64,27 @@ class ThreadPool {
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
 
-        if (!workers.size()) {
+        std::shared_future<return_type> future(task->get_future());
+
+        auto wrapped_task = [task,future]() {
             (*task)();
-            return task->get_future();
+            future.get(); // re-thrown exceptions (if any) from packaged_task
+        };
+
+        if (!workers.size()) {
+            wrapped_task();
+            return future;
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
             full_condition.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace([task](){ (*task)(); });
+            tasks.emplace(std::move(wrapped_task));
         }
+
         empty_condition.notify_one();
 
-        return task->get_future();
+        return future;
     }
 };
 

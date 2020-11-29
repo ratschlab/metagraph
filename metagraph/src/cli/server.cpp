@@ -317,7 +317,7 @@ int run_server(Config *config) {
         auto anno_graph = initialize_annotated_dbg(graph, *config);
         logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
         return anno_graph;
-    }).share();
+    });
 
     // defaults for the server
     config->num_top_labels = 10000;

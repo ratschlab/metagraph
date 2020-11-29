@@ -63,6 +63,7 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
         size_t seed_length = k - offsets[i];
 
         assert(i + seed_length <= query.size());
+        assert(seed_length >= config.min_seed_length);
 
         score_t match_score = partial_sum[i + seed_length] - partial_sum[i];
 
@@ -254,6 +255,7 @@ template <typename NodeType>
 void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
     const auto &graph = this->get_graph();
     size_t k = graph.get_k();
+
     auto query = this->get_query();
     const auto &query_nodes = this->get_query_nodes();
     const auto &offsets = this->get_offsets();
@@ -290,6 +292,8 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
 
         const char *begin_it = query.data() + i;
         const char *end_it = begin_it + mem_length;
+
+        assert(end_it >= begin_it + config.min_seed_length);
 
         score_t match_score = partial_sum[end_it - query.data()]
             - partial_sum[begin_it - query.data()];

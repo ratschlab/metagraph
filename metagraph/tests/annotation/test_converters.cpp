@@ -250,9 +250,9 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
 
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir);
 
-    const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffAnnotator::kExtension);
+    const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
-    RowDiffAnnotator annotator;
+    RowDiffColumnAnnotator annotator;
     annotator.load(dest_fname);
 
     ASSERT_EQ(0u, annotator.num_objects());
@@ -269,14 +269,13 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
     const std::string annot_fname
             = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
     const std::string dest_fname
-            = dst_dir/(std::string("ACGTCAG") + RowDiffAnnotator::kExtension);
+            = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
 
     std::vector<std::vector<std::string>> label_groups = {
             { "Label0" }, { "Label1", "Label2" }, { "Label0", "Label2", "Label1" }
     };
 
     const uint32_t expected_relations[] = { 5, 2, 1, 1, 1 };
-
     for (const auto &labels : label_groups) {
         for (const uint32_t max_depth : { 1, 2, 3, 4, 5 }) {
             std::filesystem::remove_all(dst_dir);
@@ -292,15 +291,17 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
 
             ASSERT_TRUE(std::filesystem::exists(dest_fname));
-            RowDiffAnnotator annotator;
+            RowDiffColumnAnnotator annotator;
             annotator.load(dest_fname);
             const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                     .set_graph(graph.get());
+            const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                    .load_anchor(graph_fname + binmat::kRowDiffAnchorExt + ".unopt");
 
             ASSERT_EQ(labels.size(), annotator.num_labels());
             ASSERT_EQ(5u, annotator.num_objects());
             EXPECT_EQ(labels.size() * expected_relations[max_depth - 1],
-                      annotator.num_relations()) << "Labels " << labels.size() << " Depth: " << max_depth;
+                      annotator.num_relations());
 
             for (uint32 i = 0; i < annotator.num_objects(); ++i) {
                 ASSERT_THAT(annotator.get(i), ContainerEq(labels));
@@ -342,12 +343,14 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
             convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir);
 
             for (uint32_t i = 0; i < labels.size(); ++i) {
-                std::string rd_anno = dst_dir/(labels[i] + RowDiffAnnotator::kExtension);
+                std::string rd_anno = dst_dir/(labels[i] + RowDiffColumnAnnotator::kExtension);
                 ASSERT_TRUE(std::filesystem::exists(rd_anno));
-                RowDiffAnnotator annotator;
+                RowDiffColumnAnnotator annotator;
                 annotator.load(rd_anno);
                 const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                         .set_graph(graph.get());
+                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                        .load_anchor(graph_fname + binmat::kRowDiffAnchorExt + ".unopt");
 
                 ASSERT_EQ(1, annotator.num_labels());
                 ASSERT_EQ(5u, annotator.num_objects());
@@ -373,7 +376,7 @@ void test_row_diff(uint32_t k,
     const std::string annot_fname
             = dst_dir/(std::string("anno") + ColumnCompressed<>::kExtension);
     const std::string dest_fname
-            = dst_dir/(std::string("anno") + RowDiffAnnotator::kExtension);
+            = dst_dir/(std::string("anno") + RowDiffColumnAnnotator::kExtension);
 
 
     std::filesystem::remove_all(dst_dir);
@@ -399,10 +402,12 @@ void test_row_diff(uint32_t k,
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
 
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
-    RowDiffAnnotator annotator;
+    RowDiffColumnAnnotator annotator;
     annotator.load(dest_fname);
     const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
             .set_graph(graph.get());
+    const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+            .load_anchor(graph_fname + binmat::kRowDiffAnchorExt + ".unopt");
 
     ASSERT_EQ(all_labels.size(), annotator.num_labels());
     ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
@@ -455,12 +460,14 @@ void test_row_diff_separate_columns(uint32_t k,
 
     for (const auto& [label, indices] : col_annotations) {
         const std::string dest_fname
-                = dst_dir/("anno_" + label + RowDiffAnnotator::kExtension);
+                = dst_dir/("anno_" + label + RowDiffColumnAnnotator::kExtension);
         ASSERT_TRUE(std::filesystem::exists(dest_fname));
-        RowDiffAnnotator annotator;
+        RowDiffColumnAnnotator annotator;
         annotator.load(dest_fname);
         const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                 .set_graph(graph.get());
+        const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
+                .load_anchor(graph_fname + binmat::kRowDiffAnchorExt + ".unopt");
 
         ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
 

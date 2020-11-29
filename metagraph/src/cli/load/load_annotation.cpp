@@ -19,7 +19,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
-    } else if (utils::ends_with(filename, annot::RowDiffAnnotator::kExtension)) {
+    } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
 
     } else if (utils::ends_with(filename, annot::RowCompressed<>::kExtension)) {
@@ -39,6 +39,12 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annot::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
+
+    } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
+        return Config::AnnotationType::RowSparse;
+
+    } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
+        return Config::AnnotationType::RowDiffRowSparse;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -71,7 +77,11 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::RowDiff: {
-            annotation.reset(new annot::RowDiffAnnotator());
+            annotation.reset(new annot::RowDiffColumnAnnotator());
+            break;
+        }
+        case Config::RowSparse: {
+            annotation.reset(new annot::RowSparseAnnotator());
             break;
         }
         case Config::BRWT: {
@@ -80,6 +90,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowDiffBRWT: {
             annotation.reset(new annot::RowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::RowDiffRowSparse: {
+            annotation.reset(new annot::RowDiffRowSparseAnnotator());
             break;
         }
         case Config::BinRelWT_sdsl: {

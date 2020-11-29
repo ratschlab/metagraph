@@ -46,7 +46,8 @@ class SortedSetDiskBase {
     SortedSetDiskBase(size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
-                      size_t max_disk_space_bytes);
+                      size_t max_disk_space_bytes,
+                      size_t merge_count);
 
     virtual ~SortedSetDiskBase() {
         // remove the files that have not been requested to merge
@@ -75,6 +76,15 @@ class SortedSetDiskBase {
      * #clear and re-using the buffer.
      */
     void clear(const std::filesystem::path &tmp_path = "/tmp/");
+
+    /**
+     * Insert already sorted data into the set. This data is written directly to a
+     * designated chunk without being sorted and de-duped.
+     * Use this method along with #insert when some of the data that is inserted into the
+     * set is known to be sorted.
+     * Note: #data must be globally sorted between multiple calls to #insert_sorted.
+     */
+    void insert_sorted(const std::vector<T> &data);
 
   protected:
     /** Advances #it by step or points to #end, whichever comes first. */
@@ -158,6 +168,8 @@ class SortedSetDiskBase {
 
     size_t max_disk_space_bytes_;
 
+    size_t merge_count_;
+
     std::string chunk_file_prefix_;
 
     /**
@@ -173,17 +185,14 @@ class SortedSetDiskBase {
     ChunkedWaitQueue<T> merge_queue_;
 
     /**
-     * Thread pool for doing the "level 1" merging, i.e. merging #MERGE_L1_COUNT chunk
+     * Thread pool for doing the "level 1" merging, i.e. merging #merge_count_ chunk
      * files at a time, while new files are still being added to the data structure.
      */
-    ThreadPool async_merge_l1_ = ThreadPool(1, 100);
+    ThreadPool async_merge_l1_;
 
     std::atomic<size_t> total_chunk_size_bytes_ = 0;
 
     uint32_t merged_all_count_ = 0;
-
-    /** Number of chunks for "level 1" intermediary merging. */
-    static constexpr uint32_t MERGE_L1_COUNT = 4;
 
     static std::string merged_l1_name(const std::string &prefix, uint32_t count) {
         return prefix + "m" + std::to_string(count);
@@ -195,6 +204,7 @@ class SortedSetDiskBase {
 
     static void merge_l1(const std::string &chunk_file_prefix,
                          uint32_t chunk_count,
+                         size_t merge_count,
                          std::atomic<uint32_t> *l1_chunk_count,
                          std::atomic<size_t> *total_size);
 

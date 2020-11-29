@@ -133,6 +133,29 @@ void print_bloom_filter_stats(const kmer::KmerBloomFilter<KmerHasher> *kmer_bloo
     std::cout << "========================================================" << std::endl;
 }
 
+template <class Matrix>
+void print_anchor_stats(const Matrix& m) {
+    std::cout << "=================== Anchor STATS ===================" << std::endl;
+    uint64_t num_anchors = m.anchor().num_set_bits();
+    if (num_anchors != 0) {
+        std::cout << "num anchors: " << m.anchor().num_set_bits() << std::endl;
+    } else {
+        std::cout << "Please specify the anchor file via '-i anchors_file' to get "
+                     "anchor stats" << std::endl;
+    }
+}
+
+void print_brwt_stats(const annot::binmat::BRWT& brwt) {
+    std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
+    std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
+    std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
+    std::cout << "shrinkage: " << brwt.shrinking_rate() << std::endl;
+    if (get_verbose()) {
+        std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
+        brwt.print_tree_structure(std::cout);
+    }
+}
+
 void print_stats(const Annotator &annotation) {
     std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
     std::cout << "labels:  " << annotation.num_labels() << std::endl;
@@ -143,25 +166,34 @@ void print_stats(const Annotator &annotation) {
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
-    if (const auto *rbmat = dynamic_cast<const annot::binmat::RainbowMatrix *>(&annotation.get_matrix())) {
+    using namespace annot::binmat;
+
+    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
-    }
 
-    if (const auto *brwt = dynamic_cast<const annot::binmat::BRWT *>(&annotation.get_matrix())) {
-        std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
-        std::cout << "num nodes: " << brwt->num_nodes() << std::endl;
-        std::cout << "avg arity: " << brwt->avg_arity() << std::endl;
-        std::cout << "shrinkage: " << brwt->shrinking_rate() << std::endl;
-        if (get_verbose()) {
-            std::cout << "==================== Multi-BRWT TREE ===================" << std::endl;
-            brwt->print_tree_structure(std::cout);
-        }
+    } else if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
+        print_brwt_stats(*brwt);
+
+    } else if (const auto *brwt_rd
+               = dynamic_cast<const RowDiff<BRWT> *>(&annotation.get_matrix())) {
+        std::cout << "underlying matrix: BRWT" << std::endl;
+        print_brwt_stats(brwt_rd->diffs());
+        print_anchor_stats(*brwt_rd);
+
+    } else if (const auto *rd
+               = dynamic_cast<const RowDiff<ColumnMajor> *>(&annotation.get_matrix())) {
+        std::cout << "underlying matrix: ColumnMajor" << std::endl;
+        print_anchor_stats(*rd);
+
+    } else if (const auto *rs
+               = dynamic_cast<const RowDiff<RowSparse> *>(&annotation.get_matrix())) {
+        std::cout << "underlying matrix: RowSparse" << std::endl;
+        print_anchor_stats(*rs);
     }
 
     std::cout << "========================================================" << std::endl;
 }
-
 
 int print_stats(Config *config) {
     assert(config);
@@ -232,6 +264,15 @@ int print_stats(Config *config) {
         if (!annotation->load(file)) {
             logger->error("Cannot load annotations from file '{}'", file);
             exit(1);
+        }
+
+        using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
+        if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
+            std::string ext = annot::binmat::kRowDiffAnchorExt;
+            std::string anchors_file = utils::remove_suffix(config->infbase, ext) + ext;
+            if (!config->infbase.empty() && std::filesystem::exists(anchors_file)) {
+                const_cast<RowDiffCol *>(rd)->load_anchor(anchors_file);
+            }
         }
 
         logger->info("Statistics for annotation '{}'", file);
