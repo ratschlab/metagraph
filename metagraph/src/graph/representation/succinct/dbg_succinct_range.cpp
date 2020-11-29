@@ -244,9 +244,6 @@ void DBGSuccinctRange
 
     const auto &boss_graph = dbg_succ_.get_boss();
 
-    if (min_length_ > sequence.size())
-        return;
-
     bool is_sink = false;
     if (sequence[0] == boss::BOSS::kSentinel) {
         size_t start = sequence.rfind(boss::BOSS::kSentinel) + 1;
@@ -256,6 +253,9 @@ void DBGSuccinctRange
         sequence = std::string_view(sequence.data(),
                                     sequence.find(boss::BOSS::kSentinel));
     }
+
+    if (min_length_ > sequence.size())
+        return;
 
     auto encoded = encode_sequence(boss_graph, sequence);
 
@@ -295,7 +295,7 @@ void DBGSuccinctRange
     }
 
     // TODO: always output the suffix matches? or only if the last k-mer was not found
-    if (last_offset && i + min_length_ <= sequence.size()) {
+    if (last_offset) {
         assert(terminate() || i + boss_graph.get_k() >= sequence.size());
         const auto *end = encoded.data() + encoded.size();
 
