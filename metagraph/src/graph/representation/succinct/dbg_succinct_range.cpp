@@ -244,7 +244,7 @@ void DBGSuccinctRange
 
     const auto &boss_graph = dbg_succ_.get_boss();
 
-    if (boss_graph.get_indexed_suffix_length() > sequence.size())
+    if (!sequence.size())
         return;
 
     bool is_sink = false;
@@ -294,14 +294,12 @@ void DBGSuccinctRange
         }, terminate);
     }
 
-    size_t min_length = std::max(size_t(1), boss_graph.get_indexed_suffix_length());
-
     // TODO: always output the suffix matches? or only if the last k-mer was not found
-    if (last_offset && i + min_length <= sequence.size()) {
+    if (last_offset) {
         assert(terminate() || i + boss_graph.get_k() >= sequence.size());
         const auto *end = encoded.data() + encoded.size();
 
-        while (!terminate() && i + min_length <= sequence.size()) {
+        while (!terminate() && i < sequence.size()) {
             callback(kmer_to_node(encoded.data() + i, end) + is_sink);
             ++i;
         }
