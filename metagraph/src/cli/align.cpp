@@ -155,7 +155,20 @@ void map_sequences_in_file(const std::string &file,
 
         std::vector<DeBruijnGraph::node_index> graphindices;
         graph.map_to_nodes(read_stream->seq.s,
-                           [&](auto node) { graphindices.emplace_back(node); });
+            [&](auto node) {
+                if (range_graph) {
+                    size_t match_length = graph.get_k() - range_graph->get_offset(node);
+                    if (match_length < config.alignment_length)
+                        node = 0;
+                }
+
+                graphindices.emplace_back(node);
+            },
+            [&]() {
+                return graphindices.size() + config.alignment_length - 1
+                    == read_stream->seq.l;
+            }
+        );
 
         size_t num_discovered = std::count_if(graphindices.begin(), graphindices.end(),
                                               [](const auto &x) { return x > 0; });
@@ -228,28 +241,13 @@ int align_to_graph(Config *config) {
     auto graph = load_critical_dbg(config->infbase);
     auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
-    if (!config->alignment_length) {
-        config->alignment_length = graph->get_k();
-    } else if (config->alignment_length > graph->get_k()) {
-        logger->warn("Mapping to k-mers longer than k is not supported");
-        config->alignment_length = graph->get_k();
-    }
-
-    if (!dbg && config->alignment_length != graph->get_k()) {
-        logger->error("Matching k-mers shorter than k only supported for DBGSuccinct");
-        exit(1);
-    }
-
     // This speeds up mapping, and allows for node suffix matching
     if (dbg)
         dbg->reset_mask();
 
-    if (dbg && (config->alignment_min_seed_length < graph->get_k()
-            || config->alignment_length < graph->get_k())) {
+    if (dbg && config->alignment_min_seed_length < graph->get_k()) {
         logger->trace("Wrap as suffix range succinct DBG");
-        graph.reset(new DBGSuccinctRange(
-            *dbg, std::min(config->alignment_min_seed_length, size_t(config->alignment_length))
-        ));
+        graph.reset(new DBGSuccinctRange(*dbg));
     }
 
     if (config->canonical && !graph->is_canonical_mode()) {
@@ -263,6 +261,18 @@ int align_to_graph(Config *config) {
     std::mutex print_mutex;
 
     if (config->map_sequences) {
+        if (!config->alignment_length) {
+            config->alignment_length = graph->get_k();
+        } else if (config->alignment_length > graph->get_k()) {
+            logger->warn("Mapping to k-mers longer than k is not supported");
+            config->alignment_length = graph->get_k();
+        }
+
+        if (!dbg && config->alignment_length != graph->get_k()) {
+            logger->error("Matching k-mers shorter than k only supported for DBGSuccinct");
+            exit(1);
+        }
+
         logger->trace("Map sequences against the de Bruijn graph with k={}",
                       graph->get_k());
         logger->trace("Length of mapped k-mers: {}", config->alignment_length);
