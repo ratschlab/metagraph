@@ -260,7 +260,7 @@ void DBGSuccinctRange
     auto encoded = encode_sequence(boss_graph, sequence);
 
     size_t i = 0;
-    node_index last_offset = dbg_succ_.get_k() + 1;
+    size_t last_offset = dbg_succ_.get_k() + 1;
     if (sequence.size() >= dbg_succ_.get_k()) {
         // TODO: more efficient implementation
         dbg_succ_.map_to_nodes_sequentially(sequence, [&](auto node) {

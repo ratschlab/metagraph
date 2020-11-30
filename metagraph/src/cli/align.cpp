@@ -245,7 +245,8 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
-    if (dbg && config->alignment_min_seed_length < graph->get_k()) {
+    if (dbg && (config->alignment_min_seed_length < graph->get_k()
+            || config->alignment_length < graph->get_k())) {
         logger->trace("Wrap as suffix range succinct DBG");
         graph.reset(new DBGSuccinctRange(*dbg));
     }
