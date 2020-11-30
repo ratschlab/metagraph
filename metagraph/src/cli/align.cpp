@@ -246,11 +246,10 @@ int align_to_graph(Config *config) {
 
     if (dbg && (config->alignment_min_seed_length < graph->get_k()
             || config->alignment_length < graph->get_k())) {
-        size_t min_seed_length = std::min(config->alignment_min_seed_length,
-                                          size_t(config->alignment_length));
-        logger->trace("Wrap as suffix range succinct DBG with min seed length {}",
-                      min_seed_length);
-        graph.reset(new DBGSuccinctRange(*dbg, min_seed_length));
+        logger->trace("Wrap as suffix range succinct DBG");
+        graph.reset(new DBGSuccinctRange(
+            *dbg, std::min(config->alignment_min_seed_length, size_t(config->alignment_length))
+        ));
     }
 
     if (config->canonical && !graph->is_canonical_mode()) {
