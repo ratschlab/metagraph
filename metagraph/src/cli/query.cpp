@@ -13,6 +13,7 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -856,8 +857,29 @@ int query_graph(Config *config) {
 void align_sequence(std::string &name, std::string &seq,
                     const DeBruijnGraph &graph,
                     const align::DBGAlignerConfig &aligner_config) {
-    auto alignments
-        = build_aligner(graph, aligner_config)->align(seq);
+    std::shared_ptr<const DeBruijnGraph> align_graph;
+    if (aligner_config.min_seed_length < graph.get_k()) {
+        // try to wrap the graph around a DBGSuccinctRange object
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+
+        if (dbg_succ) {
+            align_graph = std::make_shared<const DBGSuccinctRange>(*dbg_succ);
+        } else if (canonical) {
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+            align_graph = std::make_shared<const DBGSuccinctRange>(*dbg_succ);
+            align_graph = std::make_shared<const CanonicalDBG>(align_graph, true);
+        } else {
+            logger->error("Seeds of length < k only supported for succinct graph");
+            exit(1);
+        }
+
+    } else {
+        // aliasing constructor
+        align_graph = std::shared_ptr<const DeBruijnGraph>(align_graph, &graph);
+    }
+
+    auto alignments = build_aligner(*align_graph, aligner_config)->align(seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -865,7 +887,7 @@ void align_sequence(std::string &name, std::string &seq,
         auto &match = alignments[0];
         // sequence for querying -- the best alignment
         if (match.get_offset()) {
-            seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
+            seq = align_graph->get_node_sequence(match[0]).substr(0, match.get_offset())
                     + match.get_sequence();
         } else {
             seq = const_cast<std::string&&>(match.get_sequence());
