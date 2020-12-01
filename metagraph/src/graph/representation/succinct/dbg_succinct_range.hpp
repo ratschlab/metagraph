@@ -58,6 +58,12 @@ class DBGSuccinctRange : public DeBruijnGraph {
             dbg_succ_(*dbg_succ_ptr_),
             offset_(dbg_succ_.max_index() + 1) {}
 
+    DBGSuccinctRange(std::shared_ptr<const DeBruijnGraph> graph)
+          : graph_ptr_(graph),
+            dbg_succ_ptr_(std::dynamic_pointer_cast<const DBGSuccinct>(graph)),
+            dbg_succ_(*dbg_succ_ptr_),
+            offset_(dbg_succ_.max_index() + 1) {}
+
     DBGSuccinctRange(const DBGSuccinct &graph)
           : dbg_succ_(graph), offset_(dbg_succ_.max_index() + 1) {}
 
@@ -246,6 +252,7 @@ class DBGSuccinctRange : public DeBruijnGraph {
     }
 
   private:
+    const std::shared_ptr<const DeBruijnGraph> graph_ptr_;
     const std::shared_ptr<const DBGSuccinct> dbg_succ_ptr_;
     const DBGSuccinct &dbg_succ_;
 
