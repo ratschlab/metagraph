@@ -863,13 +863,26 @@ std::shared_ptr<const std::string> Alignment<NodeType>
         if (nodes_.size() == 1) {
             sequence_ = graph.get_node_sequence(nodes_.back()).substr(offset_);
         } else {
-            graph.call_outgoing_kmers(
-                *(nodes_.rbegin() + 1),
-                [&](auto node, char c) {
-                    if (node == nodes_.back())
-                        sequence_ += c;
-                }
-            );
+            char next = '\0';
+            graph.call_outgoing_kmers(*(nodes_.rbegin() + 1), [&](auto node, char c) {
+                if (node == nodes_.back())
+                    next = c;
+            });
+
+            if (!next) {
+                std::string seq = graph.get_node_sequence(nodes_.back());
+                std::string cur = graph.get_node_sequence(*(nodes_.rbegin() + 1));
+
+                if (!std::equal(cur.begin() + 1, cur.end(), seq.begin()))
+                    throw std::runtime_error("Invalid edge in JSON");
+
+                logger->warn("Found node not reachable by call_outgoing_kmers: {}",
+                             nodes_.back());
+
+                next = seq.back();
+            }
+
+            sequence_ += next;
         }
         const auto& edits = mapping[i]["edit"];
 
@@ -954,8 +967,17 @@ bool spell_path(const DeBruijnGraph &graph,
         });
 
         if (!next) {
-            std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
-            return false;
+            std::string next_seq = graph.get_node_sequence(path[i]);
+            std::string cur_seq = graph.get_node_sequence(path[i - 1]);
+            if (!std::equal(cur_seq.begin() + 1, cur_seq.end(), next_seq.begin())) {
+                std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
+                std::cerr << graph.get_node_sequence(path[i - 1]) << " " << graph.get_node_sequence(path[i]) << std::endl;
+                return false;
+            } else {
+                logger->warn("Found node not reachable by call_outgoing_kmers: {}",
+                             path[i]);
+                next = next_seq.back();
+            }
         }
 
         seq += next;

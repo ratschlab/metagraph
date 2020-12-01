@@ -117,6 +117,9 @@ void DBGSuccinctRange
         if (s != boss_graph.alph_size && last_char != s)
             return;
 
+        if (last_char == boss::BOSS::kSentinelCode)
+            return;
+
         std::unique_lock<std::mutex> lock(edge_pair_mutex_);
         auto it = edge_pairs_.emplace(first, last, offset).first;
         size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
@@ -139,6 +142,9 @@ void DBGSuccinctRange
 
     if (first_char == last_char) {
         assert(s == boss_graph.alph_size || first_char == s);
+
+        if (last_char == boss::BOSS::kSentinelCode)
+            return;
 
         std::unique_lock<std::mutex> lock(edge_pair_mutex_);
         auto it = edge_pairs_.emplace(first, last, offset).first;
@@ -499,9 +505,16 @@ void DBGSuccinctRange
     if (!offset) {
         for (size_t i = boss_graph.pred_last(last - 1) + 1; i <= last; ++i) {
             auto next_node = dbg_succ_.boss_to_kmer_index(i);
+            char next_char;
+            if (next_node) {
+                next_char = boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size);
+                if (next_char == boss::BOSS::kSentinel)
+                    next_node = 0;
+            }
+
             assert(traverse(kmer, boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size)) == next_node);
             if (next_node)
-                callback(next_node, boss_graph.decode(boss_graph.get_W(i) % boss_graph.alph_size));
+                callback(next_node, next_char);
         }
 
         return;

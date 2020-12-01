@@ -1742,4 +1742,75 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
     }
 }
 
+TEST(DBGAlignerTest, align_range_canonical_long) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = build_graph_batch<DBGSuccinct>(k, std::move(seqs));
+    dynamic_cast<DBGSuccinct*>(base_graph.get())->reset_mask();
+    auto range_graph = std::make_shared<DBGSuccinctRange>(base_graph);
+    auto graph = std::make_shared<CanonicalDBG>(*range_graph, true);
+
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/long_seq.fa", [&](auto *seq) {
+        std::string query = seq->seq.s;
+
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+        config.gap_opening_penalty = -5;
+        config.gap_extension_penalty = -2;
+        config.xdrop = 27;
+        config.exact_kmer_match_fraction = 0.0;
+        config.max_nodes_per_seq_char = 10.0;
+        config.queue_size = 20;
+        config.min_path_score = 0;
+        config.min_cell_score = 0;
+        config.min_seed_length = 15;
+        config.max_ram_per_alignment = 50000;
+
+        DBGAligner<UniMEMSeeder<>> aligner(*graph, config);
+        auto paths = aligner.align(query);
+
+        for (auto &path : paths) {
+            EXPECT_TRUE(path.is_valid(*graph, &config));
+            check_json_dump_load(*graph,
+                                 path,
+                                 paths.get_query(),
+                                 paths.get_query_reverse_complement());
+        }
+    });
+}
+
+TEST(DBGAlignerTest, align_canonical_nonprimary) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = build_graph_batch<DBGSuccinct>(k, std::move(seqs));
+    auto graph = std::make_shared<CanonicalDBG>(*base_graph, true);
+
+    std::string query = "ACACCTGTAATCCCAGCACTTTGGGAGGCCGA";
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.xdrop = 27;
+    config.exact_kmer_match_fraction = 0.0;
+    config.max_nodes_per_seq_char = 10.0;
+    config.queue_size = 20;
+    config.num_alternative_paths = 2;
+    config.min_path_score = 0;
+    config.min_cell_score = 0;
+
+    DBGAligner<UniMEMSeeder<>> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    ASSERT_EQ(1ull, paths.size());
+    EXPECT_EQ(64llu, paths[0].get_score()) << paths[0];
+    EXPECT_TRUE(paths[0].is_valid(*graph, &config));
+    check_json_dump_load(*graph,
+                         paths[0],
+                         paths.get_query(),
+                         paths.get_query_reverse_complement());
+}
+
 } // namespace
