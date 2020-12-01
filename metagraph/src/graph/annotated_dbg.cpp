@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct_range.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
@@ -380,8 +381,15 @@ void AnnotatedSequenceGraph
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
     // TODO: add method max_canonical_index() and call it here without casts
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_.get()))
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_.get())) {
+        if (const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph()))
+            return range_graph->get_dbg_succ().max_index() == annotator_->num_objects();
+
         return canonical->get_graph().max_index() == annotator_->num_objects();
+    }
+
+    if (const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(graph_.get()))
+        return range_graph->get_dbg_succ().max_index() == annotator_->num_objects();
 
     return graph_->max_index() == annotator_->num_objects();
 }
