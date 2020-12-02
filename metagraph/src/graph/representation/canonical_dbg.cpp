@@ -182,8 +182,8 @@ void CanonicalDBG::get_kmers_from_suffix(node_index node,
         if (next_range) {
             assert(range_graph->get_offset(next_range) == 1);
             range_graph->call_incoming_kmers(next_range, [&](node_index next, char c) {
-                assert(!graph_.traverse(node, c));
                 ::reverse_complement(&c, &c + 1);
+                assert(!graph_.traverse(node, c));
                 auto i = alphabet_encoder_[c];
                 if (children[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     return;
@@ -289,8 +289,8 @@ void CanonicalDBG::get_kmers_from_prefix(node_index node,
         if (prev_range) {
             assert(range_graph->get_offset(prev_range) == 1);
             range_graph->call_outgoing_kmers(prev_range, [&](node_index prev, char c) {
-                assert(!graph_.traverse_back(node, c));
                 ::reverse_complement(&c, &c + 1);
+                assert(!graph_.traverse_back(node, c));
                 auto i = alphabet_encoder_[c];
                 if (parents[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     return;
