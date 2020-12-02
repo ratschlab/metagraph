@@ -159,10 +159,10 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 }
 
 void CanonicalDBG::get_kmers_from_suffix(node_index node,
-                                         std::string &rev_seq,
                                          std::vector<node_index> &children) const {
-    assert(rev_seq[0] == boss::BOSS::kSentinel);
-    std::ignore = node;
+    std::string rev_seq = get_node_sequence(node).substr(1)
+        + std::string(1, boss::BOSS::kSentinel);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
     const auto &alphabet = graph_.alphabet();
 
     std::shared_ptr<const DBGSuccinctRange> range_graph;
@@ -252,12 +252,8 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            std::string rev_seq = get_node_sequence(node).substr(1)
-                + std::string(1, boss::BOSS::kSentinel);
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            get_kmers_from_suffix(node, rev_seq, children);
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_suffix(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t i = 0; i < children.size(); ++i) {
@@ -270,10 +266,10 @@ void CanonicalDBG
 }
 
 void CanonicalDBG::get_kmers_from_prefix(node_index node,
-                                         std::string &rev_seq,
                                          std::vector<node_index> &parents) const {
-    assert(rev_seq.back() == boss::BOSS::kSentinel);
-    std::ignore = node;
+    std::string rev_seq = std::string(1, boss::BOSS::kSentinel)
+        + get_node_sequence(node).substr(0, get_k() - 1);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
     const auto &alphabet = graph_.alphabet();
 
     std::shared_ptr<const DBGSuccinctRange> range_graph;
@@ -363,12 +359,8 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            std::string rev_seq = std::string(1, boss::BOSS::kSentinel)
-                + get_node_sequence(node).substr(0, get_k() - 1);
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            get_kmers_from_prefix(node, rev_seq, parents);
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_prefix(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t i = 0; i < parents.size(); ++i) {
