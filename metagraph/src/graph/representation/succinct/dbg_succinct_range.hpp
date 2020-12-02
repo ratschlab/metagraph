@@ -225,6 +225,11 @@ class DBGSuccinctRange : public DeBruijnGraph {
         return (1llu << 63) - 1;
     };
 
+    node_index range_to_node(boss::BOSS::edge_index first,
+                             boss::BOSS::edge_index last,
+                             size_t offset,
+                             bool is_sink = false) const;
+
     const DBGSuccinct& get_dbg_succ() const { return dbg_succ_; }
 
     // Get the number of non-matching characters of the node.

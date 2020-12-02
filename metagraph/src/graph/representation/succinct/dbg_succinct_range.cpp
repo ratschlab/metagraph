@@ -17,6 +17,15 @@ std::vector<boss::BOSS::TAlphabet> encode_sequence(const boss::BOSS &boss,
     return encoded;
 }
 
+DBGSuccinctRange::node_index DBGSuccinctRange
+::range_to_node(boss::BOSS::edge_index first,
+                boss::BOSS::edge_index last,
+                size_t offset,
+                bool is_sink) const {
+    std::lock_guard<std::mutex> lock(edge_pair_mutex_);
+    auto it = edge_pairs_.emplace(first, last, offset).first;
+    return offset_ + ((it - edge_pairs_.begin()) * 2) + is_sink;
+}
 
 DBGSuccinctRange::node_index DBGSuccinctRange
 ::traverse(node_index node, char next_char) const {
@@ -63,10 +72,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
     assert(first <= last);
     assert(offset > 1 || boss_graph.succ_last(first) == last);
 
-    std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-    auto it = edge_pairs_.emplace(first, last, offset - 1).first;
-    node_index next_node = offset_ + ((it - edge_pairs_.begin()) * 2);
-    lock.unlock();
+    node_index next_node = range_to_node(first, last, offset - 1);
 
     assert(!next_node
         || get_node_sequence(node).substr(1) + next_char == get_node_sequence(next_node));
@@ -120,10 +126,7 @@ void DBGSuccinctRange
         if (last_char == boss::BOSS::kSentinelCode)
             return;
 
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last, offset).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
+        node_index next_index = range_to_node(first, last, offset);
 
         assert(get_node_sequence(next_index).substr(offset + 1)
             == boss_graph.decode(last_seq));
@@ -146,10 +149,7 @@ void DBGSuccinctRange
         if (last_char == boss::BOSS::kSentinelCode)
             return;
 
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last, offset).first;
-        node_index prev_node = offset_ + ((it - edge_pairs_.begin()) * 2) + 1;
-        lock.unlock();
+        node_index prev_node = range_to_node(first, last, offset, true);
 
         assert(get_node_sequence(prev_node - 1).substr(offset + 1)
             == boss_graph.decode(last_seq));
@@ -441,10 +441,7 @@ DBGSuccinctRange::node_index DBGSuccinctRange
             || (require_exact_length && seq_it != end)) {
         return 0;
     } else {
-        std::lock_guard<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(first, last,
-                                      boss_graph.get_k() - (seq_it - begin)).first;
-        return offset_ + ((it - edge_pairs_.begin()) * 2);
+        return range_to_node(first, last, boss_graph.get_k() - (seq_it - begin));
     }
 }
 
@@ -530,11 +527,7 @@ void DBGSuccinctRange
         assert(next_first <= next_last);
         assert(offset > 1 || boss_graph.succ_last(next_first) == next_last);
 
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(next_first, next_last, offset - 1).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
-        callback(next_index, boss_graph.decode(c));
+        callback(range_to_node(next_first, next_last, offset - 1), boss_graph.decode(c));
     }
 }
 
@@ -580,11 +573,7 @@ void DBGSuccinctRange
         assert(next_first <= next_last);
         assert(offset > 1 || boss_graph.succ_last(next_first) == next_last);
 
-        std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-        auto it = edge_pairs_.emplace(next_first, next_last, offset - 1).first;
-        size_t next_index = offset_ + (it - edge_pairs_.begin()) * 2;
-        lock.unlock();
-        callback(next_index);
+        callback(range_to_node(next_first, next_last, offset - 1));
     }
 }
 
@@ -793,10 +782,7 @@ void DBGSuccinctRange
 void DBGSuccinctRange
 ::call_source_nodes(const std::function<void(node_index)> &callback) const {
     const auto &boss_graph = dbg_succ_.get_boss();
-    std::unique_lock<std::mutex> lock(edge_pair_mutex_);
-    auto it = edge_pairs_.emplace(1, boss_graph.num_edges(), boss_graph.get_k()).first;
-    node_index source = offset_ + ((it - edge_pairs_.begin()) * 2);
-    lock.unlock();
+    node_index source = range_to_node(1, boss_graph.num_edges(), boss_graph.get_k());
 
     assert(get_node_sequence(source)
         == std::string(dbg_succ_.get_k(), boss::BOSS::kSentinel));
