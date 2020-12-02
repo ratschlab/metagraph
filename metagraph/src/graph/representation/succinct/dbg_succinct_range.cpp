@@ -1,6 +1,7 @@
 #include "dbg_succinct_range.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/algorithms.hpp"
 
 using namespace mtg;
 using namespace mtg::graph;
@@ -268,36 +269,82 @@ void DBGSuccinctRange
     size_t i = 0;
     size_t last_offset = dbg_succ_.get_k() + 1;
     if (sequence.size() >= dbg_succ_.get_k()) {
-        // TODO: more efficient implementation
-        dbg_succ_.map_to_nodes_sequentially(sequence, [&](auto node) {
-            if (node) {
-                assert(node
-                    == dbg_succ_.kmer_to_node(std::string_view(sequence.data() + i,
-                                                               dbg_succ_.get_k())));
-                last_offset = 0;
+        auto invalid = utils::drag_and_mark_segments(encoded,
+                                                     boss_graph.alph_size,
+                                                     dbg_succ_.get_k());
 
-            } else {
-                node = kmer_to_node(encoded.data() + i,
-                                    encoded.data() + i + boss_graph.get_k());
+        size_t end_offset = 0;
 
-                if (node) {
-                    size_t offset = get_offset(node);
-                    assert(i + dbg_succ_.get_k() - offset <= sequence.size());
-                    if (!last_offset || offset <= last_offset) {
-                        last_offset = offset;
-                    } else {
-                        node = 0;
-                    }
-
-                } else {
+        // slide through all k-mers
+        for ( ; i + get_k() <= encoded.size() && !terminate(); ++i) {
+            if (invalid[i + boss_graph.get_k()]) {
+                if (++end_offset == boss_graph.get_k()) {
                     last_offset = dbg_succ_.get_k() + 1;
+                    continue;
+                }
+            } else {
+                end_offset = 0;
+            }
+
+            const auto *begin = encoded.data() + i;
+            const auto *end = begin + boss_graph.get_k() - end_offset;
+
+            if (last_offset && end_offset
+                    && boss_graph.get_k() - (end - begin) >= last_offset) {
+                continue;
+            }
+
+            auto [first, last, seq_it] = boss_graph.index_range(begin, end);
+
+            if (first == 0 || last == 0 || seq_it == begin) {
+                callback(npos);
+                last_offset = dbg_succ_.get_k() + 1;
+                continue;
+            }
+
+            node_index node = 0;
+            auto edge = seq_it == end ? boss_graph.pick_edge(last, *end) : 0;
+
+            if (edge) {
+                node = dbg_succ_.boss_to_kmer_index(edge);
+                assert(node);
+                last_offset = 0;
+            } else {
+                size_t offset = boss_graph.get_k() - (seq_it - begin);
+                assert(i + boss_graph.get_k() - offset <= sequence.size());
+                if (!last_offset || offset < last_offset) {
+                    node = range_to_node(first, last, offset);
+                    last_offset = offset + 1;
                 }
             }
 
             callback(node);
 
-            ++i;
-        }, terminate);
+            while (edge && ++i + boss_graph.get_k() < encoded.size()) {
+                if (terminate())
+                    return;
+
+                if (invalid[i + boss_graph.get_k()]) {
+                    // this k-mer contains at least one invalid character
+                    --i;
+                    break;
+                }
+
+                edge = boss_graph.fwd(edge, *end);
+                ++end;
+                edge = boss_graph.pick_edge(edge, *end);
+
+                if (edge) {
+                    node = dbg_succ_.boss_to_kmer_index(edge);
+                    assert(node);
+                    callback(node);
+                    last_offset = 0;
+                } else {
+                    --i;
+                    break;
+                }
+            }
+        }
     }
 
     // TODO: always output the suffix matches? or only if the last k-mer was not found
