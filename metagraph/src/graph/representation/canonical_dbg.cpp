@@ -179,14 +179,18 @@ void CanonicalDBG::get_kmers_from_suffix(node_index node,
         node_index next_range = range_graph->toggle_node_sink_source(
             range_graph->kmer_to_node(rev_seq)
         );
+
         if (next_range) {
+            assert(range_graph->is_sink(next_range));
             assert(range_graph->get_offset(next_range) == 1);
             range_graph->call_incoming_kmers(next_range, [&](node_index next, char c) {
+                assert(range_graph->get_offset(next) == 0);
                 ::reverse_complement(&c, &c + 1);
-                assert(!graph_.traverse(node, c));
                 auto i = alphabet_encoder_[c];
                 if (children[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     return;
+
+                assert(!graph_.traverse(node, c));
 
                 if (!primary_)
                     rev_comp_cache_.Put(next, next + offset_);
@@ -286,14 +290,18 @@ void CanonicalDBG::get_kmers_from_prefix(node_index node,
         node_index prev_range = range_graph->toggle_node_sink_source(
             range_graph->kmer_to_node(rev_seq)
         );
+
         if (prev_range) {
+            assert(!range_graph->is_sink(prev_range));
             assert(range_graph->get_offset(prev_range) == 1);
             range_graph->call_outgoing_kmers(prev_range, [&](node_index prev, char c) {
+                assert(range_graph->get_offset(prev) == 0);
                 ::reverse_complement(&c, &c + 1);
-                assert(!graph_.traverse_back(node, c));
                 auto i = alphabet_encoder_[c];
                 if (parents[i] != DeBruijnGraph::npos || c == boss::BOSS::kSentinel)
                     return;
+
+                assert(!graph_.traverse_back(node, c));
 
                 if (!primary_)
                     rev_comp_cache_.Put(prev, prev + offset_);
