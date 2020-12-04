@@ -60,6 +60,7 @@ Config::Config(int argc, char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+        tmp_dir = "OUTFBASE_TEMP_DIR";
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -428,6 +429,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
     #endif
+
+    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+        tmp_dir = std::filesystem::path(outfbase).remove_filename();
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -1027,7 +1031,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
-            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files []\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files [OUT_BASEDIR]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
