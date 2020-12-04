@@ -209,12 +209,12 @@ BRWT BRWTBottomUpBuilder::build(
     if (!tmp_path.empty()) {
         // keep all temp nodes in |tmp_dir|
         std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
-        dump_node = [=](BinaryMatrix&& node, uint64_t id) {
+        dump_node = [tmp_dir](BinaryMatrix&& node, uint64_t id) {
             std::ofstream out(tmp_dir/std::to_string(id), std::ios::binary);
             node.serialize(out);
             node = BRWT();
         };
-        get_node = [=](uint64_t id) {
+        get_node = [tmp_dir](uint64_t id) {
             BRWT node;
             auto filename = tmp_dir/std::to_string(id);
             std::ifstream in(filename, std::ios::binary);
@@ -228,10 +228,10 @@ BRWT BRWTBottomUpBuilder::build(
     } else {
         // keep all temp nodes in memory
         auto temp_nodes = std::make_shared<std::vector<BRWT>>(linkage.size());
-        dump_node = [=](BinaryMatrix&& node, uint64_t id) {
+        dump_node = [temp_nodes](BinaryMatrix&& node, uint64_t id) {
             temp_nodes->at(id) = dynamic_cast<BRWT&&>(node);
         };
-        get_node = [=](uint64_t id) {
+        get_node = [temp_nodes](uint64_t id) {
             return std::move(temp_nodes->at(id));
         };
     }
