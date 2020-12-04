@@ -588,7 +588,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
-            row_reduction.push_back(sdsl::int_vector_buffer(path, std::ios::in, 1024 * 1024));
+            row_reduction.emplace_back(path, std::ios::in, 1024 * 1024);
 
             if (row_reduction.back().size() != row_reduction.front().size()) {
                 logger->error("Row reduction vectors have different sizes");
