@@ -631,7 +631,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     static_assert(sizeof(uint64_t) * 8 > ROW_REDUCTION_WIDTH);
     const uint64_t MINUS_BIT = 1llu << (row_reduction.front().width() - 1);
 
-    ProgressBar progress_bar(anchors.size(), "Optimize anchors", std::cerr,
+    ProgressBar progress_bar(anchors.size(), "Assign extra anchors", std::cerr,
                              !common::get_verbose());
     for (uint64_t i = 0; i < anchors.size(); i += BLOCK_SIZE) {
         // adjust if the last block
