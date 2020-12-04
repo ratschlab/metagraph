@@ -11,7 +11,7 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 25;
+constexpr uint64_t BLOCK_SIZE = 1 << 27;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
 constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
 
@@ -608,8 +608,6 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         exit(1);
     }
 
-    const uint8_t width = row_reduction.front().width();
-
     sdsl::bit_vector anchors;
     uint64_t num_anchors_old;
     {
@@ -630,6 +628,9 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     }
 
     std::vector<uint64_t> buf;
+    static_assert(sizeof(uint64_t) * 8 > ROW_REDUCTION_WIDTH);
+    const uint64_t MINUS_BIT = 1llu << (row_reduction.front().width() - 1);
+
     ProgressBar progress_bar(anchors.size(), "Optimize anchors", std::cerr,
                              !common::get_verbose());
     for (uint64_t i = 0; i < anchors.size(); i += BLOCK_SIZE) {
@@ -647,7 +648,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
 
         for (uint64_t t = 0; t < buf.size(); ++t) {
             // check if the reduction is negative
-            if (buf[t] >> (width - 1))
+            if (buf[t] & MINUS_BIT)
                 anchors[i + t] = true;
         }
 
