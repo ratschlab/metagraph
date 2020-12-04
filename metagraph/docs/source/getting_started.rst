@@ -1,6 +1,6 @@
 .. _getting_started:
 
-Getting Started
+Getting started
 ===============
 
 Graph construction
@@ -47,4 +47,16 @@ Primary graphs
 Typical indexing workflow
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Complete Working Example
+------------------------
+Getting data
+^^^^^^^^^^^^
+Building the index
+^^^^^^^^^^^^^^^^^^
+Starting a local server
+^^^^^^^^^^^^^^^^^^^^^^^
+Querying from command line
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Querying using the API
+^^^^^^^^^^^^^^^^^^^^^^
 

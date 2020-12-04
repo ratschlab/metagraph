@@ -1,6 +1,6 @@
 .. _metagraph_server:
 
-MetaGraph Server
+MetaGraph server
 ================
 
 Lorem ipsum ...

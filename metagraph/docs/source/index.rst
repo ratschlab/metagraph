@@ -14,17 +14,11 @@ Following the overview of contents covered by this document:
 
    installation.rst
    getting_started.rst
-   framework.rst
    sequence_search.rst
+   sequence_assembly.rst
    metagraph_server.rst
    python_api.rst
-   tutorial.rst
+   framework.rst
    resources.rst
 
 
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
