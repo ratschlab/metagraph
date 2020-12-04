@@ -23,12 +23,15 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
     char start_char = *(seed.get_query_end() - 1);
     score_t last_char_score = config.get_row(start_char)[seed.get_sequence().back()];
 
-    auto &table_init = dp_table_[seed.back()];
-    if (!table_init.size()) {
-        table_init = Column(size, config.min_cell_score, start_char, start_pos);
+    iterator column_it = dp_table_.find(seed.back());
+    if (column_it == dp_table_.end()) {
+        column_it = emplace(seed.back(), Column(size, config.min_cell_score,
+                                                start_char, start_pos)).first;
     } else {
-        table_init.expand_to_cover(0, size);
+        expand_to_cover(column_it, 0, size);
     }
+
+    auto &table_init = column_it.value();
 
     bool update = false;
 
