@@ -11,7 +11,7 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 27;
+constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
 constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
 
