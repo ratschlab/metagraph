@@ -237,10 +237,12 @@ inline void update_del_scores(const DBGAlignerConfig &config,
 
 #ifdef __AVX2__
 
+// Drop-in replacement for _mm_loadu_si64
 inline __m128i mm_loadu_si64(const void *mem_addr) {
     return _mm_loadl_epi64((const __m128i_u*)mem_addr);
 }
 
+// Drop-in replacement for _mm_storeu_si64
 inline void mm_storeu_si64(void *mem_addr, __m128i a) {
     _mm_storel_epi64((__m128i_u*)mem_addr, a);
 }
