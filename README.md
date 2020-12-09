@@ -3,8 +3,8 @@
 ## Install
 
 ### Prerequisites
-- cmake 3.6.1
-- GNU GCC with C++17 (gcc-9 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- cmake 3.10
+- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - HTSlib
 - folly (optional)
 - Python 3 (for running integration tests)

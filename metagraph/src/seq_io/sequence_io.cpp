@@ -1,6 +1,5 @@
 #include "sequence_io.hpp"
 
-#include <iostream>
 #include <fstream>
 #include <thread>
 
@@ -318,36 +317,6 @@ FastaParser::iterator& FastaParser::iterator::operator=(iterator&& other) {
     is_reverse_complement_ = other.is_reverse_complement_;
     // the destructor in |other| will be responsible for freeing the memory now
     return *this;
-}
-
-FastaParser::iterator::iterator(const std::string &filename,
-                                bool with_reverse_complement)
-      : filename_(filename),
-        with_reverse_complement_(with_reverse_complement) {
-    gzFile input_p = gzopen(filename_.c_str(), "r");
-    if (input_p == Z_NULL) {
-        std::cerr << "ERROR: Cannot read from file " << filename_ << std::endl;
-        exit(1);
-    }
-
-    read_stream_ = kseq_init(input_p);
-    if (read_stream_ == NULL) {
-        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
-        exit(1);
-    }
-
-    if (kseq_read(read_stream_) < 0) {
-        deinit_stream();
-    }
-}
-
-void FastaParser::iterator::deinit_stream() {
-    if (read_stream_) {
-        gzFile input_p = read_stream_->f->f;
-        kseq_destroy(read_stream_);
-        gzclose(input_p);
-    }
-    read_stream_ = NULL;
 }
 
 
