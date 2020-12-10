@@ -237,10 +237,20 @@ inline void update_del_scores(const DBGAlignerConfig &config,
 
 #ifdef __AVX2__
 
+// Drop-in replacement for _mm_loadu_si64
+inline __m128i mm_loadu_si64(const void *mem_addr) {
+    return _mm_loadl_epi64((const __m128i_u*)mem_addr);
+}
+
+// Drop-in replacement for _mm_storeu_si64
+inline void mm_storeu_si64(void *mem_addr, __m128i a) {
+    _mm_storel_epi64((__m128i_u*)mem_addr, a);
+}
+
 inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
-    __m128i orig = _mm_loadu_si64(mem_addr);
+    __m128i orig = mm_loadu_si64((__m128i_u*)mem_addr);
     a = _mm_blendv_epi8(orig, a, mask);
-    _mm_storeu_si64(mem_addr, a);
+    mm_storeu_si64(mem_addr, a);
 }
 
 inline void compute_HE_avx2(size_t length,
@@ -272,7 +282,7 @@ inline void compute_HE_avx2(size_t length,
         // compute match score
         __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
         __m256i match_score = _mm256_add_epi32(
-            incoming_p, _mm256_cvtepi8_epi32(_mm_loadu_si64(&profile_scores[i]))
+            incoming_p, _mm256_cvtepi8_epi32(mm_loadu_si64(&profile_scores[i]))
         );
 
         // compute score for cell update
@@ -299,7 +309,7 @@ inline void compute_HE_avx2(size_t length,
 
         __m256i update_gap_scores_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
         __m256i update_gap_count_orig = _mm256_loadu_si256((__m256i*)&update_gap_count[i]);
-        __m128i update_gap_prevs_orig = _mm_loadu_si64(&update_gap_prevs[i]);
+        __m128i update_gap_prevs_orig = mm_loadu_si64(&update_gap_prevs[i]);
         __m256i gap_updated = _mm256_cmpgt_epi32(update_score, update_gap_scores_orig);
         __m128i gap_updated_small = mm256_cvtepi32_epi8(gap_updated);
 
@@ -333,13 +343,13 @@ inline void compute_HE_avx2(size_t length,
                             _mm256_blendv_epi8(update_gap_count_orig, incoming_count, both_cmp));
 
         update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, both_cmp_small);
-        _mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
+        mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
 
-        __m128i update_op = _mm_blendv_epi8(_mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
+        __m128i update_op = _mm_blendv_epi8(mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
         mm_maskstorel_epi8(&update_ops[i], both_cmp_small, update_op);
 
-        __m128i updated_mask_orig = _mm_loadu_si64(&updated_mask[i]);
-        _mm_storeu_si64(&updated_mask[i], _mm_or_si128(updated_mask_orig, both_cmp_small));
+        __m128i updated_mask_orig = mm_loadu_si64(&updated_mask[i]);
+        mm_storeu_si64(&updated_mask[i], _mm_or_si128(updated_mask_orig, both_cmp_small));
 
         __m128i update_prev = _mm_blendv_epi8(prev_node, update_gap_prev, update_cmp_small);
         mm_maskstorel_epi8((int8_t*)&update_prevs[i], both_cmp_small, update_prev);

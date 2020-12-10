@@ -16,7 +16,7 @@
 namespace mtg {
 namespace seq_io {
 
-KSEQ_INIT(gzFile, gzread);
+KSEQ_DECLARE(gzFile);
 
 
 class FastaWriter {
