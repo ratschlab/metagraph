@@ -130,10 +130,8 @@ int build_graph(Config *config) {
                 timer.reset();
                 next_chunk->serialize(config->outfbase + "." + suffix);
                 logger->info("Serialization done in {} sec", timer.elapsed());
-            }
-
-            if (config->suffix.size())
                 return 0;
+            }
 
             if (graph_data) {
                 graph_data->extend(*next_chunk);

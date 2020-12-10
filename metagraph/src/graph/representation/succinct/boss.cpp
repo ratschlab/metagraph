@@ -98,6 +98,31 @@ BOSS::~BOSS() {
     delete last_;
 }
 
+void BOSS::initialize(Chunk *chunk) {
+    delete W_;
+    delete last_;
+
+    // TODO: optimize
+    W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
+
+    {
+        chunk->last_.flush();
+        sdsl::bit_vector last;
+        std::ifstream in(chunk->last_.filename(), std::ios::binary);
+        last.load(in);
+        last_ = new bit_vector_stat(std::move(last));
+    }
+
+    F_ = chunk->F_;
+    recompute_NF();
+
+    k_ = chunk->k_;
+    // TODO:
+    // alph_size = chunk->alph_size_;
+
+    state = State::STAT;
+}
+
 /**
  * Given a pointer to BOSS tables G1 and G2, the function compares their elements to the
  * each other. It will perform an element wise comparison of the arrays W, last and
