@@ -114,7 +114,8 @@ int build_graph(Config *config) {
                 config->memory_available * kBytesInGigabyte,
                 config->tmp_dir.empty() ? kmer::ContainerType::VECTOR
                                         : kmer::ContainerType::VECTOR_DISK,
-                config->tmp_dir,
+                config->tmp_dir.empty() ? std::filesystem::path(config->outfbase).remove_filename()
+                                        : config->tmp_dir,
                 config->disk_cap_bytes
             );
 
