@@ -1,7 +1,7 @@
 #include "assemble.hpp"
 
 #include <fmt/format.h>
-#include <unordered_set>
+#include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -108,49 +108,48 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 }
 
 
-std::string sequence_to_gfa_path(std::string seq,
-                                 size_t seq_id,
-                                 std::shared_ptr<DeBruijnGraph> graph,
-                                 std::unordered_set<uint64_t> is_unitig_end_node,
-                                 Config *config) {
+std::string sequence_to_gfa_path(const std::string &seq,
+                                 const size_t seq_id,
+                                 const std::shared_ptr<DeBruijnGraph> &graph,
+                                 const tsl::ordered_set<uint64_t> &is_unitig_end_node,
+                                 const Config *config) {
     std::vector<uint64_t> path_nodes;
     graph->map_to_nodes(seq, [&](uint64_t node) {
         path_nodes.push_back(node);
     });
 
     //    The first node in the path must be a unitig end node.
-    assert(is_unitig_end_node.find(path_nodes[0]) != is_unitig_end_node.end());
-    std::ostringstream nodes_on_path, cigars_on_path;
-    size_t overlap = graph->get_k() - 1, len_current_unitig = 0;
+    assert(is_unitig_end_node.count(path_nodes[0]));
+    std::string nodes_on_path;
+    std::string cigars_on_path;
+    size_t overlap = graph->get_k() - 1;
+    size_t len_current_unitig = 0;
     if (config->output_compacted) {
-        nodes_on_path << fmt::format("{}+,", path_nodes[0]);
+        nodes_on_path += fmt::format("{}+,", path_nodes[0]);
         for (size_t i = 1; i < path_nodes.size(); ++i) {
-            if (is_unitig_end_node.find(path_nodes[i]) == is_unitig_end_node.end()) {
+            if (!is_unitig_end_node.count(path_nodes[i])) {
                 len_current_unitig++;
                 continue;
             }
-            nodes_on_path << fmt::format("{}+,", path_nodes[i]);
+            nodes_on_path += fmt::format("{}+,", path_nodes[i]);
             if (len_current_unitig) {
-                cigars_on_path << fmt::format("{}M{}I,", overlap, len_current_unitig);
+                cigars_on_path += fmt::format("{}M{}I,", overlap, len_current_unitig);
             } else {
-                cigars_on_path << fmt::format("{}M,", overlap);
+                cigars_on_path += fmt::format("{}M,", overlap);
             }
             len_current_unitig = 0;
         }
     } else {
-        nodes_on_path << fmt::format("{}+,", path_nodes[0]);
+        nodes_on_path += fmt::format("{}+,", path_nodes[0]);
         for (size_t i = 1; i < path_nodes.size(); ++i) {
-            nodes_on_path << fmt::format("{}+,", path_nodes[i]);
-            cigars_on_path << fmt::format("{}M,", overlap);
+            nodes_on_path += fmt::format("{}+,", path_nodes[i]);
+            cigars_on_path += fmt::format("{}M,", overlap);
         }
     }
-    std::string cleaned_nodes_on_path = nodes_on_path.str();
-    std::string cleaned_cigars_on_path = cigars_on_path.str();
-    //   Remove trailing commas.
-    cleaned_nodes_on_path.pop_back();
-    cleaned_cigars_on_path.pop_back();
-    return fmt::format("P\t{}\t{}\t{}\n", seq_id, cleaned_nodes_on_path,
-                       cleaned_cigars_on_path);
+    //   Remove right trailing comma.
+    nodes_on_path.pop_back();
+    cigars_on_path.pop_back();
+    return fmt::format("P\t{}\t{}\t{}\n", seq_id, nodes_on_path, cigars_on_path);
 }
 
 
@@ -198,7 +197,7 @@ int assemble(Config *config) {
         gfa_file << "H\tVN:Z:1.0" << std::endl;
         size_t k = graph->get_k();
         size_t overlap = k - 1;
-        std::unordered_set<uint64_t> is_unitig_end_node;
+        tsl::ordered_set<uint64_t> is_unitig_end_node;
         graph->call_unitigs(
             [&](const auto &unitig, const auto &path) {
                 std::ostringstream ostr;
@@ -229,7 +228,7 @@ int assemble(Config *config) {
             config->min_tip_size
         );
 
-        if (config->infbase != "") {
+        if (config->infbase.size()) {
             logger->trace(
                     "Loading sequences from FASTA file '{}' to highlight gfa paths.",
                     config->infbase
@@ -239,19 +238,18 @@ int assemble(Config *config) {
             for (const seq_io::kseq_t &kseq : fasta_parser) {
                 seq_queries.push_back(kseq.seq.s);
             }
-            {
+
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) shared(gfa_file)
-                for (size_t i = 0; i < seq_queries.size(); ++i) {
-                    std::string path_string_gfa = sequence_to_gfa_path(
-                            seq_queries[i],
-                            i,
-                            graph,
-                            is_unitig_end_node,
-                            config
-                    );
-                    std::lock_guard<std::mutex> lock(str_mutex);
-                    gfa_file << path_string_gfa;
-                }
+            for (size_t i = 0; i < seq_queries.size(); ++i) {
+                std::string path_string_gfa = sequence_to_gfa_path(
+                        seq_queries[i],
+                        i,
+                        graph,
+                        is_unitig_end_node,
+                        config
+                );
+                std::lock_guard<std::mutex> lock(str_mutex);
+                gfa_file << path_string_gfa;
             }
         }
     }
