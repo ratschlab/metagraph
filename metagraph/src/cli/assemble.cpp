@@ -21,8 +21,8 @@ using mtg::graph::MaskedDeBruijnGraph;
 using mtg::graph::AnnotatedDBG;
 
 
-std::unique_ptr<MaskedDeBruijnGraph>
-mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
+std::unique_ptr<MaskedDeBruijnGraph> mask_graph(const AnnotatedDBG &anno_graph,
+                                                Config *config) {
     auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
@@ -30,80 +30,65 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
 
     // Remove non-present labels
     config->label_mask_in.erase(
-        std::remove_if(config->label_mask_in.begin(),
-                       config->label_mask_in.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-in label {}", label);
+            std::remove_if(config->label_mask_in.begin(), config->label_mask_in.end(),
+                           [&](const auto &label) {
+                               bool exists = anno_graph.label_exists(label);
+                               if (!exists)
+                                   logger->trace("Removing mask-in label {}", label);
 
-                           return !exists;
-                       }),
-        config->label_mask_in.end()
-    );
+                               return !exists;
+                           }),
+            config->label_mask_in.end());
 
     config->label_mask_out.erase(
-        std::remove_if(config->label_mask_out.begin(),
-                       config->label_mask_out.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-out label {}", label);
+            std::remove_if(config->label_mask_out.begin(), config->label_mask_out.end(),
+                           [&](const auto &label) {
+                               bool exists = anno_graph.label_exists(label);
+                               if (!exists)
+                                   logger->trace("Removing mask-out label {}", label);
 
-                           return !exists;
-                       }),
-        config->label_mask_out.end()
-    );
+                               return !exists;
+                           }),
+            config->label_mask_out.end());
 
     logger->trace("Masked in: {}", fmt::join(config->label_mask_in, " "));
     logger->trace("Masked out: {}", fmt::join(config->label_mask_out, " "));
 
     if (!config->filter_by_kmer) {
         return std::make_unique<MaskedDeBruijnGraph>(
-            graph,
-            mask_nodes_by_unitig_labels(
-                anno_graph,
-                config->label_mask_in,
-                config->label_mask_out,
-                std::max(1u, get_num_threads()),
-                config->label_mask_in_fraction,
-                config->label_mask_out_fraction,
-                config->label_other_fraction
-            )
-        );
+                graph,
+                mask_nodes_by_unitig_labels(
+                        anno_graph, config->label_mask_in, config->label_mask_out,
+                        std::max(1u, get_num_threads()), config->label_mask_in_fraction,
+                        config->label_mask_out_fraction, config->label_other_fraction));
     }
 
     return std::make_unique<MaskedDeBruijnGraph>(
-        graph,
-        mask_nodes_by_node_label(
-            anno_graph,
-            config->label_mask_in,
-            config->label_mask_out,
-            [config,&anno_graph](auto index,
-                                 auto get_num_in_labels,
-                                 auto get_num_out_labels) {
-                assert(index != DeBruijnGraph::npos);
+            graph,
+            mask_nodes_by_node_label(
+                    anno_graph, config->label_mask_in, config->label_mask_out,
+                    [config, &anno_graph](auto index, auto get_num_in_labels,
+                                          auto get_num_out_labels) {
+                        assert(index != DeBruijnGraph::npos);
 
-                size_t num_in_labels = get_num_in_labels();
+                        size_t num_in_labels = get_num_in_labels();
 
-                if (num_in_labels < config->label_mask_in_fraction
-                                        * config->label_mask_in.size())
-                    return false;
+                        if (num_in_labels < config->label_mask_in_fraction
+                                    * config->label_mask_in.size())
+                            return false;
 
-                size_t num_out_labels = get_num_out_labels();
+                        size_t num_out_labels = get_num_out_labels();
 
-                if (num_out_labels < config->label_mask_out_fraction
-                                        * config->label_mask_out.size())
-                    return false;
+                        if (num_out_labels < config->label_mask_out_fraction
+                                    * config->label_mask_out.size())
+                            return false;
 
-                size_t num_total_labels = anno_graph.get_labels(index).size();
+                        size_t num_total_labels = anno_graph.get_labels(index).size();
 
-                return num_total_labels - num_in_labels - num_out_labels
-                            <= config->label_other_fraction * num_total_labels;
-            },
-            std::max(1u, get_num_threads())
-        )
-    );
+                        return num_total_labels - num_in_labels - num_out_labels
+                                <= config->label_other_fraction * num_total_labels;
+                    },
+                    std::max(1u, get_num_threads())));
 }
 
 
@@ -152,55 +137,51 @@ int assemble(Config *config) {
         size_t k = graph->get_k();
         size_t overlap = k - 1;
         graph->call_unitigs(
-            [&](const auto &unitig, const auto &path) {
-                std::ostringstream ostr;
-                if (config->output_compacted) {
-                    ostr << fmt::format("S\t{}\t{}\n", path.back(), unitig);
-                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
-                                            node, path.back(), overlap);
-                    });
-                } else {
-                    for (size_t i = 0; i < path.size(); ++i) {
-                        ostr << fmt::format("S\t{}\t{}\n", path[i],
-                                            std::string_view(unitig.data() + i, k));
-                        if (i)
-                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
-                                                path[i - 1], path[i], overlap);
+                [&](const auto &unitig, const auto &path) {
+                    std::ostringstream ostr;
+                    if (config->output_compacted) {
+                        ostr << fmt::format("S\t{}\t{}\n", path.back(), unitig);
+                        graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
+                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n", node,
+                                                path.back(), overlap);
+                        });
+                    } else {
+                        for (size_t i = 0; i < path.size(); ++i) {
+                            ostr << fmt::format("S\t{}\t{}\n", path[i],
+                                                std::string_view(unitig.data() + i, k));
+                            if (i)
+                                ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n", path[i - 1],
+                                                    path[i], overlap);
+                        }
+                        graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
+                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n", node,
+                                                path.front(), overlap);
+                        });
                     }
-                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
-                                            node, path.front(), overlap);
-                    });
-                }
-                std::lock_guard<std::mutex> lock(str_mutex);
-                gfa_file << ostr.str();
-            },
-            get_num_threads(),
-            config->min_tip_size
-        );
+                    std::lock_guard<std::mutex> lock(str_mutex);
+                    gfa_file << ostr.str();
+                },
+                get_num_threads(), config->min_tip_size);
     }
 
     seq_io::FastaWriter writer(config->outfbase, config->header,
-                               config->enumerate_out_sequences,
-                               get_num_threads() > 1);
+                               config->enumerate_out_sequences, get_num_threads() > 1);
     std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
-        graph->call_unitigs([&](const auto &unitig, auto&&) {
-                                std::lock_guard<std::mutex> lock(write_mutex);
-                                writer.write(unitig);
-                            },
-                            get_num_threads(),
-                            config->min_tip_size,
-                            config->kmers_in_single_form);
+        graph->call_unitigs(
+                [&](const auto &unitig, auto &&) {
+                    std::lock_guard<std::mutex> lock(write_mutex);
+                    writer.write(unitig);
+                },
+                get_num_threads(), config->min_tip_size, config->kmers_in_single_form);
     } else {
-        graph->call_sequences([&](const auto &contig, auto&&) {
-                                  std::lock_guard<std::mutex> lock(write_mutex);
-                                  writer.write(contig);
-                              },
-                              get_num_threads(),
-                              config->kmers_in_single_form);
+        graph->call_sequences(
+                [&](const auto &contig, auto &&) {
+                    std::lock_guard<std::mutex> lock(write_mutex);
+                    writer.write(contig);
+                },
+                get_num_threads(), config->kmers_in_single_form);
     }
 
     logger->trace("Sequences extracted in {} sec", timer.elapsed());
