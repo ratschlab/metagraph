@@ -941,6 +941,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \tload sequences from FASTA file '<infile-base>.fa' to highlight certain GFA paths []\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
             fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
