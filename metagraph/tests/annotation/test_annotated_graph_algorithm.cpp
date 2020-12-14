@@ -63,9 +63,9 @@ void test_mask_indices(double density_cutoff, size_t num_threads) {
     const std::vector<std::string> outgroup { "A" };
 
 #if _PROTEIN_GRAPH
-    for (size_t k = 3; k < 12; ++k) {
+    for (size_t k : { 3, 12 }) {
 #else
-    for (size_t k = 3; k < 15; ++k) {
+    for (size_t k : { 3, 14 }) {
 #endif
         const std::vector<std::string> sequences {
             std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
@@ -109,7 +109,7 @@ void test_mask_indices(double density_cutoff, size_t num_threads) {
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     for (size_t num_threads : { 1, 4 }) {
-        for (double d = 0.0; d <= 1.0; d += 0.05) {
+        for (double d = 0.0; d <= 1.0; d += 0.5) {
             test_mask_indices<typename TypeParam::first_type,
                               typename TypeParam::second_type>(d, num_threads);
         }
