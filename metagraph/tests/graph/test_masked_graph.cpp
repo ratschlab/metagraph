@@ -544,6 +544,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
+
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 4; k <= 10; ++k) {
@@ -643,6 +645,8 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
         }
     }
 }
+
+#endif
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
     for (size_t num_threads : { 1, 4 }) {

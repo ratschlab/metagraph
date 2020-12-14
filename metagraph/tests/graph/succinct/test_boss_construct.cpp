@@ -247,6 +247,8 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
+
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
@@ -272,6 +274,8 @@ TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
         }
     }
 }
+
+#endif
 
 TYPED_TEST(BOSSConstruct, ConstructionLong) {
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {

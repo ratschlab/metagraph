@@ -62,7 +62,11 @@ void test_mask_indices(double density_cutoff, size_t num_threads) {
     const std::vector<std::string> ingroup { "B", "C" };
     const std::vector<std::string> outgroup { "A" };
 
+#if _PROTEIN_GRAPH
+    for (size_t k = 3; k < 12; ++k) {
+#else
     for (size_t k = 3; k < 15; ++k) {
+#endif
         const std::vector<std::string> sequences {
             std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
             std::string("T") + std::string(k - 1, 'A') + "C",

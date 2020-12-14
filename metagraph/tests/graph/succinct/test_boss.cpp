@@ -1873,6 +1873,8 @@ TEST(BOSS, CallUnitigsMasked) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
+
 TEST(BOSS, CallUnitigsSingleKmer) {
     size_t k = 6;
     std::vector<std::string> sequences {
@@ -1899,6 +1901,8 @@ TEST(BOSS, CallUnitigsSingleKmer) {
         EXPECT_EQ(unitigs, obs_unitigs);
     }
 }
+
+#endif
 
 template <class Callback>
 void call_edges(const BOSS &boss, Callback callback) {

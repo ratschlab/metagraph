@@ -1515,6 +1515,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     size_t k = 18;
     std::string reference = "AAAAA" "CTTTCGAGGCCAA";
@@ -1551,6 +1552,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
+#endif
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
     size_t k = 7;
@@ -1583,6 +1585,7 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerTest, align_both_directions) {
     size_t k = 7;
     std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
@@ -1613,6 +1616,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
+#endif
 
 TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     size_t k = 5;

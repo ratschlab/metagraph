@@ -88,7 +88,9 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
                          DBGSuccinctIndexed<1>,
                          DBGSuccinctIndexed<2>,
+#if ! _PROTEIN_GRAPH
                          DBGSuccinctIndexed<10>,
+#endif
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
@@ -102,7 +104,9 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinct,
                          DBGSuccinctIndexed<1>,
                          DBGSuccinctIndexed<2>,
+#if ! _PROTEIN_GRAPH
                          DBGSuccinctIndexed<10>,
+#endif
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
@@ -110,7 +114,11 @@ typedef ::testing::Types<DBGBitmap,
 
 typedef ::testing::Types<DBGHashFast,
                          DBGSuccinct,
+#if _PROTEIN_GRAPH
+                         DBGSuccinctIndexed<2>,
+#else
                          DBGSuccinctIndexed<10>,
+#endif
                          DBGSuccinctBloomFPR<1, 10>> FewGraphTypes;
 
 } // namespace test

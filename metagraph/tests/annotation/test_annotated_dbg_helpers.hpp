@@ -52,6 +52,8 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphAnnotationPairTypes;
 
+#if ! _PROTEIN_GRAPH
+
 typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::ColumnCompressed<>>,
@@ -59,6 +61,8 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>
                         > GraphNoNAnnotationPairTypes;
+
+#endif
 
 typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
