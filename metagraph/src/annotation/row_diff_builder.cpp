@@ -586,76 +586,76 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
 
     logger->trace("Optimizing anchors");
 
-    std::vector<std::string> filenames;
+    std::vector<sdsl::int_vector_buffer<>> row_reduction;
     for (const auto &p : std::filesystem::directory_iterator(dest_dir)) {
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
-            filenames.push_back(path);
+            row_reduction.emplace_back(path, std::ios::in, 1024 * 1024);
+
+            if (row_reduction.back().size() != row_reduction.front().size()) {
+                logger->error("Row reduction vectors have different sizes");
+                exit(1);
+            }
+            if (row_reduction.back().width() != row_reduction.front().width()) {
+                logger->error("Row reduction vectors have different width: {} != {}",
+                              row_reduction.back().width(),
+                              row_reduction.front().width());
+                exit(1);
+            }
         }
     }
 
-    if (!filenames.size()) {
+    if (!row_reduction.size()) {
         logger->error("Didn't find any row reduction vectors in {} to merge", dest_dir);
         exit(1);
     }
 
-    if (filenames.size() > 1u)
-        logger->trace("Merging row reduction vectors");
+    sdsl::bit_vector anchors;
+    uint64_t num_anchors_old;
+    {
+        anchor_bv_type old_anchors;
+        auto original_anchors_fname = graph_fname + kRowDiffAnchorExt + ".unopt";
 
-    while (filenames.size() > 1u) {
-        std::vector<std::string> filenames_new((filenames.size() + 1) / 2);
+        std::ifstream f(original_anchors_fname, ios::binary);
+        old_anchors.load(f);
+
+        if (old_anchors.size() != row_reduction.front().size()) {
+            logger->error(
+                "Original anchors {}: {} and row reduction vectors: {} are incompatible",
+                original_anchors_fname, old_anchors.size(), row_reduction.front().size());
+            exit(1);
+        }
+        num_anchors_old = old_anchors.num_set_bits();
+        anchors = old_anchors.convert_to<sdsl::bit_vector>();
+    }
+
+    std::vector<uint64_t> buf;
+    static_assert(sizeof(uint64_t) * 8 > ROW_REDUCTION_WIDTH);
+    const uint64_t MINUS_BIT = 1llu << (row_reduction.front().width() - 1);
+
+    ProgressBar progress_bar(anchors.size(), "Assign extra anchors", std::cerr,
+                             !common::get_verbose());
+    for (uint64_t i = 0; i < anchors.size(); i += BLOCK_SIZE) {
+        // adjust if the last block
+        buf.assign(std::min(BLOCK_SIZE, anchors.size() - i), 0);
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t t = 1; t < filenames.size(); t += 2) {
-            // compute sum of t-1 and t.
-            sdsl::int_vector_buffer first(filenames[t - 1], std::ios::in, 1024 * 1024);
-            sdsl::int_vector_buffer second(filenames[t], std::ios::in, 1024 * 1024);
-            if (first.size() != second.size() || first.width() != second.width()) {
-                logger->error("Sizes of row reduction vectors are incompatible, {}: {}, {}: {}",
-                              filenames[t - 1], first.size(), filenames[t], second.size());
-                exit(1);
-            }
-            filenames_new[t / 2] = fmt::format("{}.merged", filenames[t]);
-            sdsl::int_vector_buffer sum(filenames_new[t / 2], std::ios::out, 1024 * 1024, first.width());
-
-            for (uint64_t i = 0; i < first.size(); ++i) {
-                sum.push_back(first[i] + second[i]);
+        for (size_t j = 0; j < row_reduction.size(); ++j) {
+            for (uint64_t t = 0; t < buf.size(); ++t) {
+                __atomic_add_fetch(&buf[t], row_reduction[j][i + t], __ATOMIC_RELAXED);
             }
         }
 
-        if (filenames.size() % 2)
-            filenames_new.back() = filenames.back();
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-        logger->trace("Merged {} row reduction vectors into {}",
-                      filenames.size(), filenames_new.size());
+        for (uint64_t t = 0; t < buf.size(); ++t) {
+            // check if the reduction is negative
+            if (buf[t] & MINUS_BIT)
+                anchors[i + t] = true;
+        }
 
-        filenames.swap(filenames_new);
-    }
-
-    assert(filenames.size() == 1u && "All must be merged into one vector");
-
-    anchor_bv_type old_anchors;
-    auto original_anchors_fname = graph_fname + kRowDiffAnchorExt + ".unopt";
-    {
-        std::ifstream f(original_anchors_fname, ios::binary);
-        old_anchors.load(f);
-    }
-    uint64_t num_anchors_old = old_anchors.num_set_bits();
-
-    sdsl::int_vector_buffer row_reduction(filenames[0], std::ios::in, 1024 * 1024);
-
-    if (old_anchors.size() != row_reduction.size()) {
-        logger->error(
-            "Original anchors {}: {} and row reduction vector {}: {} are incompatible",
-            original_anchors_fname, old_anchors.size(), filenames[0], row_reduction.size());
-        exit(1);
-    }
-    sdsl::bit_vector anchors = old_anchors.convert_to<sdsl::bit_vector>();
-    for (uint64_t i = 0; i < row_reduction.size(); ++i) {
-        // check if the reduction is negative
-        if (row_reduction[i] >> (row_reduction.width() - 1))
-            anchors[i] = true;
+        progress_bar += buf.size();
     }
     anchor_bv_type ranchors(std::move(anchors));
 
