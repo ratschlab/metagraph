@@ -29,15 +29,13 @@ template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached)
       : num_rows_(num_rows),
-        cached_columns_(num_columns_cached,
+        cached_columns_(std::max(num_columns_cached, (size_t)1),
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
                             assert(column_builder);
                             this->flush(j, *column_builder);
                             delete column_builder;
-                        }) {
-    assert(num_columns_cached > 0);
-}
+                        }) {}
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
@@ -250,9 +248,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
         std::ifstream instream(filename, std::ios::binary);
@@ -271,15 +266,15 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         offsets[i] = label_encoder.size();
     }
 
+    if (error_occurred)
+        return false;
+
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         try {
             auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
 
@@ -312,7 +307,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                          label_encoder_load.decode(c),
                          std::move(new_column));
             }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading columns: {}", e.what());
+            error_occurred = true;
         } catch (...) {
+            logger->error("Unknown exception when loading columns");
             error_occurred = true;
         }
     }

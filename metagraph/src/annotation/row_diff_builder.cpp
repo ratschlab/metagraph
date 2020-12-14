@@ -13,6 +13,7 @@
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
 constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
+constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
 
 namespace mtg {
 namespace annot {
@@ -284,7 +285,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < source_files.size(); ++i) {
-        sources[i].load(source_files[i]);
+        if (!sources[i].load(source_files[i])) {
+            logger->error("Can't load source annotations from {}", source_files[i]);
+            std::exit(1);
+        }
 
         if (sources[i].num_labels() && sources[i].num_objects() != anchor.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
@@ -306,16 +310,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
-    auto tmp_dir = [&](size_t s, size_t j) {
-        return tmp_path/fmt::format("{}/col_{}_{}", s / 100, s, j);
+    auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
+        return tmp_path/fmt::format("{}/col_{}_{}/chunk_{}", s / 100, s, j, chunk);
     };
-    auto tmp_file = [&](size_t source_idx, size_t col_idx, size_t chunk) {
-        return tmp_dir(source_idx, col_idx)/fmt::format("chunk_{}", chunk);
-    };
-    auto dump_chunk_to_disk = [&](const auto &v, size_t s, size_t j, size_t chunk) {
+    auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
+                                  size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
         std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(decltype(v.front())));
+        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -329,7 +331,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         num_chunks[s].assign(sources[s].num_labels(), 1);
 
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            std::filesystem::create_directories(tmp_dir(s, j));
+            std::filesystem::create_directories(tmp_file(s, j, 0).parent_path());
+            // make sure the first chunk exists even if empty
+            dump_chunk_to_disk({}, s, j, 0);
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
             set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
             set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
@@ -443,17 +447,76 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
 
+    const uint32_t files_open_per_thread
+            = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads);
+    if (files_open_per_thread < 3) {
+        logger->error("Can't merge with less than 3 files per thread open. "
+                      "Max num files open: {}. Current number of threads: {}.",
+                      MAX_NUM_FILES_OPEN, num_threads);
+        exit(1);
+    }
+
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
-            auto call_ones = [&](const std::function<void(uint64_t)>& call) {
+            auto call_ones = [&](const std::function<void(uint64_t)> &call) {
                 std::vector<std::string> filenames;
                 for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
+
+                // if there are too many chunks, merge them into larger ones
+                // TODO: move this pre-merging to common::merge_files
+                //       and implement it for SortedSetDisk too.
+                while (filenames.size() > files_open_per_thread) {
+                    // chunk 0 stores fwd bits and hence not merged
+                    std::vector<std::string> new_chunks = { filenames.at(0) };
+                    size_t i = 1;
+                    while (i < filenames.size()) {
+                        std::vector<std::string> to_merge;
+                        while (i < filenames.size()
+                                && to_merge.size() + 1 < files_open_per_thread) {
+                            to_merge.push_back(filenames[i++]);
+                        }
+
+                        if (to_merge.size() < 2) {
+                            // nothing to merge
+                            new_chunks.push_back(to_merge.at(0));
+                            continue;
+                        }
+
+                        assert(to_merge.size() < files_open_per_thread);
+
+                        new_chunks.push_back(to_merge.at(0) + "_");
+                        std::ofstream f(new_chunks.back(), std::ios::binary);
+
+                        std::vector<uint64_t> buf;
+                        buf.reserve(1024 * 1024);
+
+                        common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
+                            buf.push_back(i);
+                            if (buf.size() == buf.capacity()) {
+                                f.write(reinterpret_cast<const char *>(buf.data()),
+                                        buf.size() * sizeof(decltype(buf.front())));
+                                buf.resize(0);
+                            }
+                        });
+                        if (buf.size()) {
+                            f.write(reinterpret_cast<const char *>(buf.data()),
+                                    buf.size() * sizeof(decltype(buf.front())));
+                        }
+
+                        // remove merged chunks
+                        for (const std::string &chunk_file : to_merge) {
+                            std::filesystem::remove(chunk_file);
+                        }
+                    }
+                    filenames.swap(new_chunks);
+                }
+
                 //TODO: benchmark using Elias-Fano encoders + merger
                 common::merge_files<uint64_t>(filenames, call);
             };
@@ -461,16 +524,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                                          row_diff_bits[l_idx][j]);
         }
 
-        auto diff_annotation = std::make_unique<RowDiff<ColumnMajor>>(
-                nullptr, ColumnMajor(std::move(columns)));
-        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(std::move(diff_annotation),
-                                                                   std::move(label_encoders[l_idx]));
-        auto fname = std::filesystem::path(source_files[l_idx])
-                .filename()
-                .replace_extension()
-                .replace_extension(RowDiffColumnAnnotator::kExtension);
-        auto fpath = dest_dir/fname;
+        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
+                std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                std::move(label_encoders[l_idx]));
+
+        auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
+                                .filename()
+                                .replace_extension()
+                                .replace_extension(RowDiffColumnAnnotator::kExtension);
+
         row_diff[l_idx]->serialize(fpath);
+
         logger->trace("Serialized {}", fpath);
     }
     logger->trace("Removing temp directory: {}", tmp_path);

@@ -913,18 +913,20 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated,
-                         const std::filesystem::path &tmp_dir,
+                         const std::filesystem::path &swap_dir,
                          size_t max_disk_space,
                          const BuildCheckpoint &checkpoint)
-        : kmer_collector_(k + 1,
+        : swap_dir_(swap_dir),
+          kmer_collector_(k + 1,
                           both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
-                          tmp_dir,
+                          swap_dir,
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
-          bits_per_count_(bits_per_count), checkpoint_(checkpoint), tmp_dir_(tmp_dir) {
+          bits_per_count_(bits_per_count),
+          checkpoint_(checkpoint) {
         if (filter_suffix.size()
                 && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
             kmer_collector_.add_kmer(std::vector<TAlphabet>(k + 1, BOSS::kSentinelCode));
@@ -959,7 +961,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         return new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
                                kmer_collector_.get_k() - 1,
                                kmer_collector_.is_both_strands_mode(), queue,
-                               bits_per_count_, tmp_dir_);
+                               bits_per_count_, swap_dir_);
     }
 
     BOSS::Chunk* build_chunk() override {
@@ -988,8 +990,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
                                      bits_per_count_,
-                                     kmer_collector_.tmp_dir());
-        } else {  // KmerExtractor2Bit
+                                     swap_dir_);
+        } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
             assert(!kmer_collector_.suffix_length());
@@ -1011,12 +1013,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     uint64_t get_k() const override { return kmer_collector_.get_k() - 1; }
 
   private:
+    std::filesystem::path swap_dir_;
     KmerCollector kmer_collector_;
     uint8_t bits_per_count_;
     /** Async executor for merging chunks, generating reverse complements, etc. */
     ThreadPool async_worker_ = ThreadPool(1, 1);
     BuildCheckpoint checkpoint_;
-    std::filesystem::path tmp_dir_;
 };
 
 template <template <typename, class> class KmerContainer, typename... Args>
@@ -1110,11 +1112,11 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   size_t num_threads,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
-                                  const std::filesystem::path &tmp_dir,
+                                  const std::filesystem::path &swap_dir,
                                   size_t max_disk_space_bytes,
                                   const BuildCheckpoint& checkpoint) {
 #define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
-                   num_threads, memory_preallocated, tmp_dir, max_disk_space_bytes, checkpoint
+                   num_threads, memory_preallocated, swap_dir, max_disk_space_bytes, checkpoint
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

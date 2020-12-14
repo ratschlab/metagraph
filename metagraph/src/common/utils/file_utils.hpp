@@ -98,7 +98,7 @@ class BufferedAsyncWriter {
     std::vector<T> buf_;
     std::vector<T> buf_dump_;
 
-    std::future<void> write_future_;
+    std::shared_future<void> write_future_;
 
     std::string name_;
     std::ofstream *fos_;

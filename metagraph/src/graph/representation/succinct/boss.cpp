@@ -44,9 +44,10 @@ typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 typedef BOSS::TAlphabet TAlphabet;
 
-const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_FAST = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
+const size_t MAX_ITER_WAVELET_TREE_STAT = 20;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 1;
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
@@ -95,6 +96,31 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
 BOSS::~BOSS() {
     delete W_;
     delete last_;
+}
+
+void BOSS::initialize(Chunk *chunk) {
+    delete W_;
+    delete last_;
+
+    // TODO: optimize
+    W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
+
+    {
+        chunk->last_.flush();
+        sdsl::bit_vector last;
+        std::ifstream in(chunk->last_.filename(), std::ios::binary);
+        last.load(in);
+        last_ = new bit_vector_stat(std::move(last));
+    }
+
+    F_ = chunk->F_;
+    recompute_NF();
+
+    k_ = chunk->k_;
+    // TODO:
+    // alph_size = chunk->alph_size_;
+
+    state = State::STAT;
 }
 
 /**
@@ -278,7 +304,7 @@ bool BOSS::load(std::ifstream &instream) {
                 break;
             case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                last_ = new bit_vector_small();
                 break;
         }
         if (!W_->load(instream)) {
@@ -392,7 +418,7 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) con
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -450,7 +476,7 @@ BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -1048,7 +1074,7 @@ void BOSS::switch_state(State new_state) {
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
         case State::FAST: {
@@ -1883,13 +1909,14 @@ class EdgeQueue {
         EdgeQueue split_queue;
 
         // prefer moving edges without k-mers decoded
-        size_t h = std::min(size() / 2, indexes_.size());
+        size_t old_size = size();
+        size_t h = std::min(old_size / 2, indexes_.size());
         split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
         split_queue.indexes_.shrink_to_fit();
         indexes_.resize(indexes_.size() - h);
 
-        // if moved less than size()/2 indexes, move decoded k-mers as well
-        h = size() / 2 - h;
+        // if moved less than old_size/2 indexes, move decoded k-mers as well
+        h = old_size / 2 - h;
         split_queue.decoded_edges_.assign(std::make_move_iterator(decoded_edges_.end() - h),
                                           std::make_move_iterator(decoded_edges_.end()));
         split_queue.decoded_edges_.shrink_to_fit();
@@ -3043,14 +3070,11 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
         for (const auto &[idx, rl, ru] : suffix_ranges) {
             // prepend the suffix with one of the |alph_size - 1| possible characters
             for (TAlphabet c = 1; c < alph_size; ++c) {
-                // tighten the range for nodes ending with |c|
-                uint64_t rk_rl = rank_W(rl - 1, c) + 1;
-                uint64_t rk_ru = rank_W(ru, c);
-                if (rk_rl > rk_ru)
+                edge_index rl_next = rl;
+                edge_index ru_next = ru;
+                if (!tighten_range(&rl_next, &ru_next, c))
                     continue;
 
-                edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
-                edge_index ru_next = select_last(NF_[c] + rk_ru);
                 assert(idx < num_suffixes);
                 narrowed.emplace_back(num_suffixes * (c - 1) + idx,
                                       rl_next, ru_next);
@@ -3068,20 +3092,18 @@ void BOSS::index_suffix_ranges(size_t suffix_length) {
         // prepend the suffix with one of the |alph_size - 1| possible characters
         for (TAlphabet c = 1; c < alph_size; ++c) {
             // tighten the range
-            uint64_t rk_rl = rank_W(rl - 1, c) + 1;
-            uint64_t rk_ru = rank_W(ru, c);
-            if (rk_rl > rk_ru)
+            edge_index rl_next = rl;
+            edge_index ru_next = ru;
+            if (!tighten_range(&rl_next, &ru_next, c))
                 continue;
 
-            edge_index rl_next = select_last(NF_[c] + rk_rl - 1) + 1;
-            edge_index ru_next = select_last(NF_[c] + rk_ru);
             assert(idx < num_suffixes);
             indexed_suffix_ranges_[num_suffixes * (c - 1) + idx]
                 = std::make_pair(rl_next, ru_next);
         }
     }
 
-    // aline the upper bounds to enable the binary search on them
+    // align the upper bounds to enable the binary search on them
     for (size_t i = 1; i < indexed_suffix_ranges_.size(); ++i) {
         if (!indexed_suffix_ranges_[i].second) {
             // shift the upper bounds of the empty ranges but still keep them empty

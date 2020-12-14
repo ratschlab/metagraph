@@ -323,25 +323,25 @@ TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
 }
 
 TYPED_TEST(Kmer, InvertibleEndDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGA"), "");
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATG$"), "");
 }
 
 TYPED_TEST(Kmer, InvertibleStartDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "AATGG"), "");
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATGG"), "");
 }
 
 TYPED_TEST(Kmer, InvertibleBothDol) {
-    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "AATGA"), "");
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATG$"), "");
 }
 
 TYPED_TEST(Kmer, InvalidChars) {
     KMer<typename TypeParam::type, kBitsPerChar> kmer(kmer_extractor.encode("ATGC"));
 
-    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGA"), "");
-    ASSERT_DEATH(test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGAA"), "");
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGH"), "");
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGЯ"), "");
 
-    ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
-    ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
+    ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
+    ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
 }
 
 template <typename IntType>

@@ -71,7 +71,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     // set child nodes
     parent.child_nodes_.resize(submatrices.size());
 
-    std::vector<std::future<void>> results;
+    std::vector<std::shared_future<void>> results;
 
     // compress the parent index vector
     results.push_back(thread_pool.enqueue([&]() {
@@ -138,7 +138,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
     // set child nodes
     parent.child_nodes_.resize(submatrices.size());
 
-    std::vector<std::future<void>> results;
+    std::vector<std::shared_future<void>> results;
 
     for (size_t i = 0; i < submatrices.size(); ++i) {
         // generate an index column for the child node

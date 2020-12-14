@@ -28,18 +28,16 @@ namespace common {
 template <typename T, class Compare = std::greater<T>>
 class MergeHeap {
     /** The heap stores pairs <Element, SourceIndex> */
-    using value_type = std::pair<T, uint32_t>;
+    using value_type = std::pair<T, size_t>;
 
   public:
-    inline void emplace(T el, uint32_t idx) {
+    inline void emplace(T el, size_t idx) {
         els.emplace_back(el, idx);
         std::push_heap(els.begin(), els.end(),
                        [&](const value_type &a, const value_type &b) {
                            return compare_(a.first, b.first);
                        });
     }
-
-    inline const value_type& top() const { return els.front(); }
 
     inline value_type pop() {
         std::pop_heap(els.begin(), els.end(),
@@ -87,14 +85,6 @@ class FileMerger {
     }
 
     inline bool empty() const { return heap_.empty(); }
-
-    inline const T& top() const {
-#ifndef NDEBUG
-        if (heap_.empty())
-            throw std::runtime_error("Popping an empty FileMerger");
-#endif
-        return heap_.top().first;
-    }
 
     inline T pop() {
 #ifndef NDEBUG

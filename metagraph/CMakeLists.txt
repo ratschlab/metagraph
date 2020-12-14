@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.10)
 cmake_policy(SET CMP0015 NEW)
 
 project(MetaGraph)
@@ -497,12 +497,8 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FRO
 target_compile_options(gtest_main PRIVATE -w)
 target_compile_options(gtest PRIVATE -w)
 
-if(NOT DEFINED DEATH_TEST)
-  set(DEATH_TEST TRUE)
-endif()
-if(DEATH_TEST AND ${CMAKE_BUILD_TYPE} MATCHES DEBUG)
-  set(DEATH_TEST_FLAG "")
-else()
+set(DEATH_TEST_FLAG "")
+if(NO_DEATH_TESTS)
   message(STATUS "Disabling death tests in gtest")
   set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
 endif()
