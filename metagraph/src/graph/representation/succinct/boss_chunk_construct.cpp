@@ -689,17 +689,20 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $ (on 3 bits)
     using KMER_INT = typename KMER::WordType; // the 64/128/256-bit integer in KMER
 
-    uint32_t last_checkpoint = checkpoint->checkpoint();
+    // if we reached this code, we are obviously at checkpoint 1, but we delay setting the
+    // checkpoint until here, so that we can differentiate between re-starting a build
+    // at checkpoint 1, and the continuation of a build from checkpoint 0 to 1
+    bool stopped_at_phase_one = checkpoint->checkpoint() == 1;
     if (checkpoint->checkpoint() == 0) {
         checkpoint->set_kmer_dir(kmer_collector.tmp_dir());
-        checkpoint->set_checkpoint(kmer_collector.is_both_strands_mode() ? 1 : 2);
+        checkpoint->set_checkpoint(1);
     }
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = checkpoint->kmer_dir();
     size_t num_threads = kmer_collector.num_threads();
 
-    if (last_checkpoint == 1) {
+    if (stopped_at_phase_one) {
         logger->info(
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
@@ -752,7 +755,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         // compute the reverse complements of #kmers, then merge back into #kmers
         add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
                                 async_worker, &kmers, checkpoint);
-    } else {
+    } else if (checkpoint->checkpoint() < 2) {
         checkpoint->set_checkpoint(2);
     }
 
