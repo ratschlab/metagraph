@@ -285,7 +285,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < source_files.size(); ++i) {
-        sources[i].load(source_files[i]);
+        if (!sources[i].load(source_files[i])) {
+            logger->error("Can't load source annotations from {}", source_files[i]);
+            std::exit(1);
+        }
 
         if (sources[i].num_labels() && sources[i].num_objects() != anchor.size()) {
             logger->error("Anchor vector {} and annotation {} are incompatible."
