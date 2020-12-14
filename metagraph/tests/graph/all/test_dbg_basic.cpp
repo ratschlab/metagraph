@@ -20,6 +20,12 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 const size_t kBitsPerCount = 8;
 
+#if _PROTEIN_GRAPH
+const size_t maxK = 12;
+#else
+const size_t maxK = 20;
+#endif
+
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
@@ -45,7 +51,7 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
 
 TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     {
-        auto graph = build_graph<TypeParam>(20);
+        auto graph = build_graph<TypeParam>(maxK);
         ASSERT_EQ(0u, graph->num_nodes());
         graph->serialize(test_dump_basename);
         EXPECT_TRUE(check_graph_nodes(*graph));
@@ -56,7 +62,7 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     ASSERT_TRUE(graph.load(test_dump_basename));
 
     EXPECT_EQ(0u, graph.num_nodes());
-    EXPECT_EQ(20u, graph.get_k());
+    EXPECT_EQ(maxK, graph.get_k());
 
     EXPECT_FALSE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -67,7 +73,7 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
 
 TYPED_TEST(DeBruijnGraphTest, Serialize) {
     {
-        auto graph = build_graph<TypeParam>(20, {
+        auto graph = build_graph<TypeParam>(maxK, {
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "CATGTACTAGCTGATCGTAGCTAGCTAGC"
         });
@@ -87,7 +93,7 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
 
     ASSERT_TRUE(graph.load(test_dump_basename));
 
-    EXPECT_EQ(20u, graph.get_k());
+    EXPECT_EQ(maxK, graph.get_k());
 
     EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -128,9 +134,15 @@ void test_graph_serialization(size_t k_max) {
     }
 }
 
+#if _PROTEIN_GRAPH
+TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
+    test_graph_serialization<TypeParam>(maxK);
+}
+#else
 TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
     test_graph_serialization<TypeParam>(31);
 }
+#endif
 
 TEST(DBGHashString, SerializeAnyK) {
     test_graph_serialization<DBGHashString>(200);
@@ -149,7 +161,7 @@ TEST(DBGSuccinct, SerializeAnyK) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
-    auto graph = build_graph<TypeParam>(20, {
+    auto graph = build_graph<TypeParam>(maxK, {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "CATGTACTAGCTGATCGTAGCTAGCTAGC"
     });
@@ -194,15 +206,15 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {
-    auto graph1 = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
-    auto graph2 = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                                               "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
+    auto graph1 = build_graph<TypeParam>(maxK, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+    auto graph2 = build_graph<TypeParam>(maxK, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                                                 "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT" });
 
     EXPECT_EQ(graph1->num_nodes() * 2, graph2->num_nodes());
 
-    auto graph = build_graph<TypeParam>(20, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                                              "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
-                                              "CATGTACTAGCTGATCGTAGCTAGCTAGC" });
+    auto graph = build_graph<TypeParam>(maxK, { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                                                "TTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+                                                "CATGTACTAGCTGATCGTAGCTAGCTAGC" });
     EXPECT_TRUE(check_graph_nodes(*graph));
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -294,7 +306,11 @@ TYPED_TEST(DeBruijnGraphTest, AddSequences) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
+#if _PROTEIN_GRAPH
+    for (size_t k = 2; k <= maxK; ++k) {
+#else
     for (size_t k = 2; k <= 30; ++k) {
+#endif
         auto empty = build_graph<TypeParam>(k);
 
         EXPECT_TRUE(check_graph_nodes(*empty));
@@ -310,7 +326,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') });
 
         ASSERT_EQ(1u, graph->num_nodes());
@@ -326,7 +342,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') });
@@ -345,7 +361,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoopsDynamic) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph_batch<TypeParam>(k, { std::string(100, 'A'),
                                                        std::string(100, 'G'),
                                                        std::string(100, 'C') });
@@ -363,7 +379,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoopsDynamic) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPath) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(k - 1, 'C')
         });
@@ -376,7 +392,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPath) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathACA) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(k - 1, 'C') + std::string(100, 'A')
         });
@@ -389,7 +405,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathACA) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A'),
                                                  std::string(100, 'T') });
         EXPECT_TRUE(check_graph_nodes(*graph));
@@ -401,7 +417,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected2) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= maxK; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'G'),
                                                  std::string(k - 1, 'A') + "T" });
         EXPECT_TRUE(check_graph_nodes(*graph));

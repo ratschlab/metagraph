@@ -471,7 +471,11 @@ bool check_graph(const std::string &alphabet, DBGMode mode, bool check_sequence)
         sequences.push_back(seq);
     }
 
+#if _PROTEIN_GRAPH
+    auto graph = build_graph<Graph>(12, sequences, mode);
+#else
     auto graph = build_graph<Graph>(20, sequences, mode);
+#endif
 
     bool node_remap_failed = false;
     graph->call_nodes(
