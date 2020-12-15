@@ -942,6 +942,12 @@ class DPTable {
     typedef typename Storage::iterator iterator;
     typedef typename Storage::const_iterator const_iterator;
 
+    void expand_to_cover(iterator it, size_t begin, size_t end) {
+        size_t old_size = it->second.bytes_taken();
+        it.value().expand_to_cover(begin, end);
+        num_bytes_ += old_size - it->second.bytes_taken();
+    }
+
     iterator begin() { return dp_table_.begin(); }
     iterator end() { return dp_table_.end(); }
     const_iterator begin() const { return dp_table_.begin(); }
@@ -952,11 +958,21 @@ class DPTable {
 
     size_t size() const { return dp_table_.size(); }
 
-    void clear() { dp_table_.clear(); }
+    size_t num_bytes() const { return num_bytes_; }
+
+    void clear() {
+        dp_table_.clear();
+        num_bytes_ = 0;
+    }
 
     template <typename... Args>
     std::pair<iterator, bool> emplace(Args&&... args) {
-        return dp_table_.emplace(std::forward<Args>(args)...);
+        auto pair = dp_table_.emplace(std::forward<Args>(args)...);
+
+        if (pair.second)
+            num_bytes_ += pair.first.value().bytes_taken();
+
+        return pair;
     }
 
     void erase(NodeType key) { dp_table_.erase(key); }
@@ -983,6 +999,7 @@ class DPTable {
     Storage dp_table_;
     NodeType start_node_;
     size_t query_offset_ = 0;
+    size_t num_bytes_ = 0;
 };
 
 } // namespace align

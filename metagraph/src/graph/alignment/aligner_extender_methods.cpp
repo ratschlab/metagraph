@@ -48,10 +48,12 @@ void DefaultColumnExtender<NodeType>
     }
 }
 
-template <class Column>
-std::pair<size_t, size_t> get_column_boundaries(Column &column,
+template <class DPTable, class ColumnIt>
+std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
+                                                ColumnIt column_it,
                                                 DBGAlignerConfig::score_t xdrop_cutoff,
                                                 size_t bandwidth) {
+    auto &column = column_it.value();
     auto &scores = column.scores;
     size_t size = column.size();
     size_t best_pos = column.best_pos;
@@ -71,7 +73,7 @@ std::pair<size_t, size_t> get_column_boundaries(Column &column,
         end = std::min(end, column.start_index + scores.size() - 8);
         assert(begin < end);
     } else {
-        column.expand_to_cover(begin, end);
+        dp_table.expand_to_cover(column_it, begin, end);
         shift = column.start_index;
     }
 
@@ -100,7 +102,7 @@ std::pair<size_t, size_t> get_column_boundaries(Column &column,
 
     // round up to nearest multiple of 8
     end = std::min(begin + ((end - begin + 7) / 8) * 8, size);
-    column.expand_to_cover(begin, end);
+    dp_table.expand_to_cover(column_it, begin, end);
 
     assert(begin < end);
     assert(begin <= best_pos);
@@ -125,9 +127,9 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
                                     last_priority_pos, begin, end
                                 ));
     } else {
-        find.value().expand_to_cover(begin, end);
+        dp_table.expand_to_cover(find, begin, end);
         auto [node_begin, node_end] = get_column_boundaries(
-            find.value(), xdrop_cutoff, config_.bandwidth
+            dp_table, find, xdrop_cutoff, config_.bandwidth
         );
 
         if (node_begin != node_end)
@@ -589,15 +591,7 @@ void DefaultColumnExtender<NodeType>
     if (columns_to_update.empty())
         return;
 
-    const auto &first_column = dp_table.begin()->second;
-
     max_num_nodes = std::numeric_limits<size_t>::max();
-    if (config_.max_ram_per_alignment < std::numeric_limits<double>::max()) {
-        // ram_per_alignment = mb_per_column * max_num_nodes
-        double mb_per_column = static_cast<double>(first_column.bytes_taken()) / 1024 / 1024;
-        max_num_nodes = std::ceil(config_.max_ram_per_alignment / mb_per_column);
-    }
-
     if (config_.max_nodes_per_seq_char < std::numeric_limits<double>::max()) {
         max_num_nodes = std::min(max_num_nodes,
             static_cast<size_t>(std::ceil(config_.max_nodes_per_seq_char
@@ -605,7 +599,8 @@ void DefaultColumnExtender<NodeType>
         );
     }
 
-    if (max_num_nodes < first_column.size())
+    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
+    if (num_bytes > config_.max_ram_per_alignment)
         logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
 
     extend_main(callback, min_path_score);
@@ -619,6 +614,9 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
     overlapping_range_ = false;
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
 
+    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
+    bool added = false;
+
     if (dynamic_cast<const DBGSuccinct*>(graph_)) {
         const auto &dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_);
         const auto &boss = dbg_succ.get_boss();
@@ -629,25 +627,36 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
                       boss.get_W(dbg_succ.kmer_to_boss_index(next_node)) % boss.alph_size
                   )
                 : find->second.last_char;
-            if (c != '$' && (dp_table.size() < max_num_nodes || find != dp_table.end())) {
+            if (c != '$' && ((dp_table.size() < max_num_nodes
+                                && num_bytes <= config_.max_ram_per_alignment)
+                    || find != dp_table.end())) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
+                added = true;
+                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     } else {
         graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
-            if (c != '$' && (dp_table.size() < max_num_nodes || dp_table.count(next_node))) {
+            if (c != '$' && ((dp_table.size() < max_num_nodes
+                                && num_bytes <= config_.max_ram_per_alignment)
+                    || dp_table.count(next_node))) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
+                added = true;
+                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     }
+
+    if (added && num_bytes > config_.max_ram_per_alignment)
+        logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
 
     return out_columns;
 }
@@ -719,10 +728,11 @@ void DefaultColumnExtender<NodeType>
         return;
 
     // set boundaries for vertical band
-    auto *incoming = &dp_table.find(incoming_node).value();
+    auto incoming_find = dp_table.find(incoming_node);
+    auto *incoming = &incoming_find.value();
 
     if (dp_table.size() == 1 && out_columns.size() && out_columns.front().first != incoming_node) {
-        incoming->expand_to_cover(0, size);
+        dp_table.expand_to_cover(incoming_find, 0, size);
         update_del_scores(config_,
                           incoming->scores.data(),
                           incoming->prev_nodes.data(),
@@ -732,7 +742,7 @@ void DefaultColumnExtender<NodeType>
                           xdrop_cutoff);
     }
 
-    std::tie(begin, end) = get_column_boundaries(*incoming, xdrop_cutoff,
+    std::tie(begin, end) = get_column_boundaries(dp_table, incoming_find, xdrop_cutoff,
                                                  config_.bandwidth);
 
     if (begin >= end)
