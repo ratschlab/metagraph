@@ -645,7 +645,7 @@ class DPTable {
     void expand_to_cover(iterator it, size_t begin, size_t end) {
         size_t old_size = it->second.bytes_taken();
         it.value().expand_to_cover(begin, end);
-        num_bytes_ += old_size - it->second.bytes_taken();
+        num_bytes_ += it->second.bytes_taken() - old_size;
     }
 
     iterator begin() { return dp_table_.begin(); }
