@@ -656,7 +656,8 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
     }
 
     if (added && num_bytes > config_.max_ram_per_alignment)
-        logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
+        logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
+                     num_bytes, config_.max_ram_per_alignment);
 
     return out_columns;
 }
