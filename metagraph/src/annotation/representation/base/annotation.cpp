@@ -1,7 +1,5 @@
 #include "annotation.hpp"
 
-#include <libmaus2/util/StringSerialisation.hpp>
-
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
 
@@ -9,7 +7,6 @@
 namespace mtg {
 namespace annot {
 
-using libmaus2::util::StringSerialisation;
 using mtg::common::logger;
 
 
@@ -25,7 +22,7 @@ size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
 template<>
 void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
     serialize_string_number_map(outstream, encode_label_);
-    StringSerialisation::serialiseStringVector(outstream, decode_label_);
+    serialize_string_vector(outstream, decode_label_);
 }
 
 template<typename Label>
@@ -42,7 +39,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 
     try {
         load_string_number_map(instream, &encode_label_);
-        decode_label_ = StringSerialisation::deserialiseStringVector(instream);
+        load_string_vector(instream, &decode_label_);
 
         return instream.good();
     } catch (...) {
