@@ -48,11 +48,12 @@ void DefaultColumnExtender<NodeType>
     }
 }
 
-template <class DPTable, class ColumnIt>
+template <class DPTable, class ColumnIt, class Config>
 std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
                                                 ColumnIt column_it,
                                                 DBGAlignerConfig::score_t xdrop_cutoff,
-                                                size_t bandwidth) {
+                                                const Config &config) {
+    size_t bandwidth = config.bandwidth;
     auto &column = column_it.value();
     auto &scores = column.scores;
     size_t size = column.size();
@@ -70,11 +71,37 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
     if (column.min_score_ < xdrop_cutoff) {
         begin = std::max(begin, column.start_index);
         assert(column.start_index + scores.size() >= 8);
-        end = std::min(end, column.start_index + scores.size() - 8);
-        assert(begin < end);
+        size_t cur_end = std::min(end, column.start_index + scores.size() - 8);
+        assert(begin < cur_end);
+        if (scores.at(cur_end - 1 - shift) >= xdrop_cutoff) {
+            size_t old_size = scores.size();
+            dp_table.expand_to_cover(column_it, begin, end);
+            assert(shift == column.start_index);
+            if (scores.size() > old_size) {
+                update_del_scores(config,
+                                  scores.data() + begin - shift,
+                                  column.prev_nodes.data() + begin - shift,
+                                  column.ops.data() + begin - shift,
+                                  nullptr,
+                                  end - begin,
+                                  xdrop_cutoff);
+            }
+        } else {
+            end = cur_end;
+        }
     } else {
+        size_t old_size = scores.size();
         dp_table.expand_to_cover(column_it, begin, end);
         shift = column.start_index;
+        if (scores.size() > old_size) {
+            update_del_scores(config,
+                              scores.data() + begin - shift,
+                              column.prev_nodes.data() + begin - shift,
+                              column.ops.data() + begin - shift,
+                              nullptr,
+                              end - begin,
+                              xdrop_cutoff);
+        }
     }
 
     while (begin < end && scores[begin - shift] < xdrop_cutoff) {
@@ -129,7 +156,7 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
     } else {
         dp_table.expand_to_cover(find, begin, end);
         auto [node_begin, node_end] = get_column_boundaries(
-            dp_table, find, xdrop_cutoff, config_.bandwidth
+            dp_table, find, xdrop_cutoff, config_
         );
 
         if (node_begin != node_end)
@@ -743,8 +770,8 @@ void DefaultColumnExtender<NodeType>
                           xdrop_cutoff);
     }
 
-    std::tie(begin, end) = get_column_boundaries(dp_table, incoming_find, xdrop_cutoff,
-                                                 config_.bandwidth);
+    std::tie(begin, end) = get_column_boundaries(dp_table, incoming_find,
+                                                 xdrop_cutoff, config_);
 
     if (begin >= end)
         return;
