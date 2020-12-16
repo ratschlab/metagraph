@@ -768,14 +768,15 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated,
-                         const std::filesystem::path &tmp_dir,
+                         const std::filesystem::path &swap_dir,
                          size_t max_disk_space)
-        : kmer_collector_(k + 1,
+        : swap_dir_(swap_dir),
+          kmer_collector_(k + 1,
                           both_strands_mode,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
-                          tmp_dir,
+                          swap_dir,
                           max_disk_space,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
@@ -814,7 +815,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                                      kmer_collector_.is_both_strands_mode(),
                                      kmers,
                                      bits_per_count_,
-                                     kmer_collector_.tmp_dir());
+                                     swap_dir_);
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
@@ -832,7 +833,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                              kmer_collector_.is_both_strands_mode(), \
                              queue, \
                              bits_per_count_,                                     \
-                             kmer_collector_.tmp_dir())
+                             swap_dir_)
 
             if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
                 INIT_CHUNK(KmerExtractorBOSS::Kmer64);
@@ -851,6 +852,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     uint64_t get_k() const { return kmer_collector_.get_k() - 1; }
 
   private:
+    std::filesystem::path swap_dir_;
     KmerCollector kmer_collector_;
     uint8_t bits_per_count_;
     /** Used as an async executor for merging chunks from disk */
@@ -948,10 +950,10 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   size_t num_threads,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
-                                  const std::filesystem::path &tmp_dir,
+                                  const std::filesystem::path &swap_dir,
                                   size_t max_disk_space_bytes) {
 #define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
-                   num_threads, memory_preallocated, tmp_dir, max_disk_space_bytes
+                   num_threads, memory_preallocated, swap_dir, max_disk_space_bytes
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

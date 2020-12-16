@@ -260,8 +260,8 @@ TYPED_TEST(KmerBOSS, InvalidChars) {
     test_kmer_codec<typename TypeParam::type>("ATGH", "ATGH");
     test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGXX");
 #elif _DNA_GRAPH
-    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGH", "ATGN"), "");
-    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGNN"), "");
+    ASSERT_DEBUG_DEATH(kmer_codec<KMER<typename TypeParam::type>>("ATGH"), "");
+    ASSERT_DEBUG_DEATH(kmer_codec<KMER<typename TypeParam::type>>("ATGЯ"), "");
 #else
     static_assert(false,
         "Add a unit test for checking behavior with invalid characters"

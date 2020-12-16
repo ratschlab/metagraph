@@ -17,6 +17,8 @@ namespace boss {
  * 'rank' and 'select' operations.
  */
 class BOSS::Chunk {
+    friend BOSS;
+
   public:
     typedef uint8_t TAlphabet;
 

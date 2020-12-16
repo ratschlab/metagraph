@@ -11,7 +11,7 @@ testrun*
 *.dbg
 *.annodbg
 *.edgemask
-*.dbg.chunk
+*.dbg.chunk*
 *.dbgsdchunk
 *.fna
 *.gch

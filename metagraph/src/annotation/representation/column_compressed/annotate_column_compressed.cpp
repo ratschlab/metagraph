@@ -248,9 +248,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
         std::ifstream instream(filename, std::ios::binary);
@@ -269,15 +266,15 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         offsets[i] = label_encoder.size();
     }
 
+    if (error_occurred)
+        return false;
+
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         try {
             auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
 
@@ -310,7 +307,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                          label_encoder_load.decode(c),
                          std::move(new_column));
             }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading columns: {}", e.what());
+            error_occurred = true;
         } catch (...) {
+            logger->error("Unknown exception when loading columns");
             error_occurred = true;
         }
     }
