@@ -133,8 +133,6 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
 
     assert(begin < end);
     assert(begin <= best_pos);
-    if (end <= best_pos)
-        std::cerr << begin << " " << best_pos << " " << end << std::endl;
     assert(end > best_pos);
 
     return std::make_pair(begin, end);
@@ -283,10 +281,20 @@ inline void update_del_scores(const DBGAlignerConfig &config,
 
 #ifdef __AVX2__
 
+// Drop-in replacement for _mm_loadu_si64
+inline __m128i mm_loadu_si64(const void *mem_addr) {
+    return _mm_loadl_epi64((const __m128i*)mem_addr);
+}
+
+// Drop-in replacement for _mm_storeu_si64
+inline void mm_storeu_si64(void *mem_addr, __m128i a) {
+    _mm_storel_epi64((__m128i*)mem_addr, a);
+}
+
 inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
-    __m128i orig = _mm_loadu_si64(mem_addr);
+    __m128i orig = mm_loadu_si64((__m128i*)mem_addr);
     a = _mm_blendv_epi8(orig, a, mask);
-    _mm_storeu_si64(mem_addr, a);
+    mm_storeu_si64(mem_addr, a);
 }
 
 inline void compute_HE_avx2(size_t length,
@@ -318,7 +326,7 @@ inline void compute_HE_avx2(size_t length,
         // compute match score
         __m256i incoming_p = _mm256_loadu_si256((__m256i*)&incoming_scores[i - 1]);
         __m256i match_score = _mm256_add_epi32(
-            incoming_p, _mm256_cvtepi8_epi32(_mm_loadu_si64(&profile_scores[i]))
+            incoming_p, _mm256_cvtepi8_epi32(mm_loadu_si64(&profile_scores[i]))
         );
 
         // compute score for cell update
@@ -345,7 +353,7 @@ inline void compute_HE_avx2(size_t length,
 
         __m256i update_gap_scores_orig = _mm256_loadu_si256((__m256i*)&update_gap_scores[i]);
         __m256i update_gap_count_orig = _mm256_loadu_si256((__m256i*)&update_gap_count[i]);
-        __m128i update_gap_prevs_orig = _mm_loadu_si64(&update_gap_prevs[i]);
+        __m128i update_gap_prevs_orig = mm_loadu_si64(&update_gap_prevs[i]);
         __m256i gap_updated = _mm256_cmpgt_epi32(update_score, update_gap_scores_orig);
         __m128i gap_updated_small = mm256_cvtepi32_epi8(gap_updated);
 
@@ -379,13 +387,13 @@ inline void compute_HE_avx2(size_t length,
                             _mm256_blendv_epi8(update_gap_count_orig, incoming_count, both_cmp));
 
         update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, both_cmp_small);
-        _mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
+        mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
 
-        __m128i update_op = _mm_blendv_epi8(_mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
+        __m128i update_op = _mm_blendv_epi8(mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
         mm_maskstorel_epi8(&update_ops[i], both_cmp_small, update_op);
 
-        __m128i updated_mask_orig = _mm_loadu_si64(&updated_mask[i]);
-        _mm_storeu_si64(&updated_mask[i], _mm_or_si128(updated_mask_orig, both_cmp_small));
+        __m128i updated_mask_orig = mm_loadu_si64(&updated_mask[i]);
+        mm_storeu_si64(&updated_mask[i], _mm_or_si128(updated_mask_orig, both_cmp_small));
 
         __m128i update_prev = _mm_blendv_epi8(prev_node, update_gap_prev, update_cmp_small);
         mm_maskstorel_epi8((int8_t*)&update_prevs[i], both_cmp_small, update_prev);
@@ -757,14 +765,13 @@ void DefaultColumnExtender<NodeType>
 
     // set boundaries for vertical band
     auto incoming_find = dp_table.find(incoming_node);
-    auto *incoming = &incoming_find.value();
 
     if (dp_table.size() == 1 && out_columns.size() && out_columns.front().first != incoming_node) {
         dp_table.expand_to_cover(incoming_find, 0, size);
         update_del_scores(config_,
-                          incoming->scores.data(),
-                          incoming->prev_nodes.data(),
-                          incoming->ops.data(),
+                          incoming_find.value().scores.data(),
+                          incoming_find.value().prev_nodes.data(),
+                          incoming_find.value().ops.data(),
                           nullptr,
                           size,
                           xdrop_cutoff);
@@ -779,16 +786,17 @@ void DefaultColumnExtender<NodeType>
     for (const auto &[next_node, c] : out_columns) {
         auto emplace = emplace_node(next_node, incoming_node, c, size, begin, begin, begin, end);
 
-        // emplace_node may have invalidated incoming, so update the pointer
+        // emplace_node may have invalidated incoming, so update the iterator
         if (emplace.second)
-            incoming = &dp_table.find(incoming_node).value();
+            incoming_find = dp_table.find(incoming_node);
 
+        auto &incoming = incoming_find.value();
         auto &next_column = emplace.first.value();
 
         assert(begin >= next_column.start_index);
-        assert(begin >= incoming->start_index);
+        assert(begin >= incoming.start_index);
         assert(next_column.start_index + next_column.scores.size() >= end);
-        assert(incoming->start_index + incoming->scores.size() >= end);
+        assert(incoming.start_index + incoming.scores.size() >= end);
 
         // store the mask indicating which cells were updated
         // this is padded to ensure that the vectorized code doesn't access
@@ -796,18 +804,18 @@ void DefaultColumnExtender<NodeType>
         AlignedVector<int8_t> updated_mask(end - begin + 9, 0x0);
 
         assert(next_column.scores.size() == next_column.gap_scores.size());
-        assert(incoming->scores.size() == incoming->gap_scores.size());
+        assert(incoming.scores.size() == incoming.gap_scores.size());
 
-        size_t shift = incoming->start_index;
+        size_t shift = incoming.start_index;
         compute_updates(
             next_column,
             begin,
             config_,
             incoming_node,
             next_node,
-            incoming->scores.data() + begin - shift,
-            incoming->gap_scores.data() + begin - shift,
-            incoming->gap_count.data() + begin - shift,
+            incoming.scores.data() + begin - shift,
+            incoming.gap_scores.data() + begin - shift,
+            incoming.gap_count.data() + begin - shift,
             profile_score[next_column.last_char].data() + query.size() - size + begin,
             profile_op[next_column.last_char].data() + query.size() - size + begin,
             updated_mask,

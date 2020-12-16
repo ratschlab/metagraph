@@ -171,7 +171,7 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    graph::boss::BOSS::State state = graph::boss::BOSS::State::SMALL;
+    graph::boss::BOSS::State state = graph::boss::BOSS::State::STAT;
 
     static std::string state_to_string(graph::boss::BOSS::State state);
     static graph::boss::BOSS::State string_to_state(const std::string &string);
