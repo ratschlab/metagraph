@@ -29,7 +29,7 @@ using OrderedSet = tsl::ordered_set<Key,
 // https://gitlab.com/german.tischler/libmaus2
 
 void serialize_number(std::ostream &out, uint64_t number) {
-    if (!out)
+    if (!out.good())
         throw std::ostream::failure("Bad stream");
 
     // store as big endian regardless of system endianness
@@ -37,7 +37,7 @@ void serialize_number(std::ostream &out, uint64_t number) {
 
     out.write((const char*)&number, 8);
 
-    if (!out)
+    if (!out.good())
         throw std::ostream::failure("Bad stream");
 }
 
@@ -253,7 +253,7 @@ void serialize_string(std::ostream &out, const std::string_view str) {
     encode_utf8(str.size(), out);
     out.write(str.data(), str.size());
 
-    if (!out)
+    if (!out.good())
         throw std::ostream::failure("Bad stream");
 }
 
@@ -270,7 +270,7 @@ bool load_string(std::istream &in, std::string *str) {
         str->resize(u);
         in.read(str->data(), u);
 
-        if (!in)
+        if (!in.good())
             throw std::istream::failure("Bad stream");
 
         return true;
