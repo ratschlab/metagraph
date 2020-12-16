@@ -61,8 +61,8 @@ uint32_t load_number32(std::istream &in) {
     if (!in.good())
         throw std::istream::failure("Bad stream");
 
-    uint64_t u;
-    in.read((char*)&u, 8);
+    uint32_t u;
+    in.read((char*)&u, 4);
 
     // read as big endian regardless of system endianness
     u = be32toh(u);
