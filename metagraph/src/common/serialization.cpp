@@ -49,7 +49,7 @@ uint64_t load_number(std::istream &in) {
     int const c6 = in.get();
     int const c7 = in.get();
 
-    if (  c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0 || c5 < 0 || c6 < 0 || c7 < 0 )
+    if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0 || c5 < 0 || c6 < 0 || c7 < 0)
         throw std::istream::failure("Bad stream");
 
     uint64_t const u0 = c0;
@@ -61,16 +61,14 @@ uint64_t load_number(std::istream &in) {
     uint64_t const u6 = c6;
     uint64_t const u7 = c7;
 
-    uint64_t const u =
-          (u0 << (7*8))
-        | (u1 << (6*8))
-        | (u2 << (5*8))
-        | (u3 << (4*8))
-        | (u4 << (3*8))
-        | (u5 << (2*8))
-        | (u6 << (1*8))
-        | (u7 << (0*8))
-        ;
+    uint64_t const u = (u0 << (7 * 8))
+                     | (u1 << (6 * 8))
+                     | (u2 << (5 * 8))
+                     | (u3 << (4 * 8))
+                     | (u4 << (3 * 8))
+                     | (u5 << (2 * 8))
+                     | (u6 << (1 * 8))
+                     | (u7 << (0 * 8));
 
     return u;
 }
@@ -84,7 +82,7 @@ uint32_t load_number32(std::istream &in) {
     int const c2 = in.get();
     int const c3 = in.get();
 
-    if (  c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0 )
+    if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0)
         throw std::istream::failure("Bad stream");
 
     uint32_t const u0 = c0;
@@ -92,12 +90,10 @@ uint32_t load_number32(std::istream &in) {
     uint32_t const u2 = c2;
     uint32_t const u3 = c3;
 
-    uint32_t const u =
-          (u0 << (3*8))
-        | (u1 << (2*8))
-        | (u2 << (1*8))
-        | (u3 << (0*8))
-        ;
+    uint32_t const u = (u0 << (3 * 8))
+                     | (u1 << (2 * 8))
+                     | (u2 << (1 * 8))
+                     | (u3 << (0 * 8));
 
     return u;
 }
@@ -205,30 +201,30 @@ void encode_utf8(uint32_t num, std::ostream &out) {
     if (num <= 0x7F) {
         out.put(static_cast<uint8_t>(num));
     } else if (num <= 0x7FF) {
-        out.put(static_cast<uint8_t>(128 | 64 | (((1<<5)-1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num))));
+        out.put(static_cast<uint8_t>(128 | 64 | (((1 << 5) - 1) & (num >> 6))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
     } else if (num <= 0x0000FFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | (((1<<4)-1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num))));
+        out.put(static_cast<uint8_t>(128 | 64 | 32 | (((1 << 4) - 1) & (num >> 12))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
     } else if (num <= 0x001FFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | (((1<<3)-1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num))));
+        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | (((1 << 3) - 1) & (num >> 18))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
     } else if (num <= 0x03FFFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | (((1<<2)-1) & (num >> 24))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num))));
+        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | (((1 << 2) - 1) & (num >> 24))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 18))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
     } else if (num <= 0x7FFFFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | 4 | (((1<<1)-1) & (num >> 30))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 24))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1<<6)-1) & (num))));
+        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | 4 | (((1 << 1) - 1) & (num >> 30))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 24))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 18))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
+        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
     } else {
         throw std::runtime_error("Encoding value out of range for code.");
     }
@@ -254,7 +250,9 @@ uint32_t decode_utf8(std::istream &istr) {
 
     // get useable bits from first byte
     unsigned int bitsinfirstbyte = 8 - len - 1;
-    uint32_t number = str0 & (bitsinfirstbyte < 64 ? (static_cast<uint64_t>(1ULL)<<bitsinfirstbyte)-1 : 0xFFFFFFFFFFFFFFFFULL);
+    uint32_t number = str0 & (bitsinfirstbyte < 64
+        ? (static_cast<uint64_t>(1ULL) << bitsinfirstbyte) - 1
+        : 0xFFFFFFFFFFFFFFFFULL);
 
     // every additional byte provides 6 bits
     // of information
