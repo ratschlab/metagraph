@@ -112,8 +112,6 @@ template void serialize_number_vector_raw<uint64_t>(std::ostream &out,
 
 template <typename T>
 std::vector<T> load_number_vector_raw(std::istream &in) {
-    assert(vector);
-
     const uint64_t n = load_number(in);
     std::vector<T> vector;
 
