@@ -492,19 +492,24 @@ class DPTable {
                score_t min_score,
                char start_char,
                size_t pos = 0,
-               size_t priority_pos = 0)
+               size_t priority_pos = 0,
+               size_t start = 0,
+               size_t end = std::numeric_limits<size_t>::max())
               : size_(size),
-                scores(size + 8, min_score),
-                gap_scores(size + 8, min_score),
+                min_score_(min_score),
+                scores(std::min(end, size) - start + 8, min_score),
+                gap_scores(scores.size(), min_score),
                 ops(scores.size()),
                 prev_nodes(scores.size()),
                 gap_prev_nodes(scores.size()),
                 gap_count(scores.size()),
                 last_char(start_char),
-                best_pos(pos),
-                last_priority_pos(priority_pos) {}
+                best_pos(std::min(std::max(pos, start), start + scores.size() - (size_t)9)),
+                last_priority_pos(std::min(std::max(priority_pos, start), start + scores.size() - (size_t)9)),
+                start_index(start) {}
 
         size_t size_;
+        score_t min_score_;
         AlignedVector<score_t> scores;
         AlignedVector<score_t> gap_scores;
         AlignedVector<Cigar::Operator> ops;
@@ -515,10 +520,75 @@ class DPTable {
         char last_char;
         size_t best_pos;
         size_t last_priority_pos;
+        size_t start_index;
 
-        const score_t& best_score() const { return scores.at(best_pos); }
-        const score_t& last_priority_value() const { return scores.at(last_priority_pos); }
-        const Cigar::Operator& best_op() const { return ops.at(best_pos); }
+        void expand_to_cover(size_t begin, size_t end) {
+            assert(best_pos >= start_index);
+            assert(best_pos - start_index < scores.size());
+            assert(last_priority_pos >= start_index);
+            assert(last_priority_pos - start_index < scores.size());
+
+            if (begin >= start_index) {
+                // the current range already covers [begin, end)
+                if (end <= start_index + scores.size() - 8)
+                    return;
+
+                // extend the range to the right to reach end
+                scores.resize(end + 8 - start_index);
+                gap_scores.resize(end + 8 - start_index);
+                ops.resize(end + 8 - start_index);
+                prev_nodes.resize(end + 8 - start_index);
+                gap_prev_nodes.resize(end + 8 - start_index);
+                gap_count.resize(end + 8 - start_index);
+            } else if (end <= start_index + scores.size() - 8) {
+                // extend the range to the left to reach begin
+                size_t shift = start_index - begin;
+                start_index = begin;
+                scores.insert(scores.begin(), shift, min_score_);
+                gap_scores.insert(gap_scores.begin(), shift, min_score_);
+                ops.insert(ops.begin(), shift, Cigar::CLIPPED);
+                prev_nodes.insert(prev_nodes.begin(), shift, 0);
+                gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
+                gap_count.insert(gap_count.begin(), shift, 0);
+            } else {
+                // extend the range in both directions
+                size_t shift = start_index - begin;
+                start_index = begin;
+                end += 8;
+
+                size_t new_size = end - begin;
+
+                scores.reserve(new_size);
+                gap_scores.reserve(new_size);
+                ops.reserve(new_size);
+                prev_nodes.reserve(new_size);
+                gap_prev_nodes.reserve(new_size);
+                gap_count.reserve(new_size);
+
+                scores.insert(scores.begin(), shift, min_score_);
+                gap_scores.insert(gap_scores.begin(), shift, min_score_);
+                ops.insert(ops.begin(), shift, Cigar::CLIPPED);
+                prev_nodes.insert(prev_nodes.begin(), shift, 0);
+                gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
+                gap_count.insert(gap_count.begin(), shift, 0);
+
+                scores.resize(new_size);
+                gap_scores.resize(new_size);
+                ops.resize(new_size);
+                prev_nodes.resize(new_size);
+                gap_prev_nodes.resize(new_size);
+                gap_count.resize(new_size);
+            }
+
+            assert(best_pos >= start_index);
+            assert(best_pos - start_index < scores.size());
+            assert(last_priority_pos >= start_index);
+            assert(last_priority_pos - start_index < scores.size());
+        }
+
+        const score_t& best_score() const { return scores.at(best_pos - start_index); }
+        const score_t& last_priority_value() const { return scores.at(last_priority_pos - start_index); }
+        const Cigar::Operator& best_op() const { return ops.at(best_pos - start_index); }
 
         bool operator<(const Column &other) const {
             return best_score() < other.best_score();
@@ -576,6 +646,12 @@ class DPTable {
     typedef typename Storage::iterator iterator;
     typedef typename Storage::const_iterator const_iterator;
 
+    void expand_to_cover(iterator it, size_t begin, size_t end) {
+        size_t old_size = it->second.bytes_taken();
+        it.value().expand_to_cover(begin, end);
+        num_bytes_ += it->second.bytes_taken() - old_size;
+    }
+
     iterator begin() { return dp_table_.begin(); }
     iterator end() { return dp_table_.end(); }
     const_iterator begin() const { return dp_table_.begin(); }
@@ -586,11 +662,21 @@ class DPTable {
 
     size_t size() const { return dp_table_.size(); }
 
-    void clear() { dp_table_.clear(); }
+    size_t num_bytes() const { return num_bytes_; }
+
+    void clear() {
+        dp_table_.clear();
+        num_bytes_ = 0;
+    }
 
     template <typename... Args>
     std::pair<iterator, bool> emplace(Args&&... args) {
-        return dp_table_.emplace(std::forward<Args>(args)...);
+        auto pair = dp_table_.emplace(std::forward<Args>(args)...);
+
+        if (pair.second)
+            num_bytes_ += pair.first.value().bytes_taken();
+
+        return pair;
     }
 
     void erase(NodeType key) { dp_table_.erase(key); }
@@ -617,6 +703,7 @@ class DPTable {
     Storage dp_table_;
     NodeType start_node_;
     size_t query_offset_ = 0;
+    size_t num_bytes_ = 0;
 };
 
 } // namespace align
