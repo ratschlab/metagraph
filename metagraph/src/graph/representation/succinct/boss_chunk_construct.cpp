@@ -821,13 +821,13 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         logger->info("Skipping generating dummy-1..{} source k-mers", k);
     }
 
-    if (checkpoint->phase() < 3) {
-        return;
-    }
-
     // at this point, we have the original k-mers in real_split_by_W, the dummy-x k-mers
     // in dummy_chunks, and we merge them all into a single stream
     kmers_out->reset();
+
+    if (checkpoint->phase() < 3) {
+        return;
+    }
 
     // add the main dummy source k-mer
     if constexpr (utils::is_pair_v<T>) {
@@ -959,7 +959,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed());
 
         if (checkpoint_.phase() == 2) {
-            queue.reset();
             return nullptr;
         }
         return new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),

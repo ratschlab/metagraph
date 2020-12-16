@@ -137,7 +137,8 @@ int build_graph(Config *config) {
             if (checkpoint.phase() <= 2) { // phase 2 stops after generating dummy k-mers
                 assert(next_chunk == nullptr);
                 logger->info("Phase {} (checkpoint {}) successfully finished.",
-                             checkpoint.phase(), checkpoint.checkpoint());
+                             checkpoint.phase(),
+                             checkpoint.checkpoint_for_phase(checkpoint.phase()));
                 return 0;
             }
 

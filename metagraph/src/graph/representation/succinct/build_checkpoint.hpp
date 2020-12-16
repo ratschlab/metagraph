@@ -47,6 +47,10 @@ class BuildCheckpoint {
     uint32_t checkpoint() const { return checkpoint_; }
     void set_checkpoint(uint32_t checkpoint);
 
+    static uint32_t checkpoint_for_phase(uint32_t phase) {
+        return phase <= 1 ? phase : 6;
+    }
+
     const std::filesystem::path& tmp_dir() const { return checkpoint_file_; }
 
     const std::filesystem::path& kmer_dir() const { return kmer_dir_; }

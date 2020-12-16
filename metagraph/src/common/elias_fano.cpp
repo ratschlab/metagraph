@@ -213,6 +213,10 @@ EliasFanoEncoder<T>::~EliasFanoEncoder() {
 template <typename T>
 void EliasFanoEncoder<T>::add(T value) {
 #ifndef NDEBUG
+    if (value < last_value_) {
+        logger->trace("Ooops {} {}", last_value_ , value);
+        logger->info("Ooops {} {}", last_value_ , value);
+    }
     assert(value >= last_value_);
 #endif
     value -= offset_;

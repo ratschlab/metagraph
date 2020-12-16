@@ -56,6 +56,7 @@ void SortedSetDiskBase<T>::flush() {
         sort_and_dedupe();
         dump_to_file(true /* is_done */);
     }
+    async_merge_l1_.join();
 }
 
 template <typename T>
