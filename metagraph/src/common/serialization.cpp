@@ -5,6 +5,12 @@
 #include <string>
 #include <unordered_map>
 
+#ifndef __APPLE__
+#include <endian.h>
+#else
+#include <machine/endian.h>
+#endif
+
 #include <tsl/hopscotch_map.h>
 #include <tsl/ordered_set.h>
 #include <sdsl/int_vector.hpp>
@@ -23,14 +29,13 @@ using OrderedSet = tsl::ordered_set<Key,
 // https://gitlab.com/german.tischler/libmaus2
 
 void serialize_number(std::ostream &out, uint64_t number) {
-    out.put((number >> (7 * 8)) & 0xFF);
-    out.put((number >> (6 * 8)) & 0xFF);
-    out.put((number >> (5 * 8)) & 0xFF);
-    out.put((number >> (4 * 8)) & 0xFF);
-    out.put((number >> (3 * 8)) & 0xFF);
-    out.put((number >> (2 * 8)) & 0xFF);
-    out.put((number >> (1 * 8)) & 0xFF);
-    out.put((number >> (0 * 8)) & 0xFF);
+    if (!out)
+        throw std::ostream::failure("Bad stream");
+
+    // store as big endian regardless of system endianness
+    number = htobe64(number);
+
+    out.write((const char*)&number, 8);
 
     if (!out)
         throw std::ostream::failure("Bad stream");
@@ -40,35 +45,14 @@ uint64_t load_number(std::istream &in) {
     if (!in.good())
         throw std::istream::failure("Bad stream");
 
-    int const c0 = in.get();
-    int const c1 = in.get();
-    int const c2 = in.get();
-    int const c3 = in.get();
-    int const c4 = in.get();
-    int const c5 = in.get();
-    int const c6 = in.get();
-    int const c7 = in.get();
+    uint64_t u;
+    in.read((char*)&u, 8);
 
-    if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0 || c5 < 0 || c6 < 0 || c7 < 0)
+    // read as big endian regardless of system endianness
+    u = be64toh(u);
+
+    if (!in.good())
         throw std::istream::failure("Bad stream");
-
-    uint64_t const u0 = c0;
-    uint64_t const u1 = c1;
-    uint64_t const u2 = c2;
-    uint64_t const u3 = c3;
-    uint64_t const u4 = c4;
-    uint64_t const u5 = c5;
-    uint64_t const u6 = c6;
-    uint64_t const u7 = c7;
-
-    uint64_t const u = (u0 << (7 * 8))
-                     | (u1 << (6 * 8))
-                     | (u2 << (5 * 8))
-                     | (u3 << (4 * 8))
-                     | (u4 << (3 * 8))
-                     | (u5 << (2 * 8))
-                     | (u6 << (1 * 8))
-                     | (u7 << (0 * 8));
 
     return u;
 }
@@ -77,23 +61,14 @@ uint32_t load_number32(std::istream &in) {
     if (!in.good())
         throw std::istream::failure("Bad stream");
 
-    int const c0 = in.get();
-    int const c1 = in.get();
-    int const c2 = in.get();
-    int const c3 = in.get();
+    uint64_t u;
+    in.read((char*)&u, 8);
 
-    if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0)
+    // read as big endian regardless of system endianness
+    u = be32toh(u);
+
+    if (!in.good())
         throw std::istream::failure("Bad stream");
-
-    uint32_t const u0 = c0;
-    uint32_t const u1 = c1;
-    uint32_t const u2 = c2;
-    uint32_t const u3 = c3;
-
-    uint32_t const u = (u0 << (3 * 8))
-                     | (u1 << (2 * 8))
-                     | (u2 << (1 * 8))
-                     | (u3 << (0 * 8));
 
     return u;
 }
