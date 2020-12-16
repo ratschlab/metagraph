@@ -727,7 +727,8 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
                 if (path.is_regular_file()
                     && path.path().filename().string().find("chunk_", 0) == 0
                     && path.path().filename().extension() == "") {
-                    logger->trace("Found chunk: {}", path.path().string());
+                    logger->trace("Found chunk: {}, size: {}", path.path().string(),
+                                  std::filesystem::file_size(path));
                     file_names.push_back(path.path().string());
                 }
             }

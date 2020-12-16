@@ -339,7 +339,8 @@ class TestBuild(unittest.TestCase):
     @parameterized.expand(['succinct_disk'])
     def test_build_phase(self, build):
         representation, tmp_dir = build_params[build]
-        construct_command = '{exe} build --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
+        #TODO: remove -v
+        construct_command = '{exe} build -v --phase 1 --mask-dummy --graph {repr} --canonical -k 20 ' \
                             '--disk-swap {tmp_dir} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,

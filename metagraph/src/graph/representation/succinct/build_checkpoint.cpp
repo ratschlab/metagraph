@@ -27,9 +27,9 @@ BuildCheckpoint::BuildCheckpoint(const std::filesystem::path &output_prefix,
                 std::exit(1);
             }
             common::logger->info(
-                    "Found an interrupted computation, at phase {}, kmer directory "
-                    "{}. Will attempt to continue - if this is not intended, please "
-                    "remove the checkpoint file {}",
+                    "Found an interrupted computation, at checkpoint {}, kmer "
+                    "directory {}. Will attempt to continue - if this is not intended, "
+                    "please remove the checkpoint file: {}",
                     checkpoint_, kmer_dir_, checkpoint_file_);
         }
     }
