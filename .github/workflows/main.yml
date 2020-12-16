@@ -47,15 +47,6 @@ jobs:
         pip3 install parameterized
         sudo apt-get install python3-venv
 
-    - name: install libmaus2-lite
-      run: |
-        export CC=$(which ${{ matrix.cc }})
-        export CXX=$(which ${{ matrix.cxx }})
-        cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make -j 2
-        make install
-
     - name: install sdsl-lite
       run: |
         export CC=$(which ${{ matrix.cc }})
@@ -110,13 +101,6 @@ jobs:
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
-
-    - name: install libmaus2-lite
-      run: |
-        cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make -j 2
-        make install
 
     - name: install sdsl-lite
       run: |
