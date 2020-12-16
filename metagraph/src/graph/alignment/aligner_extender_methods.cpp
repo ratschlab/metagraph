@@ -765,14 +765,13 @@ void DefaultColumnExtender<NodeType>
 
     // set boundaries for vertical band
     auto incoming_find = dp_table.find(incoming_node);
-    auto *incoming = &incoming_find.value();
 
     if (dp_table.size() == 1 && out_columns.size() && out_columns.front().first != incoming_node) {
         dp_table.expand_to_cover(incoming_find, 0, size);
         update_del_scores(config_,
-                          incoming->scores.data(),
-                          incoming->prev_nodes.data(),
-                          incoming->ops.data(),
+                          incoming_find.value().scores.data(),
+                          incoming_find.value().prev_nodes.data(),
+                          incoming_find.value().ops.data(),
                           nullptr,
                           size,
                           xdrop_cutoff);
@@ -787,16 +786,17 @@ void DefaultColumnExtender<NodeType>
     for (const auto &[next_node, c] : out_columns) {
         auto emplace = emplace_node(next_node, incoming_node, c, size, begin, begin, begin, end);
 
-        // emplace_node may have invalidated incoming, so update the pointer
+        // emplace_node may have invalidated incoming, so update the iterator
         if (emplace.second)
-            incoming = &dp_table.find(incoming_node).value();
+            incoming_find = dp_table.find(incoming_node);
 
+        auto &incoming = incoming_find.value();
         auto &next_column = emplace.first.value();
 
         assert(begin >= next_column.start_index);
-        assert(begin >= incoming->start_index);
+        assert(begin >= incoming.start_index);
         assert(next_column.start_index + next_column.scores.size() >= end);
-        assert(incoming->start_index + incoming->scores.size() >= end);
+        assert(incoming.start_index + incoming.scores.size() >= end);
 
         // store the mask indicating which cells were updated
         // this is padded to ensure that the vectorized code doesn't access
@@ -804,18 +804,18 @@ void DefaultColumnExtender<NodeType>
         AlignedVector<int8_t> updated_mask(end - begin + 9, 0x0);
 
         assert(next_column.scores.size() == next_column.gap_scores.size());
-        assert(incoming->scores.size() == incoming->gap_scores.size());
+        assert(incoming.scores.size() == incoming.gap_scores.size());
 
-        size_t shift = incoming->start_index;
+        size_t shift = incoming.start_index;
         compute_updates(
             next_column,
             begin,
             config_,
             incoming_node,
             next_node,
-            incoming->scores.data() + begin - shift,
-            incoming->gap_scores.data() + begin - shift,
-            incoming->gap_count.data() + begin - shift,
+            incoming.scores.data() + begin - shift,
+            incoming.gap_scores.data() + begin - shift,
+            incoming.gap_count.data() + begin - shift,
             profile_score[next_column.last_char].data() + query.size() - size + begin,
             profile_op[next_column.last_char].data() + query.size() - size + begin,
             updated_mask,
