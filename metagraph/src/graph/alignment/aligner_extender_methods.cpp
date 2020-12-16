@@ -133,8 +133,6 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
 
     assert(begin < end);
     assert(begin <= best_pos);
-    if (end <= best_pos)
-        std::cerr << begin << " " << best_pos << " " << end << std::endl;
     assert(end > best_pos);
 
     return std::make_pair(begin, end);
