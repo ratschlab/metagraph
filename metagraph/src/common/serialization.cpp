@@ -19,6 +19,9 @@ using OrderedSet = tsl::ordered_set<Key,
                                     std::uint64_t>;
 
 
+// Adapted from libmaus2
+// https://gitlab.com/german.tischler/libmaus2
+
 void serialize_number(std::ostream &out, uint64_t number) {
     out.put((number >> (7 * 8)) & 0xFF);
     out.put((number >> (6 * 8)) & 0xFF);
