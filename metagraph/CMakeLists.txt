@@ -231,13 +231,11 @@ link_directories(
   ${CMAKE_BINARY_DIR}/zlib
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
-  external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
 
 include_directories(
   external-libraries/KMC/kmc_api
-  external-libraries/libmaus2/include
   external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
   external-libraries/ips4o
@@ -369,7 +367,6 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
-  -lmaus2
   -lsdsl
   brwt
   jsoncpp_lib
@@ -465,7 +462,6 @@ include_directories(
 )
 
 link_directories(
-  external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
 add_executable(run_experiments ${experiment_files})
