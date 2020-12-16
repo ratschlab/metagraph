@@ -1,6 +1,7 @@
 #include "serialization.hpp"
 
 #include <cassert>
+#include <codecvt>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -171,36 +172,12 @@ template bool load_number_vector<bool>(std::istream &in, std::vector<bool> *);
 
 
 void encode_utf8(uint32_t num, std::ostream &out) {
-    if (num <= 0x7F) {
-        out.put(static_cast<uint8_t>(num));
-    } else if (num <= 0x7FF) {
-        out.put(static_cast<uint8_t>(128 | 64 | (((1 << 5) - 1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
-    } else if (num <= 0x0000FFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | (((1 << 4) - 1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
-    } else if (num <= 0x001FFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | (((1 << 3) - 1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
-    } else if (num <= 0x03FFFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | (((1 << 2) - 1) & (num >> 24))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
-    } else if (num <= 0x7FFFFFFF) {
-        out.put(static_cast<uint8_t>(128 | 64 | 32 | 16 | 8 | 4 | (((1 << 1) - 1) & (num >> 30))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 24))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 18))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 12))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num >> 6))));
-        out.put(static_cast<uint8_t>(128 | (((1 << 6) - 1) & (num))));
-    } else {
+    if (num > 0x7FFFFFFF)
         throw std::runtime_error("Encoding value out of range for code.");
-    }
+
+    std::string enc = std::wstring_convert<std::codecvt_utf8<char32_t>,
+                                           char32_t>().to_bytes(num);
+    out.write(enc.c_str(), enc.size());
 }
 
 uint32_t decode_utf8(std::istream &istr) {
