@@ -41,6 +41,7 @@ jobs:
         cd htslib-1.9
         make -j 2
         sudo make install
+        sudo apt-get install jemalloc
 
     - name: install dependencies for integration tests
       run: |

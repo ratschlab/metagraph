@@ -4,9 +4,6 @@
 #include <cstdint>
 
 #if _USE_FOLLY
-// Don't re-define the type traits for uint128_t in folly that break the build
-#include <folly/folly-config.h>
-#undef FOLLY_SUPPLY_MISSING_INT128_TRAITS
 #include <folly/FBVector.h>
 #include <folly/small_vector.h>
     template <typename... Args>

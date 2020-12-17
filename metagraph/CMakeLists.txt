@@ -235,6 +235,7 @@ link_directories(
 )
 
 include_directories(
+  PUBLIC
   external-libraries/KMC/kmc_api
   external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
@@ -253,6 +254,8 @@ include_directories(
   external-libraries/zlib
   external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
+  PRIVATE
+  ${PROJECT_SOURCE_DIR}/src/common
 )
 include_directories(SYSTEM
   external-libraries/folly
@@ -288,7 +291,7 @@ add_library(mersenne_twister STATIC
 )
 
 find_library(FOLLY_LIBRARIES
-  NAMES jemalloc glog
+  NAMES jemalloc
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
@@ -298,13 +301,12 @@ if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
   add_library(fbvector STATIC
     external-libraries/folly/folly/ScopeGuard.cpp
-    external-libraries/folly/folly/lang/Assume.cpp
   )
   target_include_directories(fbvector SYSTEM PRIVATE
     external-libraries/folly
+    ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE
-    -lglog
     -ljemalloc
   )
   set(METALIBS ${METALIBS} fbvector)
