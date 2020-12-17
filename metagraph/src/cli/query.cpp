@@ -142,7 +142,7 @@ void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
                 std::string_view(&contig[i], dbg_succ.get_k()),
                 [&](node_index node) {
                     if (node) {
-                        size_t match_len = dbg_succ.get_k() - range_graph.get_offset(node);
+                        size_t match_len = range_graph.get_node_length(node);
                         if (match_len >= std::max(sub_k, prev_match_len)) {
                             assert(match_len >= cur_match_len);
                             cur_match_len = match_len;
@@ -887,8 +887,8 @@ void align_sequence(std::string &name, std::string &seq,
         auto &match = alignments[0];
         // sequence for querying -- the best alignment
         if (match.get_offset()) {
-            seq = align_graph->get_node_sequence(match[0]).substr(0, match.get_offset())
-                    + match.get_sequence();
+            seq = std::string(match.get_offset(), '$')
+                + const_cast<std::string&&>(match.get_sequence());
         } else {
             seq = const_cast<std::string&&>(match.get_sequence());
         }

@@ -156,11 +156,8 @@ void map_sequences_in_file(const std::string &file,
         std::vector<DeBruijnGraph::node_index> graphindices;
         graph.map_to_nodes(read_stream->seq.s,
             [&](auto node) {
-                if (range_graph) {
-                    size_t match_length = graph.get_node_length(node);
-                    if (match_length < config.alignment_length)
-                        node = 0;
-                }
+                if (graph.get_node_length(node) < config.alignment_length)
+                    node = 0;
 
                 graphindices.emplace_back(node);
             },
