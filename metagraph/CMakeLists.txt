@@ -288,6 +288,13 @@ add_library(fbvector STATIC
   external-libraries/folly/folly/ScopeGuard.cpp
   external-libraries/folly/folly/lang/Assume.cpp
 )
+target_include_directories(fbvector SYSTEM PRIVATE
+  external-libraries/folly
+)
+target_link_libraries(fbvector PRIVATE
+  -lglog
+  -ljemalloc
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -333,6 +340,7 @@ set(METALIBS ${METALIBS}
   -lhts -lz -lbz2
   -lsdsl
   -lglog
+  -ljemalloc
   brwt
   jsoncpp_lib
   progress_bar
