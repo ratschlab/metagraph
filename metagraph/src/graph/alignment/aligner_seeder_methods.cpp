@@ -29,7 +29,7 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
             assert(i + node_length <= query_.size());
 
             size_t offset = graph_.get_k() - node_length;
-            assert(graph_.get_node_sequence(node).substr(offset)
+            assert(graph_.get_node_sequence(query_nodes_[i]).substr(offset)
                 == std::string(query_.data() + i, query_.data() + i + node_length));
 
             if (offset)
