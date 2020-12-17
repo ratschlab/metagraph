@@ -35,10 +35,6 @@ using OrderedSet = tsl::ordered_set<Key,
                                     std::deque<Key, std::allocator<Key>>,
                                     std::uint64_t>;
 
-
-// Adapted from libmaus2
-// https://gitlab.com/german.tischler/libmaus2
-
 void serialize_number(std::ostream &out, uint64_t number) {
     if (!out.good())
         throw std::ostream::failure("Bad stream");
@@ -190,6 +186,8 @@ void encode_utf8(uint32_t num, std::ostream &out) {
     out.write(enc.c_str(), enc.size());
 }
 
+// Adapted from libmaus2
+// https://gitlab.com/german.tischler/libmaus2
 uint32_t decode_utf8(std::istream &istr) {
     int len = 0;
     unsigned char mask = 0x80u;
@@ -233,7 +231,7 @@ uint32_t decode_utf8(std::istream &istr) {
 }
 
 
-void serialize_string(std::ostream &out, const std::string_view str) {
+void serialize_string(std::ostream &out, const std::string_view &str) {
     if (!out.good())
         throw std::ostream::failure("Bad stream");
 
@@ -282,7 +280,8 @@ bool load_string_vector(std::istream &in, std::vector<std::string> *vector) {
 
         vector->resize(s);
         for (uint64_t i = 0; i < s; ++i) {
-            load_string(in, &(*vector)[i]);
+            if (!load_string(in, &(*vector)[i]))
+                return false;
         }
 
         return true;
@@ -422,7 +421,8 @@ bool load_string_number_map(std::istream &in, Map *map) {
         try {
             for (size_t i = 0; i < size; ++i) {
                 keys.emplace_back();
-                load_string(in, &keys.back());
+                if (!load_string(in, &keys.back()))
+                    return false;
             }
         } catch (...) {
             return false;
@@ -449,7 +449,9 @@ bool load_string_number_map(std::istream &in, Map *map) {
             size_t const num = load_number(in);
             for (size_t i = 0; i < num; ++i) {
                 std::string key;
-                load_string(in, &key);
+                if (!load_string(in, &key))
+                    return false;
+
                 auto value = load_number32(in);
                 map->emplace(std::move(key), std::move(value));
             }
@@ -518,7 +520,8 @@ bool load_number_string_map(std::istream &in, Map *map) {
 
         for (size_t i = 0; i < size; ++i) {
             values.emplace_back();
-            load_string(in, &values.back());
+            if (!load_string(in, &values.back()))
+                return false;
         }
 
         if (get_number_vector_size(in) != size)
@@ -543,7 +546,9 @@ bool load_number_string_map(std::istream &in, Map *map) {
             for (size_t i = 0; i < num; ++i) {
                 auto key = load_number32(in);
                 std::string value;
-                load_string(in, &value);
+                if (!load_string(in, &value))
+                    return false;
+
                 map->emplace(std::move(key), std::move(value));
             }
         } catch (...) {
@@ -592,7 +597,9 @@ bool load_set(std::istream &in, Set *set) {
     try {
         for (size_t i = 0; i < size; ++i) {
             std::string val;
-            load_string(in, &val);
+            if (!load_string(in, &val))
+                return false;
+
             set->insert(std::move(val));
         }
     } catch (...) {

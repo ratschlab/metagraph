@@ -31,7 +31,7 @@ template <typename T>
 bool load_number_vector(std::istream &in, std::vector<T> *vector);
 
 
-void serialize_string(std::ostream &out, const std::string_view str);
+void serialize_string(std::ostream &out, const std::string_view &str);
 bool load_string(std::istream &in, std::string *str);
 
 void serialize_string_vector(std::ostream &out, const std::vector<std::string> &vector);
