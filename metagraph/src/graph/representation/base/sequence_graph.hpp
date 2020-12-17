@@ -230,7 +230,7 @@ class DeBruijnGraph : public SequenceGraph {
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 
-    virtual size_t get_node_length(node_index) const override { return get_k(); }
+    virtual size_t get_node_length(node_index) const { return get_k(); }
 };
 
 
