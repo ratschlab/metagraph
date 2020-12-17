@@ -33,14 +33,19 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
     if (range_graph) {
         for (size_t i = 0; i < query_nodes_.size(); ++i) {
             NodeType node = query_nodes_[i];
-            if (node && canonical)
-                node = canonical->get_base_node(node);
+            size_t offset = node ? range_graph->get_offset(node && canonical
+                ? canonical->get_base_node(node)
+                : node
+            ) : 0;
 
             if (!node) {
                 offsets_[i] = 0;
 
             } else {
-                size_t offset = range_graph->get_offset(node);
+                assert(i + graph_.get_k() - offset <= query_.size());
+                assert(graph_.get_node_sequence(node).substr(offset)
+                    == std::string(query_.data() + i,
+                                   query_.data() + i + (graph_.get_k() - offset)));
                 if (offset)
                     --num_matching_kmers_;
 

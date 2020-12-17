@@ -1415,6 +1415,37 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
     }
 }
 
+TEST(DBGAlignerTest, align_low_similarity5) {
+    size_t k = 31;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/refs.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto base_graph = std::dynamic_pointer_cast<DBGSuccinct>(
+        build_graph_batch<DBGSuccinct>(k, std::move(seqs), DBGMode::CANONICAL)
+    );
+    base_graph->reset_mask();
+    auto graph = std::make_shared<DBGSuccinctRange>(*base_graph);
+
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/reads.fa", [&](auto *seq) {
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -4, -4));
+        config.gap_opening_penalty = -5;
+        config.gap_extension_penalty = -5;
+        config.xdrop = 27;
+        config.exact_kmer_match_fraction = 0.0;
+        config.max_nodes_per_seq_char = 10.0;
+        config.queue_size = 20;
+        config.num_alternative_paths = 1;
+        config.min_seed_length = 15;
+        config.min_path_score = 0;
+        config.min_cell_score = 0;
+
+        DBGAligner<> aligner(*graph, config);
+        auto paths = aligner.align(seq->seq.s);
+
+        ASSERT_EQ(1ull, paths.size()) << seq->name.s;
+    });
+}
+
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     size_t k = 7;
     std::string reference = "AAAAG" "CTTTCGAGGCCAA";

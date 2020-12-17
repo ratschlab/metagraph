@@ -251,6 +251,5 @@ class TestAlign(unittest.TestCase):
         for [a, b] in zip(params_str, ref_align_str):
             self.assertEqual(a, b)
 
-
 if __name__ == '__main__':
     unittest.main()

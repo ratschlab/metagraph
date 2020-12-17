@@ -1,7 +1,6 @@
 #include "dbg_succinct_range.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/algorithms.hpp"
 
 using namespace mtg;
 using namespace mtg::graph;
@@ -269,32 +268,22 @@ void DBGSuccinctRange
     size_t i = 0;
     size_t last_offset = dbg_succ_.get_k() + 1;
     if (sequence.size() >= dbg_succ_.get_k()) {
-        auto invalid = utils::drag_and_mark_segments(encoded,
-                                                     boss_graph.alph_size,
-                                                     dbg_succ_.get_k());
-
         size_t end_offset = 0;
 
         // slide through all k-mers
         for ( ; i + get_k() <= encoded.size() && !terminate(); ++i) {
-            if (invalid[i + boss_graph.get_k()]) {
-                if (++end_offset == boss_graph.get_k()) {
-                    last_offset = dbg_succ_.get_k() + 1;
-                    continue;
-                }
-            } else {
-                end_offset = 0;
-            }
-
             const auto *begin = encoded.data() + i;
-            const auto *end = begin + boss_graph.get_k() - end_offset;
-
-            if (last_offset && end_offset
-                    && boss_graph.get_k() - (end - begin) >= last_offset) {
+            const auto *end = begin + boss_graph.get_k();
+            if (end_offset && ++end_offset == boss_graph.get_k()) {
+                end_offset = 0;
                 continue;
+            } else if (*end == boss_graph.alph_size) {
+                end_offset = 1;
             }
 
-            auto [first, last, seq_it] = boss_graph.index_range(begin, end);
+            assert(end_offset < boss_graph.get_k());
+
+            auto [first, last, seq_it] = boss_graph.index_range(begin, end - end_offset);
 
             if (first == 0 || last == 0 || seq_it == begin) {
                 callback(npos);
@@ -310,6 +299,7 @@ void DBGSuccinctRange
                 assert(node);
                 last_offset = 0;
             } else {
+                assert(begin + boss_graph.get_k() >= seq_it);
                 size_t offset = boss_graph.get_k() - (seq_it - begin);
                 assert(i + boss_graph.get_k() - offset <= sequence.size());
                 if (!last_offset || offset < last_offset) {
@@ -321,10 +311,11 @@ void DBGSuccinctRange
             callback(node);
 
             while (edge && ++i + boss_graph.get_k() < encoded.size()) {
+                assert(node);
                 if (terminate())
                     return;
 
-                if (invalid[i + boss_graph.get_k()]) {
+                if (encoded[i + boss_graph.get_k()] == boss_graph.alph_size) {
                     // this k-mer contains at least one invalid character
                     --i;
                     break;
