@@ -316,7 +316,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     }
 
     // don't break the topological order for row-diff annotation
-    if (!dynamic_cast<const RowDiff *>(&full_annotation.get_matrix())) {
+    if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
         ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
                               utils::LessFirst(), num_threads);
     }
