@@ -2,12 +2,22 @@
 #define __SERIALIZATION_HPP__
 
 #include <fstream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 
 void serialize_number(std::ostream &out, uint64_t number);
 
 uint64_t load_number(std::istream &in);
+
+uint32_t load_number32(std::istream &in);
+
+template <typename T>
+void serialize_number_vector_raw(std::ostream &out, const std::vector<T> &vector);
+
+template <typename T>
+std::vector<T> load_number_vector_raw(std::istream &in);
 
 
 template <typename T>
@@ -19,6 +29,13 @@ uint64_t get_number_vector_size(std::istream &in);
 
 template <typename T>
 bool load_number_vector(std::istream &in, std::vector<T> *vector);
+
+
+void serialize_string(std::ostream &out, const std::string_view &str);
+bool load_string(std::istream &in, std::string *str);
+
+void serialize_string_vector(std::ostream &out, const std::vector<std::string> &vector);
+bool load_string_vector(std::istream &in, std::vector<std::string> *vector);
 
 
 template <class Map>

@@ -799,10 +799,10 @@ class DPTable {
                 min_score_(min_score),
                 scores(std::min(end, size) - start + 8, min_score),
                 gap_scores(scores.size(), min_score),
-                ops(scores.size()),
-                prev_nodes(scores.size()),
-                gap_prev_nodes(scores.size()),
-                gap_count(scores.size()),
+                ops(scores.size(), Cigar::CLIPPED),
+                prev_nodes(scores.size(), 0),
+                gap_prev_nodes(scores.size(), 0),
+                gap_count(scores.size(), 0),
                 last_char(start_char),
                 best_pos(std::min(std::max(pos, start), start + scores.size() - (size_t)9)),
                 last_priority_pos(std::min(std::max(priority_pos, start), start + scores.size() - (size_t)9)),
@@ -834,12 +834,12 @@ class DPTable {
                     return;
 
                 // extend the range to the right to reach end
-                scores.resize(end + 8 - start_index);
-                gap_scores.resize(end + 8 - start_index);
-                ops.resize(end + 8 - start_index);
-                prev_nodes.resize(end + 8 - start_index);
-                gap_prev_nodes.resize(end + 8 - start_index);
-                gap_count.resize(end + 8 - start_index);
+                scores.resize(end + 8 - start_index, min_score_);
+                gap_scores.resize(end + 8 - start_index, min_score_);
+                ops.resize(end + 8 - start_index, Cigar::CLIPPED);
+                prev_nodes.resize(end + 8 - start_index, 0);
+                gap_prev_nodes.resize(end + 8 - start_index, 0);
+                gap_count.resize(end + 8 - start_index, 0);
             } else if (end <= start_index + scores.size() - 8) {
                 // extend the range to the left to reach begin
                 size_t shift = start_index - begin;
@@ -872,12 +872,12 @@ class DPTable {
                 gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
                 gap_count.insert(gap_count.begin(), shift, 0);
 
-                scores.resize(new_size);
-                gap_scores.resize(new_size);
-                ops.resize(new_size);
-                prev_nodes.resize(new_size);
-                gap_prev_nodes.resize(new_size);
-                gap_count.resize(new_size);
+                scores.resize(new_size, min_score_);
+                gap_scores.resize(new_size, min_score_);
+                ops.resize(new_size, Cigar::CLIPPED);
+                prev_nodes.resize(new_size, 0);
+                gap_prev_nodes.resize(new_size, 0);
+                gap_count.resize(new_size, 0);
             }
 
             assert(best_pos >= start_index);

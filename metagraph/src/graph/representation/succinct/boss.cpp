@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <progress_bar.hpp>
-#include <libmaus2/util/NumberSerialisation.hpp>
 #include <tsl/hopscotch_set.h>
 
 #include "common/threads/threading.hpp"
@@ -249,7 +248,7 @@ void BOSS::serialize(std::ofstream &outstream) const {
         throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
-    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+    serialize_number_vector_raw(outstream, F_);
     serialize_number(outstream, k_);
     serialize_number(outstream, state);
     outstream.flush();
@@ -277,7 +276,7 @@ bool BOSS::load(std::ifstream &instream) {
 
     try {
         // load F, k, and state
-        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<edge_index>(instream);
+        F_ = load_number_vector_raw<edge_index>(instream);
         k_ = load_number(instream);
         state = static_cast<State>(load_number(instream));
 

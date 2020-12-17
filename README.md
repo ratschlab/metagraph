@@ -22,20 +22,13 @@ For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-S
 ### Compile
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
 2. make sure all submodules are downloaded: `git submodule update --init --recursive`
-3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding instructions
-or simply run the following script
+3. install **sdsl-lite** in `metagraph/external-libraries/` by running the following script
 ```bash
 git submodule sync
 git submodule update --init --recursive
 
 pushd metagraph/external-libraries/sdsl-lite
 ./install.sh $PWD
-popd
-
-pushd metagraph/external-libraries/libmaus2
-cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
-make install
 popd
 ```
 
