@@ -467,21 +467,19 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
     } else if (range_graph) {
         assert(nodes_.size() == 1);
-        if (canonical) {
-            canonical->reverse_complement(sequence_, nodes_);
-            nodes_.resize(1);
-        } else {
-            range_graph->reverse_complement(sequence_, nodes_);
-            nodes_.resize(1);
-            nodes_[0] = range_graph->toggle_node_sink_source(nodes_[0]);
-        }
+
+        reverse_complement_seq_path(graph, sequence_, nodes_);
+        nodes_.resize(1);
 
         if (!nodes_[0]) {
             *this = Alignment();
             return;
         }
 
-        assert(graph.get_k() - graph.get_node_sequence(nodes_[0]) == offset_);
+        if (!canonical)
+            nodes_[0] = range_graph->toggle_node_sink_source(nodes_[0]);
+
+        assert(graph.get_k() - graph.get_node_length(nodes_[0]) == offset_);
 
     } else {
         assert(nodes_.size() == 1);
