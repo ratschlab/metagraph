@@ -38,8 +38,11 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         return false;
 
     try {
-        load_string_number_map(instream, &encode_label_);
-        load_string_vector(instream, &decode_label_);
+        if (!load_string_number_map(instream, &encode_label_))
+            return false;
+
+        if (!load_string_vector(instream, &decode_label_))
+            return false;
 
         return instream.good();
     } catch (...) {

@@ -1180,7 +1180,11 @@ int main(int argc, char *argv[]) {
 
             // load F, k, and state
             std::vector<uint64_t> F_;
-            load_number_vector(instream, &F_);
+            if (!load_number_vector(instream, &F_)) {
+                std::cerr << "ERROR: failed to read F vector from file" << std::endl;
+                return 1;
+            }
+
             auto k_ = load_number(instream);
             auto state = static_cast<BOSS::State>(load_number(instream));
 
