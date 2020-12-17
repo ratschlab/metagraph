@@ -749,7 +749,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         size_t j = 0;
         // nodes in the query graph hull may overlap
         graph->map_to_nodes(contig, [&](node_index node) {
-            assert(node);
             path[j++] = node;
         });
         assert(j == nodes_in_full.size());
@@ -757,8 +756,10 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         #pragma omp critical
         {
             for (size_t j = 0; j < path.size(); ++j) {
-                if (nodes_in_full[j])
+                if (nodes_in_full[j]) {
+                    assert(path[j]);
                     from_full_to_small.emplace_back(nodes_in_full[j], path[j]);
+                }
             }
         }
     }
