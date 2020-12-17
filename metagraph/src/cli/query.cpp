@@ -295,109 +295,30 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     // map contigs onto the full graph
     std::vector<std::pair<uint64_t, uint64_t>> from_full_to_small;
 
-    if (canonical) {
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            std::string &contig = contigs[i].first;
-            auto &nodes_in_full = contigs[i].second;
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
+    for (size_t i = 0; i < contigs.size(); ++i) {
+        const std::string &contig = contigs[i].first;
+        const auto &path = contigs[i].second;
 
-            if (full_dbg.is_canonical_mode()) {
-                size_t j = 0;
-                full_dbg.map_to_nodes(contig,
-                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-                );
-            } else {
-                size_t j = 0;
-                // TODO: if a k-mer is found, don't search its reverse-complement
-                // TODO: add `primary/canonical` mode to DBGSuccinct?
-                full_dbg.map_to_nodes_sequentially(contig,
-                    [&](auto node_in_full) { nodes_in_full[j++] = node_in_full; }
-                );
-                reverse_complement(contig.begin(), contig.end());
-                full_dbg.map_to_nodes_sequentially(contig,
-                    [&](auto node_in_full) {
-                        --j;
-                        if (node_in_full)
-                            nodes_in_full[j] = node_in_full;
-                    }
-                );
-                reverse_complement(contig.begin(), contig.end());
-                assert(j == 0);
+        std::vector<uint64_t> in_full(path.size());
+        size_t j = 0;
+        full_dbg.map_to_nodes(contig, [&](auto node) {
+            in_full[j++] = node;
+        });
+        assert(j == in_full.size());
+
+        #pragma omp critical
+        {
+            for (size_t j = 0; j < path.size(); ++j) {
+                assert(path[j]);
+                if (in_full[j])
+                    from_full_to_small.emplace_back(in_full[j], path[j]);
             }
         }
-
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
-        timer.reset();
-
-        // construct canonical graph storing all k-mers found in the full graph
-        graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), true);
-
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &nodes_in_full = contigs[i].second;
-            size_t j = 0;
-            graph_init->add_sequence(contig, [&]() { return nodes_in_full[j++] == 0; });
-        }
-
-        graph = std::move(graph_init);
-
-        logger->trace("[Query graph construction] k-mers reindexed in canonical mode in {} sec",
-                      timer.elapsed());
-        timer.reset();
-
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &nodes_in_full = contigs[i].second;
-
-            std::vector<uint64_t> path(nodes_in_full.size());
-            size_t j = 0;
-            graph->map_to_nodes(contig, [&](auto node) {
-                path[j++] = node;
-            });
-            assert(j == path.size());
-
-            #pragma omp critical
-            {
-                for (size_t j = 0; j < path.size(); ++j) {
-                    if (nodes_in_full[j]) {
-                        assert(path[j]);
-                        from_full_to_small.emplace_back(nodes_in_full[j], path[j]);
-                    }
-                }
-            }
-        }
-
-        logger->trace("[Query graph construction] Mapping between graphs constructed in {} sec",
-                      timer.elapsed());
-        timer.reset();
-
-    } else {
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 10)
-        for (size_t i = 0; i < contigs.size(); ++i) {
-            const std::string &contig = contigs[i].first;
-            const auto &path = contigs[i].second;
-
-            std::vector<uint64_t> in_full(path.size());
-            size_t j = 0;
-            full_dbg.map_to_nodes(contig, [&](auto node) {
-                in_full[j++] = node;
-            });
-            assert(j == in_full.size());
-
-            #pragma omp critical
-            {
-                for (size_t j = 0; j < path.size(); ++j) {
-                    assert(path[j]);
-                    if (in_full[j])
-                        from_full_to_small.emplace_back(in_full[j], path[j]);
-                }
-            }
-        }
-
-        logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
-        timer.reset();
     }
+
+    logger->trace("[Query graph construction] Contigs mapped to graph in {} sec", timer.elapsed());
+    timer.reset();
 
     contigs = decltype(contigs)();
 
