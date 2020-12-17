@@ -73,7 +73,7 @@ endfunction()
 function (findFolly)
 unset(FOLLY_LIBRARIES)
 find_library(FOLLY_LIBRARIES
-  NAMES folly
+  NAMES jemalloc glog
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
@@ -81,31 +81,17 @@ find_library(FOLLY_LIBRARIES
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-  set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES}
-    -ldouble-conversion
-    -ldl
-    -lboost_regex
-    -lboost_filesystem
-    -lboost_program_options
-    OpenSSL::Crypto
+  add_library(fbvector STATIC
+    external-libraries/folly/folly/ScopeGuard.cpp
+    external-libraries/folly/folly/lang/Assume.cpp
   )
-  if(NOT BUILD_STATIC)
-    set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES}
-      -lglog
-      -lgflags
-    )
-  endif()
-  find_library(LIBERTY
-    NAMES iberty
-    HINTS
-    ENV LD_LIBRARY_PATH
-    PATHS
-      $ENV{HOME}/.linuxbrew/lib
+  target_include_directories(fbvector SYSTEM PRIVATE
+    external-libraries/folly
   )
-  if(LIBERTY)
-    set(FOLLY_LIBRARIES ${FOLLY_LIBRARIES} ${LIBERTY})
-  endif()
+  target_link_libraries(fbvector PRIVATE
+    -lglog
+    -ljemalloc
+  )
 else()
   set(FOLLY_LIBRARIES "")
   message(WARNING "Folly (Facebook Open Source Library) not found."

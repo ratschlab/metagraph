@@ -36,6 +36,9 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
 )
+target_include_directories(metagraph_common SYSTEM PUBLIC
+    ${EXTERNAL_LIB_DIR}/folly
+)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)

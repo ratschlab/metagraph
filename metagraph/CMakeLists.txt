@@ -252,9 +252,12 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
-  external-libraries/folly
   ${PROJECT_SOURCE_DIR}/src
 )
+include_directories(SYSTEM
+  external-libraries/folly
+)
+
 
 # use external fmt library in spdlog
 set(SPDLOG_FMT_EXTERNAL TRUE)
