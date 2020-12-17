@@ -221,6 +221,20 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
 }
 
+
+template <typename T_TO, typename T_FROM>
+ChunkedWaitQueue<T_TO>& reinterpret_container(ChunkedWaitQueue<T_FROM> &container) {
+    static_assert(sizeof(T_TO) == sizeof(T_FROM));
+    return reinterpret_cast<ChunkedWaitQueue<T_TO>&>(container);
+}
+
+template <typename T_TO, typename T_FROM>
+Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
+    static_assert(sizeof(T_TO) == sizeof(T_FROM));
+    return reinterpret_cast<Vector<T_TO>&>(container);
+}
+
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 /**
@@ -232,21 +246,21 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
  * @param k the node length in the BOOS graph (so k-mer length is k+1)
  * @param num_threads number of threads available for sorting
  * @param both_strands for each k-mer, also add its reverse complement
- * @param kmers real (not dummy) k-mers to generate dummy k-mers for
  * @param kmers_out sorted real+dummy k-mers
- * @tparam T_REAL the type of kmers being processed, typically either a KMer64/128/256 or an
- * std::pair<KMer64/128/256, int8/16/32> if counting kmers.
  * @tparam T a k-mer over the same alphabet as T_REAL plus the $ sentinel character (may
  * require one extra bit of storage per character)
  */
-template <typename KmerCollector, typename T_REAL, typename T>
-void recover_dummy_nodes(const KmerCollector &kmer_collector,
-                         Vector<T_REAL> &kmers,
+template <typename KmerCollector, typename T>
+void recover_dummy_nodes(KmerCollector &kmer_collector,
                          ChunkedWaitQueue<T> *kmers_out,
                          ThreadPool &async_worker) {
-    using KMER = get_first_type_t<T>;
+    using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
+    using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
+
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+
+    auto &kmers = reinterpret_container<T_REAL>(kmer_collector.data());
 
     size_t k = kmer_collector.get_k() - 1;
     size_t num_threads = kmer_collector.num_threads();
@@ -303,18 +317,20 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
-    async_worker.enqueue([k, &kmers, dummy_kmers = std::move(dummy_kmers), kmers_out]() {
+    async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out]() {
+        const KMER_INT kmer_delta
+                = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+
         // merge #kmers and #dummy_kmers into #kmers_out
         size_t di = 0;
-        const KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
-        for(const auto& kmer : kmers) {
+        for (const auto& kmer : kmers) {
             KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
             if constexpr (utils::is_pair_v<T>) {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
                     kmers_out->push({ dummy_kmers[di], 0 });
                     di++;
                 }
-                kmers_out->push({lifted, kmer.second});
+                kmers_out->push({ lifted, kmer.second });
             } else {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
                     kmers_out->push(dummy_kmers[di]);
@@ -607,16 +623,18 @@ void add_reverse_complements(size_t k,
  * The final result is obtained by merging the original #kmers and dummy-1 kmers with
  * the dummy-k kmers, for k=2..k
  */
-template <class KmerCollector, typename T_REAL, typename T>
-void recover_dummy_nodes(const KmerCollector &kmer_collector,
-                         ChunkedWaitQueue<T_REAL> &kmers,
-                         ChunkedWaitQueue<T> *kmers_out,
-                         ThreadPool &async_worker) {
-    using KMER_REAL = get_first_type_t<T_REAL>; // 64/128/256-bit KmerBOSS
-    using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
+template <class KmerCollector, typename T>
+void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
+                              ChunkedWaitQueue<T> *kmers_out,
+                              ThreadPool &async_worker) {
+    using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
+    using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
+    using KMER_REAL = typename KmerCollector::Kmer; // 64/128/256-bit KmerBOSS
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+
+    auto &kmers = reinterpret_container<T_REAL>(kmer_collector.data());
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
@@ -687,11 +705,11 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
-    const KMER_INT kmer_delta
-            = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
-
     // push all other dummy and non-dummy k-mers to |kmers_out|
-    async_worker.enqueue([k, kmer_delta, kmers_out, real_split_by_W, dummy_chunks]() {
+    async_worker.enqueue([k, kmers_out, real_split_by_W, dummy_chunks]() {
+        const KMER_INT kmer_delta
+                = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+
         common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
             [&](const T_INT_REAL &v) {
                 if constexpr (utils::is_pair_v<T>) {
@@ -746,18 +764,6 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
-template <typename T_TO, typename T_FROM>
-ChunkedWaitQueue<T_TO>& reinterpret_container(ChunkedWaitQueue<T_FROM> &container) {
-    static_assert(sizeof(T_TO) == sizeof(T_FROM));
-    return reinterpret_cast<ChunkedWaitQueue<T_TO>&>(container);
-}
-
-template <typename T_TO, typename T_FROM>
-Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
-    static_assert(sizeof(T_TO) == sizeof(T_FROM));
-    return reinterpret_cast<Vector<T_TO>&>(container);
-}
-
 
 template <typename KmerCollector>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
@@ -800,20 +806,21 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
     BOSS::Chunk* build_chunk() {
         BOSS::Chunk *result;
-        typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
 
         using T_INT = typename KmerCollector::Data::value_type;
         using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
-        auto &kmers = reinterpret_container<T>(kmer_ints);
 
         if constexpr(std::is_same_v<typename KmerCollector::Extractor,
                                     KmerExtractorBOSS>) {
             assert(kmer_collector_.suffix_length());
             // kmer_collector stores (BOSS::k_ + 1)-mers
+
+            typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
+
             result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
                                      kmer_collector_.get_k() - 1,
                                      kmer_collector_.is_both_strands_mode(),
-                                     kmers,
+                                     reinterpret_container<T>(kmer_ints),
                                      bits_per_count_,
                                      swap_dir_);
         } else {
@@ -826,7 +833,11 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
 #define INIT_CHUNK(KMER) \
     ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
-    recover_dummy_nodes(kmer_collector_, kmers, &queue, async_worker_); \
+    if constexpr(utils::is_instance_v<typename KmerCollector::Data, common::ChunkedWaitQueue>) { \
+        recover_dummy_nodes_disk(kmer_collector_, &queue, async_worker_); \
+    } else { \
+        recover_dummy_nodes(kmer_collector_, &queue, async_worker_); \
+    } \
     logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
     result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
                              kmer_collector_.get_k() - 1, \
