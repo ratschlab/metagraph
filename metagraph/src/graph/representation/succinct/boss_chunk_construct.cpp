@@ -33,7 +33,7 @@ using utils::get_first;
 using utils::get_first_type_t;
 using TAlphabet = KmerExtractorBOSS::TAlphabet;
 
-constexpr size_t ENCODER_BUFFER_SIZE = 100'000;
+const size_t ENCODER_BUFFER_SIZE = 100'000;
 
 /**
  * Generates non-redundant dummy sink kmers (a1a2...ak->$) for the given #kmers_p.
@@ -169,7 +169,7 @@ void add_dummy_source_kmers(size_t k,
 
 template <typename T>
 inline T rev_comp(size_t k, T kmer, const std::vector<TAlphabet> &complement_code) {
-    if constexpr (utils::is_pair_v<T>) {
+    if constexpr(utils::is_pair_v<T>) {
         return T(kmer::reverse_complement(k, kmer.first, complement_code), kmer.second);
     } else {
         return kmer::reverse_complement(k, kmer, complement_code);
@@ -202,7 +202,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 }
                 buffer.push_back(std::move(rc));
             } else {
-                if constexpr (utils::is_pair_v<T>) {
+                if constexpr(utils::is_pair_v<T>) {
                     using C = typename T::second_type;
                     if (kmer->second >> (sizeof(C) * 8 - 1)) {
                         kmer->second = std::numeric_limits<C>::max();
@@ -293,7 +293,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
 
         for (size_t i = dummy_source_begin; i < dummy_end; ++i) {
             KMER kmer = dummy_kmers[i];
-            if (i> 0 && KMER::compare_suffix(kmer, dummy_kmers[i - 1]))
+            if (i > 0 && KMER::compare_suffix(kmer, dummy_kmers[i - 1]))
                 continue; // i would generate the same dummy source k-mer as i-1, skip
 
             kmer.to_prev(k + 1, BOSS::kSentinelCode);
@@ -311,7 +311,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
                           utils::LessFirst(), num_threads);
 
     // add the main dummy source k-mer
-    if constexpr (utils::is_pair_v<T>) {
+    if constexpr(utils::is_pair_v<T>) {
         kmers_out->push({ KMER(0), 0 });
     } else {
         kmers_out->push(KMER(0));
@@ -325,7 +325,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
         size_t di = 0;
         for (const auto& kmer : kmers) {
             KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
-            if constexpr (utils::is_pair_v<T>) {
+            if constexpr(utils::is_pair_v<T>) {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
                     kmers_out->push({ dummy_kmers[di], 0 });
                     di++;
@@ -340,7 +340,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
             }
         }
         for (size_t i = di; i < dummy_kmers.size(); ++i) {
-            if constexpr (utils::is_pair_v<T>) {
+            if constexpr(utils::is_pair_v<T>) {
                 kmers_out->push({ dummy_kmers[i], 0 });
             } else {
                 kmers_out->push(dummy_kmers[i]);
@@ -566,7 +566,7 @@ void add_reverse_complements(size_t k,
                              size_t num_threads,
                              size_t buffer_size,
                              const std::filesystem::path &dir,
-                             ThreadPool& async_worker,
+                             ThreadPool &async_worker,
                              ChunkedWaitQueue<T_REAL> *kmers) {
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
@@ -574,10 +574,13 @@ void add_reverse_complements(size_t k,
     std::filesystem::create_directory(rc_dir);
     auto rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
             num_threads, buffer_size, rc_dir, std::numeric_limits<size_t>::max());
+
     logger->trace("Adding reverse complements...");
+
     common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
     Vector<T_INT_REAL> buffer;
     buffer.reserve(10'000);
+
     for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
         const T_REAL &kmer = *it;
         const T_REAL &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
@@ -589,7 +592,7 @@ void add_reverse_complements(size_t k,
             }
             original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
         } else {
-            if constexpr (utils::is_pair_v<T_REAL>) {
+            if constexpr(utils::is_pair_v<T_REAL>) {
                 using C = typename T_REAL::second_type;
                 if (kmer.second >> (sizeof(C) * 8 - 1)) {
                     original.add({ kmer.first.data(), std::numeric_limits<C>::max() });
@@ -607,7 +610,7 @@ void add_reverse_complements(size_t k,
     kmers->reset();
     async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers]() {
         ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
-        common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir / "original");
+        common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir/"original");
         merge(original_kmers, reverse_complements, kmers);
     });
 }
@@ -666,8 +669,7 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
         std::vector<std::string> dummy_next_names(alphabet_size);
         std::vector<Encoder<KMER_INT>> dummy_next_chunks;
         for (TAlphabet i = 0; i < alphabet_size; ++i) {
-            dummy_next_names[i] = dir/("dummy_source_"
-                    + std::to_string(dummy_pref_len + 1) + "_" + std::to_string(i));
+            dummy_next_names[i] = dir/fmt::format("dummy_source_{}_{}", dummy_pref_len + 1, i);
             dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
         }
 
@@ -699,8 +701,8 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     kmers_out->reset();
 
     // add the main dummy source k-mer
-    if constexpr (utils::is_pair_v<T>) {
-        kmers_out->push({KMER(0), 0});
+    if constexpr(utils::is_pair_v<T>) {
+        kmers_out->push({ KMER(0), 0 });
     } else {
         kmers_out->push(KMER(0));
     }
@@ -712,7 +714,7 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
 
         common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
             [&](const T_INT_REAL &v) {
-                if constexpr (utils::is_pair_v<T>) {
+                if constexpr(utils::is_pair_v<T>) {
                     return T(kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
                                 + kmer_delta,
                              v.second);
@@ -725,7 +727,7 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
 
         common::Transformed<common::MergeDecoder<KMER_INT>, T> decoder_dummy(
             [](const KMER_INT &v) {
-                if constexpr (utils::is_pair_v<T>) {
+                if constexpr(utils::is_pair_v<T>) {
                     return T(reinterpret_cast<const KMER &>(v), 0);
                 } else {
                     return reinterpret_cast<const KMER &>(v);
