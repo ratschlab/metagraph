@@ -31,7 +31,6 @@ target_include_directories(tests
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/libmaus2/include
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/sdsl-lite/include
 )
@@ -41,7 +40,6 @@ target_link_libraries(tests
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
     ${SDSL_LIBRARY}
-    ${EXTERNAL_LIB_DIR}/libmaus2/lib/libmaus2.a
 )
 target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 
