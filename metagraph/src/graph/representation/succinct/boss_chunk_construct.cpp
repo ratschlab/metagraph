@@ -355,41 +355,36 @@ using Encoder = common::EliasFanoEncoderBuffered<T>;
 template <typename T>
 using Decoder = common::EliasFanoDecoder<T>;
 
-/**
- * Splits #kmers by W (kmer[0]) and F (kmer[k]) into |ALPHABET\{$}|^2 chunks.
- * @tparam T_REAL k-mers over the alphabet without the sentinel character (e.g. ACGT).
- * @return names of the files with the partitioned k-mers
- */
 template <typename T_REAL>
-std::vector<std::string> split(size_t k,
-                               const std::filesystem::path &dir,
-                               const ChunkedWaitQueue<T_REAL> &kmers) {
+std::vector<std::string> split(size_t k, const std::string &chunk_fname) {
     using T_INT_REAL = get_int_t<T_REAL>;
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
 
     size_t chunk_count = std::pow(alphabet_size, 2);
 
-    logger->trace("Splitting k-mers into {} chunks...", chunk_count);
+    logger->trace("Splitting k-mers from chunk {} into {} chunks...",
+                  chunk_fname, chunk_count);
 
     std::vector<Encoder<T_INT_REAL>> sinks;
     std::vector<std::string> names(chunk_count);
     for (size_t i = 0; i < names.size(); ++i) {
-        names[i] = dir/("real_F_W_" + std::to_string(i));
+        names[i] = chunk_fname + "_split_" + std::to_string(i);
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
+    Decoder<T_INT_REAL> original_kmers(chunk_fname);
     size_t num_kmers = 0;
-    for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
-        const T_REAL &kmer = *it;
+    while (std::optional<T_INT_REAL> orig = original_kmers.next()) {
+        const T_REAL &kmer = reinterpret_cast<const T_REAL &>(orig.value());
         TAlphabet F = get_first(kmer)[k];
         TAlphabet W = get_first(kmer)[0];
         size_t idx = F * alphabet_size + W;
-        sinks[idx].add(reinterpret_cast<const T_INT_REAL &>(kmer));
+        sinks[idx].add(orig.value());
         num_kmers++;
     }
     std::for_each(sinks.begin(), sinks.end(), [](auto &f) { f.finish(); });
-    logger->trace("Total number of real k-mers: {}", num_kmers);
+    logger->trace("Total number of real k-mers in {}: {}", chunk_fname, num_kmers);
     return names;
 }
 
@@ -414,15 +409,12 @@ std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
 generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
                        const std::filesystem::path &dir,
-                       ChunkedWaitQueue<T_REAL> &kmers) {
+                       const std::vector<std::string> &real_F_W) {
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerExtractorBOSS::KmerBOSS
     using KMER_INT = typename KMER::WordType; // KmerExtractorBOSS::KmerBOSS::WordType
 
     using KMER_REAL = get_first_type_t<T_REAL>; // KmerExtractorT::KmerBOSS without sentinel
     using KMER_INT_REAL = typename KMER_REAL::WordType; // KmerExtractorT::KmerBOSS::WordType
-
-    // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    std::vector<std::string> real_F_W = split(k, dir, kmers);
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
 
@@ -446,12 +438,10 @@ generate_dummy_1_kmers(size_t k,
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
-
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
         common::MergeDecoder<KMER_INT_REAL> it(F_chunks, false);
-
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 0; c < alphabet_size; ++c) {
             W_chunks.push_back(real_F_W[c * alphabet_size + F]);
@@ -530,34 +520,6 @@ generate_dummy_1_kmers(size_t k,
     return { real_split_by_W, dummy_l1_names, dummy_sink_name };
 }
 
-/** Merges #original_kmers with #reverse_complements and places the result into #kmers */
-template <typename T, typename T_INT>
-static void merge(common::EliasFanoDecoder<T_INT> &original_kmers,
-                  ChunkedWaitQueue<T_INT> &reverse_complements,
-                  ChunkedWaitQueue<T> *kmers) {
-    auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT> &>(*kmers);
-    auto &it = reverse_complements.begin();
-    std::optional<T_INT> orig = original_kmers.next();
-    while (it != reverse_complements.end() && orig.has_value()) {
-        if (get_first(orig.value()) < get_first(*it)) {
-            kmers_int.push(orig.value());
-            orig = original_kmers.next();
-        } else {
-            kmers_int.push(*it);
-            ++it;
-        }
-    }
-    while (it != reverse_complements.end()) {
-        kmers_int.push(*it);
-        ++it;
-    }
-    while (orig.has_value()) {
-        kmers_int.push(orig.value());
-        orig = original_kmers.next();
-    }
-    kmers->shutdown();
-}
-
 /**
  * Adds reverse complements
  */
@@ -565,54 +527,83 @@ template <typename T_REAL>
 void add_reverse_complements(size_t k,
                              size_t num_threads,
                              size_t buffer_size,
-                             const std::filesystem::path &dir,
-                             ThreadPool &async_worker,
-                             ChunkedWaitQueue<T_REAL> *kmers) {
+                             const std::vector<std::string> &real_F_W) {
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
-    std::string rc_dir = dir/"rc";
-    std::filesystem::create_directory(rc_dir);
-    auto rc_set = std::make_unique<common::SortedSetDisk<T_INT_REAL>>(
-            num_threads, buffer_size, rc_dir, std::numeric_limits<size_t>::max());
+    const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
+
+    assert(real_F_W.size() == std::pow(alphabet_size, 2));
+
+    // initialize containers for each block of rc k-mers
+    std::vector<std::unique_ptr<common::SortedSetDisk<T_INT_REAL>>> rc_set;
+    for (size_t j = 0; j < real_F_W.size(); ++j) {
+        std::string rc_dir = real_F_W[j] + "_rc";
+        std::filesystem::create_directory(rc_dir);
+        rc_set.emplace_back(
+            new common::SortedSetDisk<T_INT_REAL>(
+                    num_threads, buffer_size / real_F_W.size(),
+                    rc_dir, std::numeric_limits<size_t>::max()));
+    }
 
     logger->trace("Adding reverse complements...");
 
-    common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
-    Vector<T_INT_REAL> buffer;
-    buffer.reserve(10'000);
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t j = 0; j < real_F_W.size(); ++j) {
+        // read all k-mers from the block and keep it for the merge
+        Decoder<T_INT_REAL> original_kmers(real_F_W[j], false);
 
-    for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
-        const T_REAL &kmer = *it;
-        const T_REAL &reverse = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
-        if (get_first(kmer) != get_first(reverse)) {
+        // initialize buffers for each output (F, W) chunk
+        std::vector<Vector<T_INT_REAL>> buffers(real_F_W.size());
+        for (auto &buf : buffers) {
+            buf.reserve(10'000);
+        }
+
+        while (std::optional<T_INT_REAL> orig = original_kmers.next()) {
+            const T_REAL &kmer = reinterpret_cast<const T_REAL &>(orig.value());
+            const T_REAL &reverse
+                = rev_comp(k + 1, kmer, KmerExtractor2Bit().complement_code());
+
+            TAlphabet F = get_first(reverse)[k];
+            TAlphabet W = get_first(reverse)[0];
+            size_t idx = F * alphabet_size + W;
+            auto &buffer = buffers[idx];
+
             buffer.push_back(reinterpret_cast<const T_INT_REAL &>(reverse));
             if (buffer.size() == buffer.capacity()) {
-                rc_set->insert(buffer.begin(), buffer.end());
+                rc_set[idx]->insert(buffer.begin(), buffer.end());
                 buffer.resize(0);
             }
-            original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
-        } else {
-            if constexpr(utils::is_pair_v<T_REAL>) {
-                using C = typename T_REAL::second_type;
-                if (kmer.second >> (sizeof(C) * 8 - 1)) {
-                    original.add({ kmer.first.data(), std::numeric_limits<C>::max() });
-                } else {
-                    original.add({ kmer.first.data(), 2 * kmer.second });
-                }
-            } else {
-                original.add(reinterpret_cast<const T_INT_REAL &>(kmer));
-            }
+        }
+        for (size_t idx = 0; idx < buffers.size(); ++idx) {
+            rc_set[idx]->insert(buffers[idx].begin(), buffers[idx].end());
         }
     }
-    rc_set->insert(buffer.begin(), buffer.end());
-    original.finish();
-    // start merging #original with #reverse_complements into #kmers
-    kmers->reset();
-    async_worker.enqueue([rc_set = std::move(rc_set), &dir, kmers]() {
-        ChunkedWaitQueue<T_INT_REAL> &reverse_complements = rc_set->data(true);
-        common::EliasFanoDecoder<T_INT_REAL> original_kmers(dir/"original");
-        merge(original_kmers, reverse_complements, kmers);
-    });
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t j = 0; j < rc_set.size(); ++j) {
+        // start merging original with reverse_complements kmers
+        std::vector<std::string> chunks_to_merge = rc_set[j]->files_to_merge();
+        chunks_to_merge.push_back(real_F_W[j]);
+
+        Encoder<T_INT_REAL> out(real_F_W[j] + "_new", ENCODER_BUFFER_SIZE);
+        const std::function<void(const T_INT_REAL &)> write
+                = [&](const T_INT_REAL &v) { out.add(v); };
+        common::merge_files(chunks_to_merge, write);
+        out.finish();
+
+        rc_set[j].reset();
+        std::filesystem::remove_all(real_F_W[j] + "_rc");
+
+        for (const auto &suffix : { "", ".up", ".count" }) {
+            if (std::filesystem::exists(real_F_W[j] + "_new" + suffix))
+                std::filesystem::rename(real_F_W[j] + "_new" + suffix,
+                                        real_F_W[j] + suffix);
+        }
+
+        logger->trace("Augmented chunk {} with reverse complement k-mers."
+                      " New size: {} bytes", real_F_W[j],
+                      std::filesystem::file_size(real_F_W[j]));
+    }
 }
 
 /**
@@ -637,23 +628,57 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
-    auto &kmers = reinterpret_container<T_REAL>(kmer_collector.data());
-
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
+    const uint64_t buffer_size = kmer_collector.buffer_size();
+
+    auto &container = kmer_collector.container();
+    std::vector<std::string> chunk_fnames = container.files_to_merge();
+
+    // split each chunk by F and W
+    std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < chunk_fnames.size(); ++i) {
+        chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
+    }
+    // release the buffer
+    container.clear();
+    container.data(true);
+
+    // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
+    const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
+    std::vector<std::string> real_F_W(std::pow(alphabet_size, 2));
+
+    // merge each group of chunks into a single one for each F and W
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t j = 0; j < real_F_W.size(); ++j) {
+        std::vector<std::string> chunks_to_merge(chunks_split.size());
+        for (size_t i = 0; i < chunk_fnames.size(); ++i) {
+            chunks_to_merge[i] = chunks_split[i][j];
+        }
+        real_F_W[j] = dir/("real_F_W_" + std::to_string(j));
+        Encoder<T_INT_REAL> out(real_F_W[j], ENCODER_BUFFER_SIZE);
+        // merge chunks into a single one and remove them
+        const std::function<void(const T_INT_REAL &)> write
+                = [&](const T_INT_REAL &v) { out.add(v); };
+        common::merge_files(chunks_to_merge, write, true);
+        out.finish();
+        logger->trace("Merged {} chunks into {} of size: {} bytes",
+                      chunks_to_merge.size(), real_F_W[j],
+                      std::filesystem::file_size(real_F_W[j]));
+    }
 
     if (kmer_collector.is_both_strands_mode()) {
-        // compute the reverse complements of #kmers, then merge back into #kmers
-        add_reverse_complements(k, num_threads, kmer_collector.buffer_size(), dir,
-                                async_worker, &kmers);
+        // compute reverse complements k-mers and update the blocks #real_F_W
+        add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
     }
 
     std::string dummy_sink_name;
     std::vector<std::string> real_split_by_W;
     std::vector<std::string> dummy_names;
     std::tie(real_split_by_W, dummy_names, dummy_sink_name)
-            = generate_dummy_1_kmers<T_REAL, T>(k, num_threads, dir, kmers);
+            = generate_dummy_1_kmers<T_REAL, T>(k, num_threads, dir, real_F_W);
 
     // stores the sorted original kmers and dummy-1 k-mers
     std::vector<std::string> dummy_chunks = { dummy_sink_name };
