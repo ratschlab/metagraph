@@ -284,17 +284,32 @@ add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
 
-add_library(fbvector STATIC
-  external-libraries/folly/folly/ScopeGuard.cpp
-  external-libraries/folly/folly/lang/Assume.cpp
+find_library(FOLLY_LIBRARIES
+  NAMES jemalloc glog
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    $ENV{HOME}/.linuxbrew/lib
 )
-target_include_directories(fbvector SYSTEM PRIVATE
-  external-libraries/folly
-)
-target_link_libraries(fbvector PRIVATE
-  -lglog
-  -ljemalloc
-)
+if(FOLLY_LIBRARIES)
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  add_library(fbvector STATIC
+    external-libraries/folly/folly/ScopeGuard.cpp
+    external-libraries/folly/folly/lang/Assume.cpp
+  )
+  target_include_directories(fbvector SYSTEM PRIVATE
+    external-libraries/folly
+  )
+  target_link_libraries(fbvector PRIVATE
+    -lglog
+    -ljemalloc
+  )
+  set(METALIBS ${METALIBS} fbvector)
+else()
+  message(WARNING "Folly (Facebook Open Source Library) not found."
+  " Install folly to reduce memory taken up by the Row-Compressed annotator"
+  " and enable other optimizations.")
+endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -339,14 +354,11 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
   -lsdsl
-  -lglog
-  -ljemalloc
   brwt
   jsoncpp_lib
   progress_bar
   fmt::fmt
   mersenne_twister
-  fbvector
   spdlog::spdlog
 )
 if(APPLE)
