@@ -145,6 +145,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     std::vector<DBGAlignment> cur_paths;
     DBGAlignment dummy;
     const auto *last_path = &dummy;
+    DBGAlignment best_alignment;
 
     while (path_queue_.size()) {
         const auto &top_path = path_queue_.maximum();
@@ -157,6 +158,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             callback(DBGAlignment(top_path));
             return;
         }
+
+        if (top_path.get_score() > best_alignment.get_score())
+            best_alignment = top_path;
 
         if (top_path == *last_path) {
             mtg::common::logger->trace("\tSkipping duplicate alignment");
@@ -172,6 +176,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
         path_queue_.pop_maximum();
     }
+
+    if (cur_paths.empty())
+        cur_paths.emplace_back(std::move(best_alignment));
 
     if (cur_paths.size() <= 1) {
         mtg::common::logger->trace("Nothing to chain: {} path(s) selected",
