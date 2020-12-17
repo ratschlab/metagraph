@@ -595,7 +595,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     // initialize a new vector
     switch (get_state()) {
         case BOSS::State::STAT: {
-            valid_edges_.reset(new bit_vector_stat());
+            valid_edges_.reset(new bit_vector_small());
             break;
         }
         case BOSS::State::FAST: {
@@ -678,7 +678,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         return;
 
     assert((boss_graph_->get_state() == BOSS::State::STAT
-                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+                && dynamic_cast<const bit_vector_small*>(valid_edges_.get()))
         || (boss_graph_->get_state() == BOSS::State::FAST
                 && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
         || (boss_graph_->get_state() == BOSS::State::DYN
@@ -709,8 +709,8 @@ void DBGSuccinct::switch_state(BOSS::State new_state) {
     if (valid_edges_.get()) {
         switch (new_state) {
             case BOSS::State::STAT: {
-                valid_edges_ = std::make_unique<bit_vector_stat>(
-                    valid_edges_->convert_to<bit_vector_stat>()
+                valid_edges_ = std::make_unique<bit_vector_small>(
+                    valid_edges_->convert_to<bit_vector_small>()
                 );
                 break;
             }
@@ -741,7 +741,7 @@ void DBGSuccinct::switch_state(BOSS::State new_state) {
 BOSS::State DBGSuccinct::get_state() const {
     assert(!valid_edges_.get()
                 || boss_graph_->get_state() != BOSS::State::STAT
-                || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
+                || dynamic_cast<const bit_vector_small*>(valid_edges_.get()));
     assert(!valid_edges_.get()
                 || boss_graph_->get_state() != BOSS::State::FAST
                 || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
@@ -766,7 +766,7 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
     switch (get_state()) {
         case BOSS::State::STAT: {
-            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector_mask));
+            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector_mask));
             break;
         }
         case BOSS::State::FAST: {

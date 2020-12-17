@@ -111,15 +111,17 @@ bool ColumnMajor::load(std::istream &in) {
 void ColumnMajor::serialize(std::ostream &out) const {
     serialize_number(out, columns_->size());
 
-    for (auto &column : *columns_) {
+    for (const auto &column : *columns_) {
         assert(column.get());
         // conversion pilfers the converted object, so we place the result back into
         // #column, to ensure the ColumnMajor instance is valid after serialization
         // TODO: better to serialize in the original format and add a loader that is able
         // to infer the format from the binary data
-        const_cast<std::unique_ptr<bit_vector> &>(column)
-                = std::make_unique<bit_vector_sd>(column->convert_to<bit_vector_sd>());
-        column->serialize(out);
+        if (const auto *sd_ptr = dynamic_cast<const bit_vector_sd *>(column.get())) {
+            sd_ptr->serialize(out);
+        } else {
+            column->copy_to<bit_vector_sd>().serialize(out);
+        }
     }
 }
 

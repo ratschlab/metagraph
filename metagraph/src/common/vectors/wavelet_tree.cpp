@@ -206,6 +206,7 @@ template <class t_wt_sdsl>
 void wavelet_tree_sdsl_fast<t_wt_sdsl>::clear() {
     int_vector_ = sdsl::int_vector<>(0, 0, int_vector_.width());
     wwt_ = t_wt_sdsl();
+    count_.assign(count_.size(), 0);
 }
 
 
@@ -512,8 +513,8 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
     template class wt; \
     template wt wavelet_tree::convert_to<wt>(); \
 
-INSTANTIATE_WT(wavelet_tree_sdsl_fast<sdsl::wt_huff<>>);
-
 INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<>>);
+
+INSTANTIATE_WT(wavelet_tree_sdsl<sdsl::wt_huff<sdsl::rrr_vector<63>>>);
 
 INSTANTIATE_WT(partite_vector<bit_vector_stat>);
