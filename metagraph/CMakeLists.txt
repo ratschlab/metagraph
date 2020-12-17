@@ -252,6 +252,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
+  external-libraries/folly
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -283,6 +284,11 @@ add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
 
+add_library(fbvector STATIC
+  external-libraries/folly/folly/ScopeGuard.cpp
+  external-libraries/folly/folly/lang/Assume.cpp
+)
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
 )
@@ -290,48 +296,6 @@ set(BRWT_INCLUDE_TESTS FALSE)
 add_subdirectory(
   external-libraries/binrel_wt
 )
-
-set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
-find_library(FOLLY_LIBRARIES
-  NAMES folly
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-if(FOLLY_LIBRARIES)
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-  set(METALIBS ${METALIBS}
-    ${FOLLY_LIBRARIES}
-    -ldl
-    -lboost_regex
-    -lboost_filesystem
-    -lboost_program_options
-    -lcrypto
-  )
-  if(NOT BUILD_STATIC)
-    set(METALIBS ${METALIBS}
-      -lglog
-      -lgflags
-      -ldouble-conversion
-    )
-  endif()
-  find_library(LIBERTY
-    NAMES iberty
-    HINTS
-    ENV LD_LIBRARY_PATH
-    PATHS
-      $ENV{HOME}/.linuxbrew/lib
-  )
-  if(LIBERTY)
-    set(METALIBS ${METALIBS} ${LIBERTY})
-  endif()
-else()
-  message(WARNING "Folly (Facebook Open Source Library) not found."
-  " Install folly to reduce memory taken up by the Row-Compressed annotator"
-  " and enable other optimizations.")
-endif()
 
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
@@ -368,11 +332,13 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
   -lsdsl
+  -lglog
   brwt
   jsoncpp_lib
   progress_bar
   fmt::fmt
   mersenne_twister
+  fbvector
   spdlog::spdlog
 )
 if(APPLE)
