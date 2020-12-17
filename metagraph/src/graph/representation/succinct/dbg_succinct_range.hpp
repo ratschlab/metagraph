@@ -195,6 +195,10 @@ class DBGSuccinctRange : public DeBruijnGraph {
 
     virtual std::string get_node_sequence(node_index node) const override;
 
+    virtual size_t get_node_length(node_index node) const override {
+        return node ? get_k() - get_offset(node) : 0;
+    }
+
     virtual void add_sequence(std::string_view, const std::function<void(node_index)> &) override {
         throw std::runtime_error("Not implemented");
     }

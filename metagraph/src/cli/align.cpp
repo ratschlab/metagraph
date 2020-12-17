@@ -157,7 +157,7 @@ void map_sequences_in_file(const std::string &file,
         graph.map_to_nodes(read_stream->seq.s,
             [&](auto node) {
                 if (range_graph) {
-                    size_t match_length = graph.get_k() - range_graph->get_offset(node);
+                    size_t match_length = graph.get_node_length(node);
                     if (match_length < config.alignment_length)
                         node = 0;
                 }
@@ -208,10 +208,8 @@ void map_sequences_in_file(const std::string &file,
             assert(i + config.alignment_length <= read_stream->seq.l);
             std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-            size_t offset = range_graph && graphindices[i]
-                ? range_graph->get_offset(graphindices[i])
-                : 0;
-            if (!offset) {
+            size_t match_length = graph.get_node_length(graphindices[i]);
+            if (match_length == graph.get_k()) {
                 *out << subseq << ": " << graphindices[i] << "\n";
             } else {
                 range_graph->call_nodes_in_range(graphindices[i], [&](auto node) {

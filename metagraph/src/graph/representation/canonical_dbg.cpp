@@ -73,15 +73,10 @@ void CanonicalDBG
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
     auto first_not_found = graph_.is_canonical_mode()
         ? path.end()
-        : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
-
-    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph_);
-    if (range_graph) {
-        first_not_found = std::find_if(path.begin(), first_not_found,
-                                       [&](node_index node) -> bool {
-                                           return range_graph->get_offset(node);
-                                       });
-    }
+        : std::find_if(path.begin(), path.end(),
+                       [&](node_index node) {
+                           return graph_.get_node_length(node) < graph_.get_k();
+                       });
 
     for (auto jt = path.begin(); jt != first_not_found; ++jt) {
         if (terminate())
@@ -100,13 +95,10 @@ void CanonicalDBG
     reverse_complement_seq_path(graph_, rev_seq, rev_path);
     std::reverse(rev_path.begin(), rev_path.end());
 
-    assert(range_graph || rev_path.size() + start == path.size());
-    if (range_graph) {
-        if (path.size() > rev_path.size() + start) {
-            rev_path.resize(path.size() - start);
-        } else if (path.size() < rev_path.size() + start) {
-            path.resize(rev_path.size() + start);
-        }
+    if (path.size() > rev_path.size() + start) {
+        rev_path.resize(path.size() - start);
+    } else if (path.size() < rev_path.size() + start) {
+        path.resize(rev_path.size() + start);
     }
 
     assert(rev_path.size() + start == path.size());
@@ -118,12 +110,12 @@ void CanonicalDBG
         if (terminate())
             return;
 
-        if (range_graph && *it && *jt) {
-            size_t fwd_offset = range_graph->get_offset(*jt);
-            size_t rev_offset = range_graph->get_offset(*it);
-            if (fwd_offset < rev_offset) {
+        if (*it && *jt) {
+            size_t fwd_length = graph_.get_node_length(*jt);
+            size_t rev_length = graph_.get_node_length(*it);
+            if (fwd_length > rev_length) {
                 *it = DeBruijnGraph::npos;
-            } else if (fwd_offset > rev_offset) {
+            } else if (fwd_length < rev_length) {
                 *jt = DeBruijnGraph::npos;
             }
         }

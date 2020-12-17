@@ -460,11 +460,8 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph());
 
     if (!offset_) {
-        assert(!range_graph
-            || std::all_of(nodes_.begin(), nodes_.end(), [&](auto node) {
-                               return !range_graph->get_offset(
-                                   canonical ? canonical->get_base_node(node) : node
-                               );
+        assert(std::all_of(nodes_.begin(), nodes_.end(), [&](auto node) {
+                               return graph.get_node_length(node) == graph.get_k();
                            }));
         reverse_complement_seq_path(graph, sequence_, nodes_);
 
@@ -484,8 +481,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             return;
         }
 
-        assert(range_graph->get_offset(
-                canonical ? canonical->get_base_node(nodes_[0]) : nodes_[0]) == offset_);
+        assert(graph.get_k() - graph.get_node_sequence(nodes_[0]) == offset_);
 
     } else {
         assert(nodes_.size() == 1);

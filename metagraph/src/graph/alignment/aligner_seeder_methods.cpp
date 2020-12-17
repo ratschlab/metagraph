@@ -1,9 +1,5 @@
 #include "aligner_methods.hpp"
 
-#include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/succinct/dbg_succinct_range.hpp"
-
 
 namespace mtg {
 namespace graph {
@@ -23,41 +19,28 @@ void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientati
     num_matching_kmers_ = query_nodes_.size()
         - std::count(query_nodes_.begin(), query_nodes_.end(), NodeType());
 
-    offsets_.assign(query_nodes_.size(), 0);
-    const auto *range_graph = dynamic_cast<const DBGSuccinctRange*>(&graph_);
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph_);
+    offsets_.resize(query_nodes_.size());
 
-    if (!range_graph && canonical)
-        range_graph = dynamic_cast<const DBGSuccinctRange*>(&canonical->get_graph());
+    for (size_t i = 0; i < query_nodes_.size(); ++i) {
+        if (!query_nodes_[i]) {
+            offsets_[i] = 0;
+        } else {
+            size_t node_length = graph_.get_node_length(query_nodes_[i]);
+            assert(i + node_length <= query_.size());
 
-    if (range_graph) {
-        for (size_t i = 0; i < query_nodes_.size(); ++i) {
-            NodeType node = query_nodes_[i];
-            size_t offset = node ? range_graph->get_offset(node && canonical
-                ? canonical->get_base_node(node)
-                : node
-            ) : 0;
+            size_t offset = graph_.get_k() - node_length;
+            assert(graph_.get_node_sequence(node).substr(offset)
+                == std::string(query_.data() + i, query_.data() + i + node_length));
 
-            if (!node) {
-                offsets_[i] = 0;
+            if (offset)
+                --num_matching_kmers_;
 
+            if (node_length >= config_.min_seed_length) {
+                offsets_[i] = offset;
             } else {
-                assert(i + graph_.get_k() - offset <= query_.size());
-                assert(graph_.get_node_sequence(node).substr(offset)
-                    == std::string(query_.data() + i,
-                                   query_.data() + i + (graph_.get_k() - offset)));
-                if (offset)
-                    --num_matching_kmers_;
-
-                if (graph_.get_k() - offset >= config_.min_seed_length) {
-                    offsets_[i] = offset;
-                } else {
-                    query_nodes_[i] = 0;
-                    offsets_[i] = 0;
-                }
+                query_nodes_[i] = 0;
+                offsets_[i] = 0;
             }
-
-            assert(!query_nodes_[i] || i + graph_.get_k() - offsets_[i] <= query_.size());
         }
     }
 
