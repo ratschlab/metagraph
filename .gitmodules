@@ -1,8 +1,3 @@
-[submodule "metagraph/external-libraries/libmaus2"]
-	path = metagraph/external-libraries/libmaus2
-	url = https://github.com/akahles/libmaus2.git
-	ignore = untracked
-	branch = shrunk
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
 	url = https://github.com/hmusta/sdsl-lite.git
