@@ -364,7 +364,7 @@ std::vector<std::string> split(size_t k,
 
     assert(checkpoint->checkpoint() >= 2);
     if (checkpoint->checkpoint() > 2) {
-        logger->info("Skipping splitting k-mers into chunks");
+        logger->trace("Skipping splitting k-mers into chunks");
         return names;
     }
 
@@ -372,7 +372,7 @@ std::vector<std::string> split(size_t k,
         sinks.emplace_back(names[i], ENCODER_BUFFER_SIZE);
     }
 
-    logger->info("Splitting k-mers into {} chunks...", chunk_count);
+    logger->trace("Splitting k-mers into {} chunks...", chunk_count);
     size_t num_kmers = 0;
     for (auto &it = kmers.begin(); it != kmers.end(); ++it) {
         const T_REAL &kmer = *it;
@@ -416,7 +416,7 @@ concatenate_chunks(const std::filesystem::path &dir,
 
     assert(checkpoint->checkpoint() >= 4);
     if (checkpoint->checkpoint() > 4) {
-        logger->info("Skipping concatenating chunks...");
+        logger->trace("Skipping concatenating chunks...");
         return { real_split_by_W, dummy_sink_name };
     }
 
@@ -484,7 +484,7 @@ generate_dummy_1_kmers(size_t k,
 
     assert(checkpoint->checkpoint() >= 3);
     if (checkpoint->checkpoint() > 3) {
-        logger->info("Skipping generating dummy-1 source k-mers and dummy sink kmers");
+        logger->trace("Skipping generating dummy-1 source k-mers and dummy sink kmers");
         return { dummy_sink_names, real_F_W };
     }
 
@@ -493,7 +493,7 @@ generate_dummy_1_kmers(size_t k,
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
 
-    logger->info("Generating dummy-1 source k-mers and dummy sink k-mers...");
+    logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
 
     static constexpr size_t L = KMER::kBitsPerChar;
     KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
@@ -578,7 +578,7 @@ void add_reverse_complements(size_t k,
                              BuildCheckpoint *checkpoint) {
     assert(checkpoint->checkpoint() >= 1);
     if (checkpoint->checkpoint() > 2) {
-        logger->info("Skipping generating reverse complements");
+        logger->trace("Skipping generating reverse complements");
         return;
     }
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
@@ -586,7 +586,7 @@ void add_reverse_complements(size_t k,
     std::unique_ptr<common::SortedSetDisk<T_INT_REAL>> rc_set;
     std::vector<std::string> to_merge = { dir/"original" };
     if (checkpoint->checkpoint() == 2) {
-        logger->info(
+        logger->trace(
                 "Continuing from checkpoint phase 2. Looking for 'original' and "
                 "'rc/chunk_*' in {}",
                 checkpoint->kmer_dir());
@@ -621,7 +621,7 @@ void add_reverse_complements(size_t k,
         common::EliasFanoEncoderBuffered<T_INT_REAL> original(dir/"original", ENCODER_BUFFER_SIZE);
         Vector<T_INT_REAL> buffer;
         buffer.reserve(10'000);
-        logger->info("Adding reverse complements...");
+        logger->trace("Adding reverse complements...");
         for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
             const T_REAL &kmer = *it;
             const T_REAL &reverse
@@ -703,7 +703,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     size_t num_threads = kmer_collector.num_threads();
 
     if (stopped_at_phase_one) {
-        logger->info(
+        logger->trace(
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
         std::vector<std::string> file_names;
@@ -781,7 +781,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
 
     if (checkpoint->checkpoint() < 6) {
         // generate dummy k-mers of prefix length 1..k
-        logger->info("Starting generating dummy-1..{} source k-mers...", k);
+        logger->trace("Starting generating dummy-1..{} source k-mers...", k);
         for (size_t dummy_pref_len = 1; dummy_pref_len < k; ++dummy_pref_len) {
 
             std::vector<Encoder<KMER_INT>> next_chunks;
@@ -818,7 +818,7 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
 
         checkpoint->set_checkpoint(6);
     } else {
-        logger->info("Skipping generating dummy-1..{} source k-mers", k);
+        logger->trace("Skipping generating dummy-1..{} source k-mers", k);
     }
 
     // at this point, we have the original k-mers in real_split_by_W, the dummy-x k-mers
