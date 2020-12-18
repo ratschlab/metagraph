@@ -41,7 +41,7 @@ jobs:
         cd htslib-1.9
         make -j 2
         sudo make install
-        sudo apt-get install jemalloc libboost-all-dev libgoogle-perftools-dev
+        sudo apt-get install libjemalloc-dev libboost-all-dev libgoogle-perftools-dev
 
     - name: install dependencies for integration tests
       run: |
