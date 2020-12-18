@@ -69,7 +69,7 @@ void add_dummy_sink_kmers(size_t k, const Vector<T_REAL> &kmers, Vector<KMER> *d
         std::vector<TAlphabet> zeros(k + 1, 0);
         zeros[k - 1] = c;
         it[c] = std::lower_bound(kmers.data(), kmers.data() + kmers.size(),
-                                 KMER_REAL(zeros, k + 1), // the AA...c->A k-mer
+                                 KMER_REAL(zeros), // the AA...c->A k-mer
                                  [](const T_REAL &a, const KMER_REAL &b) -> bool {
                                      return get_first(a) < b;
                                  }) - kmers.data();
@@ -323,7 +323,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
 
         // merge #kmers and #dummy_kmers into #kmers_out
         size_t di = 0;
-        for (const auto& kmer : kmers) {
+        for (const auto &kmer : kmers) {
             KMER lifted(transform<KMER>(get_first(kmer), k+1) + kmer_delta);
             if constexpr(utils::is_pair_v<T>) {
                 while (di < dummy_kmers.size() && lifted > dummy_kmers[di]) {
