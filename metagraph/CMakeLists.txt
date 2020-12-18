@@ -252,6 +252,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
+  external-libraries/gfapy/gfapy
   ${PROJECT_SOURCE_DIR}/src
 )
 

@@ -62,3 +62,6 @@
 [submodule "metagraph/external-libraries/Simple-Web-Server"]
 	path = metagraph/external-libraries/Simple-Web-Server
 	url = https://gitlab.com/eidheim/Simple-Web-Server.git
+[submodule "metagraph/external-libraries/gfapy"]
+	path = metagraph/external-libraries/gfapy
+	url = https://github.com/ggonnella/gfapy.git
