@@ -3,10 +3,6 @@ import subprocess
 from tempfile import TemporaryDirectory
 import os
 
-import sys
-sys.path.append('../external-libraries/gfapy')
-import gfapy
-
 
 """Test graph assemble"""
 
@@ -58,13 +54,18 @@ class TestAnnotate(unittest.TestCase):
 
         with open(self.tempdir.name + '/assembled' + graph_file_extension["gfa"], 'r') as file:
             data = file.read()
+        gfa_lines = data.rstrip("\n").split("\n")
+        fields_records = {}
+        for line in gfa_lines:
+            if line[0] in fields_records:
+                fields_records[line[0]] += 1
+            else:
+                fields_records[line[0]] = 1
 
-        # vlevel=3 does a validation when reading at the highest level.
-        gfa_obj = gfapy.Gfa(data.rstrip("\n"), vlevel=3, version='gfa1')
-        self.assertEqual(len(gfa_obj.lines), 2887)
-        self.assertEqual(len(gfa_obj._records["S"]), 1252)
-        self.assertEqual(len(gfa_obj._records["L"]), 1634)
-        self.assertEqual(len(gfa_obj._records["P"]), 0)
+        self.assertEqual(len(gfa_lines), 2887)
+        self.assertEqual(fields_records['H'], 1)
+        self.assertEqual(fields_records['S'], 1252)
+        self.assertEqual(fields_records['L'], 1634)
 
     def test_assemble_notcompacted_gfa(self):
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
@@ -100,10 +101,15 @@ class TestAnnotate(unittest.TestCase):
 
         with open(self.tempdir.name + '/assembled' + graph_file_extension["gfa"], 'r') as file:
             data = file.read()
+        gfa_lines = data.rstrip("\n").split("\n")
+        fields_records = {}
+        for line in gfa_lines:
+            if line[0] in fields_records:
+                fields_records[line[0]] += 1
+            else:
+                fields_records[line[0]] = 1
 
-        # vlevel=3 does a validation when reading at the highest level.
-        gfa_obj = gfapy.Gfa(data.rstrip("\n"), vlevel=3, version='gfa1')
-        self.assertEqual(len(gfa_obj.lines), 183551)
-        self.assertEqual(len(gfa_obj._records["S"]), 91584)
-        self.assertEqual(len(gfa_obj._records["L"]), 91966)
-        self.assertEqual(len(gfa_obj._records["P"]), 0)
+        self.assertEqual(len(gfa_lines), 183551)
+        self.assertEqual(fields_records['H'], 1)
+        self.assertEqual(fields_records['S'], 91584)
+        self.assertEqual(fields_records['L'], 91966)
