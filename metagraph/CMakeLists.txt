@@ -290,24 +290,29 @@ add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
 
-find_library(FOLLY_LIBRARIES
-  NAMES jemalloc
+find_package(Boost)
+find_library(MALLOCS
+  NAMES jemalloc tcmalloc
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
     $ENV{HOME}/.linuxbrew/lib
 )
-if(FOLLY_LIBRARIES)
+
+if(MALLOCS AND Boost_FOUND)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
   add_library(fbvector STATIC
     external-libraries/folly/folly/ScopeGuard.cpp
+    external-libraries/folly/folly/memory/detail/MallocImpl.cpp
   )
   target_include_directories(fbvector SYSTEM PRIVATE
+    ${Boost_INCLUDE_DIRS}
     external-libraries/folly
     ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE
     -ljemalloc
+    -ltcmalloc
   )
   set(METALIBS ${METALIBS} fbvector)
 else()

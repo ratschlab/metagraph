@@ -41,7 +41,7 @@ jobs:
         cd htslib-1.9
         make -j 2
         sudo make install
-        sudo apt-get install jemalloc
+        sudo apt-get install jemalloc libboost-all-dev libgoogle-perftools-dev
 
     - name: install dependencies for integration tests
       run: |
@@ -98,7 +98,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp
+      run: brew install htslib libomp gperftools boost
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
