@@ -14,21 +14,23 @@ gfa_tests = {
     'compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '--compacted',
-        'gfa_lines': 2887,
+        'gfa_lines': 2987,
         'field_records': {
             'H':1,
             'S':1252,
             'L':1634,
+            'P':100,
         }
     },
     'not_compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '',
-        'gfa_lines': 183551,
+        'gfa_lines': 183651,
         'field_records': {
             'H':1,
             'S':91584,
             'L':91966,
+            'P':100,
         }
     }
 }
@@ -88,10 +90,11 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        assemble_command = '{exe} assemble -v {graph_input} \
+        assemble_command = '{exe} assemble -v {graph_input} -i {fasta_query} \
                     -o {output_gfa} --unitigs --to-gfa --annotator {anno_input} {gfa_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
+            fasta_query=gfa_tests[gfa_test]['fasta_path'],
             output_gfa=self.tempdir.name + '/assembled',
             anno_input=self.tempdir.name + '/annotation.column.annodbg',
             gfa_flag=gfa_tests[gfa_test]['flag']
