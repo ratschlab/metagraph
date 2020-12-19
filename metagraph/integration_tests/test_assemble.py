@@ -10,9 +10,9 @@ import os
 METAGRAPH = './metagraph'
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
-# Results for metagraph->gfa conversion of TEST_DATA_DIR + '/transcripts_100.fa'.
 gfa_tests = {
     'compacted': {
+        'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '--compacted',
         'gfa_lines': 2887,
         'field_records': {
@@ -22,6 +22,7 @@ gfa_tests = {
         }
     },
     'not_compacted': {
+        'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '',
         'gfa_lines': 183551,
         'field_records': {
@@ -72,7 +73,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             outfile=self.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+            input=gfa_tests[gfa_test]['fasta_path']
         )
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -82,7 +83,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph.dbg',
             outfile=self.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+            input=gfa_tests[gfa_test]['fasta_path']
         )
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -120,7 +121,7 @@ class TestAnnotate(unittest.TestCase):
             num_threads=NUM_THREADS,
             k=k,
             outfile=self.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+            input=gfa_tests[gfa_test]['fasta_path']
         )
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -130,7 +131,7 @@ class TestAnnotate(unittest.TestCase):
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph.dbg',
             outfile=self.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
+            input=gfa_tests[gfa_test]['fasta_path']
         )
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
