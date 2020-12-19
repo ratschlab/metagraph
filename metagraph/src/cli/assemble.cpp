@@ -229,10 +229,10 @@ int assemble(Config *config) {
             }
 
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) shared(gfa_file)
-            for (size_t i = 1; i <= seq_queries.size(); ++i) {
+            for (size_t i = 0; i < seq_queries.size(); ++i) {
                 std::string path_string_gfa = sequence_to_gfa_path(
                         seq_queries[i],
-                        i,
+                        i + 1,
                         graph,
                         is_unitig_end_node,
                         config
