@@ -123,29 +123,16 @@ std::string sequence_to_gfa_path(const std::string &seq,
     std::string nodes_on_path;
     std::string cigars_on_path;
     size_t overlap = graph->get_k() - 1;
-    size_t len_current_unitig = 0;
-    if (config->output_compacted) {
-        nodes_on_path += fmt::format("{}+,", path_nodes[0]);
-        for (size_t i = 1; i < path_nodes.size(); ++i) {
-            if (!is_unitig_end_node.count(path_nodes[i])) {
-                len_current_unitig++;
-                continue;
-            }
-            nodes_on_path += fmt::format("{}+,", path_nodes[i]);
-            if (len_current_unitig) {
-                cigars_on_path += fmt::format("{}M{}I,", overlap, len_current_unitig);
-            } else {
-                cigars_on_path += fmt::format("{}M,", overlap);
-            }
-            len_current_unitig = 0;
+
+    nodes_on_path += fmt::format("{}+,", path_nodes[0]);
+    for (size_t i = 1; i < path_nodes.size(); ++i) {
+        if (config->output_compacted && !is_unitig_end_node.count(path_nodes[i])) {
+            continue;
         }
-    } else {
-        nodes_on_path += fmt::format("{}+,", path_nodes[0]);
-        for (size_t i = 1; i < path_nodes.size(); ++i) {
-            nodes_on_path += fmt::format("{}+,", path_nodes[i]);
-            cigars_on_path += fmt::format("{}M,", overlap);
-        }
+        nodes_on_path += fmt::format("{}+,", path_nodes[i]);
+        cigars_on_path += fmt::format("{}M,", overlap);
     }
+
     //   Remove right trailing comma.
     nodes_on_path.pop_back();
     if (cigars_on_path.size()) {
@@ -242,7 +229,7 @@ int assemble(Config *config) {
             }
 
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) shared(gfa_file)
-            for (size_t i = 0; i < seq_queries.size(); ++i) {
+            for (size_t i = 1; i <= seq_queries.size(); ++i) {
                 std::string path_string_gfa = sequence_to_gfa_path(
                         seq_queries[i],
                         i,
