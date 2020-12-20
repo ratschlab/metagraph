@@ -701,12 +701,11 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = checkpoint->kmer_dir();
     size_t num_threads = kmer_collector.num_threads();
-
+    std::vector<std::string> file_names;
     if (stopped_at_phase_one) {
         logger->trace(
                 "Continuing from checkpoint 1. Looking for chunk_* files in {}",
                 checkpoint->kmer_dir());
-        std::vector<std::string> file_names;
         namespace fs = std::filesystem;
         std::vector<fs::path> entries;
         if (fs::canonical(checkpoint->kmer_dir()).filename().string().rfind("temp_kmers") == 0) {
@@ -741,9 +740,8 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
             std::exit(1);
         }
         kmers.reset();
-        async_worker.enqueue([&kmers, file_names = std::move(file_names)]() {
+        async_worker.enqueue([&kmers, file_names]() {
             auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT_REAL> &>(kmers);
-            kmers_int.reset();
             std::function<void(const T_INT_REAL &)> on_new_item
                     = [&kmers_int](const T_INT_REAL &v) { kmers_int.push(v); };
             common::merge_files(file_names, on_new_item, false);
