@@ -587,7 +587,7 @@ void add_reverse_complements(size_t k,
     std::vector<std::string> to_merge = { dir/"original" };
     if (checkpoint->checkpoint() == 2) {
         logger->trace(
-                "Continuing from checkpoint phase 2. Looking for 'original' and "
+                "Continuing from checkpoint 2. Looking for 'original' and "
                 "'rc/chunk_*' in {}",
                 checkpoint->kmer_dir());
         if (!std::filesystem::exists(checkpoint->kmer_dir()/"original")) {
@@ -742,7 +742,8 @@ void recover_dummy_nodes(const KmerCollector &kmer_collector,
         }
         kmers.reset();
         async_worker.enqueue([&kmers, file_names = std::move(file_names)]() {
-          auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT_REAL> &>(kmers);
+            auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT_REAL> &>(kmers);
+            kmers_int.reset();
             std::function<void(const T_INT_REAL &)> on_new_item
                     = [&kmers_int](const T_INT_REAL &v) { kmers_int.push(v); };
             common::merge_files(file_names, on_new_item, false);
