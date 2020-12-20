@@ -37,7 +37,11 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
 
     if (!is_merging_) {
         is_merging_ = true;
-        flush(); // write any residual data left
+        // write any residual data left
+        if (!data_.empty()) {
+            sort_and_dedupe();
+            dump_to_file(true /* is_done */);
+        }
         if (free_buffer) {
             Vector<T>().swap(data_); // free up the (usually very large) buffer
         }
@@ -52,6 +56,8 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
 
 template <typename T>
 void SortedSetDiskBase<T>::flush() {
+    std::unique_lock<std::mutex> exclusive_lock(mutex_);
+    std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     if (!data_.empty()) {
         sort_and_dedupe();
         dump_to_file(true /* is_done */);
@@ -68,6 +74,7 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
         sort_and_dedupe();
         dump_to_file(true /* is_done */);
     }
+    async_merge_l1_.join();
     return get_file_names();
 }
 
