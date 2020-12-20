@@ -353,13 +353,13 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
 
-        construct_command = construct_command.replace('--phase 1', '--phase 2')
-        print(f'Executing phase2: {construct_command}')
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-        self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
+        # construct_command = construct_command.replace('--phase 1', '--phase 2')
+        # print(f'Executing phase2: {construct_command}')
+        # res = subprocess.run([construct_command], shell=True)
+        # self.assertEqual(res.returncode, 0)
+        # self.assertTrue(os.path.isfile(self.tempdir.name + '/graph.checkpoint'))
 
-        construct_command = construct_command.replace('--phase 2', '')
+        construct_command = construct_command.replace('--phase 1', '')
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
