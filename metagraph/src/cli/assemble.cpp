@@ -114,7 +114,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
                                  const tsl::ordered_set<uint64_t> &is_unitig_end_node,
                                  const Config *config) {
     std::vector<uint64_t> path_nodes;
-    graph->map_to_nodes(seq, [&](uint64_t node) {
+    graph->map_to_nodes_sequentially(seq, [&](uint64_t node) {
         path_nodes.push_back(node);
     });
 
