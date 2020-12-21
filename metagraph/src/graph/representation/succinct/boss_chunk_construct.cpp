@@ -622,11 +622,14 @@ void add_reverse_complements(size_t k,
         Vector<T_INT_REAL> buffer;
         buffer.reserve(10'000);
         logger->trace("Adding reverse complements...");
+        uint64_t orig_count = 0, rc_count = 0;
         for (auto &it = kmers->begin(); it != kmers->end(); ++it) {
+            orig_count++;
             const T_REAL &kmer = *it;
             const T_REAL &reverse
                     = rev_comp(k + 1, *it, KmerExtractor2Bit().complement_code());
             if (get_first(kmer) != get_first(reverse)) {
+                rc_count++;
                 buffer.push_back(reinterpret_cast<const T_INT_REAL &>(reverse));
                 if (buffer.size() == buffer.capacity()) {
                     rc_set->insert(buffer.begin(), buffer.end());
@@ -646,6 +649,7 @@ void add_reverse_complements(size_t k,
                 }
             }
         }
+        logger->trace("Added {} orig and {} rc", orig_count, rc_count);
         rc_set->insert(buffer.begin(), buffer.end());
         std::vector<std::string> to_insert = rc_set->files_to_merge();
         to_merge.insert(to_merge.end(), to_insert.begin(), to_insert.end());
@@ -657,12 +661,15 @@ void add_reverse_complements(size_t k,
     // start merging #original with #reverse_complements into #kmers
     kmers->reset();
     async_worker.enqueue([to_merge = std::move(to_merge), kmers]() {
+        uint64_t total_kmers = 0;
         common::MergeDecoder<T_INT_REAL> chunked_kmers(to_merge, false);
         auto &kmers_int = reinterpret_cast<ChunkedWaitQueue<T_INT_REAL> &>(*kmers);
         while (!chunked_kmers.empty()) {
             kmers_int.push(chunked_kmers.pop());
+            total_kmers++;
         }
         kmers->shutdown();
+        logger->trace("Merge {} files with {} k-mers", to_merge.size(), total_kmers);
     });
 }
 
