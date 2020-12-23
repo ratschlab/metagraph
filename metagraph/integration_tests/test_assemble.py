@@ -90,7 +90,7 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        assemble_command = '{exe} assemble -v {graph_input} -i {fasta_query} \
+        assemble_command = '{exe} assemble {graph_input} -i {fasta_query} \
                     -o {output_gfa} --unitigs --to-gfa --annotator {anno_input} {gfa_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
@@ -139,7 +139,7 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        assemble_command = '{exe} assemble -v {graph_input} \
+        assemble_command = '{exe} assemble {graph_input} \
                     -o {output_gfa} --unitigs --to-gfa --annotator {anno_input} {gfa_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
