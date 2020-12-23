@@ -118,20 +118,30 @@ std::string sequence_to_gfa_path(const std::string &seq,
         path_nodes.push_back(node);
     });
 
-    //    The first node in the path must be a unitig end node.
-    assert(is_unitig_end_node.count(path_nodes[0]));
     std::string nodes_on_path;
     std::string cigars_on_path;
     size_t overlap = graph->get_k() - 1;
 
-    nodes_on_path += fmt::format("{}+,", path_nodes[0]);
-    for (size_t i = 1; i < path_nodes.size(); ++i) {
+    for (size_t i = 0; i < path_nodes.size() - 1; ++i) {
         if (config->output_compacted && !is_unitig_end_node.count(path_nodes[i])) {
             continue;
         }
         nodes_on_path += fmt::format("{}+,", path_nodes[i]);
         cigars_on_path += fmt::format("{}M,", overlap);
     }
+    uint64_t last_node_to_print = path_nodes.back();
+    // We need to print the id of the last unitig even in the case that
+    // this unitig is not completely covered by the query sequence.
+    while(config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
+        uint64_t unique_next_node;
+        graph -> adjacent_outgoing_nodes(
+            last_node_to_print, [&](uint64_t node) {
+                unique_next_node = node;
+            }
+        );
+        last_node_to_print = unique_next_node;
+    }
+    nodes_on_path += fmt::format("{}+,", last_node_to_print);
 
     //   Remove right trailing comma.
     nodes_on_path.pop_back();
@@ -210,7 +220,9 @@ int assemble(Config *config) {
                     });
                 }
                 std::lock_guard<std::mutex> lock(str_mutex);
-                is_unitig_end_node.insert(path.back());
+                if (config->output_compacted) {
+                    is_unitig_end_node.insert(path.back());
+                }
                 gfa_file << ostr.str();
             },
             get_num_threads(),
