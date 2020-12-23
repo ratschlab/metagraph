@@ -120,6 +120,18 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual(len(gfa_lines), gfa_tests[gfa_test]['gfa_lines'])
         self.assertEqual(field_records, gfa_tests[gfa_test]['field_records'])
 
+        # Ensure valid links.
+        for line in gfa_lines:
+            if line[0] != 'L':
+                continue
+            self.assertEqual(line.split('\t')[2], "+")
+            self.assertEqual(line.split('\t')[4], "+")
+            self.assertEqual(line.split('\t')[5], str(k-1) + "M")
+            cur_node = line.split('\t')[1]
+            nxt_node = line.split('\t')[3]
+            self.assertEqual(sequences[cur_node][-(k-1):], sequences[nxt_node][:(k-1)])
+
+        # Ensure valid paths.
         for line in gfa_lines:
             if line[0] != 'P':
                 continue
