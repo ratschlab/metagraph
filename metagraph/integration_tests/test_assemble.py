@@ -70,10 +70,12 @@ class TestAnnotate(unittest.TestCase):
 
     @parameterized.expand(GFAs)
     def test_assemble_gfa(self, gfa_test):
+        k = 20
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --canonical -k 20 -o {outfile} {input}'.format(
+                --canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
+            k=k,
             outfile=self.tempdir.name + '/graph',
             input=gfa_tests[gfa_test]['fasta_path']
         )
@@ -106,14 +108,26 @@ class TestAnnotate(unittest.TestCase):
             data = file.read()
         gfa_lines = data.rstrip("\n").split("\n")
         field_records = {}
+        sequences = {}
         for line in gfa_lines:
             if line[0] in field_records:
                 field_records[line[0]] += 1
             else:
                 field_records[line[0]] = 1
+            if line[0] == 'S':
+                sequences[line.split('\t')[1]] = line.split('\t')[2]
 
         self.assertEqual(len(gfa_lines), gfa_tests[gfa_test]['gfa_lines'])
         self.assertEqual(field_records, gfa_tests[gfa_test]['field_records'])
+
+        for line in gfa_lines:
+            if line[0] != 'P':
+                continue
+            path_nodes = line.split('\t')[2].split(',')
+            for node_idx in range(len(path_nodes) - 1):
+                cur_node = path_nodes[node_idx].rstrip('+')
+                nxt_node = path_nodes[node_idx + 1].rstrip('+')
+                self.assertEqual(sequences[cur_node][-(k-1):], sequences[nxt_node][:(k-1)])
 
     @parameterized.expand(GFAs)
     def test_round_robin_graph_size_via_gfa(self, gfa_test):
