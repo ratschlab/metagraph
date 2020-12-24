@@ -277,9 +277,9 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads) {
     if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
         // shortcut construction for Rainbow<> annotation
-        std::vector<uint64_t> row_indexes;
-        for (auto [row_in_full, i] : full_to_small) {
-            row_indexes.push_back(row_in_full);
+        std::vector<uint64_t> row_indexes(full_to_small.size());
+        for (size_t i = 0; i < full_to_small.size(); ++i) {
+            row_indexes[i] = full_to_small[i].first;
         }
 
         // get unique rows and set pointers to them in |row_indexes|
@@ -290,8 +290,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                                      " Reduce the query batch size.");
         }
 
-        // if the 0-th row is not empty, we must insert an empty unique row
-        // and reassign those indexes marked in |empty_rows|.
+        // insert one empty row for representing unmatched rows
         unique_rows.emplace_back();
         std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
         for (size_t i = 0; i < row_indexes.size(); ++i) {
