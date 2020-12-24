@@ -277,13 +277,9 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads) {
     if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
         // shortcut construction for Rainbow<> annotation
-        std::vector<bool> empty_rows(num_rows, true);
-        std::vector<uint64_t> row_indexes(num_rows, 0);
+        std::vector<uint64_t> row_indexes;
         for (auto [row_in_full, i] : full_to_small) {
-            assert(row_in_full < full_annotation.num_objects());
-            assert(i < num_rows);
-            row_indexes[i] = row_in_full;
-            empty_rows[i] = false;
+            row_indexes.push_back(row_in_full);
         }
 
         // get unique rows and set pointers to them in |row_indexes|
@@ -296,20 +292,16 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // if the 0-th row is not empty, we must insert an empty unique row
         // and reassign those indexes marked in |empty_rows|.
-        if (rb->get_row(0).size()) {
-            logger->trace("Add empty row");
-            unique_rows.emplace_back();
-            for (size_t i = 0; i < empty_rows.size(); ++i) {
-                if (empty_rows[i])
-                    row_indexes[i] = unique_rows.size() - 1;
-            }
+        unique_rows.emplace_back();
+        std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
+        for (size_t i = 0; i < row_indexes.size(); ++i) {
+            row_ids[full_to_small[i].second] = row_indexes[i];
         }
 
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::UniqueRowAnnotator>(
             std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
-                                              std::vector<uint32_t>(row_indexes.begin(),
-                                                                    row_indexes.end()),
+                                              std::move(row_ids),
                                               full_annotation.num_labels()),
             full_annotation.get_label_encoder()
         );
