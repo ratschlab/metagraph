@@ -300,7 +300,7 @@ find_library(MALLOCS
 
 if(MALLOCS AND Boost_FOUND)
   message(STATUS "Configuring Folly")
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC")
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
