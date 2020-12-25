@@ -36,14 +36,16 @@ jobs:
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
 
-        sudo add-apt-repository universe
-        sudo apt update
-        sudo apt install htslib
+        wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
+        tar -vxjf htslib-1.9.tar.bz2
+        cd htslib-1.9
+        make -j 2
+        sudo make install
 
     - name: install dependencies for integration tests
       run: |
         pip3 install parameterized
-        sudo apt install python3-venv
+        sudo apt-get install python3-venv
 
     - name: install sdsl-lite
       run: |
