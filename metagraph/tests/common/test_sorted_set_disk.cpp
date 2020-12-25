@@ -54,7 +54,7 @@ TYPED_TEST(SortedSetDiskTest, Empty) {
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_ssd");
     common::SortedSetDisk<TypeParam> under_test = create_sorted_set_disk<TypeParam>(tmp_dir);
     expect_equals(under_test, {});
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
@@ -64,7 +64,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneElement) {
     std::array<TypeParam, 1> elements = { 42 };
     under_test.insert(elements.begin(), elements.end());
     expect_equals(under_test, { 42 });
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
@@ -74,7 +74,7 @@ TYPED_TEST(SortedSetDiskTest, InsertOneRange) {
     std::array<TypeParam, 7> elements = { 43, 42, 42, 45, 44, 45, 43 };
     under_test.insert(elements.begin(), elements.end());
     expect_equals(under_test, { 42, 43, 44, 45 });
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -86,7 +86,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertMultipleFiles) {
     std::vector<TypeParam> elements = { 42, 43, 44, 45 };
     under_test.insert(elements.begin(), elements.end());
     expect_equals(under_test, elements);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -100,7 +100,7 @@ TYPED_TEST(SortedSetDiskTest, OneInsertLargerThanBuffer) {
     std::vector<TypeParam> elements = { 42, 43, 44, 45 };
     under_test.insert(elements.begin(), elements.end());
     expect_equals(under_test, elements);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -123,7 +123,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFiles) {
         }
         expect_equals(under_test, expected_result);
     }
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -145,7 +145,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesNonDistinct) {
                 = { TypeParam(0), TypeParam(1), TypeParam(2), TypeParam(3) };
         expect_equals(under_test, expected_result);
     }
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -170,7 +170,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreads) {
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -197,7 +197,7 @@ TYPED_TEST(SortedSetDiskTest, MultipleInsertMultipleFilesMultipleThreadsDupes) {
     }
     std::for_each(workers.begin(), workers.end(), [](std::thread &t) { t.join(); });
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -217,7 +217,7 @@ TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
         under_test.insert(elements.begin(), elements.end());
     }
     expect_equals(under_test, elements);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 TYPED_TEST(SortedSetDiskTest, InsertSortedOnly) {
@@ -232,7 +232,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedOnly) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -251,7 +251,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Overlap) {
         expected_result.insert(expected_result.end(), elements.begin(), elements.end());
     }
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -270,7 +270,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Distinct) {
     std::vector<TypeParam> expected_result(400);
     std::iota(expected_result.begin(), expected_result.end(), 0);
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 /**
@@ -288,7 +288,7 @@ TYPED_TEST(SortedSetDiskTest, InsertSortedAndInsert_Intertwined) {
     std::vector<TypeParam> expected_result(400);
     std::iota(expected_result.begin(), expected_result.end(), 0);
     expect_equals(under_test, expected_result);
-    std::filesystem::remove(tmp_dir);
+    std::filesystem::remove_all(tmp_dir);
 }
 
 } // namespace

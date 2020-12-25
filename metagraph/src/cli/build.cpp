@@ -11,6 +11,7 @@
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/representation/succinct/build_checkpoint.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
@@ -105,6 +106,9 @@ int build_graph(Config *config) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
 
+            bool checkpoint_enabled = !config->tmp_dir.empty() && suffixes.size() == 1;
+            boss::BuildCheckpoint checkpoint(checkpoint_enabled ? config->outfbase : "",
+                                             config->phase);
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
                 config->canonical,
@@ -116,12 +120,28 @@ int build_graph(Config *config) {
                                         : kmer::ContainerType::VECTOR_DISK,
                 config->tmp_dir.empty() ? std::filesystem::path(config->outfbase).remove_filename()
                                         : config->tmp_dir,
-                config->disk_cap_bytes
+                config->disk_cap_bytes,
+                checkpoint
             );
 
-            push_sequences(files, *config, timer, constructor.get());
+            if (checkpoint.checkpoint() == 0) {
+                push_sequences(files, *config, timer, constructor.get());
+            } else {
+                logger->info("Skipping parsing sequences from input file(s)");
+            }
 
+            // need to call build_chunk() even if checkpoint.phase()==1, because the
+            // SortedSetDisk needs to be flushed
             boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
+
+            if (checkpoint.phase() <= 2) { // phase 2 stops after generating dummy k-mers
+                assert(next_chunk == nullptr);
+                logger->info("Phase {} (checkpoint {}) successfully finished.",
+                             checkpoint.phase(),
+                             checkpoint.checkpoint_for_phase(checkpoint.phase()));
+                return 0;
+            }
+
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
                           next_chunk->size() - 1, timer.elapsed());
 
@@ -139,6 +159,7 @@ int build_graph(Config *config) {
             } else {
                 graph_data.reset(next_chunk);
             }
+            checkpoint.remove_checkpoint();
         }
 
         assert(graph_data);

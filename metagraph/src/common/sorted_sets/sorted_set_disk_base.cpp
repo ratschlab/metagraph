@@ -55,6 +55,17 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
 }
 
 template <typename T>
+void SortedSetDiskBase<T>::flush() {
+    std::unique_lock<std::mutex> exclusive_lock(mutex_);
+    std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
+    if (!data_.empty()) {
+        sort_and_dedupe();
+        dump_to_file(true /* is_done */);
+    }
+    async_merge_l1_.join();
+}
+
+template <typename T>
 std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
@@ -63,17 +74,20 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
         sort_and_dedupe();
         dump_to_file(true /* is_done */);
     }
+    async_merge_l1_.join();
     return get_file_names();
 }
 
 template <typename T>
-void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path) {
+void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path, bool remove_files) {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
-    // remove the files that have not been requested to merge
-    for (const auto &chunk_file : get_file_names()) {
-        std::filesystem::remove(chunk_file);
+    if (remove_files) {
+        // remove the files that have not been requested to merge
+        for (const auto &chunk_file : get_file_names()) {
+            std::filesystem::remove(chunk_file);
+        }
     }
     chunk_count_ = 0;
     l1_chunk_count_ = 0;
@@ -94,7 +108,7 @@ void SortedSetDiskBase<T>::start_merging_async() {
     async_worker_.enqueue([file_names, this]() {
         std::function<void(const T &)> on_new_item
                 = [this](const T &v) { merge_queue_.push(v); };
-        merge_files(file_names, on_new_item);
+        merge_files(file_names, on_new_item, false);
         merge_queue_.shutdown();
     });
 }

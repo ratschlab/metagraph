@@ -148,7 +148,8 @@ KmerCollector<KMER, KmerExtractor, Container>
     buffer_size_ = memory_preallocated / sizeof(typename Container::value_type);
 
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
-        tmp_dir_ = utils::create_temp_dir(swap_dir, "kmers");
+        // don't clean up tmp_dir_ on exit so that we can resume computation
+        tmp_dir_ = utils::create_temp_dir(swap_dir, "kmers", false);
         kmers_ = std::make_unique<Container>(num_threads, buffer_size_,
                                              tmp_dir_, max_disk_space);
     } else {
@@ -158,13 +159,6 @@ KmerCollector<KMER, KmerExtractor, Container>
             "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
             kmers_->buffer_size() * sizeof(typename Container::value_type) >> 20,
             kmers_->buffer_size());
-}
-
-template <typename KMER, class KmerExtractor, class Container>
-KmerCollector<KMER, KmerExtractor, Container>
-::~KmerCollector() {
-    if (!tmp_dir_.empty())
-        std::filesystem::remove_all(tmp_dir_);
 }
 
 template <typename KMER, class KmerExtractor, class Container>

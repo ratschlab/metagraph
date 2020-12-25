@@ -50,10 +50,9 @@ class SortedSetDiskBase {
                       size_t merge_count);
 
     virtual ~SortedSetDiskBase() {
-        // remove the files that have not been requested to merge
-        for (const auto &chunk_file : get_file_names()) {
-            std::filesystem::remove(chunk_file);
-        }
+        // not cleaning up unmerged chunk_*** files so that the computation can be resumed
+        // if building in phases or in case of a crash
+        async_merge_l1_.join(); // don't leave half-merged chunks behind
         async_worker_.join(); // make sure the data was processed
     }
 
@@ -65,6 +64,9 @@ class SortedSetDiskBase {
      */
     ChunkedWaitQueue<T>& data(bool free_buffer = true);
 
+    /** Flushes the unwritten buffers to disk. */
+    void flush();
+
     /**
      * Returns the files to be merged - useful if the caller prefers to do the merging.
      */
@@ -75,7 +77,7 @@ class SortedSetDiskBase {
      * sorted set may be expensive when #data_ is large. In these cases, prefer calling
      * #clear and re-using the buffer.
      */
-    void clear(const std::filesystem::path &tmp_path = "/tmp/");
+    void clear(const std::filesystem::path &tmp_path = "/tmp/", bool remove_files = true);
 
     /**
      * Insert already sorted data into the set. This data is written directly to a

@@ -347,6 +347,8 @@ Config::Config(int argc, char *argv[]) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
+        } else if (!strcmp(argv[i], "--phase")) {
+            phase = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--anchors-file")) {
             anchors = get_value(i++);
         } else if (argv[i][0] == '-') {
@@ -544,6 +546,30 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == COMPARE && fnames.size() != 2)
         print_usage_and_exit = true;
+
+    if (identity != BUILD && phase != 3) {
+        std::cerr << "Error: Phases are only supported for building. Remove --phase"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (identity != BUILD && phase > 3) {
+        std::cerr << "Error: Invalid phase value. Can be either 1, 2 or 3." << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (phase != 3 && tmp_dir.empty()) {
+        std::cerr << "Error: Phases are only supported for disk-based building. "
+                     "Please set --disk-swap." << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (phase != 3 && suffix_len > 0) {
+        std::cerr << "Error: Phases are not supported for multiple suffixes. Remove "
+                     "--phase or specify each suffix separately using --suffix"
+                  << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
         print_usage_and_exit = true;
@@ -791,6 +817,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
             fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [20]\n");
+            fprintf(stderr, "\t   --phase [INT] \tmax where to stop the computation (1=collect kmers, 2=generate kmers, 3=build all) [3]\n");
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
