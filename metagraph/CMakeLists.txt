@@ -254,11 +254,10 @@ include_directories(
   external-libraries/zlib
   external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
-  PRIVATE
-  ${PROJECT_SOURCE_DIR}/src/common
 )
 include_directories(SYSTEM
   external-libraries/folly
+  ${CMAKE_BINARY_DIR}/external-libraries
 )
 
 
@@ -300,7 +299,12 @@ find_library(MALLOCS
 )
 
 if(MALLOCS AND Boost_FOUND)
+  message(STATUS "Configuring Folly")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  configure_file(
+    external-libraries/folly/CMake/folly-config.h.cmake
+    ${CMAKE_BINARY_DIR}/external-libraries/folly/folly-config.h
+  )
   add_library(fbvector STATIC
     external-libraries/folly/folly/ScopeGuard.cpp
     external-libraries/folly/folly/memory/detail/MallocImpl.cpp
@@ -308,6 +312,7 @@ if(MALLOCS AND Boost_FOUND)
   target_include_directories(fbvector SYSTEM PRIVATE
     ${Boost_INCLUDE_DIRS}
     external-libraries/folly
+    ${CMAKE_BINARY_DIR}/external-libraries
     ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE
