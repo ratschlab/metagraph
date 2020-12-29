@@ -23,7 +23,7 @@ target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall 
 target_include_directories(metagraph_common
   PRIVATE
     ${PROJECT_PARENT_DIR}/src/
-    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/external-libraries/folly/include
   PUBLIC
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include

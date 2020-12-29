@@ -532,7 +532,7 @@ list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 
 add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
 
 target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 
