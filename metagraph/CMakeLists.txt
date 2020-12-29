@@ -255,10 +255,13 @@ include_directories(
   external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
 )
+
+if(USE_FOLLY)
 include_directories(SYSTEM
   external-libraries/folly
   ${CMAKE_BINARY_DIR}/external-libraries/folly/include
 )
+endif()
 
 # use external fmt library in spdlog
 set(SPDLOG_FMT_EXTERNAL TRUE)
@@ -289,15 +292,32 @@ add_library(mersenne_twister STATIC
 )
 
 find_package(Boost)
-find_library(MALLOCS
-  NAMES jemalloc tcmalloc
+find_library(jemalloc_FOUND
+  NAMES jemalloc
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
     $ENV{HOME}/.linuxbrew/lib
 )
 
-if(MALLOCS AND Boost_FOUND)
+if(!jemalloc_FOUND)
+  message(WARNING "jemalloc not found.")
+endif()
+
+find_library(tcmalloc_FOUND
+  NAMES tcmalloc
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    $ENV{HOME}/.linuxbrew/lib
+)
+
+if(!tcmalloc_FOUND)
+  message(WARNING "gperftools not found")
+endif()
+
+if(jemalloc_FOUND AND tcmalloc_FOUND AND Boost_FOUND)
+  set(USE_FOLLY)
   message(STATUS "Configuring Folly")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
@@ -312,7 +332,7 @@ if(MALLOCS AND Boost_FOUND)
   target_include_directories(fbvector SYSTEM PRIVATE
     ${Boost_INCLUDE_DIRS}
     external-libraries/folly
-    ${CMAKE_BINARY_DIR}/external-libraries
+    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
     ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE
@@ -321,8 +341,8 @@ if(MALLOCS AND Boost_FOUND)
   )
   set(METALIBS ${METALIBS} fbvector)
 else()
-  message(WARNING "Folly (Facebook Open Source Library) not found."
-  " Install folly to reduce memory taken up by the Row-Compressed annotator"
+  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
+  " Install Boost, jemalloc, and gperftools to reduce memory taken up by the Row-Compressed annotator"
   " and enable other optimizations.")
 endif()
 
