@@ -1224,7 +1224,6 @@ TEST(BOSS, CallSequenceRowDiff_FourPaths) {
             = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
     constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
     BOSS graph(&constructor);
-    std::mutex mu;
     for (size_t num_threads : { 1, 4 }) {
         sdsl::bit_vector terminal;
         sdsl::bit_vector dummy;
