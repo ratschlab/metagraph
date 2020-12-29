@@ -257,9 +257,8 @@ include_directories(
 )
 include_directories(SYSTEM
   external-libraries/folly
-  ${CMAKE_BINARY_DIR}/external-libraries
+  ${CMAKE_BINARY_DIR}/external-libraries/folly/include
 )
-
 
 # use external fmt library in spdlog
 set(SPDLOG_FMT_EXTERNAL TRUE)
@@ -304,7 +303,7 @@ if(MALLOCS AND Boost_FOUND)
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
-    ${CMAKE_BINARY_DIR}/external-libraries/folly/folly-config.h
+    ${CMAKE_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
   )
   add_library(fbvector STATIC
     external-libraries/folly/folly/ScopeGuard.cpp
