@@ -76,6 +76,13 @@ find_package(Boost)
 find_package(Jemalloc)
 find_package(Tcmalloc)
 
+if(Jemalloc_FOUND)
+  if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
+    message(WARNING "jemalloc version less than 4.0")
+    unset(Jemalloc_FOUND)
+  endif()
+endif()
+
 if(Jemalloc_FOUND AND Tcmalloc_FOUND AND Boost_FOUND)
 message(STATUS "Configuring Folly")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
