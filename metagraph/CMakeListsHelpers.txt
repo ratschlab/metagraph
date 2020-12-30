@@ -69,42 +69,17 @@ if(NOT CPPNOFS)
 endif()
 endfunction()
 
-include(CheckIncludeFileCXX)
 function (findFolly)
 unset(FOLLY_LIBRARIES)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Boost)
-find_library(jemalloc_FOUND
-  NAMES jemalloc
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
+find_package(Jemalloc)
+find_package(Tcmalloc)
 
-if(jemalloc_FOUND)
-unset(jemalloc_FOUND)
-CHECK_INCLUDE_FILE_CXX(jemalloc/jemalloc.h jemalloc_FOUND)
-endif()
-
-if(!jemalloc_FOUND)
-  message(WARNING "jemalloc not found.")
-endif()
-
-find_library(tcmalloc_FOUND
-  NAMES tcmalloc
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-
-if(!tcmalloc_FOUND)
-  message(WARNING "gperftools not found")
-endif()
-
-if(jemalloc_FOUND AND tcmalloc_FOUND AND Boost_FOUND)
+if(Jemalloc_FOUND AND Tcmalloc_FOUND AND Boost_FOUND)
 message(STATUS "Configuring Folly")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
+  include_directories(PUBLIC ${JEMALLOC_INCLUDE_DIRS} ${TCMALLOC_INCLUDE_DIRS})
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
@@ -121,8 +96,8 @@ message(STATUS "Configuring Folly")
     ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE
-    -ljemalloc
-    -ltcmalloc
+    ${JEMALLOC_LIBRARIES}
+    ${TCMALLOC_LIBRARIES}
   )
 else()
   set(FOLLY_LIBRARIES "")
