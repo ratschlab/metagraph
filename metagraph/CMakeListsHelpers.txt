@@ -69,7 +69,7 @@ if(NOT CPPNOFS)
 endif()
 endfunction()
 
-
+include(CheckIncludeFileCXX)
 function (findFolly)
 unset(FOLLY_LIBRARIES)
 find_package(Boost)
@@ -80,6 +80,11 @@ find_library(jemalloc_FOUND
   PATHS
     $ENV{HOME}/.linuxbrew/lib
 )
+
+if(jemalloc_FOUND)
+unset(jemalloc_FOUND)
+CHECK_INCLUDE_FILE_CXX(jemalloc/jemalloc.h jemalloc_FOUND)
+endif()
 
 if(!jemalloc_FOUND)
   message(WARNING "jemalloc not found.")

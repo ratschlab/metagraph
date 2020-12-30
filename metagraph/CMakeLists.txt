@@ -256,11 +256,13 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/src
 )
 
+findFolly()
 if(USE_FOLLY)
-include_directories(SYSTEM
-  external-libraries/folly
-  ${CMAKE_BINARY_DIR}/external-libraries/folly/include
-)
+  include_directories(SYSTEM
+    external-libraries/folly
+    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
+  )
+  set(METALIBS ${METALIBS} fbvector)
 endif()
 
 # use external fmt library in spdlog
@@ -290,61 +292,6 @@ add_library(progress_bar STATIC
 add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
-
-find_package(Boost)
-find_library(jemalloc_FOUND
-  NAMES jemalloc
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-
-if(!jemalloc_FOUND)
-  message(WARNING "jemalloc not found.")
-endif()
-
-find_library(tcmalloc_FOUND
-  NAMES tcmalloc
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-
-if(!tcmalloc_FOUND)
-  message(WARNING "gperftools not found")
-endif()
-
-if(jemalloc_FOUND AND tcmalloc_FOUND AND Boost_FOUND)
-  set(USE_FOLLY)
-  message(STATUS "Configuring Folly")
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
-  include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
-  configure_file(
-    external-libraries/folly/CMake/folly-config.h.cmake
-    ${CMAKE_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
-  )
-  add_library(fbvector STATIC
-    external-libraries/folly/folly/ScopeGuard.cpp
-    external-libraries/folly/folly/memory/detail/MallocImpl.cpp
-  )
-  target_include_directories(fbvector SYSTEM PRIVATE
-    ${Boost_INCLUDE_DIRS}
-    external-libraries/folly
-    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
-    ${PROJECT_SOURCE_DIR}/src/common
-  )
-  target_link_libraries(fbvector PRIVATE
-    -ljemalloc
-    -ltcmalloc
-  )
-  set(METALIBS ${METALIBS} fbvector)
-else()
-  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost, jemalloc, and gperftools to reduce memory taken up by the Row-Compressed annotator"
-  " and enable other optimizations.")
-endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
