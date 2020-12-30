@@ -122,7 +122,7 @@ message(STATUS "Configuring Folly")
 else()
   set(FOLLY_LIBRARIES "")
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost, jemalloc, and gperftools to reduce memory taken up by the Row-Compressed annotator"
+  " Install Boost, jemalloc, and gperftools to compile with folly and reduce memory taken up by the Row-Compressed annotator"
   " and enable other optimizations.")
 endif()
 endfunction()
