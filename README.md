@@ -11,7 +11,7 @@
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
 ```
-brew install libomp cmake make htslib jemalloc gperftools
+brew install libomp cmake make htslib boost jemalloc gperftools
 ```
 
 For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-Start).
