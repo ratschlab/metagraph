@@ -79,7 +79,7 @@ find_package(Tcmalloc)
 if(Jemalloc_FOUND AND Tcmalloc_FOUND AND Boost_FOUND)
 message(STATUS "Configuring Folly")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
-  include_directories(PUBLIC ${JEMALLOC_INCLUDE_DIRS} ${TCMALLOC_INCLUDE_DIRS})
+  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS} ${TCMALLOC_INCLUDE_DIRS})
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
