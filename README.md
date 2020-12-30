@@ -3,10 +3,10 @@
 ## Install
 
 ### Prerequisites
-- cmake 3.10
+- cmake 3.10 or higher
 - GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - HTSlib
-- boost, jemalloc, gperftools (optional)
+- boost, jemalloc 4.0.0 or higher, gperftools (optional)
 - Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
@@ -14,7 +14,17 @@ For compiling with **AppleClang**, the prerequisites can be installed as easy as
 brew install libomp cmake make htslib boost jemalloc gperftools
 ```
 
-For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-Start).
+For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
+```
+sudo apt-get install cmake libhts-dev libjemalloc-dev libboost-all-dev libgoogle-perftools-dev
+```
+
+For **CentOS** (8 or higher)
+```
+yum install cmake htslib-devel jemalloc-devel boost-devel gperftools-devel
+```
+
+For installing with **LLVM Clang** on **Linux**, see [wiki](../../wiki/How-to-Start).
 
 
 ### Compile
