@@ -342,22 +342,24 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     ThreadPool async_writer(1, 1);
-
+    sdsl::int_vector_buffer row_reduction;
     const bool new_reduction_vector = !std::filesystem::exists(row_reduction_fname);
-    if (new_reduction_vector) {
-        // create an empty vector
-        sdsl::int_vector_buffer(row_reduction_fname,
-                                std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
-    }
+    if (compute_row_reduction) {
+        if (new_reduction_vector) {
+            // create an empty vector
+            sdsl::int_vector_buffer(row_reduction_fname,
+                                    std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
+        }
 
-    sdsl::int_vector_buffer row_reduction(row_reduction_fname,
-                                          std::ios::in | std::ios::out, 1024 * 1024);
+        row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
+                                                std::ios::in | std::ios::out, 1024 * 1024);
 
-    if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
-        logger->error("Incompatible sizes of '{}': {} and '{}': {}",
-                      row_reduction_fname, row_reduction.size(),
-                      anchors_fname, anchor.size());
-        exit(1);
+        if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
+            logger->error("Incompatible sizes of '{}': {} and '{}': {}",
+                          row_reduction_fname, row_reduction.size(),
+                          anchors_fname, anchor.size());
+            exit(1);
+        }
     }
 
     // total number of set bits in the original rows
