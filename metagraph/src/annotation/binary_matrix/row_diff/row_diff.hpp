@@ -24,6 +24,12 @@ const std::string kRowDiffAnchorExt = ".anchors";
 
 const size_t RD_PATH_RESERVE_SIZE = 2;
 
+
+class IRowDiff : public BinaryMatrix {
+  public:
+    virtual ~IRowDiff() {}
+};
+
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
  * successive nodes, rather than the full annotation.
@@ -46,7 +52,7 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 // does not instantiate the virtual methods in this class, so I had to move definitions
 // to the header (gcc works fine)
 template <class BaseMatrix>
-class RowDiff : public BinaryMatrix {
+class RowDiff : public IRowDiff {
   public:
     using anchor_bv_type = bit_vector_small;
 
