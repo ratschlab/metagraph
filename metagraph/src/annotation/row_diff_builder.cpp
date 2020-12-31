@@ -269,7 +269,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size) {
+                               uint64_t buf_size,
+                               bool compute_row_reduction) {
     if (source_files.empty())
         return;
 
@@ -402,6 +403,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
             },
             [&](uint64_t block_begin) {
+                if (!compute_row_reduction)
+                    return;
+
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
                 std::vector<uint32_t> nbits_block;
                 nbits_block.swap(row_nbits_block);
@@ -539,6 +543,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
     logger->trace("Removing temp directory: {}", tmp_path);
     std::filesystem::remove_all(tmp_path);
+
+    if (!compute_row_reduction)
+        return;
 
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
