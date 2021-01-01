@@ -22,7 +22,7 @@ SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
       merge_count_(merge_count),
       chunk_file_prefix_(tmp_dir/"chunk_"),
       merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT)),
-      async_merge_l1_(merge_count_ == 0 ? 0 : 1, 100) {
+      async_merge_l1_(merge_count_ == 0 ? 0 : 3, 100) {
     if (reserved_num_elements == 0) {
         logger->error("SortedSetDisk buffer cannot have size 0");
         std::exit(EXIT_FAILURE);
