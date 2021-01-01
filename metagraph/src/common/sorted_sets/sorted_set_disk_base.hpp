@@ -71,11 +71,9 @@ class SortedSetDiskBase {
     std::vector<std::string> files_to_merge();
 
     /**
-     * Clears the set, preparing it to be re-used for another merge. Creating a new
-     * sorted set may be expensive when #data_ is large. In these cases, prefer calling
-     * #clear and re-using the buffer.
+     * Clears the set and the buffer.
      */
-    void clear(const std::filesystem::path &tmp_path = "/tmp/");
+    void clear();
 
     /**
      * Insert already sorted data into the set. This data is written directly to a

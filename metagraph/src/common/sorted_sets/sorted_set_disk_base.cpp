@@ -67,7 +67,7 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
 }
 
 template <typename T>
-void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path) {
+void SortedSetDiskBase<T>::clear() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
@@ -79,9 +79,7 @@ void SortedSetDiskBase<T>::clear(const std::filesystem::path &tmp_path) {
     l1_chunk_count_ = 0;
     total_chunk_size_bytes_ = 0;
     try_reserve(reserved_num_elements_);
-    data_.resize(0); // this makes sure the buffer is not reallocated
-    chunk_file_prefix_ = tmp_path/"chunk_";
-    std::filesystem::create_directory(tmp_path);
+    Vector<T>().swap(data_); // free up the (usually very large) buffer
 }
 
 template <typename T>

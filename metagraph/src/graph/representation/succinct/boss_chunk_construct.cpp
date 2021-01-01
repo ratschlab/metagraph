@@ -642,9 +642,9 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
-    // release the buffer
+
+    // release old chunks and the buffer
     container.clear();
-    container.data(true);
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
