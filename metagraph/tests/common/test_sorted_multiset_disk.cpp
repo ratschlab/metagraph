@@ -198,7 +198,7 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeDisk) {
     expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 
     // now let's generate an overflow in the counter
-    underTest.clear();
+    underTest = create_sorted_set_disk<TypeParam>();
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
         std::vector<TypeParam> values = { TypeParam(value) };
         underTest.insert(values.begin(), values.end());
@@ -230,7 +230,7 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 
     // now let's generate an overflow in the counter
-    underTest.clear();
+    underTest = create_sorted_set_disk<TypeParam>();
     for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
         std::vector<TypeParam> values = { TypeParam(value) };
         underTest.insert(values.begin(), values.end());
