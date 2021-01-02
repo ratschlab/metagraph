@@ -11,6 +11,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
+#include <tsl/ordered_set.h>
 
 namespace mtg {
 namespace cli {
@@ -240,6 +241,95 @@ void map_sequences_in_file(const std::string &file,
         delete out;
 }
 
+std::string sequence_to_gfa_path(const std::string &seq,
+                                 const size_t seq_id,
+                                 const std::shared_ptr<DeBruijnGraph> &graph,
+                                 const tsl::ordered_set<uint64_t> &is_unitig_end_node,
+                                 const Config *config) {
+    std::vector<uint64_t> path_nodes;
+    graph->map_to_nodes_sequentially(seq, [&](uint64_t node) {
+      path_nodes.push_back(node);
+    });
+
+    std::string nodes_on_path;
+    std::string cigars_on_path;
+    size_t overlap = graph->get_k() - 1;
+
+    for (size_t i = 0; i < path_nodes.size() - 1; ++i) {
+        if (config->output_compacted && !is_unitig_end_node.count(path_nodes[i])) {
+            continue;
+        }
+        nodes_on_path += fmt::format("{}+,", path_nodes[i]);
+        cigars_on_path += fmt::format("{}M,", overlap);
+    }
+    uint64_t last_node_to_print = path_nodes.back();
+    // We need to print the id of the last unitig even in the case that
+    // this unitig is not completely covered by the query sequence.
+    while(config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
+        uint64_t unique_next_node;
+        graph -> adjacent_outgoing_nodes(
+                last_node_to_print, [&](uint64_t node) {
+                  unique_next_node = node;
+                }
+        );
+        last_node_to_print = unique_next_node;
+    }
+    nodes_on_path += fmt::format("{}+,", last_node_to_print);
+
+    //   Remove right trailing comma.
+    nodes_on_path.pop_back();
+    if (cigars_on_path.size()) {
+        cigars_on_path.pop_back();
+    }
+    return fmt::format("P\t{}\t{}\t{}\n", seq_id, nodes_on_path, cigars_on_path);
+}
+
+void gfa_map_files(const Config *config,
+                   const std::vector<std::string> &files,
+                   const std::shared_ptr<DeBruijnGraph> graph) {
+    logger->trace("Starting GFA mapping:");
+
+    tsl::ordered_set<uint64_t> is_unitig_end_node;
+
+    graph->call_unitigs(
+        [&](const auto &unitig, const auto &path) {
+            (void)unitig;
+            is_unitig_end_node.insert(path.back());
+        }
+    );
+    std::ofstream gfa_file;
+    //  Open gfa_file in append mode.
+    gfa_file.open(
+        utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
+        std::ios_base::app
+    );
+    std::mutex print_mutex;
+    for (size_t i = 0; i < files.size(); ++i) {
+        std::string file = files[i];
+        logger->trace(
+            "Loading sequences from FASTA file '{}' to append gfa paths.",
+            file
+        );
+
+        std::vector<string> seq_queries;
+        seq_io::FastaParser fasta_parser(file, false);
+        for (const seq_io::kseq_t &kseq : fasta_parser) {
+            seq_queries.push_back(kseq.seq.s);
+        }
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) shared(gfa_file)
+        for (size_t i = 0; i < seq_queries.size(); ++i) {
+            std::string path_string_gfa = sequence_to_gfa_path(
+                    seq_queries[i],
+                    i + 1,
+                    graph,
+                    is_unitig_end_node,
+                    config
+            );
+            std::lock_guard<std::mutex> lock(print_mutex);
+            gfa_file << path_string_gfa;
+        }
+    }
+}
 
 int align_to_graph(Config *config) {
     assert(config);
@@ -248,8 +338,18 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
+    if (utils::ends_with(config->infbase, ".gfa")) {
+        logger->trace("Received GFA input file. Trying to find the '.dbg' at the same path.");
+        config->gfa_mapping_path = config->infbase;
+        config->infbase = utils::remove_suffix(config->infbase, ".gfa") + ".dbg";
+    }
     // initialize aligner
     auto graph = load_critical_dbg(config->infbase);
+    if (config->gfa_mapping_path.size()) {
+        gfa_map_files(config, files, graph);
+        return 0;
+    }
+
     auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
     // This speeds up mapping, and allows for node suffix matching
@@ -265,7 +365,6 @@ int align_to_graph(Config *config) {
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
-
     if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();

@@ -227,6 +227,8 @@ Config::Config(int argc, char *argv[]) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
             alignment_max_ram = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--gfa-mapping-path")) {
+            gfa_mapping_path = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -841,6 +843,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t   --gfa-mapping-path [STR] \tpath to a gfa file where to append the mappings as 'P' lines []\n");
+            fprintf(stderr, "\t   --compacted \t\t\tdump the GFA's 'P' lines in a compacted mode [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
