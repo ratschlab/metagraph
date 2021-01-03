@@ -297,8 +297,7 @@ void gfa_map_files(const Config *config,
     std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
                            std::ios_base::app);
     std::mutex print_mutex;
-    for (size_t i = 0; i < files.size(); ++i) {
-        const std::string &file = files[i];
+    for (const std::string &file : files) {
         logger->trace("Loading sequences from FASTA file '{}' to append gfa paths.", file);
 
         std::vector<string> seq_queries;
