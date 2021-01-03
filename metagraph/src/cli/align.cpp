@@ -361,6 +361,7 @@ int align_to_graph(Config *config) {
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
+
     if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
