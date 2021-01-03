@@ -253,7 +253,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
 
     std::string nodes_on_path;
     std::string cigars_on_path;
-    size_t overlap = graph->get_k() - 1;
+    const size_t overlap = graph->get_k() - 1;
 
     for (size_t i = 0; i < path_nodes.size() - 1; ++i) {
         if (config->output_compacted && !is_unitig_end_node.count(path_nodes[i])) {
