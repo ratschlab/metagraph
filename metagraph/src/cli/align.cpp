@@ -296,12 +296,9 @@ void gfa_map_files(const Config *config,
             is_unitig_end_node.insert(path.back());
         }
     );
-    std::ofstream gfa_file;
-    //  Open gfa_file in append mode.
-    gfa_file.open(
-        utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
-        std::ios_base::app
-    );
+    // Open gfa_file in append mode.
+    std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
+                           std::ios_base::app);
     std::mutex print_mutex;
     for (size_t i = 0; i < files.size(); ++i) {
         std::string file = files[i];
