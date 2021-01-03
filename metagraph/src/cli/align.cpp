@@ -265,7 +265,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
     uint64_t last_node_to_print = path_nodes.back();
     // We need to print the id of the last unitig even in the case that
     // this unitig is not completely covered by the query sequence.
-    while(config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
+    while (config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
         uint64_t unique_next_node;
         graph->adjacent_outgoing_nodes(
             last_node_to_print,
