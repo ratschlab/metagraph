@@ -288,11 +288,11 @@ void gfa_map_files(const Config *config,
     tsl::ordered_set<uint64_t> is_unitig_end_node;
 
     graph->call_unitigs(
-        [&](const auto &unitig, const auto &path) {
-            (void)unitig;
+        [&](const auto &, const auto &path) {
             is_unitig_end_node.insert(path.back());
         }
     );
+    
     // Open gfa_file in append mode.
     std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
                            std::ios_base::app);
