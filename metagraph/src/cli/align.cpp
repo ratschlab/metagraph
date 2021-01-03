@@ -275,7 +275,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
     }
     nodes_on_path += fmt::format("{}+,", last_node_to_print);
 
-    //   Remove right trailing comma.
+    // Remove right trailing comma.
     nodes_on_path.pop_back();
     if (cigars_on_path.size()) {
         cigars_on_path.pop_back();
