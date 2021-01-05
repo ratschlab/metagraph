@@ -290,7 +290,8 @@ void gfa_map_files(const Config *config,
     graph->call_unitigs(
         [&](const auto &, const auto &path) {
             is_unitig_end_node.insert(path.back());
-        }
+        },
+        get_num_threads()
     );
     
     // Open gfa_file in append mode.
