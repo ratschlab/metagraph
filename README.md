@@ -26,6 +26,8 @@ For **CentOS** (8 or higher)
 yum install cmake htslib-devel jemalloc-devel boost-devel gperftools-devel
 ```
 
+All prerequisites can also be installed by users without root access with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
+
 For installing with **LLVM Clang** on **Linux**, see [wiki](../../wiki/How-to-Start).
 
 
