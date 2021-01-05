@@ -14,21 +14,23 @@ gfa_tests = {
     'compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '--compacted',
-        'gfa_lines': 2887,
+        'gfa_lines': 2987,
         'field_records': {
             'H':1,
             'S':1252,
             'L':1634,
+            'P':100,
         }
     },
     'not_compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '',
-        'gfa_lines': 183551,
+        'gfa_lines': 183651,
         'field_records': {
             'H':1,
             'S':91584,
             'L':91966,
+            'P':100,
         }
     }
 }
@@ -68,49 +70,76 @@ class TestAnnotate(unittest.TestCase):
 
     @parameterized.expand(GFAs)
     def test_assemble_gfa(self, gfa_test):
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --canonical -k 20 -o {outfile} {input}'.format(
+        k = 20
+        construct_command = '{exe} build -p {num_threads} --mask-dummy \
+                --canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
+            k=k,
             outfile=self.tempdir.name + '/graph',
             input=gfa_tests[gfa_test]['fasta_path']
         )
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
-                    -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph.dbg',
-            outfile=self.tempdir.name + '/annotation',
-            input=gfa_tests[gfa_test]['fasta_path']
-        )
-        res = subprocess.run([annotate_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        assemble_command = '{exe} assemble -v {graph_input} \
-                    -o {output_gfa} --unitigs --to-gfa --annotator {anno_input} {gfa_flag}'.format(
+        assemble_command = '{exe} assemble {graph_input} \
+                    -o {output_gfa} --unitigs --to-gfa {gfa_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
             output_gfa=self.tempdir.name + '/assembled',
-            anno_input=self.tempdir.name + '/annotation.column.annodbg',
             gfa_flag=gfa_tests[gfa_test]['flag']
         )
         res = subprocess.run([assemble_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        align_command = '{exe} align -i {graph_input} {input} \
+                    --gfa-mapping-path {gfa_file} {gfa_compacted_flag}'.format(
+            exe=METAGRAPH,
+            graph_input=self.tempdir.name + '/graph.dbg',
+            input=gfa_tests[gfa_test]['fasta_path'],
+            gfa_file=self.tempdir.name + '/assembled.gfa',
+            gfa_compacted_flag=gfa_tests[gfa_test]['flag']
+        )
+        res = subprocess.run([align_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
         with open(self.tempdir.name + '/assembled.gfa', 'r') as file:
             data = file.read()
         gfa_lines = data.rstrip("\n").split("\n")
         field_records = {}
+        sequences = {}
         for line in gfa_lines:
             if line[0] in field_records:
                 field_records[line[0]] += 1
             else:
                 field_records[line[0]] = 1
+            if line[0] == 'S':
+                sequences[line.split('\t')[1]] = line.split('\t')[2]
 
         self.assertEqual(len(gfa_lines), gfa_tests[gfa_test]['gfa_lines'])
         self.assertEqual(field_records, gfa_tests[gfa_test]['field_records'])
+
+        # Ensure valid links.
+        for line in gfa_lines:
+            if line[0] != 'L':
+                continue
+            self.assertEqual(line.split('\t')[2], "+")
+            self.assertEqual(line.split('\t')[4], "+")
+            self.assertEqual(line.split('\t')[5], str(k-1) + "M")
+            self.assertEqual(
+                sequences[line.split('\t')[1]][-(k-1):],
+                sequences[line.split('\t')[3]][:(k-1)]
+            )
+
+        # Ensure valid paths.
+        for line in gfa_lines:
+            if line[0] != 'P':
+                continue
+            path_nodes = line.split('\t')[2].split(',')
+            for node_idx in range(len(path_nodes) - 1):
+                cur_node = path_nodes[node_idx].rstrip('+')
+                nxt_node = path_nodes[node_idx + 1].rstrip('+')
+                self.assertEqual(sequences[cur_node][-(k-1):], sequences[nxt_node][:(k-1)])
 
     @parameterized.expand(GFAs)
     def test_round_robin_graph_size_via_gfa(self, gfa_test):
@@ -126,22 +155,11 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
-                     -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph.dbg',
-            outfile=self.tempdir.name + '/annotation',
-            input=gfa_tests[gfa_test]['fasta_path']
-        )
-        res = subprocess.run([annotate_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        assemble_command = '{exe} assemble -v {graph_input} \
-                    -o {output_gfa} --unitigs --to-gfa --annotator {anno_input} {gfa_flag}'.format(
+        assemble_command = '{exe} assemble {graph_input} \
+                    -o {output_gfa} --unitigs --to-gfa {gfa_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
             output_gfa=self.tempdir.name + '/assembled',
-            anno_input=self.tempdir.name + '/annotation.column.annodbg',
             gfa_flag=gfa_tests[gfa_test]['flag']
         )
         res = subprocess.run([assemble_command], shell=True)
