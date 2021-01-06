@@ -140,9 +140,9 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         merged_all_count_++;
         chunk_count_ = 0;
         l1_chunk_count_ = 0;
-    } else if (merge_count_ > 0 && chunk_count_ % merge_count_ == 0) {
+    } else if (merge_count_ > 1 && chunk_count_ % merge_count_ == 0) {
         async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_ - merge_count_,
-                                merge_count_, &l1_chunk_count_, &total_chunk_size_bytes_);
+                                chunk_count_, &l1_chunk_count_, &total_chunk_size_bytes_);
     }
 }
 
@@ -184,19 +184,20 @@ void SortedSetDiskBase<T>::try_reserve(size_t size, size_t min_size) {
 
 template <typename T>
 void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
-                                    uint32_t chunk,
-                                    size_t merge_count,
+                                    uint32_t chunk_begin,
+                                    uint32_t chunk_end,
                                     std::atomic<uint32_t> *l1_chunk_count,
                                     std::atomic<size_t> *total_size) {
+    assert(chunk_begin < chunk_end);
     const std::string &merged_l1_file_name
-            = merged_l1_name(chunk_file_prefix, chunk / merge_count);
+            = merged_l1_name(chunk_file_prefix, chunk_begin / (chunk_end - chunk_begin));
 
     std::vector<std::string> to_merge;
-    for (uint32_t i = 0; i < merge_count; ++i) {
-        to_merge.push_back(chunk_file_prefix + std::to_string(chunk + i));
+    for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
+        to_merge.push_back(chunk_file_prefix + std::to_string(i));
         *total_size -= static_cast<int64_t>(std::filesystem::file_size(to_merge.back()));
     }
-    logger->trace("Starting merging last {} chunks into {}", merge_count,
+    logger->trace("Starting merging chunks {}..{} into {}", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
     EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
     std::function<void(const T &v)> on_new_item
@@ -205,7 +206,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
     encoder.finish();
 
     *l1_chunk_count += 1;
-    logger->trace("Merging last {} chunks into {} done", merge_count,
+    logger->trace("Merging chunks {}..{} into {} done", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
     *total_size += std::filesystem::file_size(merged_l1_file_name);
 }
