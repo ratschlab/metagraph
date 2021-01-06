@@ -71,6 +71,7 @@ void SortedSetDiskBase<T>::clear() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
+    async_merge_l1_.remove_waiting_tasks();
     // remove the files that have not been requested to merge
     for (const auto &chunk_file : get_file_names()) {
         std::filesystem::remove(chunk_file);
