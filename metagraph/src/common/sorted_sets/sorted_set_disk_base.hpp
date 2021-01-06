@@ -201,8 +201,8 @@ class SortedSetDiskBase {
     }
 
     static void merge_l1(const std::string &chunk_file_prefix,
-                         uint32_t chunk_count,
-                         size_t merge_count,
+                         uint32_t chunk_begin,
+                         uint32_t chunk_end,
                          std::atomic<uint32_t> *l1_chunk_count,
                          std::atomic<size_t> *total_size);
 
