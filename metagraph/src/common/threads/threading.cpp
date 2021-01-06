@@ -59,7 +59,7 @@ void ThreadPool::initialize(size_t num_workers) {
     if (!num_workers)
         return;
 
-    for(size_t i = 0; i < num_workers; ++i) {
+    for (size_t i = 0; i < num_workers; ++i) {
         workers.emplace_back([this]() {
             while (true) {
                 std::function<void()> task;
