@@ -356,6 +356,9 @@ using Encoder = common::EliasFanoEncoderBuffered<T>;
 template <typename T>
 using Decoder = common::EliasFanoDecoder<T>;
 
+/**
+ * Split k-mers from chunk |chunk_fname| into Sigma^2 chunks by F and W.
+ */
 template <typename T_REAL>
 std::vector<std::string> split(size_t k, const std::string &chunk_fname) {
     using T_INT_REAL = get_int_t<T_REAL>;
@@ -635,11 +638,11 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     const uint64_t buffer_size = kmer_collector.buffer_size();
 
     auto &container = kmer_collector.container();
-    std::vector<std::string> chunk_fnames = container.files_to_merge();
+    const std::vector<std::string> chunk_fnames = container.files_to_merge();
 
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
@@ -655,7 +658,7 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < real_F_W.size(); ++j) {
         std::vector<std::string> chunks_to_merge(chunks_split.size());
-        for (size_t i = 0; i < chunk_fnames.size(); ++i) {
+        for (size_t i = 0; i < chunks_split.size(); ++i) {
             chunks_to_merge[i] = chunks_split[i][j];
         }
         real_F_W[j] = dir/("real_F_W_" + std::to_string(j));
