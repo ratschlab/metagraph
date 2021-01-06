@@ -11,6 +11,8 @@ namespace graph {
         class IDBGAligner;
         class DBGAlignerConfig;
     }
+
+    class AnnotatedDBG;
 }
 
 namespace cli {
@@ -25,6 +27,9 @@ build_aligner(const graph::DeBruijnGraph &graph, const Config &config);
 
 std::unique_ptr<graph::align::IDBGAligner>
 build_aligner(const graph::DeBruijnGraph &graph, const graph::align::DBGAlignerConfig &aligner_config);
+
+std::unique_ptr<graph::align::IDBGAligner>
+build_labeled_aligner(const graph::AnnotatedDBG &anno_graph, const graph::align::DBGAlignerConfig &aligner_config);
 
 int align_to_graph(Config *config);
 

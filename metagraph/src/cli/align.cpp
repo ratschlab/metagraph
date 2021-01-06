@@ -6,7 +6,9 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -113,6 +115,33 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
     } else {
         // seeds are maximal matches within unitigs (uni-MEMs)
         return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
+    }
+}
+
+std::unique_ptr<IDBGAligner> build_labeled_aligner(const AnnotatedDBG &anno_graph,
+                                                   const DBGAlignerConfig &aligner_config) {
+    const auto &graph = anno_graph.get_graph();
+    assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
+
+    if (aligner_config.min_seed_length < graph.get_k()) {
+        // seeds are ranges of nodes matching a suffix
+        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
+            logger->error("SuffixSeeder can be used only with succinct graph representation");
+            exit(1);
+        }
+
+        // Use the seeder that seeds to node suffixes
+        return std::make_unique<LabeledDBGAligner<SuffixSeeder<>>>(anno_graph, aligner_config);
+
+    } else if (aligner_config.max_seed_length == graph.get_k()) {
+        assert(aligner_config.min_seed_length == graph.get_k());
+
+        // seeds are single k-mers
+        return std::make_unique<LabeledDBGAligner<>>(anno_graph, aligner_config);
+
+    } else {
+        // seeds are maximal matches within unitigs (uni-MEMs)
+        return std::make_unique<LabeledDBGAligner<UniMEMSeeder<>>>(anno_graph, aligner_config);
     }
 }
 

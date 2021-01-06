@@ -125,7 +125,6 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
-  private:
     Seeder build_seeder() const override { return Seeder(graph_, config_); }
     Extender build_extender() const override { return Extender(graph_, config_); }
 
@@ -134,6 +133,7 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     void align_aggregate(DBGQueryAlignment &paths,
                          const AlignmentGenerator &alignment_generator) const override;
 
+  private:
     const DeBruijnGraph& graph_;
     const DBGAlignerConfig config_;
 };

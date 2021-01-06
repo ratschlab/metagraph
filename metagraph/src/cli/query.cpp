@@ -826,10 +826,11 @@ int query_graph(Config *config) {
 }
 
 void align_sequence(std::string &name, std::string &seq,
-                    const DeBruijnGraph &graph,
+                    const AnnotatedDBG &anno_graph,
                     const align::DBGAlignerConfig &aligner_config) {
+    const auto &graph = anno_graph.get_graph();
     auto alignments
-        = build_aligner(graph, aligner_config)->align(seq);
+        = build_labeled_aligner(anno_graph, aligner_config)->align(seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -859,7 +860,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                            const Config &config,
                            const align::DBGAlignerConfig *aligner_config) {
     if (aligner_config) {
-        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
+        align_sequence(name, seq, anno_graph, *aligner_config);
     }
 
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
@@ -926,7 +927,7 @@ void QueryExecutor
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 align_sequence(seq_batch[i].first, seq_batch[i].second,
-                               anno_graph_.get_graph(), *aligner_config_);
+                               anno_graph_, *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();

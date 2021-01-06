@@ -254,9 +254,9 @@ class DefaultColumnExtender : public Extender<NodeType> {
                         score_t min_path_score);
 
     virtual std::deque<std::pair<NodeType, char>>
-    fork_extension(NodeType /* fork after this node */,
-                   std::function<void(DBGAlignment&&, NodeType)>,
-                   score_t);
+    fork_extension(NodeType node /* fork after this node */,
+                   std::function<void(DBGAlignment&&, NodeType)> callback,
+                   score_t min_path_score);
 
     virtual DPTable<NodeType>& get_dp_table() { return dp_table; }
     virtual ColumnQueue& get_column_queue() { return columns_to_update; }
