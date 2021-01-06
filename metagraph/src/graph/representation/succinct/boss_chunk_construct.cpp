@@ -231,6 +231,7 @@ ChunkedWaitQueue<T_TO>& reinterpret_container(ChunkedWaitQueue<T_FROM> &containe
 template <typename T_TO, typename T_FROM>
 Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
     static_assert(sizeof(T_TO) == sizeof(T_FROM));
+    static_assert(!std::is_same_v<T_FROM, bool> && !std::is_same_v<T_TO, bool>);
     return reinterpret_cast<Vector<T_TO>&>(container);
 }
 
