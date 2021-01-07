@@ -1,9 +1,12 @@
 #ifndef __LABELED_ALIGNER_HPP__
 #define __LABELED_ALIGNER_HPP__
 
+#include <tsl/hopscotch_map.h>
+
 #include "dbg_aligner.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/vector_map.hpp"
+#include "common/hashers/hash.hpp"
 
 
 namespace mtg {
@@ -79,6 +82,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   private:
     const AnnotatedDBG &anno_graph_;
     std::vector<uint64_t> target_columns_;
+
+    typedef tsl::hopscotch_map<NodeType, std::deque<std::pair<NodeType, char>>> EdgeMap;
+    std::shared_ptr<EdgeMap> edges_;
+
+    LabeledColumnExtender fork_extender(std::vector<uint64_t>&& new_target_labels) const;
 };
 
 
@@ -105,6 +113,8 @@ template <typename NodeType>
 inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     DefaultColumnExtender<NodeType>::initialize(path);
 
+    edges_ = std::make_shared<EdgeMap>();
+
     VectorMap<AnnotatedDBG::row_index, size_t> row_map;
     row_map.reserve(path.size());
     for (NodeType i : path) {
@@ -126,6 +136,17 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
     }
 
     std::sort(target_columns_.begin(), target_columns_.end());
+
+    mtg::common::logger->trace("Seed has {} labels", target_columns_.size());
+}
+
+template <typename NodeType>
+inline LabeledColumnExtender<NodeType> LabeledColumnExtender<NodeType>
+::fork_extender(std::vector<uint64_t>&& new_target_labels) const {
+    auto fork = *this;
+    fork.edges_ = std::make_shared<EdgeMap>();
+    fork.target_columns_ = std::move(new_target_labels);
+    return fork;
 }
 
 template <typename NodeType>
@@ -136,59 +157,50 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
     if (target_columns_.empty())
         return {};
 
+    auto edge_cached = edges_->find(node);
+    if (edge_cached != edges_->end())
+        return edge_cached->second;
+
     const auto &mat = anno_graph_.get_annotation().get_matrix();
     auto base_edges = DefaultColumnExtender<NodeType>::fork_extension(
         node, callback, min_path_score
     );
+
     std::deque<std::pair<NodeType, char>> edges;
+    for (const auto &edge : base_edges) {
+        const auto &[out_node, c] = edge;
+        AnnotatedDBG::row_index out_row = anno_graph_.graph_to_anno_index(out_node);
 
-    for (const auto &[out_node, c] : base_edges) {
-        auto row = mat.get_row(anno_graph_.graph_to_anno_index(out_node));
-        std::sort(row.begin(), row.end());
+        if (target_columns_.size() == 1) {
+            if (mat.get(out_row, target_columns_[0]))
+                edges.push_back(edge);
 
-        std::vector<AnnotatedDBG::row_index> intersection;
-        std::set_intersection(row.begin(), row.end(),
-                              target_columns_.begin(), target_columns_.end(),
-                              std::back_inserter(intersection));
-
-        if (intersection.empty())
-            continue;
-
-        if (intersection.size() == target_columns_.size()) {
-            edges.emplace_back(out_node, c);
         } else {
-            std::vector<std::pair<DBGAlignment, NodeType>> extensions;
-            std::cerr << "fork" << std::endl;
+            auto row = mat.get_row(out_row);
+            std::sort(row.begin(), row.end());
 
-            {
-                auto fork = *this;
-                fork.target_columns_ = intersection;
-                fork.update_columns(node, { { out_node, c } }, min_path_score);
-                fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
-                    assert(extension.is_valid(this->get_graph(), &this->get_config()));
-                    std::cerr << "bar\t" << extension << "\t" << start_node << std::endl;
-                    extensions.emplace_back(std::move(extension), start_node);
-                }, min_path_score);
-            }
-            std::cerr << "end" << std::endl;
+            std::vector<AnnotatedDBG::row_index> intersection;
+            intersection.reserve(std::min(row.size(), target_columns_.size()));
+            std::set_intersection(target_columns_.begin(), target_columns_.end(),
+                                  row.begin(), row.end(), std::back_inserter(intersection));
 
-            for (auto&& [extension, start_node] : extensions) {
-                assert(extension.is_valid(this->get_graph(), &this->get_config()));
-                // std::cerr << "foo\t" << extension << "\t" << start_node << std::endl;
-                std::cerr << "foo\t" << start_node << " " << extension.get_clipping() << std::endl;
-                callback(std::move(extension), start_node);
+            if (intersection.size() == target_columns_.size()) {
+                edges.push_back(edge);
+
+            } else if (!intersection.empty()) {
+                mtg::common::logger->trace(
+                    "Forking alignment from {} to {} labels on edge: {} {}-> {}. Table size: {}",
+                    target_columns_.size(), intersection.size(),
+                    node, c, out_node, this->get_dp_table().size()
+                );
+                auto fork = fork_extender(std::move(intersection));
+                fork.update_columns(node, { edge }, min_path_score);
+                fork.extend_main(callback, min_path_score);
             }
         }
-
-
-        // if (row.size() < target_columns_.size())
-        //     continue;
-
-        // if (std::includes(target_columns_.begin(), target_columns_.end(),
-        //                   row.begin(), row.end()))
-        //     edges.emplace_back(node, c);
     }
 
+    edges_->emplace(node, edges);
     return edges;
 }
 

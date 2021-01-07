@@ -175,11 +175,12 @@ inline void SeedAndExtendAligner<Seeder, Extender>
             if (!start_node && !extended) {
                 // no good extension found
                 if (seed.get_score() >= min_path_score) {
-                    seed.extend_query_end(query.data() + query.size());
-                    seed.trim_offset();
-                    assert(seed.is_valid(get_graph(), &get_config()));
-                    mtg::common::logger->trace("Alignment: {}", seed);
-                    callback(std::move(seed));
+                    auto next_path = seed;
+                    next_path.extend_query_end(query.data() + query.size());
+                    next_path.trim_offset();
+                    assert(next_path.is_valid(get_graph(), &get_config()));
+                    mtg::common::logger->trace("Alignment: {}", next_path);
+                    callback(std::move(next_path));
                 }
                 extended = true;
                 return;
@@ -188,9 +189,6 @@ inline void SeedAndExtendAligner<Seeder, Extender>
             assert(extension.is_valid(get_graph(), &get_config()));
             extension.extend_query_end(query.data() + query.size());
 
-            std::cout << "FOO\t" << extension << "\t" << std::flush;
-            std::cout << start_node << "\t" << std::flush;
-            std::cout << seed.back() << std::endl;
             if (extension.get_clipping() || start_node != seed.back()) {
                 // if the extension starts at a different position
                 // from the seed end, then it's a new alignment

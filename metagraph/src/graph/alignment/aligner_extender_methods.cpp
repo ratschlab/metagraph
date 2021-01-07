@@ -176,6 +176,8 @@ bool DefaultColumnExtender<NodeType>
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
+    assert(path.size());
+    assert(path.get_cigar().back().first != Cigar::CLIPPED);
     // this extender only works if at least one character has been matched
     assert(path.get_query_end() > path.get_query().data());
     assert(path.get_query_end() > query.data());
