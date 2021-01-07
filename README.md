@@ -18,7 +18,7 @@ brew install libomp cmake make htslib boost jemalloc
 
 For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
 ```
-sudo apt-get install cmake libhts-dev libjemalloc-dev libboost-all-dev libgoogle-perftools-dev
+sudo apt-get install cmake libhts-dev libjemalloc-dev libboost-all-dev
 ```
 
 For **CentOS** (8 or higher)

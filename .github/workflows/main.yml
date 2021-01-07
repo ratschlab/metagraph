@@ -36,7 +36,7 @@ jobs:
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
 
-        sudo apt-get install libhts-dev libjemalloc-dev libboost-all-dev libgoogle-perftools-dev
+        sudo apt-get install libhts-dev libjemalloc-dev libboost-all-dev
 
     - name: install dependencies for integration tests
       run: |
