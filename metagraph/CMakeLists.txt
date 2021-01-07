@@ -235,6 +235,7 @@ link_directories(
 )
 
 include_directories(
+ PUBLIC
   external-libraries/KMC/kmc_api
   external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
@@ -254,6 +255,20 @@ include_directories(
   external-libraries/Simple-Web-Server
   ${PROJECT_SOURCE_DIR}/src
 )
+
+findFolly()
+if(FOLLY_FOUND)
+  add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
+  include_directories(SYSTEM
+    external-libraries/folly
+    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
+  )
+  set(METALIBS ${METALIBS} fbvector)
+else()
+  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
+  " Install Boost and jemalloc to compile with folly and enable various"
+  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
+endif()
 
 # use external fmt library in spdlog
 set(SPDLOG_FMT_EXTERNAL TRUE)
@@ -291,48 +306,6 @@ add_subdirectory(
   external-libraries/binrel_wt
 )
 
-set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
-find_library(FOLLY_LIBRARIES
-  NAMES folly
-  HINTS
-  ENV LD_LIBRARY_PATH
-  PATHS
-    $ENV{HOME}/.linuxbrew/lib
-)
-if(FOLLY_LIBRARIES)
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-  set(METALIBS ${METALIBS}
-    ${FOLLY_LIBRARIES}
-    -ldl
-    -lboost_regex
-    -lboost_filesystem
-    -lboost_program_options
-    -lcrypto
-  )
-  if(NOT BUILD_STATIC)
-    set(METALIBS ${METALIBS}
-      -lglog
-      -lgflags
-      -ldouble-conversion
-    )
-  endif()
-  find_library(LIBERTY
-    NAMES iberty
-    HINTS
-    ENV LD_LIBRARY_PATH
-    PATHS
-      $ENV{HOME}/.linuxbrew/lib
-  )
-  if(LIBERTY)
-    set(METALIBS ${METALIBS} ${LIBERTY})
-  endif()
-else()
-  message(WARNING "Folly (Facebook Open Source Library) not found."
-  " Install folly to reduce memory taken up by the Row-Compressed annotator"
-  " and enable other optimizations.")
-endif()
-
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
@@ -364,9 +337,11 @@ add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
+find_package(BZip2 REQUIRED)
+
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts -lz -lbz2
+  -lhts -lz ${BZIP2_LIBRARIES}
   -lsdsl
   brwt
   jsoncpp_lib
@@ -386,7 +361,7 @@ if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
+  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
@@ -531,7 +506,7 @@ list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 
 add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
 
 target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
 

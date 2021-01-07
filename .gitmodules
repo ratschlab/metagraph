@@ -62,3 +62,6 @@
 [submodule "metagraph/external-libraries/Simple-Web-Server"]
 	path = metagraph/external-libraries/Simple-Web-Server
 	url = https://gitlab.com/eidheim/Simple-Web-Server.git
+[submodule "metagraph/external-libraries/folly"]
+	path = metagraph/external-libraries/folly
+	url = https://github.com/facebook/folly
