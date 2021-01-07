@@ -85,7 +85,7 @@ endif()
 
 if(Jemalloc_FOUND AND Boost_FOUND)
 message(STATUS "Configuring Folly")
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC")
+  add_compile_options(-D_USE_FOLLY -DUSE_JEMALLOC)
   set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS})
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(

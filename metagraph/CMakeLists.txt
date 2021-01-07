@@ -258,6 +258,7 @@ include_directories(
 
 findFolly()
 if(USE_FOLLY)
+  add_compile_options(-D_USE_FOLLY -DUSE_JEMALLOC)
   include_directories(SYSTEM
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
