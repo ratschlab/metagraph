@@ -26,7 +26,7 @@ For **CentOS** (8 or higher)
 yum install cmake htslib-devel jemalloc-devel boost-devel
 ```
 
-All prerequisites can also be installed by users without root access with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
+All prerequisites can also be installed by users **without root** access with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
 
 
 ### Compile
