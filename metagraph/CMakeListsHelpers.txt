@@ -75,7 +75,6 @@ unset(Boost_INCLUDE_DIR CACHE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Boost)
 find_package(Jemalloc)
-find_package(Tcmalloc)
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
@@ -84,10 +83,10 @@ if(Jemalloc_FOUND)
   endif()
 endif()
 
-if(Jemalloc_FOUND AND Tcmalloc_FOUND AND Boost_FOUND)
+if(Jemalloc_FOUND AND Boost_FOUND)
 message(STATUS "Configuring Folly")
-  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC -DUSE_TCMALLOC")
-  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS} ${TCMALLOC_INCLUDE_DIRS})
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY -DUSE_JEMALLOC")
+  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS})
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
@@ -103,10 +102,7 @@ message(STATUS "Configuring Folly")
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
     ${PROJECT_SOURCE_DIR}/src/common
   )
-  target_link_libraries(fbvector PRIVATE
-    ${JEMALLOC_LIBRARIES}
-    ${TCMALLOC_LIBRARIES}
-  )
+  target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES})
 else()
   set(FOLLY_LIBRARIES "")
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
