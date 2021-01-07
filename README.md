@@ -8,7 +8,7 @@
 - HTSlib
 
 #### Optional
-- boost, jemalloc 4.0.0 or higher, gperftools (for efficient small vector support)
+- boost, jemalloc 4.0.0 or higher, gperftools (to build with folly for efficient small vector support)
 - Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
@@ -28,11 +28,9 @@ yum install cmake htslib-devel jemalloc-devel boost-devel gperftools-devel
 
 All prerequisites can also be installed by users without root access with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
 
-For installing with **LLVM Clang** on **Linux**, see [wiki](../../wiki/How-to-Start).
-
 
 ### Compile
-1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
+1. `git clone --recursive https://github.com/ratschlab/metagraph.git`
 2. install **sdsl-lite** in `metagraph/external-libraries/` by running the following script from the repository root directory
 ```bash
 git submodule sync

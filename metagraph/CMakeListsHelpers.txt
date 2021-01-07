@@ -71,6 +71,7 @@ endfunction()
 
 function (findFolly)
 unset(FOLLY_LIBRARIES)
+unset(Boost_INCLUDE_DIR CACHE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Boost)
 find_package(Jemalloc)
@@ -109,8 +110,8 @@ message(STATUS "Configuring Folly")
 else()
   set(FOLLY_LIBRARIES "")
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost, jemalloc, and gperftools to compile with folly and reduce memory taken up by the Row-Compressed annotator"
-  " and enable other optimizations.")
+  " Install Boost, jemalloc, and gperftools to compile with folly and enable various"
+  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 endfunction()
 

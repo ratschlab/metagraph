@@ -11,6 +11,7 @@
 find_package(PkgConfig)
 pkg_check_modules(PC_JEMALLOC QUIET libjemalloc)
 
+unset(JEMALLOC_INCLUDE_DIR CACHE)
 find_path(JEMALLOC_INCLUDE_DIR jemalloc/jemalloc.h
   HINTS
     ${JEMALLOC_ROOT} ENV JEMALLOC_ROOT
