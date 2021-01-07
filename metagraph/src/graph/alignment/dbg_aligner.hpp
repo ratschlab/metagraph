@@ -188,6 +188,9 @@ inline void SeedAndExtendAligner<Seeder, Extender>
             assert(extension.is_valid(get_graph(), &get_config()));
             extension.extend_query_end(query.data() + query.size());
 
+            std::cout << "FOO\t" << extension << "\t" << std::flush;
+            std::cout << start_node << "\t" << std::flush;
+            std::cout << seed.back() << std::endl;
             if (extension.get_clipping() || start_node != seed.back()) {
                 // if the extension starts at a different position
                 // from the seed end, then it's a new alignment

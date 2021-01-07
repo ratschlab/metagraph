@@ -38,7 +38,6 @@ class LabeledDBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
   protected:
-    typedef const std::function<void(const std::function<void(DBGAlignment&&)>&)> SeedGenerator;
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
@@ -143,16 +142,51 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
     );
     std::deque<std::pair<NodeType, char>> edges;
 
-    for (const auto &[node, c] : base_edges) {
-        auto row = mat.get_row(anno_graph_.graph_to_anno_index(node));
-        if (row.size() < target_columns_.size())
-            continue;
-
+    for (const auto &[out_node, c] : base_edges) {
+        auto row = mat.get_row(anno_graph_.graph_to_anno_index(out_node));
         std::sort(row.begin(), row.end());
 
-        if (std::includes(target_columns_.begin(), target_columns_.end(),
-                          row.begin(), row.end()))
-            edges.emplace_back(node, c);
+        std::vector<AnnotatedDBG::row_index> intersection;
+        std::set_intersection(row.begin(), row.end(),
+                              target_columns_.begin(), target_columns_.end(),
+                              std::back_inserter(intersection));
+
+        if (intersection.empty())
+            continue;
+
+        if (intersection.size() == target_columns_.size()) {
+            edges.emplace_back(out_node, c);
+        } else {
+            std::vector<std::pair<DBGAlignment, NodeType>> extensions;
+            std::cerr << "fork" << std::endl;
+
+            {
+                auto fork = *this;
+                fork.target_columns_ = intersection;
+                fork.update_columns(node, { { out_node, c } }, min_path_score);
+                fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
+                    assert(extension.is_valid(this->get_graph(), &this->get_config()));
+                    std::cerr << "bar\t" << extension << "\t" << start_node << std::endl;
+                    extensions.emplace_back(std::move(extension), start_node);
+                }, min_path_score);
+            }
+            std::cerr << "end" << std::endl;
+
+            for (auto&& [extension, start_node] : extensions) {
+                assert(extension.is_valid(this->get_graph(), &this->get_config()));
+                // std::cerr << "foo\t" << extension << "\t" << start_node << std::endl;
+                std::cerr << "foo\t" << start_node << " " << extension.get_clipping() << std::endl;
+                callback(std::move(extension), start_node);
+            }
+        }
+
+
+        // if (row.size() < target_columns_.size())
+        //     continue;
+
+        // if (std::includes(target_columns_.begin(), target_columns_.end(),
+        //                   row.begin(), row.end()))
+        //     edges.emplace_back(node, c);
     }
 
     return edges;
