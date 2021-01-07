@@ -337,10 +337,13 @@ add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
+find_package(BZip2 REQUIRED)
+
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts -lz -lbz2
+  -lhts -lz
   -lsdsl
+  ${BZIP2_LIBRARIES}
   brwt
   jsoncpp_lib
   progress_bar
@@ -359,7 +362,7 @@ if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lbz2 -llzma -lcurl -lssl -lcrypto)
+  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path

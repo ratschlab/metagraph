@@ -79,9 +79,12 @@ add_executable(kmc
     ${KMC_MAIN_DIR}/kmer_counter.cpp
 )
 
+find_package(BZip2 REQUIRED)
+
 target_link_libraries(kmc
     KMCcore
-    -lz -lbz2 -lpthread
+    ${BZIP2_LIBRARIES}
+    -lz -lpthread
 )
 
 endif()
