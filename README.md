@@ -8,7 +8,7 @@
 - HTSlib
 
 #### Optional
-- boost and jemalloc 4.0.0 or higher (to build with folly for efficient small vector support)
+- boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
 - Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
@@ -31,7 +31,7 @@ All prerequisites can also be installed by users **without root** access with [b
 
 ### Compile
 1. `git clone --recursive https://github.com/ratschlab/metagraph.git`
-2. install **sdsl-lite** in `metagraph/external-libraries/` by running the following script from the repository root directory
+2. install *sdsl-lite* in `metagraph/external-libraries/` by running the following script from the repository root directory
 ```bash
 git submodule sync
 git submodule update --init --recursive
