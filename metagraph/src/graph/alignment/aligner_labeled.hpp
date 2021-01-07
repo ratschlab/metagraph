@@ -1,8 +1,6 @@
 #ifndef __LABELED_ALIGNER_HPP__
 #define __LABELED_ALIGNER_HPP__
 
-#include <tsl/hopscotch_map.h>
-
 #include "dbg_aligner.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/vector_map.hpp"
@@ -83,9 +81,6 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     const AnnotatedDBG &anno_graph_;
     std::vector<uint64_t> target_columns_;
 
-    typedef tsl::hopscotch_map<NodeType, std::deque<std::pair<NodeType, char>>> EdgeMap;
-    std::shared_ptr<EdgeMap> edges_;
-
     LabeledColumnExtender fork_extender(std::vector<uint64_t>&& new_target_labels) const;
 };
 
@@ -112,8 +107,6 @@ inline void LabeledDBGAligner<Seeder, Extender, AlignmentCompare>
 template <typename NodeType>
 inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     DefaultColumnExtender<NodeType>::initialize(path);
-
-    edges_ = std::make_shared<EdgeMap>();
 
     VectorMap<AnnotatedDBG::row_index, size_t> row_map;
     row_map.reserve(path.size());
@@ -144,7 +137,6 @@ template <typename NodeType>
 inline LabeledColumnExtender<NodeType> LabeledColumnExtender<NodeType>
 ::fork_extender(std::vector<uint64_t>&& new_target_labels) const {
     auto fork = *this;
-    fork.edges_ = std::make_shared<EdgeMap>();
     fork.target_columns_ = std::move(new_target_labels);
     return fork;
 }
@@ -156,10 +148,6 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                  score_t min_path_score) {
     if (target_columns_.empty())
         return {};
-
-    auto edge_cached = edges_->find(node);
-    if (edge_cached != edges_->end())
-        return edge_cached->second;
 
     const auto &mat = anno_graph_.get_annotation().get_matrix();
     auto base_edges = DefaultColumnExtender<NodeType>::fork_extension(
@@ -188,11 +176,15 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                 edges.push_back(edge);
 
             } else if (!intersection.empty()) {
-                mtg::common::logger->trace(
-                    "Forking alignment from {} to {} labels on edge: {} {}-> {}. Table size: {}",
-                    target_columns_.size(), intersection.size(),
-                    node, c, out_node, this->get_dp_table().size()
-                );
+                // discard the labels which are in the intersection
+                std::vector<uint64_t> diff;
+                diff.reserve(target_columns_.size() - intersection.size());
+                std::set_difference(target_columns_.begin(), target_columns_.end(),
+                                    intersection.begin(), intersection.end(),
+                                    std::back_inserter(diff));
+                std::swap(diff, target_columns_);
+
+                // assign intersection labels to the fork
                 auto fork = fork_extender(std::move(intersection));
                 fork.update_columns(node, { edge }, min_path_score);
                 fork.extend_main(callback, min_path_score);
@@ -200,7 +192,6 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         }
     }
 
-    edges_->emplace(node, edges);
     return edges;
 }
 
