@@ -93,7 +93,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp gperftools boost jemalloc
+      run: brew install htslib libomp boost jemalloc
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized

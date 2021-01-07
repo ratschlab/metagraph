@@ -8,12 +8,12 @@
 - HTSlib
 
 #### Optional
-- boost, jemalloc 4.0.0 or higher, gperftools (to build with folly for efficient small vector support)
+- boost and jemalloc 4.0.0 or higher (to build with folly for efficient small vector support)
 - Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
 ```
-brew install libomp cmake make htslib boost jemalloc gperftools
+brew install libomp cmake make htslib boost jemalloc
 ```
 
 For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
@@ -23,7 +23,7 @@ sudo apt-get install cmake libhts-dev libjemalloc-dev libboost-all-dev libgoogle
 
 For **CentOS** (8 or higher)
 ```
-yum install cmake htslib-devel jemalloc-devel boost-devel gperftools-devel
+yum install cmake htslib-devel jemalloc-devel boost-devel
 ```
 
 All prerequisites can also be installed by users without root access with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
