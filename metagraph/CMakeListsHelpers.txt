@@ -70,7 +70,7 @@ endif()
 endfunction()
 
 function (findFolly)
-unset(FOLLY_LIBRARIES)
+unset(FOLLY_FOUND PARENT_SCOPE)
 unset(Boost_INCLUDE_DIR CACHE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
 find_package(Boost)
@@ -84,7 +84,7 @@ if(Jemalloc_FOUND)
 endif()
 
 if(Jemalloc_FOUND AND Boost_FOUND)
-message(STATUS "Configuring Folly")
+  message(STATUS "Configuring Folly")
   add_compile_options(-D_USE_FOLLY -DUSE_JEMALLOC)
   set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS})
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
@@ -103,11 +103,7 @@ message(STATUS "Configuring Folly")
     ${PROJECT_SOURCE_DIR}/src/common
   )
   target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES})
-else()
-  set(FOLLY_LIBRARIES "")
-  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost and jemalloc to compile with folly and enable various"
-  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
+  set(FOLLY_FOUND TRUE PARENT_SCOPE)
 endif()
 endfunction()
 

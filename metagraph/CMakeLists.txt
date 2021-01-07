@@ -257,13 +257,16 @@ include_directories(
 )
 
 findFolly()
-if(USE_FOLLY)
-  add_compile_options(-D_USE_FOLLY -DUSE_JEMALLOC)
+if(FOLLY_FOUND)
   include_directories(SYSTEM
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
   )
   set(METALIBS ${METALIBS} fbvector)
+else()
+  message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
+  " Install Boost and jemalloc to compile with folly and enable various"
+  " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
 # use external fmt library in spdlog
