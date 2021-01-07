@@ -341,9 +341,8 @@ find_package(BZip2 REQUIRED)
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts -lz
+  -lhts -lz ${BZIP2_LIBRARIES}
   -lsdsl
-  ${BZIP2_LIBRARIES}
   brwt
   jsoncpp_lib
   progress_bar
