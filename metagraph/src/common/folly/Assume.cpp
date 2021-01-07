@@ -2,12 +2,11 @@
 
 #if _USE_FOLLY
 
-#include <folly/lang/Assume.h>
-
 #include <iostream>
 
-namespace folly {
+#include <folly/lang/Assume.h>
 
+namespace folly {
 namespace detail {
 
 void assume_check(bool cond) {
@@ -16,7 +15,6 @@ void assume_check(bool cond) {
 }
 
 } // namespace detail
-
 } // namespace folly
 
 #endif // _USE_FOLLY

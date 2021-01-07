@@ -235,7 +235,7 @@ link_directories(
 )
 
 include_directories(
-  PUBLIC
+ PUBLIC
   external-libraries/KMC/kmc_api
   external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
