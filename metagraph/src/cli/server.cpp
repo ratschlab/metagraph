@@ -204,7 +204,8 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
+    std::unique_ptr<graph::align::IDBGAligner> aligner
+        = build_aligner<graph::align::DBGAligner>(graph, config);
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),

@@ -11,7 +11,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -830,7 +830,7 @@ void align_sequence(std::string &name, std::string &seq,
                     const align::DBGAlignerConfig &aligner_config) {
     const auto &graph = anno_graph.get_graph();
     auto alignments
-        = build_labeled_aligner(anno_graph, aligner_config)->align(seq);
+        = build_aligner<align::LabeledDBGAligner>(anno_graph, aligner_config)->align(seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 

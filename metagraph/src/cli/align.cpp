@@ -86,64 +86,60 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     return aligner_config;
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
+template <template <class ... Types> class Aligner, class Graph>
+std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &config) {
     assert(!config.canonical || graph.is_canonical_mode());
 
-    return build_aligner(graph, initialize_aligner_config(graph.get_k(), config));
+    return build_aligner<Aligner, Graph>(graph, initialize_aligner_config(graph.get_k(), config));
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
+template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const Config&);
+
+
+template <template <class ... Types> class Aligner, class Graph>
+std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
                                            const DBGAlignerConfig &aligner_config) {
+    size_t k;
+    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
+        k = graph.get_graph().get_k();
+    } else {
+        k = graph.get_k();
+    }
+
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    if (aligner_config.min_seed_length < graph.get_k()) {
+    if (aligner_config.min_seed_length < k) {
+        const DBGSuccinct *dbg_succ = nullptr;
+        if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_graph());
+        } else {
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+        }
+
         // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
+        if (!dbg_succ) {
             logger->error("SuffixSeeder can be used only with succinct graph representation");
             exit(1);
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
+        return std::make_unique<Aligner<SuffixSeeder<>>>(graph, aligner_config);
 
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
+    } else if (aligner_config.max_seed_length == k) {
+        assert(aligner_config.min_seed_length == k);
 
         // seeds are single k-mers
-        return std::make_unique<DBGAligner<>>(graph, aligner_config);
+        return std::make_unique<Aligner<>>(graph, aligner_config);
 
     } else {
         // seeds are maximal matches within unitigs (uni-MEMs)
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
+        return std::make_unique<Aligner<UniMEMSeeder<>>>(graph, aligner_config);
     }
 }
 
-std::unique_ptr<IDBGAligner> build_labeled_aligner(const AnnotatedDBG &anno_graph,
-                                                   const DBGAlignerConfig &aligner_config) {
-    const auto &graph = anno_graph.get_graph();
-    assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
+template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const DBGAlignerConfig&);
+template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
 
-    if (aligner_config.min_seed_length < graph.get_k()) {
-        // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
-        }
-
-        // Use the seeder that seeds to node suffixes
-        return std::make_unique<LabeledDBGAligner<SuffixSeeder<>>>(anno_graph, aligner_config);
-
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
-
-        // seeds are single k-mers
-        return std::make_unique<LabeledDBGAligner<>>(anno_graph, aligner_config);
-
-    } else {
-        // seeds are maximal matches within unitigs (uni-MEMs)
-        return std::make_unique<LabeledDBGAligner<UniMEMSeeder<>>>(anno_graph, aligner_config);
-    }
-}
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
@@ -322,7 +318,7 @@ void gfa_map_files(const Config *config,
         },
         get_num_threads()
     );
-    
+
     // Open gfa_file in append mode.
     std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
                            std::ios_base::app);
@@ -421,7 +417,7 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    auto aligner = build_aligner(*graph, *config);
+    auto aligner = build_aligner<DBGAligner>(*graph, *config);
 
     if (aligner->get_config().min_seed_length < graph->get_k()
             && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
