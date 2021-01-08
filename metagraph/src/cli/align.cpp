@@ -99,25 +99,20 @@ template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(c
 template <template <class ... Types> class Aligner, class Graph>
 std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
                                            const DBGAlignerConfig &aligner_config) {
-    size_t k;
+    const DeBruijnGraph *dbg;
     if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
-        k = graph.get_graph().get_k();
+        dbg = &graph.get_graph();
     } else {
-        k = graph.get_k();
+        dbg = &graph;
     }
+
+    size_t k = dbg->get_k();
 
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < k) {
-        const DBGSuccinct *dbg_succ = nullptr;
-        if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
-            dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph.get_graph());
-        } else {
-            dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-        }
-
         // seeds are ranges of nodes matching a suffix
-        if (!dbg_succ) {
+        if (!dynamic_cast<const DBGSuccinct*>(dbg)) {
             logger->error("SuffixSeeder can be used only with succinct graph representation");
             exit(1);
         }
