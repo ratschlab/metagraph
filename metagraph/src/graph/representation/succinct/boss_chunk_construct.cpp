@@ -405,11 +405,11 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
 
 /**
  * Generates non-redundant dummy-1 source k-mers and dummy sink kmers from #kmers.
- * @return a triplet containing the names of the original k-mer blocks, the dummy-1 source
+ * @return a triplet containing the names of the original k-mer block, the dummy-1 source
  * k-mer blocks and the dummy sink k-mers
  */
 template <typename T_REAL, typename T>
-std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
+std::tuple<std::string, std::vector<std::string>, std::string>
 generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
                        const std::filesystem::path &dir,
@@ -422,13 +422,19 @@ generate_dummy_1_kmers(size_t k,
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
 
+    using T_INT = get_int_t<T>;
+    using T_INT_REAL = get_int_t<T_REAL>;
+    std::vector<Encoder<T_INT>> real_chunks;
     std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
     std::vector<Encoder<KMER_INT>> dummy_sink_chunks;
+    std::vector<std::string> real_split_by_F_names(alphabet_size);
     std::vector<std::string> dummy_l1_names(alphabet_size);
     std::vector<std::string> dummy_sink_names(alphabet_size);
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
+        real_split_by_F_names[i] = dir/("real_split_by_F_" + std::to_string(i));
         dummy_l1_names[i] = dir/("dummy_source_1_" + std::to_string(i));
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
+        real_chunks.emplace_back(real_split_by_F_names[i], ENCODER_BUFFER_SIZE);
         dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
@@ -438,14 +444,14 @@ generate_dummy_1_kmers(size_t k,
     static constexpr size_t L = KMER::kBitsPerChar;
     KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
-    kmer_delta &= ~KMER_INT(((1ull << L) - 1) << L);
+    KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
-        common::MergeDecoder<KMER_INT_REAL> it(F_chunks, false);
+        common::MergeDecoder<T_INT_REAL> it(F_chunks, false);
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 0; c < alphabet_size; ++c) {
             W_chunks.push_back(real_F_W[c * alphabet_size + F]);
@@ -453,9 +459,22 @@ generate_dummy_1_kmers(size_t k,
         common::ConcatDecoder<KMER_INT_REAL> sink_gen_it(W_chunks);
 
         while (!it.empty()) {
-            KMER_REAL dummy_source(it.pop());
+            T_REAL v(it.pop());
+
+            // write k-mer to its respective block |real_chunks[F]|
+            if constexpr(utils::is_pair_v<T>) {
+                real_chunks[F].add({ kmer::transform<KMER>(v.first, k + 1) + kmer_delta, v.second });
+            } else {
+                real_chunks[F].add(kmer::transform<KMER>(v, k + 1) + kmer_delta);
+            }
+
+            KMER_REAL dummy_source(utils::get_first(v));
             // skip k-mers that would generate identical source dummy k-mers
-            skip_same_suffix(dummy_source, it, 0);
+            if (!it.empty() && KMER_REAL::compare_suffix(KMER_REAL(utils::get_first(it.top())),
+                                                         dummy_source, 0)) {
+                continue;
+            }
+
             dummy_source.to_prev(k + 1, 0);
             // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
             while (!sink_gen_it.empty()
@@ -479,7 +498,7 @@ generate_dummy_1_kmers(size_t k,
                 }
             }
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
+            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
@@ -489,9 +508,15 @@ generate_dummy_1_kmers(size_t k,
         }
     }
 
+    // remove all unmerged chunks
+    for (const std::string &chunk_name : real_F_W) {
+        std::filesystem::remove(chunk_name);
+    }
+
     uint64_t num_sink = 0;
     uint64_t num_source = 0;
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
+        real_chunks[i].finish();
         dummy_sink_chunks[i].finish();
         dummy_l1_chunks[i].finish();
         num_sink += dummy_sink_chunks[i].size();
@@ -508,20 +533,13 @@ generate_dummy_1_kmers(size_t k,
     std::string dummy_sink_name = dir/"dummy_sink";
     common::concat(dummy_sink_names, dummy_sink_name);
 
-    // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
-    // 4 without destroying the order
-    logger->trace("Concatenating blocks of original real k-mers ({} -> {})...",
-                  real_F_W.size(), alphabet_size);
-    std::vector<std::string> real_split_by_W;
-    for (TAlphabet W = 0; W < alphabet_size; ++W) {
-        std::vector<std::string> blocks;
-        for (TAlphabet F = 0; F < alphabet_size; ++F) {
-            blocks.push_back(real_F_W[F * alphabet_size + W]);
-        }
-        real_split_by_W.push_back(dir/("real_split_by_W_" + std::to_string(W)));
-        common::concat(blocks, real_split_by_W.back());
-    }
-    return { real_split_by_W, dummy_l1_names, dummy_sink_name };
+    // similarly concatenate blocks of the real k-mers
+    logger->trace("Concatenating blocks of real k-mers ({} -> 1)...",
+                  real_split_by_F_names.size());
+    std::string real_name = dir/"real";
+    common::concat(real_split_by_F_names, real_name);
+
+    return { real_name, dummy_l1_names, dummy_sink_name };
 }
 
 /**
@@ -627,7 +645,6 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
                               ThreadPool &async_worker) {
     using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
     using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
-    using KMER_REAL = typename KmerCollector::Kmer; // 64/128/256-bit KmerBOSS
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
@@ -679,9 +696,9 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     }
 
     std::string dummy_sink_name;
-    std::vector<std::string> real_split_by_W;
+    std::string real_name;
     std::vector<std::string> dummy_names;
-    std::tie(real_split_by_W, dummy_names, dummy_sink_name)
+    std::tie(real_name, dummy_names, dummy_sink_name)
             = generate_dummy_1_kmers<T_REAL, T>(k, num_threads, dir, real_F_W);
 
     // stores the sorted original kmers and dummy-1 k-mers
@@ -737,22 +754,9 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     }
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
-    async_worker.enqueue([k, kmers_out, real_split_by_W, dummy_chunks]() {
-        const KMER_INT kmer_delta
-                = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
-
-        common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
-            [&](const T_INT_REAL &v) {
-                if constexpr(utils::is_pair_v<T>) {
-                    return T(kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
-                                + kmer_delta,
-                             v.second);
-                } else {
-                    return kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1) + kmer_delta;
-                }
-            },
-            real_split_by_W, true
-        );
+    async_worker.enqueue([kmers_out, real_name, dummy_chunks]() {
+        using T_INT = get_int_t<T>;
+        Decoder<T_INT> decoder(real_name, true);
 
         common::Transformed<common::MergeDecoder<KMER_INT>, T> decoder_dummy(
             [](const KMER_INT &v) {
@@ -765,15 +769,19 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
             dummy_chunks, true
         );
 
-        while (!decoder.empty() && !decoder_dummy.empty()) {
-            if (get_first(decoder.top()) < get_first(decoder_dummy.top())) {
-                kmers_out->push(decoder.pop());
+        std::optional<T_INT> next = decoder.next();
+        while (next && !decoder_dummy.empty()) {
+            const T &next_real = reinterpret_cast<const T &>(next.value());
+            if (get_first(next_real) < get_first(decoder_dummy.top())) {
+                kmers_out->push(next_real);
+                next = decoder.next();
             } else {
                 kmers_out->push(decoder_dummy.pop());
             }
         }
-        while (!decoder.empty()) {
-            kmers_out->push(decoder.pop());
+        while (next) {
+            kmers_out->push(reinterpret_cast<const T &>(next.value()));
+            next = decoder.next();
         }
         while (!decoder_dummy.empty()) {
             kmers_out->push(decoder_dummy.pop());
