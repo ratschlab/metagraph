@@ -201,7 +201,10 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                 // assign intersection labels to the fork
                 auto fork = fork_extender(std::move(intersection));
                 fork.update_columns(node, { edge }, min_path_score);
-                fork.extend_main(callback, min_path_score);
+                fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
+                    if (start_node)
+                        callback(std::move(extension), start_node);
+                }, min_path_score);
             }
         }
     }

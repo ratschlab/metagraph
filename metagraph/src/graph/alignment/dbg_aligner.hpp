@@ -125,6 +125,7 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
+  private:
     Seeder build_seeder() const override { return Seeder(graph_, config_); }
     Extender build_extender() const override { return Extender(graph_, config_); }
 
@@ -133,7 +134,6 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     void align_aggregate(DBGQueryAlignment &paths,
                          const AlignmentGenerator &alignment_generator) const override;
 
-  private:
     const DeBruijnGraph& graph_;
     const DBGAlignerConfig config_;
 };
@@ -175,12 +175,11 @@ inline void SeedAndExtendAligner<Seeder, Extender>
             if (!start_node && !extended) {
                 // no good extension found
                 if (seed.get_score() >= min_path_score) {
-                    auto next_path = seed;
-                    next_path.extend_query_end(query.data() + query.size());
-                    next_path.trim_offset();
-                    assert(next_path.is_valid(get_graph(), &get_config()));
-                    mtg::common::logger->trace("Alignment: {}", next_path);
-                    callback(std::move(next_path));
+                    seed.extend_query_end(query.data() + query.size());
+                    seed.trim_offset();
+                    assert(seed.is_valid(get_graph(), &get_config()));
+                    mtg::common::logger->trace("Alignment: {}", seed);
+                    callback(std::move(seed));
                 }
                 extended = true;
                 return;
