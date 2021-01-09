@@ -195,7 +195,7 @@ inline auto LabeledColumnExtender<NodeType>
                 const auto &boss = dbg_succ.get_boss();
                 if (boss.get_last(dbg_succ.kmer_to_boss_index(base_edges[i].first))) {
                     // apply diff to target_columns_
-                    auto diff_row = rd->get_diff(base_rows[i]);
+                    auto diff_row = rd->get_diff(anno_graph_.graph_to_anno_index(node));
                     std::set_difference(target_columns_.begin(), target_columns_.end(),
                                         diff_row.begin(), diff_row.end(),
                                         std::back_inserter(rows[i]));
