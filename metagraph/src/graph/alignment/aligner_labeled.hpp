@@ -82,6 +82,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   private:
     const AnnotatedDBG &anno_graph_;
     std::vector<uint64_t> target_columns_;
+    tsl::hopscotch_map<NodeType, Edges> cached_edge_sets_;
 };
 
 
@@ -151,6 +152,9 @@ inline auto LabeledColumnExtender<NodeType>
 ::fork_extension(NodeType node,
                  std::function<void(DBGAlignment&&, NodeType)> callback,
                  score_t min_path_score) -> Edges {
+    if (cached_edge_sets_.count(node))
+        return cached_edge_sets_[node];
+
     const auto &mat = anno_graph_.get_annotation().get_matrix();
 
     // get set of outgoing nodes from the parent class
@@ -166,6 +170,8 @@ inline auto LabeledColumnExtender<NodeType>
             if (mat.get(anno_graph_.graph_to_anno_index(edge.first), target_columns_[0]))
                 edges.emplace_back(std::move(edge));
         }
+
+        cached_edge_sets_[node] = edges;
 
         return edges;
     }
@@ -193,6 +199,8 @@ inline auto LabeledColumnExtender<NodeType>
                              std::deque<std::pair<NodeType, char>>&& cur_edges) {
         if (!new_target_labels.empty()) {
             auto fork = *this;
+            fork.cached_edge_sets_.clear();
+            fork.cached_edge_sets_[node] = cur_edges;
             fork.target_columns_ = std::move(new_target_labels);
             fork.update_columns(node, std::move(cur_edges), min_path_score);
             fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
@@ -230,6 +238,8 @@ inline auto LabeledColumnExtender<NodeType>
             fork_extender(std::move(intersection), std::move(cur_edges));
         }
     }
+
+    cached_edge_sets_[node] = edges;
 
     return edges;
 }
