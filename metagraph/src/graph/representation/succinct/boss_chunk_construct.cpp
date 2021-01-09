@@ -927,6 +927,7 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
     }
 
     // concatenate all chunks
+    logger->trace("Concatenating {} chunks into a single BOSS table", chunks.size() + 1);
     for (size_t F = 0; F < real_names.size(); ++F) {
         chunk->extend(*chunks[F]);
         delete chunks[F];
