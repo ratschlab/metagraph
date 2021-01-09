@@ -153,30 +153,33 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                  std::function<void(DBGAlignment&&, NodeType)> callback,
                  score_t min_path_score) {
     const auto &mat = anno_graph_.get_annotation().get_matrix();
+
+    // get set of outgoing nodes from the parent class
     auto base_edges = DefaultColumnExtender<NodeType>::fork_extension(
         node, callback, min_path_score
     );
 
     std::deque<std::pair<NodeType, char>> edges;
 
+    // first check the simple case to avoid decoding entire rows
     if (target_columns_.size() == 1) {
         for (auto&& edge : base_edges) {
-            const auto &[out_node, c] = edge;
-            if (mat.get(anno_graph_.graph_to_anno_index(out_node), target_columns_[0]))
+            if (mat.get(anno_graph_.graph_to_anno_index(edge.first), target_columns_[0]))
                 edges.emplace_back(std::move(edge));
         }
 
         return edges;
     }
 
+    // decode all rows
     std::vector<AnnotatedDBG::row_index> base_rows;
     base_rows.reserve(base_edges.size());
     for (const auto &[out_node, c] : base_edges) {
         base_rows.push_back(anno_graph_.graph_to_anno_index(out_node));
     }
-
     auto rows = mat.get_rows(base_rows);
 
+    // aggregate outgoing nodes by row
     tsl::hopscotch_map<std::vector<uint64_t>, std::deque<std::pair<NodeType, char>>,
                        utils::VectorHash> out_labels;
 
@@ -187,6 +190,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         );
     }
 
+    // copy the current extender with the new row and continue extension
     auto fork_extender = [&](std::vector<uint64_t>&& new_target_labels,
                              std::deque<std::pair<NodeType, char>>&& cur_edges) {
         if (!new_target_labels.empty()) {
@@ -204,6 +208,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         const auto &row = it->first;
         auto &cur_edges = it.value();
 
+        // if the current target row is empty, replace it with this one
         if (target_columns_.empty()) {
             assert(row.size());
             fork_extender(std::vector<uint64_t>(row), std::move(cur_edges));
@@ -217,8 +222,10 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                               std::back_inserter(intersection));
 
         if (intersection.size() == target_columns_.size()) {
+            // the row matches, so pass these outgoing nodes to the current extender
             swap(edges, cur_edges);
         } else {
+            // create a new extender to work on the subset
             fork_extender(std::move(intersection), std::move(cur_edges));
         }
     }
