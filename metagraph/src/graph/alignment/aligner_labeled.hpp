@@ -206,10 +206,13 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         const auto &row = it->first;
         auto &cur_edges = it.value();
 
-        // if the current target row is empty, replace it with this one
+        // if the current target row is empty, fork when labels are found
         if (target_columns_.empty()) {
-            assert(row.size());
-            fork_extender(std::vector<uint64_t>(row), std::move(cur_edges));
+            if (row.empty()) {
+                swap(edges, cur_edges);
+            } else {
+                fork_extender(std::vector<uint64_t>(row), std::move(cur_edges));
+            }
             continue;
         }
 
