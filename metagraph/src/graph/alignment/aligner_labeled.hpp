@@ -4,6 +4,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "dbg_aligner.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/vector_map.hpp"
 #include "common/hashers/hash.hpp"
@@ -182,7 +183,30 @@ inline auto LabeledColumnExtender<NodeType>
     for (const auto &[out_node, c] : base_edges) {
         base_rows.push_back(anno_graph_.graph_to_anno_index(out_node));
     }
-    auto rows = mat.get_rows(base_rows);
+
+    std::vector<Vector<uint64_t>> rows;
+    if (const auto *rd = dynamic_cast<const annot::binmat::IRowDiff*>(&mat)) {
+        rows.resize(base_rows.size());
+        for (size_t i = 0; i < base_rows.size(); ++i) {
+            if (rd->is_anchor(base_rows[i])) {
+                rows[i] = rd->get_diff(base_rows[i]);
+            } else {
+                const auto &dbg_succ = *rd->graph();
+                const auto &boss = dbg_succ.get_boss();
+                if (boss.get_last(dbg_succ.kmer_to_boss_index(base_edges[i].first))) {
+                    // apply diff to target_columns_
+                    auto diff_row = rd->get_diff(base_rows[i]);
+                    std::set_difference(target_columns_.begin(), target_columns_.end(),
+                                        diff_row.begin(), diff_row.end(),
+                                        std::back_inserter(rows[i]));
+                } else {
+                    rows[i] = mat.get_row(base_rows[i]);
+                }
+            }
+        }
+    } else {
+        rows = mat.get_rows(base_rows);
+    }
 
     // aggregate outgoing nodes by row
     tsl::hopscotch_map<std::vector<uint64_t>, Edges, utils::VectorHash> out_labels;

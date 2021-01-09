@@ -28,6 +28,11 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 class IRowDiff : public BinaryMatrix {
   public:
     virtual ~IRowDiff() {}
+
+    virtual Vector<uint64_t> get_diff(uint64_t node_id) const = 0;
+    virtual bool is_anchor(uint64_t node_id) const = 0;
+
+    virtual const graph::DBGSuccinct* graph() const = 0;
 };
 
 /**
@@ -63,7 +68,7 @@ class RowDiff : public IRowDiff {
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
 
-    const graph::DBGSuccinct* graph() const { return graph_; }
+    const graph::DBGSuccinct* graph() const override { return graph_; }
 
     /**
      * Returns the number of set bits in the matrix.
@@ -92,11 +97,12 @@ class RowDiff : public IRowDiff {
 
     void load_anchor(const std::string& filename);
     const anchor_bv_type& anchor() const { return anchor_; }
+    bool is_anchor(uint64_t node_id) const override { return anchor_[node_id]; }
 
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
-    Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
+    Vector<uint64_t> get_diff(uint64_t node_id) const override { return diffs_.get_row(node_id); }
 
   private:
     static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
