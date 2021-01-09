@@ -181,6 +181,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                        utils::VectorHash> out_labels;
 
     for (size_t i = 0; i < rows.size(); ++i) {
+        assert(std::is_sorted(rows[i].begin(), rows[i].end()));
         out_labels[{ rows[i].begin(), rows[i].end() }].emplace_back(
             std::move(base_edges[i])
         );
@@ -188,28 +189,24 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
 
     auto fork_extender = [&](std::vector<uint64_t>&& new_target_labels,
                              std::deque<std::pair<NodeType, char>>&& cur_edges) {
-        auto fork = *this;
-        fork.target_columns_ = std::move(new_target_labels);
-        fork.update_columns(node, std::move(cur_edges), min_path_score);
-        fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
-            if (start_node)
-                callback(std::move(extension), start_node);
-        }, min_path_score);
+        if (!new_target_labels.empty()) {
+            auto fork = *this;
+            fork.target_columns_ = std::move(new_target_labels);
+            fork.update_columns(node, std::move(cur_edges), min_path_score);
+            fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
+                if (start_node)
+                    callback(std::move(extension), start_node);
+            }, min_path_score);
+        }
     };
 
     for (auto it = out_labels.begin(); it != out_labels.end(); ++it) {
         const auto &row = it->first;
         auto &cur_edges = it.value();
 
-        assert(std::is_sorted(row.begin(), row.end()));
-
         if (target_columns_.empty()) {
-            if (row.empty()) {
-                std::swap(edges, cur_edges);
-            } else {
-                fork_extender(std::vector<uint64_t>(row), std::move(cur_edges));
-            }
-
+            assert(row.size());
+            fork_extender(std::vector<uint64_t>(row), std::move(cur_edges));
             continue;
         }
 
@@ -220,19 +217,8 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                               std::back_inserter(intersection));
 
         if (intersection.size() == target_columns_.size()) {
-            std::swap(edges, cur_edges);
-
-        } else if (!intersection.empty()) {
-            // discard the labels which are in the intersection
-            std::vector<uint64_t> diff;
-            diff.reserve(target_columns_.size() - intersection.size());
-            std::set_difference(target_columns_.begin(), target_columns_.end(),
-                                intersection.begin(), intersection.end(),
-                                std::back_inserter(diff));
-            assert(diff.size());
-            std::swap(diff, target_columns_);
-
-            // assign intersection labels to the fork
+            swap(edges, cur_edges);
+        } else {
             fork_extender(std::move(intersection), std::move(cur_edges));
         }
     }
