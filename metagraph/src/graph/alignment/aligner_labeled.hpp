@@ -73,10 +73,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     virtual void initialize(const DBGAlignment &path) override;
 
   protected:
-    virtual std::deque<std::pair<NodeType, char>>
-    fork_extension(NodeType node,
-                   std::function<void(DBGAlignment&&, NodeType)> callback,
-                   score_t min_path_score) override;
+    typedef std::deque<std::pair<NodeType, char>> Edges;
+
+    virtual Edges fork_extension(NodeType node,
+                                 std::function<void(DBGAlignment&&, NodeType)> callback,
+                                 score_t min_path_score) override;
 
   private:
     const AnnotatedDBG &anno_graph_;
@@ -146,10 +147,10 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
 }
 
 template <typename NodeType>
-inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
+inline auto LabeledColumnExtender<NodeType>
 ::fork_extension(NodeType node,
                  std::function<void(DBGAlignment&&, NodeType)> callback,
-                 score_t min_path_score) {
+                 score_t min_path_score) -> Edges {
     const auto &mat = anno_graph_.get_annotation().get_matrix();
 
     // get set of outgoing nodes from the parent class
@@ -157,7 +158,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         node, callback, min_path_score
     );
 
-    std::deque<std::pair<NodeType, char>> edges;
+    Edges edges;
 
     // first check the simple case to avoid decoding entire rows
     if (target_columns_.size() == 1) {
@@ -178,8 +179,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
     auto rows = mat.get_rows(base_rows);
 
     // aggregate outgoing nodes by row
-    tsl::hopscotch_map<std::vector<uint64_t>, std::deque<std::pair<NodeType, char>>,
-                       utils::VectorHash> out_labels;
+    tsl::hopscotch_map<std::vector<uint64_t>, Edges, utils::VectorHash> out_labels;
 
     for (size_t i = 0; i < rows.size(); ++i) {
         assert(std::is_sorted(rows[i].begin(), rows[i].end()));
