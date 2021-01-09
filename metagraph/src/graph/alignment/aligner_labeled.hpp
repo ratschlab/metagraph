@@ -166,54 +166,65 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
     );
 
     std::deque<std::pair<NodeType, char>> edges;
-    for (const auto &edge : base_edges) {
+
+    if (target_columns_.size() == 1) {
+        for (auto&& edge : base_edges) {
+            const auto &[out_node, c] = edge;
+            if (mat.get(anno_graph_.graph_to_anno_index(out_node), target_columns_[0]))
+                edges.emplace_back(std::move(edge));
+        }
+
+        return edges;
+    }
+
+    for (auto&& edge : base_edges) {
         const auto &[out_node, c] = edge;
         AnnotatedDBG::row_index out_row = anno_graph_.graph_to_anno_index(out_node);
 
-        if (target_columns_.size() == 1) {
-            if (mat.get(out_row, target_columns_[0]))
-                edges.push_back(edge);
+        auto row = mat.get_row(out_row);
+        assert(std::is_sorted(row.begin(), row.end()));
 
-        } else {
-            auto row = mat.get_row(out_row);
-            assert(std::is_sorted(row.begin(), row.end()));
+        if (target_columns_.empty()) {
+            if (row.empty()) {
+                edges.emplace_back(std::move(edge));
 
-            if (target_columns_.empty()) {
+            } else {
                 auto fork = fork_extender({ row.begin(), row.end() });
-                fork.update_columns(node, { edge }, min_path_score);
-                fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
-                    if (start_node)
-                        callback(std::move(extension), start_node);
-                }, min_path_score);
-                continue;
-            }
-
-            std::vector<AnnotatedDBG::row_index> intersection;
-            intersection.reserve(std::min(row.size(), target_columns_.size()));
-            std::set_intersection(target_columns_.begin(), target_columns_.end(),
-                                  row.begin(), row.end(), std::back_inserter(intersection));
-
-            if (intersection.size() == target_columns_.size()) {
-                edges.push_back(edge);
-
-            } else if (!intersection.empty()) {
-                // discard the labels which are in the intersection
-                std::vector<uint64_t> diff;
-                diff.reserve(target_columns_.size() - intersection.size());
-                std::set_difference(target_columns_.begin(), target_columns_.end(),
-                                    intersection.begin(), intersection.end(),
-                                    std::back_inserter(diff));
-                assert(diff.size());
-                std::swap(diff, target_columns_);
-
-                // assign intersection labels to the fork
-                auto fork = fork_extender(std::move(intersection));
-                fork.update_columns(node, { edge }, min_path_score);
+                fork.update_columns(node, { std::move(edge) }, min_path_score);
                 fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
                     if (start_node)
                         callback(std::move(extension), start_node);
                 }, min_path_score);
             }
+
+            continue;
+        }
+
+        std::vector<AnnotatedDBG::row_index> intersection;
+        intersection.reserve(std::min(row.size(), target_columns_.size()));
+        std::set_intersection(target_columns_.begin(), target_columns_.end(),
+                              row.begin(), row.end(), std::back_inserter(intersection));
+
+        if (intersection.size() == target_columns_.size()) {
+            edges.emplace_back(std::move(edge));
+
+        } else if (!intersection.empty()) {
+            // discard the labels which are in the intersection
+            std::vector<uint64_t> diff;
+            diff.reserve(target_columns_.size() - intersection.size());
+            std::set_difference(target_columns_.begin(), target_columns_.end(),
+                                intersection.begin(), intersection.end(),
+                                std::back_inserter(diff));
+            assert(diff.size());
+            std::swap(diff, target_columns_);
+
+            // assign intersection labels to the fork
+            auto fork = fork_extender(std::move(intersection));
+            fork.update_columns(node, { std::move(edge) }, min_path_score);
+            fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
+                if (start_node)
+                    callback(std::move(extension), start_node);
+            }, min_path_score);
         }
     }
 
