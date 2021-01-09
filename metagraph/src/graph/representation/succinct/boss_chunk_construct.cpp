@@ -640,14 +640,15 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
                          std::filesystem::path dir);
 
 template <typename T>
-BOSS::Chunk* build_boss_chunk(const std::vector<std::string> &real_names,
-                              const std::vector<std::vector<std::string>> &dummy_source_names,
-                              const std::vector<std::string> &dummy_sink_names,
-                              size_t k,
-                              bool both_strands_mode,
-                              uint8_t bits_per_count,
-                              std::filesystem::path dir,
-                              std::filesystem::path swap_dir);
+BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
+                        const std::vector<std::vector<std::string>> &dummy_source_names,
+                        const std::vector<std::string> &dummy_sink_names,
+                        std::filesystem::path dir,
+                        size_t k,
+                        bool both_strands_mode,
+                        uint8_t bits_per_count,
+                        std::filesystem::path swap_dir,
+                        size_t num_threads);
 
 /**
  * Reconstructs all the required dummy k-mers and builds a BOSS table (chunk).
@@ -722,8 +723,8 @@ BOSS::Chunk* construct_boss_chunk_disk(KmerCollector &kmer_collector,
             = reconstruct_dummy_source<KMER>(dummy_l1_names, k, num_threads, dir);
 
     // merge all the original k-mers with the dummy k-mers and generate a BOSS table
-    return build_boss_chunk<T>(real_names, dummy_source_names, dummy_sink_names,
-                               k, both_strands_mode, bits_per_count, dir, swap_dir);
+    return build_boss<T>(real_names, dummy_source_names, dummy_sink_names,
+                         dir, k, both_strands_mode, bits_per_count, swap_dir, num_threads);
 }
 
 template <typename KMER>
@@ -796,13 +797,12 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
 }
 
 template <typename T>
-BOSS::Chunk* build_boss_chunk(const std::vector<std::string> &real_names,
-                              const std::vector<std::vector<std::string>> &dummy_source_names,
-                              const std::vector<std::string> &dummy_sink_names,
+BOSS::Chunk* build_boss_chunk(bool is_first_chunk,
+                              const std::string &real_name,
+                              const std::vector<std::string> &dummy_names,
                               size_t k,
                               bool both_strands_mode,
                               uint8_t bits_per_count,
-                              std::filesystem::path dir,
                               std::filesystem::path swap_dir) {
     using T_INT = get_int_t<T>;
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
@@ -810,28 +810,13 @@ BOSS::Chunk* build_boss_chunk(const std::vector<std::string> &real_names,
 
     auto kmers_out = std::make_shared<ChunkedWaitQueue<T_INT>>(ENCODER_BUFFER_SIZE);
 
-    // add the main dummy source k-mer
-    if constexpr(utils::is_pair_v<T>) {
-        kmers_out->push({ KMER_INT(0), 0 });
-    } else {
-        kmers_out->push(KMER_INT(0));
-    }
-
-    // concatenate blocks of the real k-mers
-    logger->trace("Concatenating blocks of real k-mers ({} -> 1)...", real_names.size());
-    std::string real_name = dir/"real_kmers";
-    common::concat(real_names, real_name);
-
-    logger->trace("Concatenating blocks of dummy sink k-mers ({} -> 1)...",
-                  dummy_sink_names.size());
-    std::vector<std::string> dummy_names { dir/"dummy_sink" };
-    common::concat(dummy_sink_names, dummy_names.back());
-
-    for (size_t i = 0; i < dummy_source_names.size(); ++i) {
-        logger->trace("Concatenating blocks of dummy-{} source k-mers ({} -> 1)...",
-                      i + 1, dummy_source_names[i].size());
-        dummy_names.push_back(dir/fmt::format("dummy_source_{}", i));
-        common::concat(dummy_source_names[i], dummy_names.back());
+    if (is_first_chunk) {
+        // add the main dummy source k-mer
+        if constexpr(utils::is_pair_v<T>) {
+            kmers_out->push({ KMER_INT(0), 0 });
+        } else {
+            kmers_out->push(KMER_INT(0));
+        }
     }
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
@@ -870,12 +855,84 @@ BOSS::Chunk* build_boss_chunk(const std::vector<std::string> &real_names,
         kmers_out->shutdown();
     });
 
-    BOSS::Chunk *result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
-                                          k, both_strands_mode,
-                                          reinterpret_container<T>(*kmers_out),
-                                          bits_per_count, swap_dir);
+    return new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
+                           k, both_strands_mode,
+                           reinterpret_container<T>(*kmers_out),
+                           bits_per_count, swap_dir);
+}
 
-    return result;
+template <typename T>
+BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
+                        const std::vector<std::vector<std::string>> &dummy_source_names,
+                        const std::vector<std::string> &dummy_sink_names,
+                        std::filesystem::path dir,
+                        size_t k,
+                        bool both_strands_mode,
+                        uint8_t bits_per_count,
+                        std::filesystem::path swap_dir,
+                        size_t num_threads) {
+    assert(real_names.size() == dummy_sink_names.size());
+    assert(real_names.size() + 1 == dummy_source_names.front().size());
+    assert(dummy_source_names.size() == k);
+
+    if (k <= 1) {
+        // For k <= 1 BOSS chunks can't be built independently.
+        // Concatenate blocks and build a full BOSS table.
+        logger->trace("Concatenating blocks of real k-mers ({} -> 1)...", real_names.size());
+        std::string real_name = dir/"real_kmers";
+        common::concat(real_names, real_name);
+
+        logger->trace("Concatenating blocks of dummy sink k-mers ({} -> 1)...",
+                      dummy_sink_names.size());
+        std::vector<std::string> dummy_names { dir/"dummy_sink" };
+        common::concat(dummy_sink_names, dummy_names.back());
+
+        for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+            logger->trace("Concatenating blocks of dummy-{} source k-mers ({} -> 1)...",
+                          i + 1, dummy_source_names[i].size());
+            dummy_names.push_back(dir/fmt::format("dummy_source_{}", i));
+            common::concat(dummy_source_names[i], dummy_names.back());
+        }
+
+        return build_boss_chunk<T>(true, real_name, dummy_names,
+                                   k, both_strands_mode, bits_per_count, swap_dir);
+    }
+
+    // For k >= 2, BOSS chunks can be built independently, in parallel.
+
+    // there are real k-mers that end with $, so we do the following trick
+    const std::string empty_real_name = real_names.front() + "_empty";
+    Encoder<get_int_t<T>> empty_real(empty_real_name, ENCODER_BUFFER_SIZE);
+    empty_real.finish();
+
+    // the first chunk has at most alphabet_size + 1 k-mers (where F = $)
+    std::vector<std::string> dummy_names;
+    for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+        dummy_names.push_back(dummy_source_names[i][0]);
+    }
+    BOSS::Chunk *chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
+                                             k, both_strands_mode, bits_per_count, swap_dir);
+    logger->trace("Chunk for ..$. done");
+    // construct all other chunks in parallel
+    std::vector<BOSS::Chunk *> chunks(real_names.size());
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t F = 0; F < real_names.size(); ++F) {
+        std::vector<std::string> dummy_names { dummy_sink_names[F] };
+        for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+            dummy_names.push_back(dummy_source_names[i][F + 1]);
+        }
+        chunks[F] = build_boss_chunk<T>(false, real_names[F], dummy_names,
+                                        k, both_strands_mode, bits_per_count, swap_dir);
+        logger->trace("Chunk for ..{}. done", KmerExtractor2Bit().alphabet[F]);
+    }
+
+    // concatenate all chunks
+    for (size_t F = 0; F < real_names.size(); ++F) {
+        chunk->extend(*chunks[F]);
+        delete chunks[F];
+    }
+    logger->trace("All {} chunks concatenated", chunks.size() + 1);
+    return chunk;
 }
 
 inline std::vector<TAlphabet>
