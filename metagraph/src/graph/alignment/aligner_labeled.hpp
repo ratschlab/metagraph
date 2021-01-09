@@ -177,11 +177,17 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
         return edges;
     }
 
-    for (auto&& edge : base_edges) {
-        const auto &[out_node, c] = edge;
-        AnnotatedDBG::row_index out_row = anno_graph_.graph_to_anno_index(out_node);
+    std::vector<AnnotatedDBG::row_index> base_rows;
+    base_rows.reserve(base_edges.size());
+    for (const auto &[out_node, c] : base_edges) {
+        base_rows.push_back(anno_graph_.graph_to_anno_index(out_node));
+    }
 
-        auto row = mat.get_row(out_row);
+    auto rows = mat.get_rows(base_rows);
+
+    for (size_t i = 0; i < base_edges.size(); ++i) {
+        auto &edge = base_edges[i];
+        auto &row = rows[i];
         assert(std::is_sorted(row.begin(), row.end()));
 
         if (target_columns_.empty()) {
