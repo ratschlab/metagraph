@@ -66,9 +66,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config),
-            anno_graph_(anno_graph) {
-        assert(this->get_config().check_config_scores());
-    }
+            anno_graph_(anno_graph) {}
 
     virtual ~LabeledColumnExtender() {}
 
