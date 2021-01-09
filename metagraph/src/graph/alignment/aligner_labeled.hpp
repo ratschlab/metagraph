@@ -139,7 +139,7 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
 
     mtg::common::logger->trace("Seed has {} labels", target_columns_.size());
 
-    if (max_count != path.size()) {
+    if (max_count && max_count != path.size()) {
         mtg::common::logger->warn(
             "Seed has no common labels. Maximum label multiplicity is {} / {}",
             max_count, path.size()
@@ -160,9 +160,6 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
 ::fork_extension(NodeType node,
                  std::function<void(DBGAlignment&&, NodeType)> callback,
                  score_t min_path_score) {
-    if (target_columns_.empty())
-        return {};
-
     const auto &mat = anno_graph_.get_annotation().get_matrix();
     auto base_edges = DefaultColumnExtender<NodeType>::fork_extension(
         node, callback, min_path_score
@@ -181,6 +178,16 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
             auto row = mat.get_row(out_row);
             assert(std::is_sorted(row.begin(), row.end()));
 
+            if (target_columns_.empty()) {
+                auto fork = fork_extender({ row.begin(), row.end() });
+                fork.update_columns(node, { edge }, min_path_score);
+                fork.extend_main([&](DBGAlignment&& extension, NodeType start_node) {
+                    if (start_node)
+                        callback(std::move(extension), start_node);
+                }, min_path_score);
+                continue;
+            }
+
             std::vector<AnnotatedDBG::row_index> intersection;
             intersection.reserve(std::min(row.size(), target_columns_.size()));
             std::set_intersection(target_columns_.begin(), target_columns_.end(),
@@ -196,6 +203,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
                 std::set_difference(target_columns_.begin(), target_columns_.end(),
                                     intersection.begin(), intersection.end(),
                                     std::back_inserter(diff));
+                assert(diff.size());
                 std::swap(diff, target_columns_);
 
                 // assign intersection labels to the fork
