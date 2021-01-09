@@ -135,7 +135,7 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
         target_columns_.push_back(label_encoder.encode(label));
     }
 
-    std::sort(target_columns_.begin(), target_columns_.end());
+    assert(std::is_sorted(target_columns_.begin(), target_columns_.end()));
 
     mtg::common::logger->trace("Seed has {} labels", target_columns_.size());
 
@@ -179,7 +179,7 @@ inline std::deque<std::pair<NodeType, char>> LabeledColumnExtender<NodeType>
 
         } else {
             auto row = mat.get_row(out_row);
-            std::sort(row.begin(), row.end());
+            assert(std::is_sorted(row.begin(), row.end()));
 
             std::vector<AnnotatedDBG::row_index> intersection;
             intersection.reserve(std::min(row.size(), target_columns_.size()));
