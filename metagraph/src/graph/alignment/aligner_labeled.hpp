@@ -136,7 +136,8 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
         target_columns_.push_back(label_encoder.encode(label));
     }
 
-    assert(std::is_sorted(target_columns_.begin(), target_columns_.end()));
+    std::sort(target_columns_.begin(), target_columns_.end());
+    //assert(std::is_sorted(target_columns_.begin(), target_columns_.end()));
 
     mtg::common::logger->trace("Seed has {} labels", target_columns_.size());
 
@@ -212,7 +213,8 @@ inline auto LabeledColumnExtender<NodeType>
     tsl::hopscotch_map<std::vector<uint64_t>, Edges, utils::VectorHash> out_labels;
 
     for (size_t i = 0; i < rows.size(); ++i) {
-        assert(std::is_sorted(rows[i].begin(), rows[i].end()));
+        //assert(std::is_sorted(rows[i].begin(), rows[i].end()));
+        std::sort(rows[i].begin(), rows[i].end());
         out_labels[{ rows[i].begin(), rows[i].end() }].emplace_back(
             std::move(base_edges[i])
         );
