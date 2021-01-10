@@ -137,7 +137,6 @@ inline void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path
     }
 
     std::sort(target_columns_.begin(), target_columns_.end());
-    //assert(std::is_sorted(target_columns_.begin(), target_columns_.end()));
 
     mtg::common::logger->trace("Seed has {} labels", target_columns_.size());
 
@@ -191,12 +190,16 @@ inline auto LabeledColumnExtender<NodeType>
         for (size_t i = 0; i < base_rows.size(); ++i) {
             if (rd->is_anchor(base_rows[i])) {
                 rows[i] = rd->get_diff(base_rows[i]);
+                std::sort(rows[i].begin(), rows[i].end());
+            } else if (rd->is_anchor(anno_graph_.graph_to_anno_index(node))) {
+                rows[i] = mat.get_row(base_rows[i]);
             } else {
                 const auto &dbg_succ = *rd->graph();
                 const auto &boss = dbg_succ.get_boss();
                 if (boss.get_last(dbg_succ.kmer_to_boss_index(base_edges[i].first))) {
                     // apply diff to target_columns_
                     auto diff_row = rd->get_diff(anno_graph_.graph_to_anno_index(node));
+                    std::sort(diff_row.begin(), diff_row.end());
                     std::set_difference(target_columns_.begin(), target_columns_.end(),
                                         diff_row.begin(), diff_row.end(),
                                         std::back_inserter(rows[i]));
@@ -207,14 +210,16 @@ inline auto LabeledColumnExtender<NodeType>
         }
     } else {
         rows = mat.get_rows(base_rows);
+        for (auto &row : rows) {
+            std::sort(row.begin(), row.end());
+        }
     }
 
     // aggregate outgoing nodes by row
     tsl::hopscotch_map<std::vector<uint64_t>, Edges, utils::VectorHash> out_labels;
 
     for (size_t i = 0; i < rows.size(); ++i) {
-        //assert(std::is_sorted(rows[i].begin(), rows[i].end()));
-        std::sort(rows[i].begin(), rows[i].end());
+        assert(std::is_sorted(rows[i].begin(), rows[i].end()));
         out_labels[{ rows[i].begin(), rows[i].end() }].emplace_back(
             std::move(base_edges[i])
         );
