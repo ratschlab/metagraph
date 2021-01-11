@@ -95,13 +95,9 @@ string(APPEND CMAKE_CXX_FLAGS
 )
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  string(APPEND CMAKE_CXX_FLAGS " \
-    -Wno-exit-time-destructors \
-    -Wno-unused-function \
-    -Wno-old-style-cast \
-    -Wno-atomic-alignment \
-    -Wno-extra-semi-stmt \
-  ")
+  add_compile_options(
+    -Wno-exit-time-destructors
+  )
 endif()
 
 if(APPLE)
@@ -258,7 +254,6 @@ include_directories(
 
 findFolly()
 if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
   include_directories(SYSTEM
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
