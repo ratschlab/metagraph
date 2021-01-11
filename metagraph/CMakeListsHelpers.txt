@@ -85,8 +85,6 @@ endif()
 
 if(Jemalloc_FOUND AND Boost_FOUND)
   message(STATUS "Configuring Folly")
-  add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
-  set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${JEMALLOC_INCLUDE_DIRS} PARENT_SCOPE)
   include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
   configure_file(
     external-libraries/folly/CMake/folly-config.h.cmake
@@ -97,6 +95,7 @@ if(Jemalloc_FOUND AND Boost_FOUND)
     external-libraries/folly/folly/memory/detail/MallocImpl.cpp
   )
   target_include_directories(fbvector SYSTEM PRIVATE
+    ${JEMALLOC_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
     external-libraries/folly
     ${CMAKE_BINARY_DIR}/external-libraries/folly/include
