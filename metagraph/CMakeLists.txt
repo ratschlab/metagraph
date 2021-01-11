@@ -301,9 +301,25 @@ add_subdirectory(
   external-libraries/binrel_wt
 )
 
+set(OTHER_COMPILER_FLAGS "")
+get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
+foreach(DEF ${DIRECTORY_DEFINITIONS})
+  if(DEF)
+    string(REPLACE "\"" "\\\"" DEF "${DEF}")
+    list(APPEND OTHER_COMPILER_FLAGS " -D${DEF}")
+  endif()
+endforeach()
+get_directory_property(DIRECTORY_OPTIONS COMPILE_OPTIONS)
+foreach(OPT ${DIRECTORY_OPTIONS})
+  if(OPT)
+    string(REPLACE "\"" "\\\"" OPT "${OPT}")
+    list(APPEND OTHER_COMPILER_FLAGS " ${OPT}")
+  endif()
+endforeach()
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
+  " ${OTHER_COMPILER_FLAGS}"
 )
 
 file(GLOB metagraph_core_files
