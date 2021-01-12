@@ -62,13 +62,15 @@ std::unique_ptr<annot::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
                       size_t column_compressed_num_columns_cached,
                       bool row_compressed_sparse,
-                      uint64_t num_rows) {
+                      uint64_t num_rows,
+                      const std::string &swap_dir) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
-                new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached)
+                new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached,
+                                              swap_dir, 1024 * 1024 * 1024 / sizeof(uint64_t))
             );
             break;
         }

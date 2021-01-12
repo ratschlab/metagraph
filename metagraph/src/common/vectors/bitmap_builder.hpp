@@ -3,8 +3,11 @@
 
 #include <cassert>
 #include <functional>
+#include <filesystem>
 
+#include "common/utils/file_utils.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_set_disk.hpp"
 
 
 /**
@@ -72,6 +75,37 @@ class bitmap_builder_set : public bitmap_builder {
 
     const uint64_t size_;
     mtg::common::SortedSet<uint64_t> set_bit_positions_;
+};
+
+
+class bitmap_builder_set_disk : public bitmap_builder {
+  public:
+    bitmap_builder_set_disk(uint64_t size,
+                            size_t num_threads,
+                            uint64_t buffer_size,
+                            const std::string &swap_dir,
+                            size_t max_disk_space_bytes = -1,
+                            size_t merge_count = 4)
+          : size_(size),
+            tmp_dir_(utils::create_temp_dir(swap_dir, "bitmap")),
+            set_bit_positions_(num_threads, buffer_size, tmp_dir_,
+                               max_disk_space_bytes, merge_count) {}
+
+    ~bitmap_builder_set_disk() { std::filesystem::remove_all(tmp_dir_); }
+
+    virtual void add_one(uint64_t pos) { set_bit_positions_.insert(&pos, &pos + 1); }
+    virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
+        set_bit_positions_.insert(begin, end);
+    }
+
+    // can only be called once
+    virtual InitializationData get_initialization_data() const;
+
+  private:
+    const uint64_t size_;
+    const std::filesystem::path tmp_dir_;
+    mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
+    bool merged_ = false;
 };
 
 

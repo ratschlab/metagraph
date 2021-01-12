@@ -27,7 +27,9 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
     ColumnCompressed(uint64_t num_rows = 0,
-                     size_t num_columns_cached = 1);
+                     size_t num_columns_cached = 1,
+                     const std::string &swap_dir = "",
+                     uint64_t buffer_size = 1024 * 1024 * 1024 / sizeof(uint64_t));
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
@@ -107,6 +109,9 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     const bitmap& get_column(size_t j) const;
 
     uint64_t num_rows_;
+
+    std::string swap_dir_;
+    uint64_t buffer_size_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
     mutable binmat::ColumnMajor annotation_matrix_view_;

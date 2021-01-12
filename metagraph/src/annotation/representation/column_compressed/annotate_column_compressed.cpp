@@ -27,8 +27,12 @@ const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
-                                          size_t num_columns_cached)
+                                          size_t num_columns_cached,
+                                          const std::string &swap_dir,
+                                          uint64_t buffer_size)
       : num_rows_(num_rows),
+        swap_dir_(swap_dir),
+        buffer_size_(buffer_size),
         cached_columns_(std::max(num_columns_cached, (size_t)1),
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
@@ -475,11 +479,7 @@ void ColumnCompressed<Label>::flush() const {
     std::lock_guard<std::mutex> lock(bitmap_conversion_mu_);
 
     if (!flushed_) {
-        for (const auto &cached_vector : cached_columns_) {
-            const_cast<ColumnCompressed*>(this)->flush(
-                cached_vector.first, *cached_vector.second
-            );
-        }
+        const_cast<ColumnCompressed*>(this)->cached_columns_.Clear();
         flushed_ = true;
     }
     assert(bitmatrix_.size() == label_encoder_.size());
@@ -563,6 +563,12 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
             // than the buffer in its builder.
             if (num_rows_ < kNumElementsReservedInBitmapBuilder * 64) {
                 vector = new bitmap_vector(num_rows_, 0);
+
+            } else if (swap_dir_.size()) {
+                // For large bitmaps, use the efficient builder, using only
+                // space proportional to the number of bits set in the bitmap.
+                vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
+                                                     buffer_size_, swap_dir_, -1, 16);
             } else {
                 // For large bitmaps, use the efficient builder, using only
                 // space proportional to the number of bits set in the bitmap.
@@ -623,7 +629,6 @@ template <typename Label>
 binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    cached_columns_.Clear();
     return binmat::ColumnMajor(std::move(bitmatrix_));
 }
 
