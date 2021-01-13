@@ -222,18 +222,19 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
     const std::string &merged_l1_file_name
             = merged_l1_name(chunk_file_prefix, chunk_begin / (chunk_end - chunk_begin));
 
-    std::vector<std::string> to_merge;
-    for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
-        std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
-        to_merge.push_back(chunk_name);
-        *total_size -= static_cast<int64_t>(std::filesystem::file_size(chunk_name));
-    }
     logger->trace("Starting merging chunks {}..{} into {}", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
+
+    std::vector<std::string> chunks;
+    for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
+        std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
+        chunks.push_back(chunk_name);
+        *total_size -= static_cast<int64_t>(std::filesystem::file_size(chunk_name));
+    }
     EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
     std::function<void(const T &v)> on_new_item
             = [&encoder](const T &v) { encoder.add(v); };
-    merge_files(to_merge, on_new_item);
+    merge_files(chunks, on_new_item);
     encoder.finish();
 
     *l1_chunk_count += 1;
