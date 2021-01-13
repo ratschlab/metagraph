@@ -1,6 +1,5 @@
 #include "sorted_set_disk_base.hpp"
 
-#include <omp.h>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
@@ -117,7 +116,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
     std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
-    // dump chunk in parallel to num_blocks_ blocks
+    // split chunk into |num_blocks_| blocks and dump to disk in parallel
     #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
     for (size_t t = 0; t < num_blocks_; ++t) {
         std::string block_name = file_name + "_block_" + std::to_string(t);
