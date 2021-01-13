@@ -1,5 +1,6 @@
 #include "sorted_set_disk_base.hpp"
 
+#include <omp.h>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
@@ -115,12 +116,26 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
     std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
-    EliasFanoEncoder<T> encoder(data_.size(), utils::get_first(data_.front()),
-                                utils::get_first(data_.back()), file_name);
-    for (const auto &v : data_) {
-        encoder.add(v);
+    const size_t num_blocks = std::max(num_threads_, (size_t)1);
+    std::vector<std::string> block_names(num_blocks);
+    #pragma omp parallel for num_threads(num_blocks) schedule(static, 1)
+    for (size_t t = 0; t < num_blocks; ++t) {
+        block_names[t] = file_name + "_" + std::to_string(t);
+        EliasFanoEncoder<T> encoder(data_.size(),
+                                    utils::get_first(data_.front()),
+                                    utils::get_first(data_.back()),
+                                    block_names[t]);
+        size_t block_size = (data_.size() + num_blocks - 1) / num_blocks;
+        for (size_t i = t * block_size; i < std::min(data_.size(), (t + 1) * block_size); ++i) {
+            encoder.add(data_[i]);
+        }
+        uint64_t written = encoder.finish();
+
+        #pragma omp critical
+        total_chunk_size_bytes_ += written;
     }
-    total_chunk_size_bytes_ += encoder.finish();
+    concat(block_names, file_name);
+
     chunk_count_++;
 
     data_.resize(0);
