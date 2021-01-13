@@ -286,7 +286,12 @@ IF(APPLE)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
 add_subdirectory(external-libraries/zlib)
-target_compile_options(zlib PRIVATE -Wno-unused-variable -Wno-sign-compare)
+target_compile_options(zlib
+  PRIVATE
+    -Wno-unused-variable
+    -Wno-sign-compare
+    -Wno-implicit-fallthrough
+)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
