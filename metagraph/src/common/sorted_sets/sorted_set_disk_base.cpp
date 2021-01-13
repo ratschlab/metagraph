@@ -22,8 +22,9 @@ SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
       max_disk_space_bytes_(max_disk_space_bytes),
       merge_count_(merge_count),
       chunk_file_prefix_(tmp_dir/"chunk_"),
+      num_blocks_(std::max(num_threads_, (size_t)1)),
       merge_queue_(std::min(reserved_num_elements, QUEUE_EL_COUNT)),
-      async_merge_l1_(merge_count_ == 0 ? 0 : 3, 100) {
+      async_merge_l1_(merge_count_ == 0 ? 0 : num_threads_, 100) {
     if (reserved_num_elements == 0) {
         logger->error("SortedSetDisk buffer cannot have size 0");
         std::exit(EXIT_FAILURE);
@@ -116,13 +117,12 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
     std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
-    const size_t num_blocks = std::max(num_threads_, (size_t)1);
-    std::vector<std::string> block_names(num_blocks);
-    #pragma omp parallel for num_threads(num_blocks) schedule(static, 1)
-    for (size_t t = 0; t < num_blocks; ++t) {
-        block_names[t] = file_name + "_block_" + std::to_string(t);
-        EliasFanoEncoderBuffered<T> encoder(block_names[t], 1000);
-        const size_t block_size = (data_.size() + num_blocks - 1) / num_blocks;
+    // dump chunk in parallel to num_blocks_ blocks
+    #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
+    for (size_t t = 0; t < num_blocks_; ++t) {
+        std::string block_name = file_name + "_block_" + std::to_string(t);
+        EliasFanoEncoderBuffered<T> encoder(block_name, 1000);
+        const size_t block_size = (data_.size() + num_blocks_ - 1) / num_blocks_;
         const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
         for (size_t i = t * block_size; i < block_end; ++i) {
             encoder.add(data_[i]);
@@ -132,7 +132,6 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         #pragma omp critical
         total_chunk_size_bytes_ += written;
     }
-    concat(block_names, file_name);
 
     chunk_count_++;
 
@@ -156,7 +155,8 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         l1_chunk_count_ = 0;
     } else if (merge_count_ > 1 && chunk_count_ % merge_count_ == 0) {
         async_merge_l1_.enqueue(merge_l1, chunk_file_prefix_, chunk_count_ - merge_count_,
-                                chunk_count_, &l1_chunk_count_, &total_chunk_size_bytes_);
+                                chunk_count_, &l1_chunk_count_, &total_chunk_size_bytes_,
+                                num_blocks_);
     }
 }
 
@@ -197,19 +197,37 @@ void SortedSetDiskBase<T>::try_reserve(size_t size, size_t min_size) {
 }
 
 template <typename T>
+std::string SortedSetDiskBase<T>::merge_blocks(const std::string &chunk_file_prefix,
+                                               uint32_t chunk,
+                                               size_t num_blocks) {
+    std::string chunk_name = chunk_file_prefix + std::to_string(chunk);
+    if (!std::filesystem::exists(chunk_name + "_block_" + std::to_string(0)))
+        return chunk_name; // already merged
+
+    std::vector<std::string> block_names(num_blocks);
+    for (size_t t = 0; t < num_blocks; ++t) {
+        block_names[t] = chunk_name + "_block_" + std::to_string(t);
+    }
+    concat(block_names, chunk_name);
+    return chunk_name;
+}
+
+template <typename T>
 void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
                                     uint32_t chunk_begin,
                                     uint32_t chunk_end,
                                     std::atomic<uint32_t> *l1_chunk_count,
-                                    std::atomic<size_t> *total_size) {
+                                    std::atomic<size_t> *total_size,
+                                    size_t blocks_per_chunk) {
     assert(chunk_begin < chunk_end);
     const std::string &merged_l1_file_name
             = merged_l1_name(chunk_file_prefix, chunk_begin / (chunk_end - chunk_begin));
 
     std::vector<std::string> to_merge;
     for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
-        to_merge.push_back(chunk_file_prefix + std::to_string(i));
-        *total_size -= static_cast<int64_t>(std::filesystem::file_size(to_merge.back()));
+        std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
+        to_merge.push_back(chunk_name);
+        *total_size -= static_cast<int64_t>(std::filesystem::file_size(chunk_name));
     }
     logger->trace("Starting merging chunks {}..{} into {}", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
@@ -252,7 +270,10 @@ std::vector<std::string> SortedSetDiskBase<T>::get_file_names() {
     for (size_t i = 0; i < l1_chunk_count_; ++i) {
         file_names.push_back(merged_l1_name(chunk_file_prefix_, i));
     }
+    #pragma omp parallel for num_threads(num_threads_) schedule(dynamic)
     for (size_t i = merge_count_ * l1_chunk_count_; i < chunk_count_; ++i) {
+        merge_blocks(chunk_file_prefix_, i, num_blocks_);
+        #pragma omp critical
         file_names.push_back(chunk_file_prefix_ + std::to_string(i));
     }
     std::string sorted_file_name = chunk_file_prefix_ + "sorted";
