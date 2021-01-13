@@ -78,30 +78,26 @@ if(NOT CMAKE_DBG_ALPHABET)
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
+  add_definitions(-D_DNA_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA5_GRAPH")
+  add_definitions(-D_DNA5_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA_CASE_SENSITIVE_GRAPH")
+  add_definitions(-D_DNA_CASE_SENSITIVE_GRAPH)
 else()
-  string(APPEND CMAKE_CXX_FLAGS " -D_PROTEIN_GRAPH")
+  add_definitions(-D_PROTEIN_GRAPH)
 endif()
 
 
-string(APPEND CMAKE_CXX_FLAGS
-  " -Wall -Wextra -Werror"
-  " -D_THREAD_SAFE -pthread"
+add_compile_options(
+  -Wall -Wextra -Werror
+  -D_THREAD_SAFE -pthread
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  string(APPEND CMAKE_CXX_FLAGS " \
-    -Wno-exit-time-destructors \
-    -Wno-unused-function \
-    -Wno-old-style-cast \
-    -Wno-atomic-alignment \
-    -Wno-extra-semi-stmt \
-  ")
+  add_compile_options(
+    -Wno-exit-time-destructors
+  )
 endif()
 
 if(APPLE)
@@ -132,7 +128,8 @@ try_compile(MODE_TI
   "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
 )
 if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI -mcx16")
+  add_definitions(-DMODE_TI)
+  add_compile_options(-mcx16)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -146,13 +143,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 if(WITH_MSSE42 OR (NOT DEFINED WITH_MSSE42 AND _cpuinfo MATCHES "(sse4_2)|(sse4a)|(SSE4.2)"))
-string(APPEND CMAKE_CXX_FLAGS " -msse4.2")
+add_compile_options(-msse4.2)
 else()
 message(WARNING "Compiling without msse4.2 instructions!")
 endif()
 
 if(WITH_AVX OR (NOT DEFINED WITH_AVX AND _cpuinfo MATCHES "(avx2)|(AVX2)"))
-string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+add_compile_options(-mavx -mavx2 -mfma -mbmi -mbmi2)
 else()
 message(WARNING "Compiling without AVX instructions!")
 endif()
@@ -270,14 +267,8 @@ else()
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
-# use external fmt library in spdlog
-set(SPDLOG_FMT_EXTERNAL TRUE)
-set(SPDLOG_BUILD_TESTING FALSE)
-
 # makes ASIO not depend on boost
-string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
-
-add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
+add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -288,7 +279,13 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
-add_subdirectory(external-libraries/zlib zlib)
+add_subdirectory(external-libraries/zlib)
+target_compile_options(zlib
+  PRIVATE
+    -Wno-unused-variable
+    -Wno-sign-compare
+    -Wno-implicit-fallthrough
+)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
@@ -306,9 +303,25 @@ add_subdirectory(
   external-libraries/binrel_wt
 )
 
+set(OTHER_COMPILER_FLAGS "")
+get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
+foreach(DEF ${DIRECTORY_DEFINITIONS})
+  if(DEF)
+    string(REPLACE "\"" "\\\"" DEF "${DEF}")
+    list(APPEND OTHER_COMPILER_FLAGS " -D${DEF}")
+  endif()
+endforeach()
+get_directory_property(DIRECTORY_OPTIONS COMPILE_OPTIONS)
+foreach(OPT ${DIRECTORY_OPTIONS})
+  if(OPT)
+    string(REPLACE "\"" "\\\"" OPT "${OPT}")
+    list(APPEND OTHER_COMPILER_FLAGS " ${OPT}")
+  endif()
+endforeach()
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
+  " ${OTHER_COMPILER_FLAGS}"
 )
 
 file(GLOB metagraph_core_files
@@ -341,12 +354,11 @@ find_package(BZip2 REQUIRED)
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts -lz ${BZIP2_LIBRARIES}
+  -lhts zlib ${BZIP2_LIBRARIES}
   -lsdsl
   brwt
   jsoncpp_lib
   progress_bar
-  fmt::fmt
   mersenne_twister
   spdlog::spdlog
 )

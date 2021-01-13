@@ -19,8 +19,10 @@ find_path(JEMALLOC_INCLUDE_DIR jemalloc/jemalloc.h
     ${PC_JEMALLOC_MINIMAL_INCLUDE_DIRS}
     ${PC_JEMALLOC_INCLUDEDIR}
     ${PC_JEMALLOC_INCLUDE_DIRS}
+    ~/.linuxbrew/
   PATH_SUFFIXES include)
 
+unset(JEMALLOC_LIBRARY CACHE)
 find_library(JEMALLOC_LIBRARY NAMES jemalloc libjemalloc
   HINTS
     ${JEMALLOC_ROOT} ENV JEMALLOC_ROOT
@@ -28,6 +30,7 @@ find_library(JEMALLOC_LIBRARY NAMES jemalloc libjemalloc
     ${PC_JEMALLOC_MINIMAL_LIBRARY_DIRS}
     ${PC_JEMALLOC_LIBDIR}
     ${PC_JEMALLOC_LIBRARY_DIRS}
+    ~/.linuxbrew/
   PATH_SUFFIXES lib lib64)
 
 if(JEMALLOC_INCLUDE_DIR)
