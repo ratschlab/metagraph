@@ -121,14 +121,15 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
     #pragma omp parallel for num_threads(num_blocks) schedule(static, 1)
     for (size_t t = 0; t < num_blocks; ++t) {
         block_names[t] = file_name + "_block_" + std::to_string(t);
-        EliasFanoEncoder<T> encoder(data_.size(),
-                                    utils::get_first(data_.front()),
-                                    utils::get_first(data_.back()),
-                                    block_names[t]);
         const size_t block_size = (data_.size() + num_blocks - 1) / num_blocks;
-        const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
-        for (size_t i = t * block_size; i < block_end; ++i) {
-            encoder.add(data_[i]);
+        auto *it = data_.data() + t * block_size;
+        auto *end = data_.data() + std::min(data_.size(), (t + 1) * block_size);
+        EliasFanoEncoder<T> encoder(data_.size(),
+                                    utils::get_first(*it),
+                                    utils::get_first(*(end - 1)),
+                                    block_names[t]);
+        for ( ; it != end; ++it) {
+            encoder.add(*it);
         }
         uint64_t written = encoder.finish();
 
