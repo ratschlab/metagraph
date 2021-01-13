@@ -270,14 +270,8 @@ else()
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
-# use external fmt library in spdlog
-set(SPDLOG_FMT_EXTERNAL TRUE)
-set(SPDLOG_BUILD_TESTING FALSE)
-
 # makes ASIO not depend on boost
 string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
-
-add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -347,7 +341,6 @@ set(METALIBS ${METALIBS}
   brwt
   jsoncpp_lib
   progress_bar
-  fmt::fmt
   mersenne_twister
   spdlog::spdlog
 )
