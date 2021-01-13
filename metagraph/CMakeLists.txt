@@ -78,19 +78,19 @@ if(NOT CMAKE_DBG_ALPHABET)
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
+  add_definitions(-D_DNA_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA5_GRAPH")
+  add_definitions(-D_DNA5_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA_CASE_SENSITIVE_GRAPH")
+  add_definitions(-D_DNA_CASE_SENSITIVE_GRAPH)
 else()
-  string(APPEND CMAKE_CXX_FLAGS " -D_PROTEIN_GRAPH")
+  add_definitions(-D_PROTEIN_GRAPH)
 endif()
 
 
-string(APPEND CMAKE_CXX_FLAGS
-  " -Wall -Wextra -Werror"
-  " -D_THREAD_SAFE -pthread"
+add_compile_options(
+  -Wall -Wextra -Werror
+  -D_THREAD_SAFE -pthread
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
 
@@ -128,7 +128,8 @@ try_compile(MODE_TI
   "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
 )
 if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI -mcx16")
+  add_definitions(-DMODE_TI)
+  add_compile_options(-mcx16)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -142,13 +143,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 if(WITH_MSSE42 OR (NOT DEFINED WITH_MSSE42 AND _cpuinfo MATCHES "(sse4_2)|(sse4a)|(SSE4.2)"))
-string(APPEND CMAKE_CXX_FLAGS " -msse4.2")
+add_compile_options(-msse4.2)
 else()
 message(WARNING "Compiling without msse4.2 instructions!")
 endif()
 
 if(WITH_AVX OR (NOT DEFINED WITH_AVX AND _cpuinfo MATCHES "(avx2)|(AVX2)"))
-string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+add_compile_options(-mavx -mavx2 -mfma -mbmi -mbmi2)
 else()
 message(WARNING "Compiling without AVX instructions!")
 endif()
@@ -271,7 +272,7 @@ set(SPDLOG_FMT_EXTERNAL TRUE)
 set(SPDLOG_BUILD_TESTING FALSE)
 
 # makes ASIO not depend on boost
-string(APPEND CMAKE_CXX_FLAGS " -DASIO_STANDALONE -DUSE_STANDALONE_ASIO")
+add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 
 add_subdirectory(external-libraries/fmt EXCLUDE_FROM_ALL)
 
