@@ -285,7 +285,8 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
-add_subdirectory(external-libraries/zlib zlib)
+add_subdirectory(external-libraries/zlib)
+target_compile_options(zlib PRIVATE -Wno-unused-variable -Wno-sign-compare)
 
 add_library(progress_bar STATIC
   external-libraries/cpp_progress_bar/progress_bar.cpp
@@ -354,7 +355,7 @@ find_package(BZip2 REQUIRED)
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts -lz ${BZIP2_LIBRARIES}
+  -lhts zlib ${BZIP2_LIBRARIES}
   -lsdsl
   brwt
   jsoncpp_lib
