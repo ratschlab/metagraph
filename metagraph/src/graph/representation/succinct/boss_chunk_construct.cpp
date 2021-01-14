@@ -914,25 +914,20 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
                                              k, both_strands_mode, bits_per_count, swap_dir);
     logger->trace("Chunk for ..$. done");
     // construct all other chunks in parallel
-    std::vector<BOSS::Chunk *> chunks(real_names.size());
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
         std::vector<std::string> dummy_names { dummy_sink_names[F] };
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
             dummy_names.push_back(dummy_source_names[i][F + 1]);
         }
-        chunks[F] = build_boss_chunk<T>(false, real_names[F], dummy_names,
-                                        k, both_strands_mode, bits_per_count, swap_dir);
+        BOSS::Chunk *next = build_boss_chunk<T>(false, real_names[F], dummy_names,
+                                                k, both_strands_mode, bits_per_count, swap_dir);
         logger->trace("Chunk for ..{}. done", KmerExtractor2Bit().alphabet[F]);
+        #pragma omp ordered
+        chunk->extend(*next);
+        delete next;
     }
-
-    // concatenate all chunks
-    logger->trace("Concatenating {} chunks into a BOSS table", chunks.size() + 1);
-    for (size_t F = 0; F < real_names.size(); ++F) {
-        chunk->extend(*chunks[F]);
-        delete chunks[F];
-    }
-    logger->trace("All {} chunks concatenated", chunks.size() + 1);
+    logger->trace("All chunks concatenated");
     return chunk;
 }
 
