@@ -189,21 +189,26 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeDisk) {
     // make sure we correctly count up to the max value of the counter
     // the container size is 8, so we are guaranteed to generate many chunk files that
     // will have to be merged and overflow handled correctly
-    common::SortedMultisetDisk<TypeParam, uint8_t> underTest
-            = create_sorted_set_disk<TypeParam>();
-    std::vector<TypeParam> values = { TypeParam(value) };
-    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
-        underTest.insert(values.begin(), values.end());
+    {
+        common::SortedMultisetDisk<TypeParam, uint8_t> underTest
+                = create_sorted_set_disk<TypeParam>();
+        std::vector<TypeParam> values = { TypeParam(value) };
+        for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
+            underTest.insert(values.begin(), values.end());
+        }
+        expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
     }
-    expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 
     // now let's generate an overflow in the counter
-    underTest.clear();
-    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
-        std::vector<TypeParam> values = { TypeParam(value) };
-        underTest.insert(values.begin(), values.end());
+    {
+        common::SortedMultisetDisk<TypeParam, uint8_t> underTest
+                = create_sorted_set_disk<TypeParam>();
+        for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
+            std::vector<TypeParam> values = { TypeParam(value) };
+            underTest.insert(values.begin(), values.end());
+        }
+        expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
     }
-    expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 }
 
 /**
@@ -220,22 +225,27 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     constexpr size_t max_disk_space = 1e6;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
-    common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            thread_count, container_size, "./test_chunk_", max_disk_space);
-    // make sure we correctly count up to the max value of the counter
-    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
-        std::vector<TypeParam> values = { TypeParam(value) };
-        underTest.insert(values.begin(), values.end());
+    {
+        common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
+                thread_count, container_size, "./test_chunk_", max_disk_space);
+        // make sure we correctly count up to the max value of the counter
+        for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
+            std::vector<TypeParam> values = { TypeParam(value) };
+            underTest.insert(values.begin(), values.end());
+        }
+        expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
     }
-    expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 
     // now let's generate an overflow in the counter
-    underTest.clear();
-    for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
-        std::vector<TypeParam> values = { TypeParam(value) };
-        underTest.insert(values.begin(), values.end());
+    {
+        common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
+                thread_count, container_size, "./test_chunk_", max_disk_space);
+        for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
+            std::vector<TypeParam> values = { TypeParam(value) };
+            underTest.insert(values.begin(), values.end());
+        }
+        expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
     }
-    expect_equals(underTest, { std::make_pair(TypeParam(value), 255) });
 }
 
 /**

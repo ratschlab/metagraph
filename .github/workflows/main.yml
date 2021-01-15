@@ -37,25 +37,12 @@ jobs:
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
 
-        wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
-        tar -vxjf htslib-1.9.tar.bz2
-        cd htslib-1.9
-        make -j 2
-        sudo make install
+        sudo apt-get install libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
     - name: install dependencies for integration tests
       run: |
         pip3 install parameterized
         sudo apt-get install python3-venv
-
-    - name: install libmaus2-lite
-      run: |
-        export CC=$(which ${{ matrix.cc }})
-        export CXX=$(which ${{ matrix.cxx }})
-        cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make -j 2
-        make install
 
     - name: install sdsl-lite
       run: |
@@ -108,17 +95,10 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp
+      run: brew install bzip2 htslib libomp boost jemalloc
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
-
-    - name: install libmaus2-lite
-      run: |
-        cd metagraph/external-libraries/libmaus2
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-        make -j 2
-        make install
 
     - name: install sdsl-lite
       run: |

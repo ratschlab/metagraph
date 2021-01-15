@@ -60,6 +60,7 @@ Config::Config(int argc, char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+        tmp_dir = "OUTFBASE_TEMP_DIR";
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -226,6 +227,8 @@ Config::Config(int argc, char *argv[]) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
             alignment_max_ram = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--gfa-mapping-path")) {
+            gfa_mapping_path = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -428,6 +431,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 #endif
+
+    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+        tmp_dir = std::filesystem::path(outfbase).remove_filename();
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -841,6 +847,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t   --gfa-mapping-path [STR]\tpath to a gfa file where to append the mappings as 'P' lines []\n");
+            fprintf(stderr, "\t   --compacted\t\t\tdump the GFA's 'P' lines in a compacted mode [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
@@ -1035,7 +1043,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
-            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files []\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files [OUT_BASEDIR]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");

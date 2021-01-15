@@ -1,19 +1,8 @@
-cmake_minimum_required(VERSION 2.8.2)
+cmake_minimum_required(VERSION 2.8.12)
 
 project(KMC)
 
-
-if(APPLE)
-string(APPEND CMAKE_CXX_FLAGS " \
-    -Wall -O3 -m64 \
-    -pthread -std=c++11 \
-")
-elseif(UNIX)
-string(APPEND CMAKE_CXX_FLAGS " \
-    -Wall -O3 -m64 -Wl,--whole-archive \
-    -pthread -Wl,--no-whole-archive -std=c++11 \
-")
-endif()
+add_compile_options(-Wall -O3 -m64 -pthread -std=c++11)
 
 if(@BUILD_STATIC@)
 string(APPEND CMAKE_CXX_FLAGS " -static ")
@@ -79,9 +68,12 @@ add_executable(kmc
     ${KMC_MAIN_DIR}/kmer_counter.cpp
 )
 
+find_package(BZip2 REQUIRED)
+
 target_link_libraries(kmc
     KMCcore
-    -lz -lbz2 -lpthread
+    ${BZIP2_LIBRARIES}
+    -lz -lpthread
 )
 
 endif()

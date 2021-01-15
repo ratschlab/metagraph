@@ -581,6 +581,7 @@ class BOSS {
 
   public:
     class Chunk;
+    void initialize(Chunk *chunk);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);

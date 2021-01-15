@@ -983,20 +983,43 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
 
 template <typename GraphAnnotationPair>
 class AnnotatedDBGTest : public ::testing::Test {};
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
+                        > GraphAnnotationPairTypes;
+TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
+
 
 template <typename GraphAnnotationPair>
 class AnnotatedDBGWithNTest : public ::testing::Test {};
+typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
+                        > GraphWithNAnnotationPairTypes;
+TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
+
 
 #if ! _PROTEIN_GRAPH
 template <typename GraphAnnotationPair>
 class AnnotatedDBGNoNTest : public ::testing::Test {};
-#endif
-
-TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
-TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
-#if ! _PROTEIN_GRAPH
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
+                        > GraphNoNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
 #endif
+
 
 
 TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {

@@ -423,9 +423,7 @@ int transform_annotation(Config *config) {
                         files, config->infbase,
                         config->parallel_nodes,
                         get_num_threads(),
-                        config->tmp_dir.empty()
-                            ? std::filesystem::path(config->outfbase).remove_filename()
-                            : config->tmp_dir)
+                        config->tmp_dir)
                     : (config->greedy_brwt
                         ? convert_to_greedy_BRWT(
                             std::move(*annotator),
@@ -514,12 +512,9 @@ int transform_annotation(Config *config) {
                                                      config->parallel_nodes,
                                                      get_num_threads());
                 } else {
-                    std::string tmp_dir = config->tmp_dir.empty()
-                            ? std::filesystem::path(config->outfbase).remove_filename()
-                            : config->tmp_dir;
                     brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
                             files, config->infbase, config->parallel_nodes,
-                            get_num_threads(), tmp_dir);
+                            get_num_threads(), config->tmp_dir);
                 }
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
