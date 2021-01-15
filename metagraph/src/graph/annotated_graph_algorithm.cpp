@@ -8,6 +8,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 
@@ -55,7 +56,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  size_t num_threads);
 
 std::shared_ptr<MaskedDeBruijnGraph>
-make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
+make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
                           std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
@@ -220,18 +221,28 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 
 std::shared_ptr<MaskedDeBruijnGraph>
-make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> &graph_ptr,
+make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
                           std::unique_ptr<bitmap>&& mask,
                           bool add_complement,
                           bool make_boss,
                           size_t num_threads) {
+    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph_ptr)) {
+        graph_ptr = std::shared_ptr<const DeBruijnGraph>(
+            std::shared_ptr<const DeBruijnGraph>(), &canonical->get_graph()
+        );
+
+        add_complement = true;
+    }
+
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::move(mask),
         graph_ptr->is_canonical_mode()
     );
+
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
+
     bool masked_canonical = add_complement || graph_ptr->is_canonical_mode();
 
     if (make_boss || (add_complement && !graph_ptr->is_canonical_mode())) {
@@ -338,9 +349,10 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
                                   const std::vector<Label> &labels_out,
                                   size_t num_threads) {
-    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(
-        anno_graph.get_graph_ptr()
-    );
+    const DeBruijnGraph *graph = &anno_graph.get_graph();
+
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph))
+        graph = &canonical->get_graph();
 
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::bit_vector indicator(graph->max_index() + 1, false);
@@ -364,78 +376,45 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     constexpr std::memory_order memorder = std::memory_order_relaxed;
 
     std::mutex vector_backup_mutex;
-    #pragma omp parallel num_threads(num_threads)
-    #pragma omp single
-    {
-        std::atomic_thread_fence(std::memory_order_release);
-        bool async = num_threads > 1;
-        binmat.slice_columns(label_in_codes, [&](auto, const bitmap &rows) {
+    std::atomic_thread_fence(std::memory_order_release);
+    bool async = num_threads > 1;
+    binmat.slice_columns(label_in_codes,
+        [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, memorder);
                 atomic_fetch_and_add(counts, i, 1, vector_backup_mutex, memorder);
             });
-        });
+        },
+        num_threads
+    );
 
-        #pragma omp taskwait
-        std::atomic_thread_fence(std::memory_order_acquire);
+    std::atomic_thread_fence(std::memory_order_acquire);
 
-        // correct the width of counts, making it single-width
-        counts.width(width);
-        std::atomic_thread_fence(std::memory_order_release);
+    // correct the width of counts, making it single-width
+    counts.width(width);
+    std::atomic_thread_fence(std::memory_order_release);
 
-        binmat.slice_columns(label_out_codes, [&](auto, const bitmap &rows) {
+    binmat.slice_columns(label_out_codes,
+        [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, memorder);
                 atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, memorder);
             });
-        });
+        },
+        num_threads
+    );
 
-        #pragma omp taskwait
-        std::atomic_thread_fence(std::memory_order_acquire);
-    }
+    std::atomic_thread_fence(std::memory_order_acquire);
 
     std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(
         std::move(indicator)
     );
 
-#if 0
-    // MAKE_BOSS is set to true, so for now, comment this out
-    if (!MAKE_BOSS && graph->is_canonical_mode()) {
-        logger->trace("Adding reverse complements");
-
-        MaskedDeBruijnGraph masked_graph(graph, std::move(union_mask));
-
-        std::mutex count_mutex;
-        std::atomic_thread_fence(std::memory_order_release);
-        masked_graph.update_mask([&](const auto &callback) {
-            masked_graph.call_sequences([&](const std::string &seq, const auto &path) {
-                auto it = path.rbegin();
-                auto rev = seq;
-                reverse_complement(rev.begin(), rev.end());
-                graph->map_to_nodes_sequentially(rev, [&](node_index i) {
-                    if (i != *it) {
-                        assert(i != DeBruijnGraph::npos);
-                        assert(it != path.rend());
-                        callback(i, true);
-                        atomic_fetch_and_add(counts, i * 2,
-                                             atomic_fetch(counts, *it * 2, count_mutex),
-                                             count_mutex, memorder);
-                        atomic_fetch_and_add(counts, i * 2 + 1,
-                                             atomic_fetch(counts, *it * 2 + 1, count_mutex),
-                                             count_mutex, memorder);
-                    }
-                    ++it;
-                });
-                assert(it == path.rend());
-            }, num_threads);
-        }, true, num_threads > 1, memorder);
-        std::atomic_thread_fence(std::memory_order_acquire);
-
-        union_mask = std::unique_ptr<bitmap>(masked_graph.release_mask());
-    }
-#endif
+    // TODO: this function doesn't work if MAKE_BOSS is false and the complements
+    //       of k-mers should also be present
+    static_assert(MAKE_BOSS);
 
     // set the width to be double again
     counts.width(width * 2);

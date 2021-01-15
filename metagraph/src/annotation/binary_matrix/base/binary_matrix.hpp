@@ -23,7 +23,6 @@ class BinaryMatrix {
     typedef Vector<Column> SetBitPositions;
     typedef std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback;
-    typedef std::function<void(Column, bitmap&&)> ColumnCallback;
 
     virtual ~BinaryMatrix() {}
 
@@ -40,7 +39,8 @@ class BinaryMatrix {
     virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
     virtual void slice_columns(const std::vector<Column> &columns,
-                               const ColumnCallback &callback) const;
+                               const std::function<void(Column, bitmap&&)> &callback,
+                               size_t num_threads = 1) const;
 
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
