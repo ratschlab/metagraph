@@ -16,9 +16,9 @@ using namespace mtg;
 using namespace mtg::test;
 
 #if _PROTEIN_GRAPH
-const size_t maxK = 12;
+const size_t MAX_K = 12;
 #else
-const size_t maxK = 20;
+const size_t MAX_K = 20;
 #endif
 
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
@@ -65,7 +65,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= maxK; ++k) {
+        for (size_t k = 2; k <= MAX_K; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
@@ -92,7 +92,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsOneSelfLoop) {
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= maxK; ++k) {
+        for (size_t k = 2; k <= MAX_K; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A') };
             auto graph = build_graph<TypeParam>(k, sequences);
             auto graph_batch = build_graph_batch<TypeParam>(k, sequences);
@@ -119,7 +119,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsOneSelfLoop) {
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= maxK; ++k) {
+        for (size_t k = 2; k <= MAX_K; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -256,7 +256,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsUniqueKmersCycle) {
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= maxK; ++k) {
+        for (size_t k = 2; k <= MAX_K; ++k) {
             std::vector<std::string> sequences { std::string(100, 'A'),
                                                  std::string(100, 'G'),
                                                  std::string(100, 'C') };
@@ -844,7 +844,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
         };
 
 #if _PROTEIN_GRAPH
-        auto graph = build_graph_batch<TypeParam>(maxK, sequences);
+        auto graph = build_graph_batch<TypeParam>(MAX_K, sequences);
 #else
         auto graph = build_graph_batch<TypeParam>(31, sequences);
 #endif
