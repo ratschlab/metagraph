@@ -1101,6 +1101,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1,
                   num_kmers);
 
+#if ! _PROTEIN_GRAPH
         num_sequences = 0;
         num_kmers = 0;
 
@@ -1114,6 +1115,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
+#endif
     }
 }
 
