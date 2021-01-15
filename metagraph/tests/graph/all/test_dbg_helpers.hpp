@@ -18,6 +18,9 @@ namespace test {
 
 using namespace mtg::graph;
 
+template <class Graph>
+size_t max_test_k();
+
 template <size_t numerator, size_t denominator>
 class DBGSuccinctBloomFPR : public DBGSuccinct {
   public:

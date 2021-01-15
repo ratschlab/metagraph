@@ -835,6 +835,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
     for (size_t num_threads : { 1, 4 }) {
         std::vector<std::string> sequences {
@@ -843,11 +844,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
             "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
         };
 
-#if _PROTEIN_GRAPH
-        auto graph = build_graph_batch<TypeParam>(MAX_K, sequences);
-#else
         auto graph = build_graph_batch<TypeParam>(31, sequences);
-#endif
 
         std::multiset<std::string> unitigs {
             "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
@@ -866,6 +863,7 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
         EXPECT_EQ(unitigs, obs_unitigs);
     }
 }
+#endif
 
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsCross) {
     for (size_t num_threads : { 1, 4 }) {

@@ -12,6 +12,31 @@ namespace test {
 
 using namespace mtg::graph::boss;
 
+template <class Graph>
+size_t max_test_k() {
+    return 256 / kmer::KmerExtractorBOSS::bits_per_char;
+}
+template size_t max_test_k<DBGSuccinct>();
+template size_t max_test_k<DBGSuccinctIndexed<1>>();
+template size_t max_test_k<DBGSuccinctIndexed<2>>();
+template size_t max_test_k<DBGSuccinctIndexed<10>>();
+template size_t max_test_k<DBGSuccinctBloomFPR<1, 1>>();
+template size_t max_test_k<DBGSuccinctBloomFPR<1, 10>>();
+template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
+template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
+
+template<> size_t max_test_k<DBGBitmap>() {
+    return 64. / std::log2(kmer::KmerExtractor2Bit().alphabet.size()) - 1;
+}
+template<> size_t max_test_k<DBGHashOrdered>() {
+    return 256 / kmer::KmerExtractor2Bit::bits_per_char;
+}
+template<> size_t max_test_k<DBGHashFast>() {
+    return 256 / kmer::KmerExtractor2Bit::bits_per_char;
+}
+template<> size_t max_test_k<DBGHashString>() {
+    return 100;
+}
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph> make_graph_primary(std::shared_ptr<DeBruijnGraph> graph) {
