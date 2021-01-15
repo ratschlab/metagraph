@@ -22,7 +22,9 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
     assert(!canonical || mode == DBGMode::CANONICAL_WRAPPER);
 
-    uint64_t max_index = canonical ? canonical->get_graph().max_index() : graph->max_index();
+    uint64_t max_index = canonical
+                            ? canonical->get_graph().max_index()
+                            : graph->max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,
