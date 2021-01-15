@@ -296,7 +296,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersEmptyGraph) {
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A') });
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A') });
 
         ASSERT_EQ(1u, graph->num_nodes());
         EXPECT_TRUE(check_graph_nodes(*graph));
@@ -312,9 +312,9 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A'),
-                                                 std::string(100, 'G'),
-                                                 std::string(100, 'C') });
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A'),
+                                                 std::string(2 * k, 'G'),
+                                                 std::string(2 * k, 'C') });
         ASSERT_EQ(3u, graph->num_nodes());
         EXPECT_TRUE(check_graph_nodes(*graph));
 
@@ -331,9 +331,9 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoopsDynamic) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
-        auto graph = build_graph_batch<TypeParam>(k, { std::string(100, 'A'),
-                                                       std::string(100, 'G'),
-                                                       std::string(100, 'C') });
+        auto graph = build_graph_batch<TypeParam>(k, { std::string(2 * k, 'A'),
+                                                       std::string(2 * k, 'G'),
+                                                       std::string(2 * k, 'C') });
         EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
@@ -350,7 +350,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoopsDynamic) {
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPath) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, {
-            std::string(100, 'A') + std::string(k - 1, 'C')
+            std::string(2 * k, 'A') + std::string(k - 1, 'C')
         });
         EXPECT_TRUE(check_graph_nodes(*graph));
 
@@ -363,7 +363,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPath) {
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathACA) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, {
-            std::string(100, 'A') + std::string(k - 1, 'C') + std::string(100, 'A')
+            std::string(2 * k, 'A') + std::string(k - 1, 'C') + std::string(2 * k, 'A')
         });
         EXPECT_TRUE(check_graph_nodes(*graph));
 
@@ -375,8 +375,8 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathACA) {
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A'),
-                                                 std::string(100, 'T') });
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A'),
+                                                 std::string(2 * k, 'T') });
         EXPECT_TRUE(check_graph_nodes(*graph));
 
         size_t num_kmers = 0;
@@ -387,7 +387,7 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected) {
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersTestPathDisconnected2) {
     for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'G'),
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'G'),
                                                  std::string(k - 1, 'A') + "T" });
         EXPECT_TRUE(check_graph_nodes(*graph));
 

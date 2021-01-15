@@ -69,7 +69,7 @@ void test_mask_indices(double density_cutoff, size_t num_threads) {
 
     for (size_t k = 3; k < max_test_k<Graph>(); ++k) {
         const std::vector<std::string> sequences {
-            std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
+            std::string("T") + std::string(k - 1, 'A') + std::string(2 * k, 'T'),
             std::string("T") + std::string(k - 1, 'A') + "C",
             std::string("T") + std::string(k - 1, 'A') + "C",
             std::string("T") + std::string(k - 1, 'A') + "A",
