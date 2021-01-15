@@ -3,6 +3,7 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -43,7 +44,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 = parse_annotation_type(config.infbase_annotators.at(0));
         // row_diff annotation is special, as it must know the graph structure
         if (input_anno_type == Config::AnnotationType::RowDiff
-            || input_anno_type == Config::AnnotationType::RowDiffBRWT) {
+            || input_anno_type == Config::AnnotationType::RowDiffBRWT
+            || input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
             auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
 
             if (!dbg_graph) {
@@ -63,6 +65,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
             if (input_anno_type == Config::AnnotationType::RowDiff) {
                 dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
+                std::string anchor_fname = config.infbase + kRowDiffAnchorExt;
+                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_anchor(anchor_fname);
+            } else if (input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
+                dynamic_cast<RowDiff<RowSparse> &>(matrix).set_graph(dbg_graph);
             } else {
                 dynamic_cast<RowDiff<BRWT> &>(matrix).set_graph(dbg_graph);
             }

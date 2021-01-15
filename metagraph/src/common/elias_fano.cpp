@@ -23,14 +23,16 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
         suffixes.push_back(".count");
 
     for (const std::string &suffix : suffixes) {
-        std::string concat_command = "cat ";
-        for (uint32_t i = 1; i < files.size(); ++i) {
-            concat_command += files[i] + suffix + " ";
-        }
-        concat_command += " >> " + files[0] + suffix;
+        if (files.size() > 1) {
+            std::string concat_command = "cat ";
+            for (uint32_t i = 1; i < files.size(); ++i) {
+                concat_command += files[i] + suffix + " ";
+            }
+            concat_command += " >> " + files[0] + suffix;
 
-        if (std::system(concat_command.c_str()))
-            throw std::runtime_error("Error while cat-ing files: " + concat_command);
+            if (std::system(concat_command.c_str()))
+                throw std::runtime_error("Error while cat-ing files: " + concat_command);
+        }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const std::string &f : files) {
@@ -174,11 +176,13 @@ template <typename T>
 EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       T min_value,
                                       T max_value,
-                                      const std::string &out_filename)
+                                      const std::string &out_filename,
+                                      bool append)
     : declared_size_(size), offset_(min_value) {
-    sink_internal_ = std::ofstream(out_filename, std::ios::binary);
+    auto mode = append ? std::ios::binary | std::ios::app : std::ios::binary;
+    sink_internal_ = std::ofstream(out_filename, mode | std::ios::binary);
     sink_ = &sink_internal_;
-    sink_internal_upper_ = std::ofstream(out_filename + ".up", std::ios::binary);
+    sink_internal_upper_ = std::ofstream(out_filename + ".up", mode | std::ios::binary);
     sink_upper_ = &sink_internal_upper_;
     if (!sink_->good() || !sink_upper_->good()) {
         logger->error("Unable to write to {}", out_filename);
@@ -449,10 +453,12 @@ template <typename T, typename C>
 EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     const T &first_value,
                                                     const T &last_value,
-                                                    const std::string &sink_name)
-    : ef_encoder(size, first_value, last_value, sink_name),
+                                                    const std::string &sink_name,
+                                                    bool append)
+    : ef_encoder(size, first_value, last_value, sink_name, append),
       sink_second_name_(sink_name + ".count"),
-      sink_second_(sink_second_name_, std::ios::binary) {}
+      sink_second_(sink_second_name_,
+                   append ? std::ios::binary | std::ios::app : std::ios::binary) {}
 
 template <typename T, typename C>
 void EliasFanoEncoder<std::pair<T, C>>::add(const std::pair<T, C> &value) {

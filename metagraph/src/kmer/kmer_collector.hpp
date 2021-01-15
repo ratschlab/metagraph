@@ -96,6 +96,8 @@ class KmerCollector {
 
     void clear() { join(); kmers_->clear(); }
 
+    Container& container() { join(); return *kmers_; }
+
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }

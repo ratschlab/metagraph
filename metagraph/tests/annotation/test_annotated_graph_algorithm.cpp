@@ -14,8 +14,53 @@ using namespace mtg::graph;
 using namespace mtg::test;
 
 
+MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
+                                       const std::vector<std::string> &ingroup,
+                                       const std::vector<std::string> &outgroup,
+                                       double mask_in_label_fraction,
+                                       double mask_out_label_fraction,
+                                       double other_label_fraction,
+                                       double lazy_evaluation_density_cutoff,
+                                       size_t num_threads) {
+    size_t insize = ingroup.size();
+    size_t outsize = outgroup.size();
+    return MaskedDeBruijnGraph(
+        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+        graph::mask_nodes_by_node_label(
+            anno_graph,
+            ingroup,
+            outgroup,
+            [=,&anno_graph](auto index, auto get_num_in_labels, auto get_num_out_labels) {
+                assert(index != DeBruijnGraph::npos);
+
+                size_t num_in_labels = get_num_in_labels();
+                if (num_in_labels < mask_in_label_fraction * insize)
+                    return false;
+
+                size_t num_out_labels = get_num_out_labels();
+                if (num_out_labels < mask_out_label_fraction * outsize)
+                    return false;
+
+                size_t num_total_labels = anno_graph.get_labels(index).size();
+
+                return (num_total_labels - num_in_labels - num_out_labels)
+                    <= other_label_fraction * num_total_labels;
+            },
+            num_threads,
+            lazy_evaluation_density_cutoff
+        )
+    );
+}
+
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
+// test with DBGBitmap and DBGHashFast to have k-mers in different order
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
+                        > GraphAnnoTypes;
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationCanonicalPairTypes);
 

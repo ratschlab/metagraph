@@ -226,7 +226,7 @@ TYPED_TEST(KmerBOSS, UpdateKmerVsConstruct) {
     long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = KmerExtractorBOSS::encode(long_seq0);
-    KMER<typename TypeParam::type> kmer0(seq0.begin(), seq0.size());
+    KMER<typename TypeParam::type> kmer0(seq0.data(), seq0.size());
     kmer0.to_next(long_seq0.length(), KmerExtractorBOSS::encode(long_seq1.back()),
                                       KmerExtractorBOSS::encode(long_seq0.back()));
     std::string reconst_seq1 = kmer0.to_string(long_seq0.length(),
@@ -234,7 +234,7 @@ TYPED_TEST(KmerBOSS, UpdateKmerVsConstruct) {
     EXPECT_EQ(long_seq1, reconst_seq1);
 
     seq0.emplace_back(KmerExtractorBOSS::encode(long_seq1.back()));
-    KMER<typename TypeParam::type> kmer1(seq0.begin() + 1, seq0.size() - 1);
+    KMER<typename TypeParam::type> kmer1(seq0.data() + 1, seq0.size() - 1);
     std::string reconst_seq2 = kmer1.to_string(long_seq1.length(),
                                                KmerExtractorBOSS::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
@@ -260,8 +260,8 @@ TYPED_TEST(KmerBOSS, InvalidChars) {
     test_kmer_codec<typename TypeParam::type>("ATGH", "ATGH");
     test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGXX");
 #elif _DNA_GRAPH
-    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGH", "ATGN"), "");
-    ASSERT_DEATH(test_kmer_codec<typename TypeParam::type>("ATGЯ", "ATGNN"), "");
+    ASSERT_DEBUG_DEATH(kmer_codec<KMER<typename TypeParam::type>>("ATGH"), "");
+    ASSERT_DEBUG_DEATH(kmer_codec<KMER<typename TypeParam::type>>("ATGЯ"), "");
 #else
     static_assert(false,
         "Add a unit test for checking behavior with invalid characters"
@@ -367,7 +367,7 @@ TYPED_TEST(KmerBOSS, SizeOfClass) {
 
 TEST(KmerBOSS, TestPrint64) {
     size_t size = sizeof(uint64_t) * 8 / kBitsPerChar;
-    KMER<uint64_t> kmer(std::vector<uint64_t>(size, 1), size);
+    KMER<uint64_t> kmer(std::vector<uint64_t>(size, 1));
     std::stringstream ss;
     ss << kmer;
     std::string out;
@@ -379,7 +379,7 @@ TEST(KmerBOSS, TestPrint64) {
 
 TEST(KmerBOSS, TestPrint128) {
     size_t size = sizeof(sdsl::uint128_t) * 8 / kBitsPerChar;
-    KMER<sdsl::uint128_t> kmer(std::vector<uint64_t>(size, 1), size);
+    KMER<sdsl::uint128_t> kmer(std::vector<uint64_t>(size, 1));
     std::stringstream ss;
     ss << kmer;
     std::string out;
@@ -391,7 +391,7 @@ TEST(KmerBOSS, TestPrint128) {
 
 TEST(KmerBOSS, TestPrint256) {
     size_t size = sizeof(sdsl::uint256_t) * 8 / kBitsPerChar;
-    KMER<sdsl::uint256_t> kmer(std::vector<uint64_t>(size, 1), size);
+    KMER<sdsl::uint256_t> kmer(std::vector<uint64_t>(size, 1));
     std::stringstream ss;
     ss << kmer;
     std::string out;

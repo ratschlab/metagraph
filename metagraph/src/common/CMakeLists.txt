@@ -23,12 +23,12 @@ target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall 
 target_include_directories(metagraph_common
   PRIVATE
     ${PROJECT_PARENT_DIR}/src/
+    ${PROJECT_SOURCE_DIR}/external-libraries/folly/include
   PUBLIC
     ${EXTERNAL_LIB_DIR}/asio/asio/include
     ${EXTERNAL_LIB_DIR}/DYNAMIC/include
     ${EXTERNAL_LIB_DIR}/hopscotch-map/include
     ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/libmaus2/include
     ${EXTERNAL_LIB_DIR}/nvbio/contrib/htslib
     ${EXTERNAL_LIB_DIR}/ordered-map/include
     ${EXTERNAL_LIB_DIR}/rollinghashcpp
@@ -36,6 +36,9 @@ target_include_directories(metagraph_common
     ${EXTERNAL_LIB_DIR}/spdlog/include
     ${EXTERNAL_LIB_DIR}/zlib
     /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
+)
+target_include_directories(metagraph_common SYSTEM PUBLIC
+    ${EXTERNAL_LIB_DIR}/folly
 )
 
 # assume built-in pthreads on MacOS

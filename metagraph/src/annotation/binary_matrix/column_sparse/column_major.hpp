@@ -42,7 +42,7 @@ class ColumnMajor : public BinaryMatrix {
     /**
      * Returns the columns vector and pilfers the existing columns.
      */
-    std::vector<std::unique_ptr<bit_vector>> &&release_columns() {
+    std::vector<std::unique_ptr<bit_vector>> release_columns() {
         return std::move(data_);
     }
 

@@ -26,8 +26,8 @@ TYPED_TEST_SUITE(WaveletTreeTest, WaveletTreeTypes);
 
 
 void test_next(const wavelet_tree &vector) {
-    ASSERT_DEATH(vector.next(0, 1 << vector.logsigma()), "");
-    ASSERT_DEATH(vector.next(0, 10 << vector.logsigma()), "");
+    ASSERT_DEBUG_DEATH(vector.next(0, 1 << vector.logsigma()), "");
+    ASSERT_DEBUG_DEATH(vector.next(0, 10 << vector.logsigma()), "");
 
     if (vector.size() == 0)
         return;
@@ -61,8 +61,8 @@ void test_next(const wavelet_tree &vector) {
 }
 
 void test_prev(const wavelet_tree &vector) {
-    ASSERT_DEATH(vector.prev(vector.size(), 1 << vector.logsigma()), "");
-    ASSERT_DEATH(vector.prev(vector.size(), 10 << vector.logsigma()), "");
+    ASSERT_DEBUG_DEATH(vector.prev(vector.size(), 1 << vector.logsigma()), "");
+    ASSERT_DEBUG_DEATH(vector.prev(vector.size(), 10 << vector.logsigma()), "");
 
     if (vector.size() == 0)
         return;
@@ -104,8 +104,8 @@ void reference_based_test(const wavelet_tree &vector,
         uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
         ASSERT_EQ(max_rank, vector.count(c));
 
-        ASSERT_DEATH(vector.select(c, 0), "");
-        ASSERT_DEATH(vector.select(c, max_rank + 1), "");
+        ASSERT_DEBUG_DEATH(vector.select(c, 0), "");
+        ASSERT_DEBUG_DEATH(vector.select(c, max_rank + 1), "");
 
         for (size_t i : {1, 2, 10, 100, 1000}) {
             EXPECT_EQ(max_rank, vector.rank(c, vector.size() - 1 + i - 1));
@@ -137,8 +137,8 @@ TYPED_TEST(WaveletTreeTest, Queries) {
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
-    ASSERT_DEATH((*vector)[vector->size()], "");
-    ASSERT_DEATH((*vector)[vector->size() + 1], "");
+    ASSERT_DEBUG_DEATH((*vector)[vector->size()], "");
+    ASSERT_DEBUG_DEATH((*vector)[vector->size() + 1], "");
 
     for (size_t i = 0; i < 10; ++i) {
         EXPECT_EQ(0u, (*vector)[i]);
@@ -146,21 +146,21 @@ TYPED_TEST(WaveletTreeTest, Queries) {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(2, i));
         EXPECT_EQ(i, vector->select(0, i + 1));
-        ASSERT_DEATH(vector->select(1, i + 1), "");
+        ASSERT_DEBUG_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(2, 0));
     EXPECT_EQ(0u, vector->rank(2, 1'000));
     EXPECT_EQ(10u, vector->rank(0, 1'000));
-    ASSERT_DEATH(vector->select(1, 1'000), "");
-    ASSERT_DEATH(vector->select(1, 0), "");
+    ASSERT_DEBUG_DEATH(vector->select(1, 1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select(1, 0), "");
     delete vector;
 
     vector = new TypeParam(4, std::vector<int>(10, 2));
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
-    ASSERT_DEATH((*vector)[vector->size()], "");
-    ASSERT_DEATH((*vector)[vector->size() + 1], "");
+    ASSERT_DEBUG_DEATH((*vector)[vector->size()], "");
+    ASSERT_DEBUG_DEATH((*vector)[vector->size() + 1], "");
 
     for (size_t i = 0; i < 10; ++i) {
         EXPECT_EQ(2u, (*vector)[i]);
@@ -168,13 +168,13 @@ TYPED_TEST(WaveletTreeTest, Queries) {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(3, i));
         EXPECT_EQ(i, vector->select(2, i + 1));
-        ASSERT_DEATH(vector->select(1, i + 1), "");
+        ASSERT_DEBUG_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(0, 0));
     EXPECT_EQ(0u, vector->rank(0, 1'000));
     EXPECT_EQ(10u, vector->rank(2, 1'000));
-    ASSERT_DEATH(vector->select(3, 1'000), "");
-    ASSERT_DEATH(vector->select(1, 0), "");
+    ASSERT_DEBUG_DEATH(vector->select(3, 1'000), "");
+    ASSERT_DEBUG_DEATH(vector->select(1, 0), "");
     delete vector;
 
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,

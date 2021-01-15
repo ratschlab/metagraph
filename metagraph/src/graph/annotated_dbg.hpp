@@ -74,6 +74,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
+    // add k-mer counts to the annotation
+    void add_kmer_counts(std::string_view sequence,
+                         const std::vector<Label> &labels,
+                         std::vector<uint32_t>&& kmer_counts);
+
     /*********************** Special queries **********************/
 
     // return labels that occur at least in |presence_ratio| k-mers

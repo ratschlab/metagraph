@@ -1,6 +1,6 @@
 #include "assemble.hpp"
 
-#include <fmt/format.h>
+#include <spdlog/fmt/fmt.h>
 
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"

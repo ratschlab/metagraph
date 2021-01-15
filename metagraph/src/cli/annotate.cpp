@@ -129,11 +129,82 @@ void call_annotations(const std::string &file,
                   file, timer.elapsed(), get_curr_RSS() >> 20);
 }
 
+template <class Callback>
+void add_kmer_counts(const std::string &file,
+                     const graph::DeBruijnGraph &graph,
+                     bool forward_and_reverse,
+                     bool filename_anno,
+                     bool annotate_sequence_headers,
+                     const std::string &fasta_anno_comment_delim,
+                     const std::string &fasta_header_delimiter,
+                     const std::vector<std::string> &anno_labels,
+                     const Callback &callback) {
+    size_t total_seqs = 0;
+
+    Timer timer;
+
+    std::vector<std::string> labels = anno_labels;
+    if (filename_anno) {
+        labels.push_back(file);
+    }
+    // remember the number of base labels to remove those unique to each sequence quickly
+    const size_t num_base_labels = labels.size();
+
+    mtg::common::logger->trace("Parsing k-mer counts from '{}'",
+        utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
+    );
+    read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
+        [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
+            if (k != graph.get_k()) {
+                mtg::common::logger->error("File '{}' contains counts for k-mers of "
+                                          "length {} but graph is constructed with k={}",
+                                          file, k, graph.get_k());
+                exit(1);
+            }
+            assert(read_stream->seq.l >= k && "sequences can't be shorter than k-mers");
+
+            // add sequence header to labels
+            if (annotate_sequence_headers) {
+                for (const auto &label
+                        : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                                ? utils::join_strings(
+                                                    { read_stream->name.s, read_stream->comment.s },
+                                                    fasta_anno_comment_delim,
+                                                    true)
+                                                : read_stream->name.s,
+                                              fasta_header_delimiter)) {
+                    labels.push_back(label);
+                }
+            }
+
+            callback(read_stream->seq.s, labels,
+                     std::vector<uint32_t>(kmer_counts, kmer_counts + read_stream->seq.l - k + 1));
+
+            total_seqs++;
+
+            if (logger->level() <= spdlog::level::level_enum::trace
+                                            && total_seqs % 10000 == 0) {
+                logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                              total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
+            }
+
+            labels.resize(num_base_labels);
+        },
+        forward_and_reverse
+    );
+}
+
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename) {
     auto anno_graph = initialize_annotated_dbg(graph, config);
+
+    bool forward_and_reverse = config.forward_and_reverse;
+    if (anno_graph->get_graph().is_canonical_mode()) {
+        logger->trace("Annotating canonical graph");
+        forward_and_reverse = false;
+    }
 
     Timer timer;
 
@@ -145,7 +216,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             file,
             config.refpath,
             anno_graph->get_graph(),
-            config.forward_and_reverse,
+            forward_and_reverse,
             config.min_count,
             config.max_count,
             config.filename_anno,
@@ -162,6 +233,36 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 );
             }
         );
+    }
+
+    thread_pool.join();
+
+    if (config.count_kmers) {
+        // add k-mer counts
+        for (const auto &file : files) {
+            add_kmer_counts(
+                file,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence,
+                            std::vector<std::string> labels,
+                            std::vector<uint32_t> kmer_counts) {
+                    thread_pool.enqueue(
+                        [&](std::string &sequence,
+                                std::vector<std::string> &labels,
+                                std::vector<uint32_t> &kmer_counts) {
+                            anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
+                        },
+                        std::move(sequence), std::move(labels), std::move(kmer_counts)
+                    );
+                }
+            );
+        }
     }
 
     thread_pool.join();
@@ -263,9 +364,6 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     const auto graph = load_critical_dbg(config->infbase);
-
-    if (graph->is_canonical_mode() || config->canonical)
-        config->forward_and_reverse = false;
 
     if (!config->separately) {
         annotate_data(graph, *config, files, config->outfbase);
