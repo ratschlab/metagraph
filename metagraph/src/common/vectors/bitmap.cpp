@@ -391,22 +391,6 @@ bitmap_generator
                    size_t num_set_bits) noexcept
       : size_(size), num_set_bits_(num_set_bits), generator_(std::move(generator)) {}
 
-bitmap_generator
-::bitmap_generator(bitmap&& base,
-                   std::function<uint64_t(uint64_t)>&& index_transformer,
-                   size_t size,
-                   size_t num_set_bits) noexcept
-      : size_(size == static_cast<size_t>(-1) ? base.size() : size),
-        num_set_bits_(num_set_bits == static_cast<size_t>(-1) ? base.num_set_bits() : num_set_bits) {
-    auto get_generator = [&](bitmap&& v, auto&& transformer) {
-        return [&](const auto &callback) {
-            v.call_ones([&](auto i) { callback(transformer(i)); });
-        };
-    };
-
-    generator_ = get_generator(std::move(base), std::move(index_transformer));
-}
-
 void bitmap_generator::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());

@@ -201,12 +201,6 @@ class bitmap_generator : public bitmap {
                      size_t size,
                      size_t num_set_bits = -1) noexcept;
 
-    bitmap_generator(bitmap&& base,
-                     std::function<uint64_t(uint64_t)>&& index_transformer
-                         = [](auto i) { return i; },
-                     size_t size = -1,
-                     size_t num_set_bits = -1) noexcept;
-
     bool operator[](uint64_t) const { throw std::runtime_error("Not implemented"); }
     uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("Not implemented"); }
 
@@ -214,6 +208,7 @@ class bitmap_generator : public bitmap {
     uint64_t num_set_bits() const { return num_set_bits_; }
 
     void add_to(sdsl::bit_vector *other) const;
+
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const;
 
