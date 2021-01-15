@@ -382,7 +382,8 @@ bitmap_generator::bitmap_generator(size_t size, bool value)
                                      index_callback(i);
                                  }
                              }
-                         }, size, size * value) {}
+                         },
+                         size, size * value) {}
 
 bitmap_generator
 ::bitmap_generator(std::function<void(const VoidCall<uint64_t>&)>&& generator,
