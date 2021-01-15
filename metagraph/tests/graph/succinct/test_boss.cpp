@@ -1873,7 +1873,6 @@ TEST(BOSS, CallUnitigsMasked) {
 }
 
 #if ! _PROTEIN_GRAPH
-
 TEST(BOSS, CallUnitigsSingleKmer) {
     size_t k = 6;
     std::vector<std::string> sequences {
@@ -1900,7 +1899,6 @@ TEST(BOSS, CallUnitigsSingleKmer) {
         EXPECT_EQ(unitigs, obs_unitigs);
     }
 }
-
 #endif
 
 template <class Callback>
@@ -2220,7 +2218,7 @@ TEST(BOSS, PredKmer) {
         test_pred_kmer(graph, "NNNNN", 8);
         test_pred_kmer(graph, "$$$$$", 2);
     }
-#ifndef _PROTEIN_GRAPH
+#if ! _PROTEIN_GRAPH
     {
         BOSS graph(5);
         graph.add_sequence("AAACGTAGTATGTAGC");

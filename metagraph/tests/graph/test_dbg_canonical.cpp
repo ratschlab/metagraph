@@ -8,8 +8,7 @@
 
 namespace {
 
-#if _PROTEIN_GRAPH
-#else
+#if ! _PROTEIN_GRAPH
 
 using namespace mtg;
 using namespace mtg::test;
@@ -20,14 +19,12 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 template <typename Graph>
 class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
-
 // TODO: add support for canonical mode in DBGHashString
 typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGHashFast,
                          DBGSuccinct,
                          DBGSuccinctBloom<4, 1>> CanonicalGraphTypes;
-
 TYPED_TEST_SUITE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 
@@ -1366,6 +1363,6 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
     }
 }
 
-#endif // _PROTEIN_GRAPH
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

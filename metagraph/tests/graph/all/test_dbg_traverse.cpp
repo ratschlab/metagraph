@@ -14,12 +14,6 @@ namespace {
 using namespace mtg;
 using namespace mtg::test;
 
-#if _PROTEIN_GRAPH
-const size_t MAX_K = 12;
-#else
-const size_t MAX_K = 20;
-#endif
-
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
 
@@ -92,7 +86,7 @@ TYPED_TEST(DeBruijnGraphTest, Traversals) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, Traversals2) {
-    for (size_t k = 2; k <= MAX_K; ++k) {
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A') + std::string(100, 'C') + std::string(100, 'G')
         });
@@ -376,7 +370,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
-    for (size_t k = 2; k <= MAX_K; ++k) {
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
                                                + std::string(100, 'C')
                                                + std::string(100, 'G') });
@@ -445,7 +439,7 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, RankIncomingEdge) {
-    for (size_t k = 2; k <= MAX_K; ++k) {
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
                                                + std::string(100, 'C')
                                                + std::string(100, 'G') });
