@@ -126,10 +126,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         for (size_t i = t * block_size; i < block_end; ++i) {
             encoder.add(data_[i]);
         }
-        uint64_t written = encoder.finish();
-
-        #pragma omp critical
-        total_chunk_size_bytes_ += written;
+        total_chunk_size_bytes_ += encoder.finish();
     }
 
     chunk_count_++;
