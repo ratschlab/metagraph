@@ -170,6 +170,8 @@ class SortedSetDiskBase {
 
     std::string chunk_file_prefix_;
 
+    size_t num_blocks_;
+
     /**
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
      */
@@ -204,7 +206,12 @@ class SortedSetDiskBase {
                          uint32_t chunk_begin,
                          uint32_t chunk_end,
                          std::atomic<uint32_t> *l1_chunk_count,
-                         std::atomic<size_t> *total_size);
+                         std::atomic<size_t> *total_size,
+                         size_t blocks_per_chunk);
+
+    static std::string merge_blocks(const std::string &chunk_file_prefix,
+                                    uint32_t chunk,
+                                    size_t num_blocks);
 
     static void merge_all(const std::string &out_file,
                           const std::vector<std::string> &to_merge);
