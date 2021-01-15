@@ -142,7 +142,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsThreeSelfLoops) {
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 4; k < std::min(max_test_k<TypeParam>(), (size_t)14); ++k) {
+        for (size_t k = 4; k < std::min((size_t)14, max_test_k<TypeParam>()); ++k) {
             std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                                  "GGGGGGGGGGGGG" };
             auto graph = build_graph<TypeParam>(k, sequences);
@@ -164,7 +164,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
 
 TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 4; k < std::min(max_test_k<TypeParam>(), (size_t)14); ++k) {
+        for (size_t k = 4; k < std::min((size_t)14, max_test_k<TypeParam>()); ++k) {
             std::vector<std::string> sequences { "ATGCAGTACTCAG",
                                                  "ATGCAGTACTGAG",
                                                  "GGGGGGGGGGGGG" };
