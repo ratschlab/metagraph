@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         build_type: [Debug, Release]
-        alphabet: [DNA, Protein]
+        alphabet: [DNA]
         compiler: [g++-8, g++-9, g++-10]
         include:
           - compiler: g++-8
@@ -25,6 +25,9 @@ jobs:
           - compiler: g++-10
             cxx: g++-10
             cc: gcc-10
+
+          - compiler: g++-10
+            alphabet: Protein
 
     steps:
     - uses: actions/checkout@v1
@@ -86,7 +89,7 @@ jobs:
     strategy:
       matrix:
         build_type: [Debug, Release]
-        alphabet: [DNA, Protein]
+        alphabet: [DNA]
 
     steps:
     - uses: actions/checkout@v1
@@ -109,7 +112,9 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
+              -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
