@@ -28,6 +28,7 @@ jobs:
 
           - compiler: g++-10
             alphabet: Protein
+            build_type: [Debug, Release]
 
     steps:
     - uses: actions/checkout@v1
