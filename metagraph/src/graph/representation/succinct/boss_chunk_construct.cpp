@@ -920,7 +920,7 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
             dummy_names.push_back(dummy_source_names[i][F + 1]);
         }
-        BOSS::Chunk *next = build_boss_chunk<T>(false /* is_first_chunk*/ ,
+        BOSS::Chunk *next = build_boss_chunk<T>(false, // not the first chunk
                                                 real_names[F], dummy_names,
                                                 k, both_strands_mode, bits_per_count, swap_dir);
         logger->trace("Chunk for ..{}. done", KmerExtractor2Bit().alphabet[F]);
