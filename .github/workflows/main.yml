@@ -10,8 +10,8 @@ jobs:
 
     strategy:
       matrix:
+        alphabet: [DNA, Protein]
         build_type: [Debug, Release]
-        alphabet: [DNA]
         compiler: [g++-8, g++-9, g++-10]
         include:
           - compiler: g++-8
@@ -26,13 +26,11 @@ jobs:
             cxx: g++-10
             cc: gcc-10
 
-          - build_type: Debug
-            compiler: g++-10
-            alphabet: Protein
-
-          - build_type: Release
-            compiler: g++-10
-            alphabet: Protein
+        exclude:
+          - alphabet: Protein
+            compiler: g++-8
+          - alphabet: Protein
+            compiler: g++-9
 
     steps:
     - uses: actions/checkout@v1
