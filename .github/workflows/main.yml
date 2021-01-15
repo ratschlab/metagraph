@@ -63,7 +63,8 @@ jobs:
         export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
