@@ -26,9 +26,13 @@ jobs:
             cxx: g++-10
             cc: gcc-10
 
-          - compiler: g++-10
+          - build_type: Debug
+            compiler: g++-10
             alphabet: Protein
-            build_type: [Debug, Release]
+
+          - build_type: Release
+            compiler: g++-10
+            alphabet: Protein
 
     steps:
     - uses: actions/checkout@v1
