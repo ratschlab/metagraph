@@ -245,7 +245,18 @@ void DBGBitmap::adjacent_incoming_nodes(node_index node,
 }
 
 DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
-    auto index = kmer.data() + 1;
+#if _DNA_GRAPH
+    uint64_t index = kmer.data() + 1;
+#else
+    int k = get_k();
+    const size_t alph_size = seq_encoder_.alphabet.size();
+    uint64_t index = 0;
+    while (--k >= 0) {
+        index = index * alph_size + kmer[k];
+    }
+    index += 1;
+#endif
+
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
 
@@ -267,6 +278,17 @@ uint64_t DBGBitmap::node_to_index(node_index node) const {
 
 DBGBitmap::Kmer DBGBitmap::node_to_kmer(node_index node) const {
     assert(node > 0 && node <= num_nodes());
+
+#if ! _DNA_GRAPH
+    const size_t alph_size = seq_encoder_.alphabet.size();
+    uint64_t word = 0;
+    node -= 1;
+    for (size_t i = 0; i < get_k(); ++i) {
+        word |= (node % alph_size) << (i * seq_encoder_.bits_per_char);
+        node /= alph_size;
+    }
+    node = word + 1;
+#endif
 
     return Kmer { complete_ ? node - 1 : kmers_.select1(node + 1) - 1 };
 }

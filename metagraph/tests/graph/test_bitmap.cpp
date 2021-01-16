@@ -23,43 +23,21 @@ const kmer::KmerExtractor2Bit kmer_extractor;
 
 
 TEST(DBGBitmapComplete, InitializeComplete) {
-    {
-        DBGBitmap graph(20, false);
+    for (bool canonical : { false, true }) {
+        DBGBitmap graph(12, canonical);
         ASSERT_TRUE(graph.is_complete());
-        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
-        EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
+        EXPECT_EQ(std::string(12, 'A'), graph.get_node_sequence(1));
+        EXPECT_EQ(1u, graph.kmer_to_node(std::string(12, 'A')));
 
-    // #if _DNA4_GRAPH
-        EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
-    // #elif _DNA_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
-    // #elif _DNA_CASE_SENSITIVE_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
-    // #elif _PROTEIN_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
-    // #endif
-
-        EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-        EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-        EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    }
-
-    {
-        DBGBitmap graph(20, true);
-        ASSERT_TRUE(graph.is_complete());
-        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
-        EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
-
-    // #if _DNA4_GRAPH
-        EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
-    // #elif _DNA_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
-    // #elif _DNA_CASE_SENSITIVE_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
-    // #elif _PROTEIN_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
-    // #endif
+        #if _DNA_GRAPH
+            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'T')));
+        #elif _DNA5_GRAPH
+            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'N')));
+        #elif _DNA_CASE_SENSITIVE_GRAPH
+            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 't')));
+        #elif _PROTEIN_GRAPH
+            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'X')));
+        #endif
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -69,60 +47,30 @@ TEST(DBGBitmapComplete, InitializeComplete) {
 }
 
 TEST(DBGBitmapComplete, SerializeComplete) {
-    {
-        DBGBitmap graph(20, false);
+    for (bool canonical : { false, true }) {
+        {
+            DBGBitmap graph(12, canonical);
 
-        graph.serialize(test_dump_basename);
-    }
+            graph.serialize(test_dump_basename);
+        }
 
-    {
-        DBGBitmap graph(2, false);
+        {
+            DBGBitmap graph(2);
 
-        ASSERT_TRUE(graph.load(test_dump_basename));
-        EXPECT_EQ(20u, graph.get_k());
+            ASSERT_TRUE(graph.load(test_dump_basename));
+            EXPECT_EQ(12u, graph.get_k());
 
-        EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-        EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-        EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    }
-
-    {
-        DBGBitmap graph(20, true);
-
-        graph.serialize(test_dump_basename);
-    }
-
-    {
-        DBGBitmap graph(2, true);
-
-        ASSERT_TRUE(graph.load(test_dump_basename));
-        EXPECT_EQ(20u, graph.get_k());
-
-        EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-        EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-        EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+            EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+            EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+            EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+            EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+        }
     }
 }
 
 TEST(DBGBitmapComplete, InsertSequence) {
-    {
-        DBGBitmap graph(20, false);
-
-        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
-        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
-
-        EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-        EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-        EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-        EXPECT_TRUE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
-        EXPECT_TRUE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
-    }
-
-    {
-        DBGBitmap graph(20, true);
+    for (bool canonical : { false, true }) {
+        DBGBitmap graph(12, canonical);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -137,27 +85,8 @@ TEST(DBGBitmapComplete, InsertSequence) {
 }
 
 TEST(DBGBitmapComplete, ReverseComplement) {
-    {
-        DBGBitmap graph(20, false);
-
-        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
-
-        //uint64_t num_nodes = graph.num_nodes();
-        ASSERT_THROW(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), std::runtime_error);
-
-        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
-
-
-        EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-        EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-        EXPECT_TRUE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-        EXPECT_TRUE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
-        EXPECT_TRUE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
-    }
-
-    {
-        DBGBitmap graph(20, true);
+    for (bool canonical : { false, true }) {
+        DBGBitmap graph(12, canonical);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
 
@@ -176,42 +105,22 @@ TEST(DBGBitmapComplete, ReverseComplement) {
 }
 
 TEST(DBGBitmapComplete, CheckGraph) {
-    {
-        DBGBitmap graph(20, false);
+    for (bool canonical : { false, true }) {
+        DBGBitmap graph(12, canonical);
 
         const std::string alphabet = "ACGT";
 
         for (DBGBitmap::node_index i = 0; i < 100; ++i) {
             std::string seq(1'000, 'A');
             for (size_t j = 0; j < seq.size(); ++j) {
-                seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
+                seq[j] = alphabet[(i * i + j + 17 * j * j) % alphabet.size()];
             }
             ASSERT_THROW(graph.add_sequence(seq), std::runtime_error);
         }
 
         for (DBGBitmap::node_index i = 1; i <= 1000; ++i) {
             auto kmer = graph.get_node_sequence(i);
-            ASSERT_EQ(20u, kmer.size());
-            EXPECT_EQ(i, graph.kmer_to_node(kmer)) << kmer;
-        }
-    }
-
-    {
-        DBGBitmap graph(20, true);
-
-        const std::string alphabet = "ACGT";
-
-        for (DBGBitmap::node_index i = 0; i < 100; ++i) {
-            std::string seq(1'000, 'A');
-            for (size_t j = 0; j < seq.size(); ++j) {
-                seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
-            }
-            ASSERT_THROW(graph.add_sequence(seq), std::runtime_error);
-        }
-
-        for (DBGBitmap::node_index i = 1; i <= 1000; ++i) {
-            auto kmer = graph.get_node_sequence(i);
-            ASSERT_EQ(20u, kmer.size());
+            ASSERT_EQ(12u, kmer.size());
             EXPECT_EQ(i, graph.kmer_to_node(kmer)) << kmer;
         }
     }
@@ -219,7 +128,7 @@ TEST(DBGBitmapComplete, CheckGraph) {
 
 TEST(DBGBitmapComplete, Serialize) {
     {
-        DBGBitmap graph(20, false);
+        DBGBitmap graph(12, false);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -239,7 +148,7 @@ TEST(DBGBitmapComplete, Serialize) {
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 
-        EXPECT_EQ(20u, graph.get_k());
+        EXPECT_EQ(12u, graph.get_k());
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -250,7 +159,7 @@ TEST(DBGBitmapComplete, Serialize) {
     }
 
     {
-        DBGBitmap graph(20, true);
+        DBGBitmap graph(12, true);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -270,7 +179,7 @@ TEST(DBGBitmapComplete, Serialize) {
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 
-        EXPECT_EQ(20u, graph.get_k());
+        EXPECT_EQ(12u, graph.get_k());
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));

@@ -159,7 +159,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
             constructor->add_sequences(std::vector<std::string>(input_data));
             DBGBitmap reference(constructor.get());
 
-            for (size_t suffix_len = 0; suffix_len <= k && suffix_len <= 4u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len <= std::min(k, (size_t)2); ++suffix_len) {
                 std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
@@ -238,18 +238,6 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
         2, &result, {}, 100'000
     );
@@ -260,6 +248,20 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
         2, &result, { 1, }, 100'000
     );
     EXPECT_EQ(2u, result.data().size());
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, {}, 100'000
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, { 1, }, 100'000
+    );
+    #if _DNA_GRAPH
+        ASSERT_EQ(2u, result.data().size());
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
@@ -298,12 +300,11 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, 0
     );
-    // #if _DNA4_GRAPH
-        // B->A in 2Bit mode
+    #if _DNA_GRAPH
         ASSERT_EQ(2u, result.data().size());
-    // #else
-    //     ASSERT_EQ(3u, result.data().size());
-    // #endif
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
