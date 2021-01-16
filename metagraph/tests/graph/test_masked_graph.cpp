@@ -15,12 +15,19 @@ using namespace mtg;
 using namespace mtg::test;
 
 template <typename Graph>
-class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_SUITE(MaskedDeBruijnGraphTest, GraphTypes);
+class MaskedDeBruijnGraphTest : public DeBruijnGraphTest<Graph> {};
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashString,
+                         DBGHashOrdered,
+                         DBGHashFast,
+                         DBGSuccinct> GraphsToMask;
+TYPED_TEST_SUITE(MaskedDeBruijnGraphTest, GraphsToMask);
 
 template <typename Graph>
-class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> { };
-TYPED_TEST_SUITE(MaskedStableDeBruijnGraphTest, StableGraphTypes);
+class MaskedStableDeBruijnGraphTest : public DeBruijnGraphTest<Graph> {};
+typedef ::testing::Types<DBGBitmap,
+                         DBGSuccinct> StableGraphsToMask;
+TYPED_TEST_SUITE(MaskedStableDeBruijnGraphTest, StableGraphsToMask);
 
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
