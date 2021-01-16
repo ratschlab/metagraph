@@ -655,7 +655,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
 
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
     for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 3; k <= 15; k += 2) {
+        for (size_t k = 3; k <= 12; k += 2) {
             for (const std::vector<std::string> &sequences
                     : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
                         std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
