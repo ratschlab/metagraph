@@ -26,7 +26,7 @@ template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
 
 template<> size_t max_test_k<DBGBitmap>() {
-    return 64. / std::log2(kmer::KmerExtractor2Bit().alphabet.size()) - 1;
+    return 63. / kmer::KmerExtractor2Bit().bits_per_char;
 }
 template<> size_t max_test_k<DBGHashOrdered>() {
     return 256 / kmer::KmerExtractor2Bit::bits_per_char;

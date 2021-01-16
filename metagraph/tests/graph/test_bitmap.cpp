@@ -31,12 +31,12 @@ TEST(DBGBitmapComplete, InitializeComplete) {
 
         #if _DNA_GRAPH
             EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'T')));
-        #elif _DNA5_GRAPH
-            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'N')));
-        #elif _DNA_CASE_SENSITIVE_GRAPH
-            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 't')));
-        #elif _PROTEIN_GRAPH
-            EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'X')));
+        // #elif _DNA5_GRAPH
+        //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'N')));
+        // #elif _DNA_CASE_SENSITIVE_GRAPH
+        //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 't')));
+        // #elif _PROTEIN_GRAPH
+        //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node(std::string(12, 'X')));
         #endif
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -117,12 +117,19 @@ TEST(DBGBitmapComplete, CheckGraph) {
             }
             ASSERT_THROW(graph.add_sequence(seq), std::runtime_error);
         }
-
+        for (DBGBitmap::node_index i = 1; i <= graph.alphabet().size(); ++i) {
+            auto kmer = graph.get_node_sequence(i);
+            ASSERT_EQ(12u, kmer.size());
+            EXPECT_EQ(i, graph.kmer_to_node(kmer)) << kmer;
+        }
+// complete BitmapDBG uses contiguous indexing only for DNA4
+#if _DNA_GRAPH
         for (DBGBitmap::node_index i = 1; i <= 1000; ++i) {
             auto kmer = graph.get_node_sequence(i);
             ASSERT_EQ(12u, kmer.size());
             EXPECT_EQ(i, graph.kmer_to_node(kmer)) << kmer;
         }
+#endif
     }
 }
 
