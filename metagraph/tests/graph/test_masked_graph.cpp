@@ -664,7 +664,7 @@ TEST(MaskedDBGSuccinct, CallUnitigsMaskLastEdges) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<DBGSuccinct>(k, sequences, DBGMode::CANONICAL);
+                auto graph = build_graph_batch<DBGSuccinct>(k, sequences, DBGMode::NORMAL);
                 auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
                 dbg_succ->reset_mask();
