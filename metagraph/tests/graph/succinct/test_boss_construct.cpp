@@ -296,7 +296,7 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
                                         + std::string(100, 'G'));
 
         for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
                 for (bool weighted : { false, true }) {
                     for (size_t num_threads : { 1, 4 }) {
                         std::unique_ptr<BOSS::Chunk> graph_data;
