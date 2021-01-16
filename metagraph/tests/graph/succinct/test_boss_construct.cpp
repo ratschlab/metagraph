@@ -552,8 +552,8 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
 #if _DNA_GRAPH
     ASSERT_EQ(1u, result.data().size());
 #else
-    // AA, $B, BB
-    ASSERT_EQ(3u, result.data().size());
+    // AA, BB
+    ASSERT_EQ(2u, result.data().size());
 #endif
 }
 
