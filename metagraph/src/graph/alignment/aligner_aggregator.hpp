@@ -16,8 +16,10 @@ class AlignmentAggregator {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
-    AlignmentAggregator(const std::string_view query, const std::string_view rc_query,
-                        const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+    AlignmentAggregator(const std::string_view query,
+                        const std::string_view rc_query,
+                        const DeBruijnGraph &graph,
+                        const DBGAlignerConfig &config)
           : query_(query), rc_query_(rc_query), graph_(graph), config_(config),
             best_score_(config_.chain_alignments ? query.size() : 1,
                         config_.min_path_score) {
