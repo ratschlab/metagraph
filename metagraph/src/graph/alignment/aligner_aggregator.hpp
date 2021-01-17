@@ -197,8 +197,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
               });
 
     std::pair<score_t, std::vector<DBGAlignment>> cur_chain(config_.min_path_score, {});
-    call_alignment_chains(cur_paths, [&](std::vector<DBGAlignment>&& chain,
-                                         score_t score) {
+    call_alignment_chains(cur_paths, [&](std::vector<DBGAlignment>&& chain, score_t score) {
         if (score > cur_chain.first) {
             for (auto &path : chain) {
                 path.extend_query_end(query_.data() + query_.size());
