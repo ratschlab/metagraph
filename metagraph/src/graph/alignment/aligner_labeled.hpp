@@ -27,8 +27,10 @@ class LabeledDBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     typedef QueryAlignment<node_index> DBGQueryAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
-    LabeledDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
-          : anno_graph_(anno_graph), config_(config) {
+    LabeledDBGAligner(const AnnotatedDBG &anno_graph,
+                      const DBGAlignerConfig &config,
+                      size_t num_top_labels = 1)
+          : anno_graph_(anno_graph), config_(config), num_top_labels_(num_top_labels) {
         assert(config_.num_alternative_paths);
         if (!config_.check_config_scores()) {
             throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
@@ -61,6 +63,7 @@ class LabeledDBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
   private:
     const AnnotatedDBG& anno_graph_;
     const DBGAlignerConfig config_;
+    size_t num_top_labels_;
 };
 
 template <typename NodeType>
@@ -117,6 +120,11 @@ inline auto LabeledDBGAligner<Seeder, Extender, AlignmentCompare>
     return [this,query,orientation](const auto &callback) {
         auto seeder = build_seeder();
         seeder.initialize(query, orientation);
+
+        auto signatures = anno_graph_.get_top_label_signatures(
+            query, num_top_labels_, config_.exact_kmer_match_fraction
+        );
+
         seeder.call_seeds(callback);
     };
 }
