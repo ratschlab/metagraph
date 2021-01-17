@@ -6,6 +6,8 @@ import pandas as pd
 import requests
 import warnings
 
+from metagraph import helpers
+
 """Metagraph client."""
 
 DEFAULT_TOP_LABELS = 10000
@@ -129,37 +131,7 @@ class GraphClient:
             raise RuntimeError(
                 f"Error while calling the server API {str(err)}")
 
-        def _build_dict(row):
-            d = dict(row)
-            if 'properties' in d.keys():
-                props = d.pop('properties')
-            else:
-                props = {}
-            return {**d, **props}
-
-        def _build_df_from_json(j):
-            return pd.DataFrame([_build_dict(r) for r in j['results']])
-
-        def _build_df_per_result(res):
-            df = _build_df_from_json(res)
-
-            if not isinstance(sequence, str):
-                # only add sequence description if several queries are being made
-                df['seq_description'] = res['seq_description']
-
-            if align:
-                df['sequence'] = res['sequence']
-                df['score'] = res['score']
-                df['cigar'] = res['cigar']
-
-            return df
-
-        def build_df_from_json(j):
-            if j:
-                return pd.concat(_build_df_per_result(query_res) for query_res in j)
-            return pd.DataFrame()
-
-        return build_df_from_json(json_obj)
+        return helpers.df_from_search_result(json_obj)
 
     def align(self, sequence: Union[str, Iterable[str]],
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
@@ -171,21 +143,7 @@ class GraphClient:
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
 
-        def _df_per_seq_res(seq_res):
-            df = pd.DataFrame(seq_res['alignments'])
-            if 'cigar' not in df:
-                # no results returned. add empty columns
-                df['cigar'] = ""
-                df['score'] = None
-                df['sequence'] = ""
-            df['seq_description'] = seq_res['seq_description']
-            return df
-
-        if not json_obj:
-            return pd.DataFrame({})
-
-        return (pd.concat([ _df_per_seq_res(a) for a in json_obj]).
-                 reset_index(drop=True))
+        return helpers.df_from_align_result(json_obj)
 
 
     def column_labels(self) -> List[str]:

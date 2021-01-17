@@ -31,8 +31,8 @@ class bit_vector_adaptive : public bit_vector {
         return vector_->get_int(id, width);
     }
 
-    inline virtual bool load(std::istream &in) override final;
-    inline virtual void serialize(std::ostream &out) const override final;
+    inline bool load(std::istream &in) override final;
+    inline void serialize(std::ostream &out) const override final;
 
     virtual uint64_t size() const override final { return vector_->size(); }
 

@@ -87,9 +87,6 @@ template <typename Annotator>
 class AnnotatorStaticTest : public AnnotatorTest<Annotator> { };
 
 template <typename Annotator>
-class AnnotatorStaticLargeTest : public AnnotatorStaticTest<Annotator> { };
-
-template <typename Annotator>
 class AnnotatorPresetTest : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
@@ -140,25 +137,29 @@ typedef ::testing::Types<annot::BinRelWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,
                          annot::RowFlatAnnotator,
+                         annot::RowSparseAnnotator,
                          annot::UniqueRowAnnotator,
                          annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
                          RowCompressedParallel<>,
                          RowCompressedDynamic<>,
                          RowCompressedSparse<>> AnnotatorTypes;
+
 typedef ::testing::Types<annot::BinRelWTAnnotator,
                          annot::BinRelWT_sdslAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::RainbowfishAnnotator,
                          annot::RowFlatAnnotator,
+                         annot::RowSparseAnnotator,
                          annot::UniqueRowAnnotator,
                          annot::MultiBRWTAnnotator> AnnotatorStaticTypes;
-typedef ::testing::Types<annot::MultiBRWTAnnotator> AnnotatorStaticLargeTypes;
+
 typedef ::testing::Types<annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
                          RowCompressedParallel<>,
                          RowCompressedDynamic<>,
                          RowCompressedSparse<>> AnnotatorDynamicTypes;
+
 typedef ::testing::Types<annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -170,7 +171,6 @@ TYPED_TEST_SUITE(AnnotatorPresetTest, AnnotatorTypes);
 TYPED_TEST_SUITE(AnnotatorPreset2Test, AnnotatorTypes);
 TYPED_TEST_SUITE(AnnotatorPreset3Test, AnnotatorTypes);
 TYPED_TEST_SUITE(AnnotatorStaticTest, AnnotatorStaticTypes);
-TYPED_TEST_SUITE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_SUITE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 

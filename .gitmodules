@@ -1,8 +1,3 @@
-[submodule "metagraph/external-libraries/libmaus2"]
-	path = metagraph/external-libraries/libmaus2
-	url = https://github.com/akahles/libmaus2.git
-	ignore = untracked
-	branch = shrunk
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
 	url = https://github.com/hmusta/sdsl-lite.git
@@ -46,9 +41,6 @@
 [submodule "metagraph/external-libraries/nvbio"]
 	path = metagraph/external-libraries/nvbio
 	url = https://github.com/NVlabs/nvbio
-[submodule "metagraph/external-libraries/fmt"]
-	path = metagraph/external-libraries/fmt
-	url = https://github.com/fmtlib/fmt.git
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
 	url = https://github.com/hmusta/rollinghashcpp
@@ -67,3 +59,6 @@
 [submodule "metagraph/external-libraries/Simple-Web-Server"]
 	path = metagraph/external-libraries/Simple-Web-Server
 	url = https://gitlab.com/eidheim/Simple-Web-Server.git
+[submodule "metagraph/external-libraries/folly"]
+	path = metagraph/external-libraries/folly
+	url = https://github.com/facebook/folly

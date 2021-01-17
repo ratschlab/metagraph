@@ -71,7 +71,7 @@ BRWT BRWTBottomUpBuilder::concatenate(std::vector<BRWT>&& submatrices,
     // set child nodes
     parent.child_nodes_.resize(submatrices.size());
 
-    std::vector<std::future<void>> results;
+    std::vector<std::shared_future<void>> results;
 
     // compress the parent index vector
     results.push_back(thread_pool.enqueue([&]() {
@@ -138,7 +138,7 @@ BRWT BRWTBottomUpBuilder::concatenate_sparse(std::vector<BRWT>&& submatrices,
     // set child nodes
     parent.child_nodes_.resize(submatrices.size());
 
-    std::vector<std::future<void>> results;
+    std::vector<std::shared_future<void>> results;
 
     for (size_t i = 0; i < submatrices.size(); ++i) {
         // generate an index column for the child node
@@ -203,7 +203,38 @@ BRWT BRWTBottomUpBuilder::build(
     if (!linkage.size())
         return BRWT();
 
-    std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
+    std::function<void(BinaryMatrix&& node, uint64_t id)> dump_node;
+    std::function<BRWT(uint64_t id)> get_node;
+
+    if (!tmp_path.empty()) {
+        // keep all temp nodes in |tmp_dir|
+        std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
+        dump_node = [tmp_dir](BinaryMatrix&& node, uint64_t id) {
+            std::ofstream out(tmp_dir/std::to_string(id), std::ios::binary);
+            node.serialize(out);
+            node = BRWT();
+        };
+        get_node = [tmp_dir](uint64_t id) {
+            BRWT node;
+            auto filename = tmp_dir/std::to_string(id);
+            std::ifstream in(filename, std::ios::binary);
+            if (!node.load(in)) {
+                logger->error("Can't load temp BRWT node {}", filename);
+                exit(1);
+            }
+            std::filesystem::remove(filename);
+            return node;
+        };
+    } else {
+        // keep all temp nodes in memory
+        auto temp_nodes = std::make_shared<std::vector<BRWT>>(linkage.size());
+        dump_node = [temp_nodes](BinaryMatrix&& node, uint64_t id) {
+            temp_nodes->at(id) = dynamic_cast<BRWT&&>(node);
+        };
+        get_node = [temp_nodes](uint64_t id) {
+            return std::move(temp_nodes->at(id));
+        };
+    }
 
     std::vector<bool> done(linkage.size(), false);
     std::mutex done_mu;
@@ -215,35 +246,30 @@ BRWT BRWTBottomUpBuilder::build(
     uint64_t num_rows = 0;
 
     // prepare leaves
-    {
-        ThreadPool writing_pool(num_threads, 1);
-        get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
-            writing_pool.enqueue([&,i,column{column.release()}] {
-                uint64_t size = column->size();
+    get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
+        uint64_t size = column->size();
 
-                BRWT node;
-                node.assignments_ = RangePartition(Partition(1, { 0 }));
-                node.nonzero_rows_.reset(column);
+        BRWT node;
+        node.assignments_ = RangePartition(Partition(1, { 0 }));
+        node.nonzero_rows_ = std::make_unique<bit_vector_smart>(
+                                column->convert_to<bit_vector_smart>());
 
-                std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
-                node.serialize(out);
+        dump_node(std::move(node), i);
 
-                std::unique_lock<std::mutex> lock(done_mu);
-                done[i] = true;
+        std::unique_lock<std::mutex> lock(done_mu);
+        done[i] = true;
 
-                if (!num_rows)
-                    num_rows = size;
+        if (!num_rows)
+            num_rows = size;
 
-                if (size != num_rows) {
-                    logger->error("Can't merge columns of different size");
-                    exit(1);
-                }
+        if (size != num_rows) {
+            logger->error("Can't merge columns of different size");
+            exit(1);
+        }
 
-                ++progress_bar;
-                num_leaves++;
-            });
-        });
-    }
+        ++progress_bar;
+        num_leaves++;
+    });
 
     for (size_t i = 0; i < num_leaves; ++i) {
         if (linkage[i].size()) {
@@ -278,17 +304,11 @@ BRWT BRWTBottomUpBuilder::build(
         std::vector<BRWT> children(linkage[i].size());
         for (size_t r = 0; r < children.size(); ++r) {
             size_t j = linkage[i][r];
-            std::ifstream in;
             {
                 std::unique_lock<std::mutex> lock(done_mu);
                 done_cond.wait(lock, [&]() { return done[j]; });
-                in.open(tmp_dir/std::to_string(j), std::ios::binary);
             }
-            if (!children[r].load(in)) {
-                logger->error("Can't load internal node {}",
-                              tmp_dir/std::to_string(j));
-                exit(1);
-            }
+            children[r] = get_node(j);
         }
 
         // merge submatrices
@@ -305,10 +325,7 @@ BRWT BRWTBottomUpBuilder::build(
         // replace the child nodes with dummy empty matrices
         std::swap(child_nodes, node.child_nodes_);
         // serialize the node without its child nodes
-        {
-            std::ofstream out(tmp_dir/std::to_string(i), std::ios::binary);
-            node.serialize(out);
-        }
+        dump_node(std::move(node), i);
 
         // compute column assignments for the parent
         for (size_t j : linkage[i]) {
@@ -333,10 +350,7 @@ BRWT BRWTBottomUpBuilder::build(
         done_cond.notify_all();
 
         for (size_t r = 0; r < children.size(); ++r) {
-            size_t j = linkage[i][r];
-            std::filesystem::remove(tmp_dir/std::to_string(j));
-            std::ofstream out(tmp_dir/("index_" + std::to_string(j)), std::ios::binary);
-            child_nodes[r]->serialize(out);
+            dump_node(std::move(*child_nodes[r]), linkage[i][r]);
         }
 
         ++progress_bar;
@@ -356,28 +370,12 @@ BRWT BRWTBottomUpBuilder::build(
     std::vector<std::unique_ptr<BRWT>> nodes(linkage.size());
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (size_t i = 0; i < linkage.size() - 1; ++i) {
-        nodes[i] = std::make_unique<BRWT>();
-        std::filesystem::path filename = tmp_dir/("index_" + std::to_string(i));
-        std::ifstream in(filename, std::ios::binary);
-        if (!nodes[i]->load(in)) {
-            logger->error("Can't load node {} from {}", i, filename);
-            exit(1);
-        }
-        std::filesystem::remove(filename);
+    for (size_t i = 0; i < linkage.size(); ++i) {
+        nodes[i] = std::make_unique<BRWT>(get_node(i));
     }
-
-    nodes.back() = std::make_unique<BRWT>();
 
     // make the root node in Multi-BRWT
     BRWT &root = *nodes.back();
-    std::filesystem::path filename = tmp_dir/std::to_string(linkage.size() - 1);
-    std::ifstream in(filename, std::ios::binary);
-    if (!root.load(in)) {
-        logger->error("Can't load the root from {}", filename);
-        exit(1);
-    }
-    std::filesystem::remove(filename);
 
     // compress the index vector
     root.nonzero_rows_ = std::make_unique<bit_vector_smallrank>(

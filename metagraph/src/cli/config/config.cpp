@@ -60,6 +60,7 @@ Config::Config(int argc, char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+        tmp_dir = "OUTFBASE_TEMP_DIR";
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -226,6 +227,8 @@ Config::Config(int argc, char *argv[]) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
             alignment_max_ram = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--gfa-mapping-path")) {
+            gfa_mapping_path = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -346,6 +349,8 @@ Config::Config(int argc, char *argv[]) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
+        } else if (!strcmp(argv[i], "--anchors-file")) {
+            anchors = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -426,6 +431,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
     #endif
+
+    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+        tmp_dir = std::filesystem::path(outfbase).remove_filename();
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -590,7 +598,7 @@ using mtg::graph::boss::BOSS;
 std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
         case BOSS::State::STAT:
-            return "stat-obsolete";
+            return "stat";
         case BOSS::State::DYN:
             return "dynamic";
         case BOSS::State::SMALL:
@@ -604,7 +612,7 @@ std::string Config::state_to_string(BOSS::State state) {
 }
 
 BOSS::State Config::string_to_state(const std::string &string) {
-    if (string == "stat-obsolete") {
+    if (string == "stat") {
         return BOSS::State::STAT;
     } else if (string == "dynamic") {
         return BOSS::State::DYN;
@@ -639,6 +647,10 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffRowSparse:
+            return "row_diff_sparse";
+        case RowSparse:
+            return "row_sparse";
         default:
             assert(false);
             return "Never happens";
@@ -666,6 +678,10 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiff;
     } else if (string == "row_diff_brwt") {
         return AnnotationType::RowDiffBRWT;
+    } else if (string == "row_diff_sparse") {
+        return AnnotationType::RowDiffRowSparse;
+    } else if (string == "row_sparse") {
+        return AnnotationType::RowSparse;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -827,6 +843,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
+            fprintf(stderr, "\t   --gfa-mapping-path [STR]\tpath to a gfa file where to append the mappings as 'P' lines []\n");
+            fprintf(stderr, "\t   --compacted\t\t\tdump the GFA's 'P' lines in a compacted mode [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
@@ -895,7 +913,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [10]\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [small]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
@@ -969,6 +987,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
+            fprintf(stderr, "\t   --anchors [STR]\t\tlocation of the anchor file (for row_diff) []\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1014,7 +1035,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
-            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files []\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files [OUT_BASEDIR]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
