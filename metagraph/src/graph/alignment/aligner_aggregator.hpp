@@ -244,7 +244,6 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                                       { *it }, cur_score + it->get_score(), best_score);
             }
         }
-
         return;
     }
 
