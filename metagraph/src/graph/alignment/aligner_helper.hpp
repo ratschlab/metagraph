@@ -50,8 +50,7 @@ class Cigar {
     // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
     explicit Cigar(const std::string &cigar_str);
 
-    explicit Cigar(const_iterator begin, const_iterator end)
-          : cigar_(begin, end) { }
+    explicit Cigar(const_iterator begin, const_iterator end) : cigar_(begin, end) {}
 
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
