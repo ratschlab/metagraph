@@ -564,7 +564,8 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 template <typename NodeType>
 class AlignmentSuffix {
   public:
-    AlignmentSuffix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config,
+    AlignmentSuffix(const Alignment<NodeType> &alignment,
+                    const DBGAlignerConfig &config,
                     size_t k)
           : alignment_(&alignment),
             config_(&config),
