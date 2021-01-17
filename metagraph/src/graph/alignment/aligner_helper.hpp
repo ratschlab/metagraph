@@ -562,6 +562,8 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 template <typename NodeType>
 class AlignmentSuffix {
   public:
+    typedef typename Alignment<NodeType>::score_t score_t;
+  
     AlignmentSuffix(const Alignment<NodeType> &alignment,
                     const DBGAlignerConfig &config,
                     size_t k)
@@ -586,7 +588,7 @@ class AlignmentSuffix {
     AlignmentSuffix& operator++();
     AlignmentSuffix& operator--();
 
-    auto get_score() const { return score_; }
+    score_t get_score() const { return score_; }
     std::string_view get_query() const {
         return std::string_view(begin_it_, end_it_ - begin_it_);
     }
@@ -611,7 +613,6 @@ class AlignmentSuffix {
     size_t get_k() const { return k_; }
 
   private:
-    typedef typename Alignment<NodeType>::score_t score_t;
     const Alignment<NodeType> *alignment_;
     const DBGAlignerConfig *config_;
     const char *begin_it_;
@@ -635,6 +636,8 @@ std::ostream& operator<<(std::ostream &out, const AlignmentSuffix<NodeType> &suf
 template <typename NodeType>
 class AlignmentPrefix {
   public:
+    typedef typename Alignment<NodeType>::score_t score_t;
+  
     AlignmentPrefix(const Alignment<NodeType> &alignment,
                     const DBGAlignerConfig &config,
                     const DeBruijnGraph &graph)
@@ -688,7 +691,6 @@ class AlignmentPrefix {
     const DeBruijnGraph& get_graph() const { return *graph_; }
 
   private:
-    typedef typename Alignment<NodeType>::score_t score_t;
     const Alignment<NodeType> *alignment_;
     const DeBruijnGraph *graph_;
     const DBGAlignerConfig *config_;
