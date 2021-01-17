@@ -662,7 +662,7 @@ class AlignmentPrefix {
     AlignmentPrefix& operator++();
     AlignmentPrefix& operator--();
 
-    auto get_score() const { return score_; }
+    score_t get_score() const { return score_; }
     std::string_view get_query() const {
         return std::string_view(begin_it_, end_it_ - begin_it_);
     }
