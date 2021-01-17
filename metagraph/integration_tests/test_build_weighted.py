@@ -12,6 +12,7 @@ import gzip
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -65,6 +66,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -122,6 +124,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -209,6 +212,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -239,6 +243,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 

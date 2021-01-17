@@ -12,6 +12,7 @@ from helpers import get_test_class_name
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -202,7 +203,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
 
-        # query graph (fwd and reverse)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_query_both(self):
+        """query graph (fwd and reverse)"""
         query_command = '{exe} query --fwd-and-reverse -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -223,7 +226,8 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
 
-        # query graph (multi-threaded)
+    def test_query_parallel(self):
+        """query graph (multi-threaded)"""
         query_command = '{exe} query -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -246,7 +250,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
 
-        # query graph (fwd and reverse, multi-threaded)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_query_both_parallel(self):
+        """query graph (fwd and reverse, multi-threaded)"""
         query_command = '{exe} query --fwd-and-reverse -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -313,7 +319,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12347)
 
-        # align to graph (fwd and reverse multi-threaded)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_query_with_align_both(self):
+        """align to graph (fwd and reverse multi-threaded)"""
         query_command = '{exe} query --fwd-and-reverse --align -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -357,7 +365,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
 
-        # query graph (fwd and reverse)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_batch_query_both(self):
+        """query graph (fwd and reverse)"""
         query_command = '{exe} query --fast --fwd-and-reverse -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -378,7 +388,8 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
 
-        # query graph (multi-threaded)
+    def test_batch_query_parallel(self):
+        """query graph (multi-threaded)"""
         query_command = '{exe} query --fast -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -401,7 +412,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
 
-        # query graph (fwd and reverse, multi-threaded)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_batch_query_both_parallel(self):
+        """query graph (fwd and reverse, multi-threaded)"""
         query_command = '{exe} query --fast --fwd-and-reverse -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -468,7 +481,9 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12347)
 
-        # align to graph (fwd and reverse multi-threaded)
+    @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
+    def test_batch_query_with_align_both(self):
+        """align to graph (fwd and reverse multi-threaded)"""
         query_command = '{exe} query --fast --fwd-and-reverse --align -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
@@ -520,6 +535,7 @@ class TestQuery(unittest.TestCase):
     ),
     class_name_func=get_test_class_name
 )
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestQueryCanonical(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -703,6 +719,7 @@ class TestQueryCanonical(unittest.TestCase):
     ),
     class_name_func=get_test_class_name
 )
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestQueryPrimary(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
