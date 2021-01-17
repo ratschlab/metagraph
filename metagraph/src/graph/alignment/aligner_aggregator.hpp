@@ -192,8 +192,8 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     std::sort(cur_paths.begin(), cur_paths.end(),
               [&](const auto &a, const auto &b) {
-                  return a.get_query_end() < b.get_query_end()
-                      || (a.get_query_end() == b.get_query_end() && a.get_query().data() < b.get_query().data());
+                  return std::make_pair(a.get_query_end(), a.get_query().data())
+                          < std::make_pair(b.get_query_end(), b.get_query().data());
               });
 
     std::pair<score_t, std::vector<DBGAlignment>> cur_chain(config_.min_path_score, {});
