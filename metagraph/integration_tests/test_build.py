@@ -39,7 +39,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         return res
 
-    @parameterized.expand(BUILDS)
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 

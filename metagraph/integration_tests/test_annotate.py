@@ -10,6 +10,7 @@ import os
 """Test graph annotation"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -30,7 +31,7 @@ class TestAnnotate(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(GRAPH_TYPES)
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):
 
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
@@ -84,6 +85,7 @@ class TestAnnotate(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, graph_repr):
 
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
@@ -272,6 +274,7 @@ class TestAnnotate(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_from_kmc_both_canonical(self, graph_repr):
         """
         Annotate canonical graph with k-mers from KMC
