@@ -341,6 +341,7 @@ class TestBuildWeighted(unittest.TestCase):
                           ]
                           )
     ))
+    @unittest.skipIf(PROTEIN_MODE, "Too large k-mer size for Protein alphabets")
     def test_kmer_count_width_large(self, build, k_width_result):
         representation, tmp_dir = build_params[build]
         k, count_width, avg_count_expected = k_width_result
