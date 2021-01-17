@@ -42,15 +42,15 @@ class KMerBOSS {
      * @param arr the k-mer characters
      * @param k k-mer length
      */
-    template <typename V>
-    KMerBOSS(const V &arr, size_t k);
+    template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value, T>>
+    KMerBOSS(const T *arr, size_t k);
     /**
      * Construct a BOSS k-mer from the given vector
      * @tparam T k-mer character type
      * @param arr unpacked k-mer (e.g. 'ACATGGAA')
      */
-    template <typename T>
-    KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
+    template <typename T, typename = typename std::enable_if_t<std::is_integral<T>::value, T>>
+    KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr.data(), arr.size()) {}
 
     KMerBOSS(WordType&& seq) noexcept : seq_(seq) {}
     explicit KMerBOSS(const WordType &seq) noexcept : seq_(seq) {}
@@ -121,8 +121,8 @@ class KMerBOSS {
 
 
 template <typename G, int L>
-template <typename V>
-KMerBOSS<G, L>::KMerBOSS(const V &arr, size_t k) : seq_(0) {
+template <typename T, typename>
+KMerBOSS<G, L>::KMerBOSS(const T *arr, size_t k) : seq_(0) {
     assert(k * kBitsPerChar <= sizeof(WordType) * 8 && k >= 2);
 
     for (int i = k - 2; i >= 0; --i) {
