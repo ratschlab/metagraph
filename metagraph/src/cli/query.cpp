@@ -857,7 +857,7 @@ void align_sequence(std::string &name, std::string &seq,
                 if (path.get_offset())
                     concat += graph.get_node_sequence(path.front()).substr(0, path.get_offset());
 
-                concat += const_cast<std::string&&>(path.get_sequence());
+                concat += path.get_sequence();
                 concat.push_back('$');
                 score += path.get_score();
                 cigar += path.get_cigar().to_string() + ",";
