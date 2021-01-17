@@ -42,6 +42,7 @@ class LabeledDBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
   protected:
+    typedef const std::function<void(const std::function<void(DBGAlignment&&)>&)> SeedGenerator;
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
@@ -53,6 +54,9 @@ class LabeledDBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     // at least one label which is shared by all nodes
     void align_aggregate(DBGQueryAlignment &paths,
                          const AlignmentGenerator &alignment_generator) const override;
+
+    SeedGenerator build_seed_generator(const std::string_view query,
+                                       bool orientation) const override;
 
   private:
     const AnnotatedDBG& anno_graph_;
@@ -104,6 +108,17 @@ inline void LabeledDBGAligner<Seeder, Extender, AlignmentCompare>
         assert(alignment.is_valid(get_graph(), &config_));
         paths.emplace_back(std::move(alignment));
     });
+}
+
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto LabeledDBGAligner<Seeder, Extender, AlignmentCompare>
+::build_seed_generator(const std::string_view query,
+                       bool orientation) const -> SeedGenerator {
+    return [this,query,orientation](const auto &callback) {
+        auto seeder = build_seeder();
+        seeder.initialize(query, orientation);
+        seeder.call_seeds(callback);
+    };
 }
 
 template <typename NodeType>

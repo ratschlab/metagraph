@@ -94,6 +94,9 @@ class SeedAndExtendAligner : public IDBGAligner {
     // and add the top ones to paths.
     virtual void align_aggregate(DBGQueryAlignment &paths,
                                  const AlignmentGenerator &alignment_generator) const = 0;
+
+    virtual SeedGenerator build_seed_generator(const std::string_view query,
+                                               bool orientation) const = 0;
 };
 
 
@@ -133,6 +136,9 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender> {
     // and add the top ones to paths.
     void align_aggregate(DBGQueryAlignment &paths,
                          const AlignmentGenerator &alignment_generator) const override;
+
+    SeedGenerator build_seed_generator(const std::string_view query,
+                                       bool orientation) const override;
 
     const DeBruijnGraph& graph_;
     const DBGAlignerConfig config_;
@@ -218,7 +224,6 @@ template <class Seeder, class Extender>
 inline auto SeedAndExtendAligner<Seeder, Extender>
 ::align_one_direction(const std::string_view query,
                       bool orientation) const -> DBGQueryAlignment {
-    auto seeder = build_seeder();
     DBGQueryAlignment paths(query);
 
     if (orientation) {
@@ -230,14 +235,12 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
                                               : paths.get_query();
     assert(query_alignment == query);
 
-    seeder.initialize(query_alignment, orientation);
-
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align(query_alignment, [&](const auto &callback) {
-            seeder.call_seeds([&](DBGAlignment&& seed) { callback(std::move(seed)); });
-        }, alignment_callback, get_min_path_score);
-
+        align(query_alignment,
+              build_seed_generator(query_alignment, orientation),
+              alignment_callback,
+              get_min_path_score);
     });
 
     return paths;
@@ -246,10 +249,8 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
 template <class Seeder, class Extender>
 inline auto SeedAndExtendAligner<Seeder, Extender>
 ::align_both_directions(const std::string_view query) const -> DBGQueryAlignment {
-    auto seeder = build_seeder();
     DBGQueryAlignment paths(query);
 
-    seeder.initialize(paths.get_query(), false);
     std::vector<DBGAlignment> reverse_seeds;
 
     align_aggregate(paths, [&](const auto &alignment_callback,
@@ -257,12 +258,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
         mtg::common::logger->trace("Aligning forwards");
 
         // First get forward alignments
-        align(paths.get_query(),
-            [&](const auto &forward_seed_callback) {
-                seeder.call_seeds([&](DBGAlignment&& seed) {
-                    forward_seed_callback(std::move(seed));
-                });
-            },
+        align(paths.get_query(), build_seed_generator(paths.get_query(), false),
             [&](DBGAlignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
@@ -318,7 +314,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender>
                 // (so it is unable to be reversed), change back to the forward orientation
                 if (path.get_orientation()) {
                     auto forward_path = path;
-                    forward_path.reverse_complement(seeder.get_graph(), paths.get_query());
+                    forward_path.reverse_complement(get_graph(), paths.get_query());
                     if (!forward_path.empty()) {
                         path = std::move(forward_path);
                     } else {
@@ -378,6 +374,17 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         assert(alignment.is_valid(graph_, &config_));
         paths.emplace_back(std::move(alignment));
     });
+}
+
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto DBGAligner<Seeder, Extender, AlignmentCompare>
+::build_seed_generator(const std::string_view query,
+                       bool orientation) const -> SeedGenerator {
+    return [this,query,orientation](const auto &callback) {
+        auto seeder = build_seeder();
+        seeder.initialize(query, orientation);
+        seeder.call_seeds(callback);
+    };
 }
 
 } // namespace align
