@@ -636,7 +636,8 @@ std::ostream& operator<<(std::ostream &out, const AlignmentSuffix<NodeType> &suf
 template <typename NodeType>
 class AlignmentPrefix {
   public:
-    AlignmentPrefix(const Alignment<NodeType> &alignment, const DBGAlignerConfig &config,
+    AlignmentPrefix(const Alignment<NodeType> &alignment,
+                    const DBGAlignerConfig &config,
                     const DeBruijnGraph &graph)
           : alignment_(&alignment),
             graph_(&graph),
