@@ -132,8 +132,7 @@ class CigarOpIterator {
     typedef std::random_access_iterator_tag iterator_category;
 
     CigarOpIterator(const Cigar &cigar) : CigarOpIterator(cigar, cigar.begin()) {}
-    CigarOpIterator(const Cigar &cigar, size_t offset)
-          : CigarOpIterator(cigar) {
+    CigarOpIterator(const Cigar &cigar, size_t offset) : CigarOpIterator(cigar) {
         while (offset) {
             if (offset >= it_->second) {
                 offset -= it_->second;
