@@ -466,7 +466,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
 
 template <typename NodeType>
 AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
-    throw std::runtime_error("not implemented");
+    throw std::runtime_error("not implemented yet");
     return *this;
 }
 
