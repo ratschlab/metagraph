@@ -12,6 +12,7 @@ from helpers import get_test_class_name
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
@@ -284,7 +285,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12241)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12241)
+        else:
+            self.assertEqual(len(res.stdout), 12244)
 
         query_command = '{exe} query --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -294,7 +298,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12347)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12347)
+        else:
+            self.assertEqual(len(res.stdout), 12350)
 
         # align to graph (multi-threaded)
         query_command = '{exe} query --align -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 {input}'.format(
@@ -306,7 +313,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12241)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12241)
+        else:
+            self.assertEqual(len(res.stdout), 12244)
 
         query_command = '{exe} query --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -317,7 +327,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12347)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12347)
+        else:
+            self.assertEqual(len(res.stdout), 12350)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_query_with_align_both(self):
@@ -446,7 +459,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12241)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12241)
+        else:
+            self.assertEqual(len(res.stdout), 12244)
 
         query_command = '{exe} query --align --fast --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -456,7 +472,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12347)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12347)
+        else:
+            self.assertEqual(len(res.stdout), 12350)
 
         # align to graph (multi-threaded)
         query_command = '{exe} query --align --fast -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 0.0 {input}'.format(
@@ -468,7 +487,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12241)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12241)
+        else:
+            self.assertEqual(len(res.stdout), 12244)
 
         query_command = '{exe} query --align --fast --count-labels -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -479,7 +501,10 @@ class TestQuery(unittest.TestCase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12347)
+        if DNA_MODE:
+            self.assertEqual(len(res.stdout), 12347)
+        else:
+            self.assertEqual(len(res.stdout), 12350)
 
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
     def test_batch_query_with_align_both(self):
