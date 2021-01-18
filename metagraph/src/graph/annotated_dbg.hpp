@@ -47,12 +47,17 @@ class AnnotatedSequenceGraph {
 
     virtual const Annotator& get_annotation() const { return *annotator_; }
 
-    static row_index graph_to_anno_index(node_index kmer_index) {
+    static row_index graph_to_anno_transform(node_index kmer_index) {
         assert(kmer_index);
         return kmer_index - 1;
     }
+
     static node_index anno_to_graph_index(row_index anno_index) {
         return anno_index + 1;
+    }
+
+    row_index graph_to_anno_index(node_index kmer_index) const {
+        return graph_to_anno_transform(graph_->get_base_node(kmer_index));
     }
 
   protected:

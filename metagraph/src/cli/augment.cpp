@@ -166,7 +166,7 @@ int augment_graph(Config *config) {
     // transform indexes of the inserved k-mers to the annotation format
     std::vector<uint64_t> inserted_rows;
     inserted_nodes->call_ones([&](auto i) {
-        inserted_rows.push_back(graph::AnnotatedDBG::graph_to_anno_index(i));
+        inserted_rows.push_back(graph::AnnotatedDBG::graph_to_anno_transform(i));
     });
     annotation->insert_rows(inserted_rows);
 

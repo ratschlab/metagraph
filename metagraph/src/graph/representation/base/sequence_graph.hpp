@@ -67,6 +67,10 @@ class SequenceGraph {
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node) const = 0;
 
+    // If the given node is an implicit node created by a given implementation,
+    // get the index of its underlying node in the graph data.
+    virtual node_index get_base_node(node_index node) const = 0;
+
     /********************************************************/
     /******************* graph extensions *******************/
     /********************************************************/
@@ -227,6 +231,8 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    virtual node_index get_base_node(node_index node) const { return node; }
 };
 
 

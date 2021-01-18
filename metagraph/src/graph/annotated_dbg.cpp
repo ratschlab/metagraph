@@ -48,7 +48,7 @@ void AnnotatedSequenceGraph
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0)
-            indices.push_back(graph_to_anno_index(i));
+            indices.push_back(graph_to_anno_transform(i));
     });
 
     if (!indices.size())
@@ -80,7 +80,7 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     graph_->map_to_nodes(sequence, [&](node_index i) {
         // only insert indexes for matched k-mers and shift counts accordingly
         if (i > 0) {
-            indices.push_back(graph_to_anno_index(i));
+            indices.push_back(graph_to_anno_transform(i));
             kmer_counts[indices.size() - 1] = kmer_counts[end++];
         }
     });
@@ -112,7 +112,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts[graph_to_anno_transform(i)]++;
             num_present_kmers++;
         } else {
             num_missing_kmers++;
@@ -180,7 +180,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts[graph_to_anno_transform(i)]++;
             num_present_kmers++;
         }
     });
@@ -236,7 +236,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
             kmer_positions.push_back(j);
-            row_indices.push_back(graph_to_anno_index(i));
+            row_indices.push_back(graph_to_anno_transform(i));
         }
         j++;
     });

@@ -59,7 +59,7 @@ void build_successor(const std::string &graph_fname,
         if (terminal[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
             uint64_t anno_index
-                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
+                = graph::AnnotatedSequenceGraph::graph_to_anno_transform(graph_idx);
             assert(anno_index < num_rows);
             term[anno_index] = 1;
         }
@@ -101,7 +101,7 @@ void build_successor(const std::string &graph_fname,
                 uint64_t next = graph.boss_to_kmer_index(boss.fwd(boss_idx, d));
                 assert(next);
                 succ_buf[r].push_back(
-                    graph::AnnotatedSequenceGraph::graph_to_anno_index(next)
+                    graph::AnnotatedSequenceGraph::graph_to_anno_transform(next)
                 );
             }
             // ignore predecessors if boss_idx is not the last outgoing
@@ -115,7 +115,7 @@ void build_successor(const std::string &graph_fname,
                         if (!terminal[pred] && !dummy[pred]) {
                             uint64_t node_index = graph.boss_to_kmer_index(pred);
                             pred_buf[r].push_back(
-                                graph::AnnotatedSequenceGraph::graph_to_anno_index(node_index)
+                                graph::AnnotatedSequenceGraph::graph_to_anno_transform(node_index)
                             );
                             pred_boundary_buf[r].push_back(0);
                         }
