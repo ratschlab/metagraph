@@ -107,7 +107,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
-        GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'],
+        [repr for repr in GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'] if not (repr == 'bitmap' and PROTEIN_MODE)],
         ANNO_TYPES
     ),
     class_name_func=get_test_class_name
