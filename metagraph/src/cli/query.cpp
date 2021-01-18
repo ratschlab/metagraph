@@ -761,8 +761,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     for (auto &[first, second] : from_full_to_small) {
         assert(first && second);
-        first = AnnotatedDBG::graph_to_anno_index(first);
-        second = AnnotatedDBG::graph_to_anno_index(second);
+        first = anno_graph.graph_to_anno_index(first);
+        second = anno_graph.graph_to_anno_index(second);
     }
 
     logger->trace("[Query graph construction] Slicing {} rows out of full annotation...",

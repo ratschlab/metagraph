@@ -8,8 +8,8 @@
 
 #include <cstdlib>
 
-#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -48,7 +48,7 @@ void AnnotatedSequenceGraph
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0)
-            indices.push_back(graph_to_anno_index(i));
+            indices.push_back(graph_to_anno_transform(i));
     });
 
     if (!indices.size())
@@ -80,7 +80,7 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     graph_->map_to_nodes(sequence, [&](node_index i) {
         // only insert indexes for matched k-mers and shift counts accordingly
         if (i > 0) {
-            indices.push_back(graph_to_anno_index(i));
+            indices.push_back(graph_to_anno_transform(i));
             kmer_counts[indices.size() - 1] = kmer_counts[end++];
         }
     });
@@ -112,7 +112,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts[graph_to_anno_transform(i)]++;
             num_present_kmers++;
         } else {
             num_missing_kmers++;
@@ -180,7 +180,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
         if (i > 0) {
-            index_counts[graph_to_anno_index(i)]++;
+            index_counts[graph_to_anno_transform(i)]++;
             num_present_kmers++;
         }
     });
@@ -243,7 +243,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         nodes.push_back(i);
         if (i > 0) {
             kmer_positions.push_back(j);
-            row_indices.push_back(graph_to_anno_index(i));
+            row_indices.push_back(graph_to_anno_transform(i));
         }
         j++;
     });
@@ -279,8 +279,6 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     if (label_codes_to_presence.empty() && query_nodes && alt_query_nodes
             && presence_ratio == 0.0) {
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&dbg_);
-        node_index cur_node;
         row_indices.clear();
         for (size_t i = 0; i < query_nodes->size(); ++i) {
             if (nodes[i] || !(*query_nodes)[i])
@@ -288,22 +286,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
             // TODO: implement a better way to deal with column range queries to
             //       the annotator.
-            cur_node = (*query_nodes)[i];
-            if (canonical) {
-                cur_node = canonical->get_base_node(cur_node);
-            } else if (dbg_.is_canonical_mode()) {
-                throw std::runtime_error("Not implemented yet");
-            }
-
-            row_indices.push_back(graph_to_anno_index(cur_node));
+            row_indices.push_back(graph_to_anno_index((*query_nodes)[i]));
 
             for (node_index node : (*alt_query_nodes)[i]) {
-                if (canonical) {
-                    node = canonical->get_base_node(node);
-                } else if (dbg_.is_canonical_mode()) {
-                    throw std::runtime_error("Not implemented yet");
-                }
-
                 row_indices.push_back(graph_to_anno_index(node));
             }
         }

@@ -155,7 +155,7 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 
         // fwd always selects the last outgoing edge for a given node
         boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+        row = graph::AnnotatedSequenceGraph::graph_to_anno_transform(
                 graph_->boss_to_kmer_index(boss_edge));
 
         auto diff_row = get_diff(row);
@@ -191,7 +191,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
                 graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
 
         while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_transform(
                     graph_->boss_to_kmer_index(boss_edge));
 
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());

@@ -62,11 +62,12 @@ void check_labels(const AnnotatedDBG &anno_graph,
     }
 }
 
-std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
+std::vector<uint64_t> edge_to_row_idx(const AnnotatedDBG &anno_graph,
+                                      const bitmap &edge_mask) {
     // transform indexes of k-mers to the annotation format
     std::vector<uint64_t> rows;
     edge_mask.call_ones([&](auto i) {
-        rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
+        rows.push_back(anno_graph.graph_to_anno_index(i));
     });
     return rows;
 }
@@ -89,7 +90,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         ASSERT_EQ(k + 2, anno_graph.get_graph().num_nodes());
         EXPECT_EQ(1u, anno_graph.get_annotation().num_objects());
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         EXPECT_FALSE(anno_graph.label_exists("Label"));
@@ -147,7 +148,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -216,7 +217,7 @@ TEST(AnnotatedDBG, Transform) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph->annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph->annotator_->insert_rows(edge_to_row_idx(*anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph->get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -303,7 +304,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -420,7 +421,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -540,7 +541,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -664,7 +665,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -786,7 +787,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },
@@ -909,7 +910,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
-        anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
+        anno_graph.annotator_->insert_rows(edge_to_row_idx(anno_graph, inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
 
         ASSERT_EQ(std::vector<std::string> { "First" },

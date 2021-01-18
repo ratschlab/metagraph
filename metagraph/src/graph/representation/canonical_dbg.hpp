@@ -145,7 +145,7 @@ class CanonicalDBG : public DeBruijnGraph {
 
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
-    inline node_index get_base_node(node_index node) const {
+    virtual node_index get_base_node(node_index node) const override {
         assert(node);
         assert(node <= offset_ * 2);
         return !graph_.is_canonical_mode()
