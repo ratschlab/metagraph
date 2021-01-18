@@ -10,7 +10,7 @@ def exec_file_merging(gfa_main_filepath: str, gfa_path_filepaths: []):
         file_reader = open(path_file, 'r')
         lines = file_reader.readlines()
         for line in lines:
-            gfa_file.write("{}\t{}\n".format(next_P_index, line.split("\t",1)[1]))
+            gfa_file.write("{}\t{}".format(next_P_index, line.split("\t",1)[1]))
             next_P_index += 1
 
 def main():
