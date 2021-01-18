@@ -8,10 +8,9 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
+#include "common/vector.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vector.hpp"
-#include "common/vectors/bit_vector_adaptive.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -24,6 +23,12 @@ namespace binmat {
 const std::string kRowDiffAnchorExt = ".anchors";
 
 const size_t RD_PATH_RESERVE_SIZE = 2;
+
+
+class IRowDiff : public BinaryMatrix {
+  public:
+    virtual ~IRowDiff() {}
+};
 
 /**
  * Sparsified representation of the underlying #BinaryMatrix that stores diffs between
@@ -47,7 +52,7 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 // does not instantiate the virtual methods in this class, so I had to move definitions
 // to the header (gcc works fine)
 template <class BaseMatrix>
-class RowDiff : public BinaryMatrix {
+class RowDiff : public IRowDiff {
   public:
     using anchor_bv_type = bit_vector_small;
 

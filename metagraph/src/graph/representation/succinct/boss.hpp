@@ -280,13 +280,29 @@ class BOSS {
     void print_internal_representation(std::ostream &os = std::cout) const;
 
     /**
-     * Representation states of the BOSS table.
+     * Alternative representation states of the BOSS table.
      *
-     * SMALL is the smallest
-     * STAT provides a good space/time tradeoff
-     * FAST is the fastest but large
+     * STAT: provides the best space/time trade-off
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_stat
+     *
+     * SMALL: is the smallest, useful for storage or when RAM is limited
+     *      Representation:
+     *          last -- bit_vector_small
+     *             W -- wavelet_tree_small
+     *
+     * FAST: is the fastest but large
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_fast
+     *
+     * DYN: is a dynamic representation supporting insert and delete
+     *      Representation:
+     *          last -- bit_vector_dyn
+     *             W -- wavelet_tree_dyn
      */
-    enum State { STAT = 1, DYN, SMALL, FAST };
+    enum State { SMALL = 1, DYN, STAT, FAST };
 
     State get_state() const { return state; }
     void switch_state(State state);
@@ -565,6 +581,7 @@ class BOSS {
 
   public:
     class Chunk;
+    void initialize(Chunk *chunk);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);

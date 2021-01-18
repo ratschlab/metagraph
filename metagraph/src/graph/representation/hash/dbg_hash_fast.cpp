@@ -255,7 +255,9 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
     auto add_seq = [&](const auto &sequence) {
         bool previous_valid = false;
 
-        for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
+        for (const auto &kmer_pair : sequence_to_kmers(sequence)) {
+            // putting the structured binding in the for statement above crashes gcc 8.2.0
+            const auto &[kmer, is_valid] = kmer_pair;
             if (!is_valid) {
                 previous_valid = false;
                 continue;

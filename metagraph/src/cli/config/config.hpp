@@ -143,6 +143,7 @@ class Config {
     std::string host_address;
     uint32_t max_path_length = 50;
     std::string anchors;
+    std::string gfa_mapping_path;
 
     std::filesystem::path tmp_dir;
 
@@ -170,7 +171,7 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    graph::boss::BOSS::State state = graph::boss::BOSS::State::SMALL;
+    graph::boss::BOSS::State state = graph::boss::BOSS::State::STAT;
 
     static std::string state_to_string(graph::boss::BOSS::State state);
     static graph::boss::BOSS::State string_to_state(const std::string &string);

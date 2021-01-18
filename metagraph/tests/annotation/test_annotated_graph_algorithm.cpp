@@ -52,10 +52,15 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
     );
 }
 
-
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
-TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnotationPairTypes);
+// test with DBGBitmap and DBGHashFast to have k-mers in different order
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
+                        > GraphAnnoTypes;
+TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 void test_mask_indices(double density_cutoff, size_t num_threads) {

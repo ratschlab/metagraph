@@ -12,6 +12,15 @@
 namespace mtg {
 namespace seq_io {
 
+// subset of KSTREAM_INIT
+__KS_BASIC(/**/, gzFile, 16384)
+__KS_GETUNTIL(/**/, gzread)
+__KS_INLINED(gzread)
+
+// subset of KSEQ_INIT
+__KSEQ_BASIC(/**/, gzFile)
+__KSEQ_READ(/**/)
+
 const char kDefaultFastQualityChar = 'I';
 
 // Optimal values found from a grid search with the BM_WriteRandomSequences benchmark

@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <progress_bar.hpp>
-#include <libmaus2/util/NumberSerialisation.hpp>
 #include <tsl/hopscotch_set.h>
 
 #include "common/threads/threading.hpp"
@@ -44,9 +43,10 @@ typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 typedef BOSS::TAlphabet TAlphabet;
 
-const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_FAST = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
+const size_t MAX_ITER_WAVELET_TREE_STAT = 20;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 1;
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
@@ -95,6 +95,31 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
 BOSS::~BOSS() {
     delete W_;
     delete last_;
+}
+
+void BOSS::initialize(Chunk *chunk) {
+    delete W_;
+    delete last_;
+
+    // TODO: optimize
+    W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
+
+    {
+        chunk->last_.flush();
+        sdsl::bit_vector last;
+        std::ifstream in(chunk->last_.filename(), std::ios::binary);
+        last.load(in);
+        last_ = new bit_vector_stat(std::move(last));
+    }
+
+    F_ = chunk->F_;
+    recompute_NF();
+
+    k_ = chunk->k_;
+    // TODO:
+    // alph_size = chunk->alph_size_;
+
+    state = State::STAT;
 }
 
 /**
@@ -223,7 +248,7 @@ void BOSS::serialize(std::ofstream &outstream) const {
         throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
-    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+    serialize_number_vector_raw(outstream, F_);
     serialize_number(outstream, k_);
     serialize_number(outstream, state);
     outstream.flush();
@@ -251,7 +276,7 @@ bool BOSS::load(std::ifstream &instream) {
 
     try {
         // load F, k, and state
-        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<edge_index>(instream);
+        F_ = load_number_vector_raw<edge_index>(instream);
         k_ = load_number(instream);
         state = static_cast<State>(load_number(instream));
 
@@ -278,7 +303,7 @@ bool BOSS::load(std::ifstream &instream) {
                 break;
             case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                last_ = new bit_vector_small();
                 break;
         }
         if (!W_->load(instream)) {
@@ -392,7 +417,7 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) con
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -450,7 +475,7 @@ BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -1048,7 +1073,7 @@ void BOSS::switch_state(State new_state) {
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
         case State::FAST: {
@@ -1883,13 +1908,14 @@ class EdgeQueue {
         EdgeQueue split_queue;
 
         // prefer moving edges without k-mers decoded
-        size_t h = std::min(size() / 2, indexes_.size());
+        size_t old_size = size();
+        size_t h = std::min(old_size / 2, indexes_.size());
         split_queue.indexes_.assign(indexes_.end() - h, indexes_.end());
         split_queue.indexes_.shrink_to_fit();
         indexes_.resize(indexes_.size() - h);
 
-        // if moved less than size()/2 indexes, move decoded k-mers as well
-        h = size() / 2 - h;
+        // if moved less than old_size/2 indexes, move decoded k-mers as well
+        h = old_size / 2 - h;
         split_queue.decoded_edges_.assign(std::make_move_iterator(decoded_edges_.end() - h),
                                           std::make_move_iterator(decoded_edges_.end()));
         split_queue.decoded_edges_.shrink_to_fit();
