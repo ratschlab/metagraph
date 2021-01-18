@@ -96,8 +96,8 @@ void SuffixSeeder<NodeType>
 ::initialize(std::string_view query, bool orientation) {
     const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
     const auto &config = get_config();
-    auto &query_nodes = get_query_nodes();
-    auto &offsets = get_offsets();
+    auto &query_nodes = const_cast<std::vector<NodeType>&>(base_seeder_->get_query_nodes());
+    auto &offsets = const_cast<std::vector<uint8_t>&>(base_seeder_->get_offsets());
     alt_query_nodes.clear();
 
     base_seeder_->initialize(query, orientation);
@@ -119,7 +119,9 @@ void SuffixSeeder<NodeType>
         alt_query_nodes.resize(query_nodes.size());
 
     auto *unimem_seeder = dynamic_cast<MEMSeeder<NodeType>*>(base_seeder_.get());
-    auto *query_node_flags = unimem_seeder ? &unimem_seeder->get_query_node_flags() : nullptr;
+    auto *query_node_flags = unimem_seeder
+        ? const_cast<std::vector<uint8_t>*>(&unimem_seeder->get_query_node_flags())
+        : nullptr;
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos)

@@ -102,7 +102,9 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
-                             double presence_ratio = 0.0) const;
+                             double presence_ratio = 0.0,
+                             const std::vector<node_index> *query_nodes = nullptr,
+                             const std::vector<std::vector<node_index>> *alt_query_nodes = nullptr) const;
 
     int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
                                      int32_t match_score = 1,

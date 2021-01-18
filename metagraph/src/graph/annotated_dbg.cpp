@@ -201,7 +201,10 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 std::vector<std::pair<Label, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
-                                       double presence_ratio) const {
+                                       double presence_ratio,
+                                       const std::vector<node_index> *query_nodes,
+                                       const std::vector<std::vector<node_index>> *alt_query_nodes) const {
+    std::ignore = alt_query_nodes;
     assert(presence_ratio >= 0.);
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
@@ -226,6 +229,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     }
 
     // kmers and their positions in the query sequence
+    std::vector<node_index> nodes;
+    nodes.reserve(num_kmers);
+
     std::vector<row_index> row_indices;
     row_indices.reserve(num_kmers);
 
@@ -234,6 +240,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t j = 0;
     graph_->map_to_nodes(sequence, [&](node_index i) {
+        nodes.push_back(i);
         if (i > 0) {
             kmer_positions.push_back(j);
             row_indices.push_back(graph_to_anno_index(i));
@@ -267,6 +274,63 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
             mask[kmer_positions[i]] = true;
             label_count++;
+        }
+    }
+
+    if (label_codes_to_presence.empty() && query_nodes && alt_query_nodes
+            && presence_ratio == 0.0) {
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&dbg_);
+        node_index cur_node;
+        row_indices.clear();
+        for (size_t i = 0; i < query_nodes->size(); ++i) {
+            if (nodes[i] || !(*query_nodes)[i])
+                continue;
+
+            // TODO: implement a better way to deal with column range queries to
+            //       the annotator.
+            cur_node = (*query_nodes)[i];
+            if (canonical) {
+                cur_node = canonical->get_base_node(cur_node);
+            } else if (dbg_.is_canonical_mode()) {
+                throw std::runtime_error("Not implemented yet");
+            }
+
+            row_indices.push_back(graph_to_anno_index(cur_node));
+
+            for (node_index node : (*alt_query_nodes)[i]) {
+                if (canonical) {
+                    node = canonical->get_base_node(node);
+                } else if (dbg_.is_canonical_mode()) {
+                    throw std::runtime_error("Not implemented yet");
+                }
+
+                row_indices.push_back(graph_to_anno_index(node));
+            }
+        }
+
+        auto added_labels = annotator_->get_matrix().get_rows(row_indices);
+
+        size_t j = 0;
+        while (nodes[j] || !(*query_nodes)[j])
+            ++j;
+
+        size_t last_i = 0;
+
+        for (size_t i = 0; i < row_indices.size(); ++i) {
+            for (size_t label_code : label_codes[i]) {
+                auto& [mask, label_count] = label_codes_to_presence[label_code];
+
+                if (mask.empty())
+                    mask.resize(num_kmers, 0);
+
+                mask[j] = true;
+                label_count++;
+            }
+
+            if (i - last_i == (*alt_query_nodes)[j].size()) {
+                ++j;
+                last_i = i;
+            }
         }
     }
 

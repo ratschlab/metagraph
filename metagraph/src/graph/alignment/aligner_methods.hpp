@@ -52,14 +52,17 @@ class SuffixSeeder : public Seeder<NodeType> {
     const DeBruijnGraph& get_graph() const { return base_seeder_->get_graph(); }
     virtual const std::string_view get_query() const { return base_seeder_->get_query(); }
     const DBGAlignerConfig& get_config() const { return base_seeder_->get_config(); }
+    const std::vector<NodeType>& get_query_nodes() const { return base_seeder_->get_query_nodes(); }
+    const std::vector<uint8_t>& get_offsets() const { return base_seeder_->get_offsets(); }
+    const std::vector<std::vector<NodeType>>& get_alt_query_nodes() const { return alt_query_nodes; }
     bool get_orientation() const { return base_seeder_->get_orientation(); }
+
+    const ExactMapSeeder<NodeType>& get_base_seeder() const { return *base_seeder_; }
 
   private:
     std::unique_ptr<ExactMapSeeder<NodeType>> base_seeder_;
     std::vector<std::vector<NodeType>> alt_query_nodes;
 
-    std::vector<NodeType>& get_query_nodes() { return base_seeder_->get_query_nodes(); }
-    std::vector<uint8_t>& get_offsets() { return base_seeder_->get_offsets(); }
     size_t get_num_matching_kmers() const { return base_seeder_->get_num_matching_kmers(); }
 };
 
@@ -88,8 +91,6 @@ class ExactMapSeeder : public Seeder<NodeType> {
     virtual void initialize(std::string_view query, bool orientation) override;
 
   protected:
-    std::vector<NodeType>& get_query_nodes() { return query_nodes_; }
-    std::vector<uint8_t>& get_offsets() { return offsets_; }
     size_t get_num_matching_kmers() const { return num_matching_kmers_; }
 
   private:
@@ -137,6 +138,8 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
         return *is_mem_terminus_;
     }
 
+    const std::vector<uint8_t>& get_query_node_flags() const { return query_node_flags_; }
+
   protected:
     MEMSeeder(const DeBruijnGraph &graph,
               const DBGAlignerConfig &config,
@@ -145,8 +148,6 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
             is_mem_terminus_(std::move(is_mem_terminus)) {
         assert(is_mem_terminus_->size() == graph.max_index() + 1);
     }
-
-    std::vector<uint8_t>& get_query_node_flags() { return query_node_flags_; }
 
   private:
     const std::unique_ptr<bitmap> is_mem_terminus_;
