@@ -369,16 +369,16 @@ TYPED_TEST(Kmer, InvalidChars) {
 
 #if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGN");
-    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGNN"); // cyrillic
     test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGNN"); // cyrillic
+    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGNN"); // cyrillic
 #elif _PROTEIN_GRAPH
     test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGH");
-    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGXX"); // cyrillic
     test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGXX"); // cyrillic
+    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGXX"); // cyrillic
 #elif _DNA_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGH"), "");
-    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGН"), ""); // cyrillic
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGЯ"), ""); // cyrillic
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGН"), ""); // cyrillic
     ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
     ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
 #else

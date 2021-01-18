@@ -17,7 +17,6 @@ DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
         seq_encoder_(),
         kmers_((1llu << (k * seq_encoder_.bits_per_char)) + 1, true),
         complete_(true) {
-    assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
     if (k * seq_encoder_.bits_per_char >= 64) {
         std::cerr << "ERROR: Too large k!"
@@ -244,17 +243,7 @@ void DBGBitmap::adjacent_incoming_nodes(node_index node,
 }
 
 DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
-// #if _DNA_GRAPH
     uint64_t index = kmer.data() + 1;
-// #else
-//     int k = get_k();
-//     const size_t alph_size = seq_encoder_.alphabet.size();
-//     uint64_t index = 0;
-//     while (--k >= 0) {
-//         index = index * alph_size + kmer[k];
-//     }
-//     index += 1;
-// #endif
 
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
@@ -278,18 +267,7 @@ uint64_t DBGBitmap::node_to_index(node_index node) const {
 DBGBitmap::Kmer DBGBitmap::node_to_kmer(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
-// #if _DNA_GRAPH
     return Kmer { complete_ ? node - 1 : kmers_.select1(node + 1) - 1 };
-// #else
-//     node = complete_ ? node - 1 : kmers_.select1(node + 1) - 1;
-//     const size_t alph_size = seq_encoder_.alphabet.size();
-//     uint64_t word = 0;
-//     for (size_t i = 0; i < get_k(); ++i) {
-//         word |= (node % alph_size) << (i * seq_encoder_.bits_per_char);
-//         node /= alph_size;
-//     }
-//     return Kmer(word);
-// #endif
 }
 
 std::string DBGBitmap::get_node_sequence(node_index node) const {
