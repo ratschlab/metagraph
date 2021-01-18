@@ -6,6 +6,7 @@
 #include "dbg_aligner.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/vector_map.hpp"
 #include "common/hashers/hash.hpp"
 
@@ -193,10 +194,16 @@ inline auto LabeledColumnExtender<NodeType>
 
     Edges edges;
 
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&anno_graph_.get_graph());
+
     // first check the simple case to avoid decoding entire rows
     if (target_columns_.size() == 1) {
         for (auto&& edge : base_edges) {
-            if (mat.get(anno_graph_.graph_to_anno_index(edge.first), target_columns_[0]))
+            NodeType label_edge = edge.first;
+            if (canonical)
+                label_edge = canonical->get_base_node(label_edge);
+
+            if (mat.get(anno_graph_.graph_to_anno_index(label_edge), target_columns_[0]))
                 edges.emplace_back(std::move(edge));
         }
 
@@ -209,8 +216,16 @@ inline auto LabeledColumnExtender<NodeType>
     std::vector<AnnotatedDBG::row_index> base_rows;
     base_rows.reserve(base_edges.size());
     for (const auto &[out_node, c] : base_edges) {
-        base_rows.push_back(anno_graph_.graph_to_anno_index(out_node));
+        NodeType label_node = out_node;
+        if (canonical)
+            label_node = canonical->get_base_node(label_node);
+
+        base_rows.push_back(anno_graph_.graph_to_anno_index(label_node));
     }
+
+    NodeType label_node = node;
+    if (canonical)
+        label_node = canonical->get_base_node(label_node);
 
     std::vector<Vector<uint64_t>> rows;
     if (const auto *rd = dynamic_cast<const annot::binmat::IRowDiff*>(&mat)) {
@@ -219,14 +234,14 @@ inline auto LabeledColumnExtender<NodeType>
             if (rd->is_anchor(base_rows[i])) {
                 rows[i] = rd->get_diff(base_rows[i]);
                 std::sort(rows[i].begin(), rows[i].end());
-            } else if (rd->is_anchor(anno_graph_.graph_to_anno_index(node))) {
+            } else if (rd->is_anchor(anno_graph_.graph_to_anno_index(label_node))) {
                 rows[i] = mat.get_row(base_rows[i]);
             } else {
                 const auto &dbg_succ = *rd->graph();
                 const auto &boss = dbg_succ.get_boss();
                 if (boss.get_last(dbg_succ.kmer_to_boss_index(base_edges[i].first))) {
                     // apply diff to target_columns_
-                    auto diff_row = rd->get_diff(anno_graph_.graph_to_anno_index(node));
+                    auto diff_row = rd->get_diff(anno_graph_.graph_to_anno_index(label_node));
                     std::sort(diff_row.begin(), diff_row.end());
                     std::set_difference(target_columns_.begin(), target_columns_.end(),
                                         diff_row.begin(), diff_row.end(),

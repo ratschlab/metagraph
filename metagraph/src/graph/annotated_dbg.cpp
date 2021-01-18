@@ -311,12 +311,13 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         auto added_labels = annotator_->get_matrix().get_rows(row_indices);
 
         size_t j = 0;
-        while (nodes[j] || !(*query_nodes)[j])
+        while (j < nodes.size() && (nodes[j] || !(*query_nodes)[j]))
             ++j;
 
         size_t last_i = 0;
 
         for (size_t i = 0; i < row_indices.size(); ++i) {
+            assert(j < nodes.size());
             for (size_t label_code : label_codes[i]) {
                 auto& [mask, label_count] = label_codes_to_presence[label_code];
 
@@ -329,6 +330,8 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
             if (i - last_i == (*alt_query_nodes)[j].size()) {
                 ++j;
+                while (j < nodes.size() && (nodes[j] || !(*query_nodes)[j]))
+                    ++j;
                 last_i = i;
             }
         }
