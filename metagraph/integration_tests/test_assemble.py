@@ -14,24 +14,24 @@ gfa_tests = {
     'compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '--compacted',
-        'gfa_lines': 2987,
+        'gfa_lines': 2887,
         'field_records': {
             'H':1,
             'S':1252,
             'L':1634,
-            'P':100,
-        }
+        },
+        'expected_P_lines':100,
     },
     'not_compacted': {
         'fasta_path': TEST_DATA_DIR + '/transcripts_100.fa',
         'flag': '',
-        'gfa_lines': 183651,
+        'gfa_lines': 183551,
         'field_records': {
             'H':1,
             'S':91584,
             'L':91966,
-            'P':100,
-        }
+        },
+        'expected_P_lines':100,
     }
 }
 
@@ -93,7 +93,7 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         align_command = '{exe} align -i {graph_input} {input} \
-                    --gfa-mapping-path {gfa_file} {gfa_compacted_flag}'.format(
+                    -o {gfa_file} {gfa_compacted_flag}'.format(
             exe=METAGRAPH,
             graph_input=self.tempdir.name + '/graph.dbg',
             input=gfa_tests[gfa_test]['fasta_path'],
@@ -131,10 +131,14 @@ class TestAnnotate(unittest.TestCase):
                 sequences[line.split('\t')[3]][:(k-1)]
             )
 
+        with open(self.tempdir.name + '/assembled.path.gfa', 'r') as file:
+            data = file.read()
+        gfa_lines = data.rstrip("\n").split("\n")
+        self.assertEqual(len(gfa_lines), gfa_tests[gfa_test]['expected_P_lines'])
+
         # Ensure valid paths.
         for line in gfa_lines:
-            if line[0] != 'P':
-                continue
+            self.assertEqual(line[0], 'P')
             path_nodes = line.split('\t')[2].split(',')
             for node_idx in range(len(path_nodes) - 1):
                 cur_node = path_nodes[node_idx].rstrip('+')

@@ -293,10 +293,14 @@ void gfa_map_files(const Config *config,
         },
         get_num_threads()
     );
-    
-    // Open gfa_file in append mode.
-    std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
-                           std::ios_base::app);
+
+    std::ofstream gfa_file(
+        utils::remove_suffix(
+            utils::remove_suffix(config->outfbase, ".gfa"),
+            ".path"
+        ) + ".path.gfa"
+    );
+
     std::mutex print_mutex;
     for (const std::string &file : files) {
         logger->trace("Loading sequences from FASTA file '{}' to append gfa paths.", file);
@@ -328,14 +332,9 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    if (utils::ends_with(config->infbase, ".gfa")) {
-        logger->trace("Received GFA input file. Trying to find the '.dbg' at the same path.");
-        config->gfa_mapping_path = config->infbase;
-        config->infbase = utils::remove_suffix(config->infbase, ".gfa") + ".dbg";
-    }
     // initialize aligner
     auto graph = load_critical_dbg(config->infbase);
-    if (config->gfa_mapping_path.size()) {
+    if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, graph);
         return 0;
     }
