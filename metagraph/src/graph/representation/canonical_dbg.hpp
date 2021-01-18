@@ -148,9 +148,17 @@ class CanonicalDBG : public DeBruijnGraph {
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
-        return !graph_.is_canonical_mode()
-            ? (node > offset_ ? node - offset_ : node)
-            : std::min(node, reverse_complement(node));
+        if (node > offset_)
+            node -= offset_;
+
+        if (!graph_.is_canonical_mode())
+            return node;
+
+        graph_.map_to_nodes(graph_.get_node_sequence(node), [&](auto base_node) {
+            node = base_node;
+        });
+
+        return node;
     }
 
   private:
