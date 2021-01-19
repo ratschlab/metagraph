@@ -16,9 +16,6 @@ namespace seq_io {
 
 namespace graph {
     class AnnotatedDBG;
-    namespace align {
-        class DBGAlignerConfig;
-    }
 }
 
 
@@ -49,7 +46,6 @@ class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
-                  std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
                   ThreadPool &thread_pool);
 
     void query_fasta(const std::string &file_path,
@@ -68,7 +64,6 @@ class QueryExecutor {
   private:
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
