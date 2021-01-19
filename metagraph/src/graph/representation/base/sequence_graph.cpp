@@ -105,6 +105,14 @@ void DeBruijnGraph::traverse(node_index start,
     }
 }
 
+DeBruijnGraph::node_index DeBruijnGraph::get_base_node(node_index node) const {
+    if (!is_canonical_mode())
+        return node;
+
+    map_to_nodes(get_node_sequence(node), [&](node_index base) { node = base; });
+    return node;
+}
+
 void call_sequences_from(const DeBruijnGraph &graph,
                          node_index start,
                          const DeBruijnGraph::CallPath &callback,
