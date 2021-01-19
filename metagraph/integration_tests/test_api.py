@@ -2,6 +2,7 @@ import json
 import os
 import shlex
 import time
+import unittest
 from subprocess import Popen
 
 import socket
@@ -10,6 +11,8 @@ from metagraph.client import GraphClientJson, MultiGraphClient
 from parameterized import parameterized, parameterized_class
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
+
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 
 class TestAPIBase(TestingBase):
@@ -52,6 +55,7 @@ class TestAPIBase(TestingBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
@@ -188,6 +192,7 @@ class TestAPIRaw(TestAPIBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -255,6 +260,7 @@ class TestAPIClient(TestAPIBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -306,6 +312,7 @@ class TestAPIJson(TestAPIBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed

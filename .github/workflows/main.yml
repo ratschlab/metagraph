@@ -4,12 +4,13 @@ on: [push]
 
 jobs:
 
-  build-linux:
+  Linux:
 
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
+        alphabet: [DNA, Protein]
         build_type: [Debug, Release]
         compiler: [g++-8, g++-9, g++-10]
         include:
@@ -24,6 +25,12 @@ jobs:
           - compiler: g++-10
             cxx: g++-10
             cc: gcc-10
+
+        exclude:
+          - alphabet: Protein
+            compiler: g++-8
+          - alphabet: Protein
+            compiler: g++-9
 
     steps:
     - uses: actions/checkout@v1
@@ -56,7 +63,8 @@ jobs:
         export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
@@ -78,12 +86,13 @@ jobs:
         cd metagraph/build && make check
 
 
-  build-macos:
+  MacOS:
 
     runs-on: macos-latest
 
     strategy:
       matrix:
+        alphabet: [DNA]
         build_type: [Debug, Release]
 
     steps:
@@ -107,7 +116,9 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
+              -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph

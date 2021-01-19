@@ -551,6 +551,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 4; k <= 10; ++k) {
@@ -650,8 +651,9 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
         }
     }
 }
+#endif
 
-TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
+TEST(MaskedDBGSuccinct, CallUnitigsMaskLastEdges) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 3; k <= 15; k += 2) {
             for (const std::vector<std::string> &sequences
@@ -662,29 +664,27 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskLastEdges) {
                         std::vector<std::string>({ "AAACT", "AAATG" }),
                         std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
 
-                auto graph = build_graph_batch<TypeParam>(k, sequences, DBGMode::CANONICAL);
+                auto graph = build_graph_batch<DBGSuccinct>(k, sequences, DBGMode::NORMAL);
                 auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
-                if (dbg_succ) {
-                    dbg_succ->reset_mask();
-                    const auto &boss = dbg_succ->get_boss();
-                    sdsl::bit_vector mask(boss.num_edges() + 1, true);
-                    size_t num_kmers = mask.size() - 1;
-                    for (size_t i = 1; i < mask.size(); ++i) {
-                        if (boss.get_last(i) || boss.get_node_seq(i)[0] == boss.kSentinelCode) {
-                            mask[i] = false;
-                            ASSERT_LT(0, num_kmers);
-                            --num_kmers;
-                        }
+                dbg_succ->reset_mask();
+                const auto &boss = dbg_succ->get_boss();
+                sdsl::bit_vector mask(boss.num_edges() + 1, true);
+                size_t num_kmers = mask.size() - 1;
+                for (size_t i = 1; i < mask.size(); ++i) {
+                    if (boss.get_last(i) || boss.get_node_seq(i)[0] == boss.kSentinelCode) {
+                        mask[i] = false;
+                        ASSERT_LT(0, num_kmers);
+                        --num_kmers;
                     }
-                    MaskedDeBruijnGraph masked_graph(graph, std::make_unique<bit_vector_stat>(std::move(mask)));
-                    std::atomic<size_t> counted_kmers(0);
-                    masked_graph.call_unitigs([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(masked_graph, seq));
-                        counted_kmers += path.size();
-                    }, num_threads);
-                    EXPECT_EQ(num_kmers, counted_kmers);
                 }
+                MaskedDeBruijnGraph masked_graph(graph, std::make_unique<bit_vector_stat>(std::move(mask)));
+                std::atomic<size_t> counted_kmers(0);
+                masked_graph.call_unitigs([&](const auto &seq, const auto &path) {
+                    ASSERT_EQ(path, map_sequence_to_nodes(masked_graph, seq));
+                    counted_kmers += path.size();
+                }, num_threads);
+                EXPECT_EQ(num_kmers, counted_kmers);
             }
         }
     }

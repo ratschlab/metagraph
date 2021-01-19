@@ -8,6 +8,7 @@ import os
 """Test graph assemble"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 gfa_tests = {
@@ -69,6 +70,7 @@ class TestAnnotate(unittest.TestCase):
         fasta_file.close()
 
     @parameterized.expand(GFAs)
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_assemble_gfa(self, gfa_test):
         k = 20
         construct_command = '{exe} build -p {num_threads} --mask-dummy \

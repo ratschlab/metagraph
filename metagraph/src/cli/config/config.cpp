@@ -9,10 +9,14 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 namespace mtg {
 namespace cli {
+
+const size_t Config::kDefaultIndexSuffixLen
+    = 20 / std::log2(kmer::KmerExtractorBOSS::alphabet.size() - 1);
 
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
@@ -424,13 +428,13 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    #if _PROTEIN_GRAPH
+#if _PROTEIN_GRAPH
     if (canonical || forward_and_reverse) {
         std::cerr << "Error: reverse complement not defined for protein alphabets"
                   << std::endl;
         print_usage_and_exit = true;
     }
-    #endif
+#endif
 
     if (tmp_dir == "OUTFBASE_TEMP_DIR")
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
@@ -775,14 +779,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
             fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
+#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
-            fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [10]\n");
+            fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+#endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
@@ -826,7 +834,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
+#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
@@ -835,11 +845,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, align its reverse complement as well [off]\n");
+#endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t-c --canonical \t\t\ttreat the input graph as a canonical graph [off]\n");
             fprintf(stderr, "\t   --primary-kmers\t\tindicate that the input graph has only primary k-mers [off]\n");
+#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
@@ -902,7 +916,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap [succinct]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
+#endif
             fprintf(stderr, "\t   --no-postprocessing \tdo not erase redundant dummy edges after concatenation [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -910,7 +926,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [10]\n");
+            fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [stat]\n");
@@ -919,7 +935,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
+#endif
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --compacted \t\tdump compacted de Bruijn graph to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
@@ -938,7 +956,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences assembled and dumped to FASTA [off]\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
+#endif
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --compacted \t\tdump compacted de Bruijn graph to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
@@ -972,7 +992,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \tprocess both forward and reverse complement sequences [off]\n");
+#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
@@ -998,7 +1020,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \t\tprocess both forward and reverse complement sequences [off]\n");
+#endif
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
@@ -1054,7 +1078,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
+#if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \tfor each input sequence, query its reverse complement as well [off]\n");
+#endif
             fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers [off]\n");
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");

@@ -61,9 +61,12 @@ class Config {
     bool optimize = false;
 
     unsigned int k = 3;
-    // For succinct graphs by default, cache ranges of nodes
-    // in the BOSS table for all suffixes of length 10.
-    unsigned int node_suffix_length = 10;
+
+    // Cache ranges of nodes in succinct graphs to search faster.
+    // For DNA4, index nodes for all possible suffixes of length 10.
+    // In general, the default value is: 20/log2(|Sigma|)
+    static const size_t kDefaultIndexSuffixLen;
+    unsigned int node_suffix_length = kDefaultIndexSuffixLen;
     unsigned int distance = 0;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;

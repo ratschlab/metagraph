@@ -220,6 +220,7 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
     std::vector<std::string> input_data = {
         "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -246,6 +247,7 @@ TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
         }
     }
 }
+#endif
 
 TEST(BOSSConstruct, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
@@ -294,7 +296,7 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
                                         + std::string(100, 'G'));
 
         for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
                 for (bool weighted : { false, true }) {
                     for (size_t num_threads : { 1, 4 }) {
                         std::unique_ptr<BOSS::Chunk> graph_data;
@@ -550,8 +552,8 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
 #if _DNA_GRAPH
     ASSERT_EQ(1u, result.data().size());
 #else
-    // AA, $B, BB
-    ASSERT_EQ(3u, result.data().size());
+    // AA, BB
+    ASSERT_EQ(2u, result.data().size());
 #endif
 }
 

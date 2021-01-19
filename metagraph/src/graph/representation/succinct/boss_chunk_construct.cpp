@@ -909,8 +909,9 @@ initialize_boss_chunk_constructor(size_t k,
                                   const std::string &filter_suffix,
                                   const Args& ...args) {
     if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
+        // DBGSuccinct::k = BOSS::k + 1
         logger->error("For succinct graph, k must be between 2 and {}",
-                      256 / KmerExtractorBOSS::bits_per_char - 1);
+                      256 / KmerExtractorBOSS::bits_per_char);
         exit(1);
     }
 
