@@ -294,12 +294,7 @@ void gfa_map_files(const Config *config,
         get_num_threads()
     );
 
-    std::ofstream gfa_file(
-        utils::remove_suffix(
-            utils::remove_suffix(config->outfbase, ".gfa"),
-            ".path"
-        ) + ".path.gfa"
-    );
+    std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa", ".path") + ".path.gfa");
 
     std::mutex print_mutex;
     for (const std::string &file : files) {
@@ -334,6 +329,7 @@ int align_to_graph(Config *config) {
 
     // initialize aligner
     auto graph = load_critical_dbg(config->infbase);
+
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, graph);
         return 0;
