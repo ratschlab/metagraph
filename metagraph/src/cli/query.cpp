@@ -855,12 +855,7 @@ void align_sequence(std::string &name, std::string &seq,
 
 std::string query_sequence(size_t id, std::string name, std::string seq,
                            const AnnotatedDBG &anno_graph,
-                           const Config &config,
-                           const align::DBGAlignerConfig *aligner_config) {
-    if (aligner_config) {
-        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
-    }
-
+                           const Config &config) {
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
@@ -868,7 +863,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                                         anno_graph);
 }
 
-void QueryExecutor::query_fasta(const string &file,
+void QueryExecutor::query_fasta(const std::string &file,
                                 const std::function<void(const std::string &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
@@ -885,9 +880,11 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](const auto&... args) {
-            callback(query_sequence(args..., anno_graph_,
-                                    config_, aligner_config_.get()));
+        thread_pool_.enqueue([&](size_t id, std::string &name, std::string &seq) {
+            if (aligner_config_) {
+                align_sequence(name, seq, anno_graph_.get_graph(), *aligner_config_);
+            }
+            callback(query_sequence(id, name, seq, anno_graph_, config_));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -918,7 +915,7 @@ void QueryExecutor
             num_bytes_read += it->seq.l;
         }
 
-        if (aligner_config_ && !config_.batch_align) {
+        if (aligner_config_) {
             logger->trace("Aligning sequences from batch against the full graph...");
             batch_timer.reset();
 
@@ -939,8 +936,7 @@ void QueryExecutor
                 }
             },
             get_num_threads(),
-            anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
-            aligner_config_ && config_.batch_align ? &config_ : NULL
+            anno_graph_.get_graph().is_canonical_mode() || config_.canonical
         );
 
         logger->trace("Query graph constructed for batch of sequences"
@@ -951,8 +947,7 @@ void QueryExecutor
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < seq_batch.size(); ++i) {
             callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
-                                    *query_graph, config_,
-                                    config_.batch_align ? aligner_config_.get() : NULL));
+                                    *query_graph, config_));
         }
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,

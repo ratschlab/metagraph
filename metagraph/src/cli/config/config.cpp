@@ -193,8 +193,6 @@ Config::Config(int argc, char *argv[]) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
-        } else if (!strcmp(argv[i], "--batch-align")) {
-            batch_align = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-queue-size")) {
