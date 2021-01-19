@@ -151,14 +151,7 @@ class CanonicalDBG : public DeBruijnGraph {
         if (node > offset_)
             node -= offset_;
 
-        if (!graph_.is_canonical_mode())
-            return node;
-
-        graph_.map_to_nodes(graph_.get_node_sequence(node), [&](auto base_node) {
-            node = base_node;
-        });
-
-        return node;
+        return graph_.get_base_node(node);
     }
 
   private:
