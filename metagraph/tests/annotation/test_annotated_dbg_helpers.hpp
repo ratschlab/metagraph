@@ -9,6 +9,7 @@
 
 #define protected public
 #define private public
+#include "../graph/all/test_dbg_helpers.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -29,7 +30,8 @@ using namespace mtg::graph;
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
-                                               const std::vector<std::string> &labels);
+                                               const std::vector<std::string> &labels,
+                                               DBGMode mode = NORMAL);
 
 } // namespace test
 } // namespace mtg

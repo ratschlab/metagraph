@@ -128,52 +128,50 @@ inline auto LabeledDBGAligner<Seeder, Extender, AlignmentCompare>
     static_assert(std::is_base_of_v<ExactMapSeeder<node_index>, Seeder>
         || std::is_base_of_v<SuffixSeeder<node_index>, Seeder>);
 
-    return [this,query,orientation](const auto &callback) {
-        auto seeder = build_seeder();
-        seeder.initialize(query, orientation);
-        auto &query_nodes = const_cast<std::vector<node_index>&>(seeder.get_query_nodes());
+    std::shared_ptr<Seeder> seeder(new Seeder(build_seeder()));
+    seeder->initialize(query, orientation);
+    auto &query_nodes = const_cast<std::vector<node_index>&>(seeder->get_query_nodes());
 
-        if (std::all_of(query_nodes.begin(), query_nodes.end(), [](auto i) { return !i; }))
-            return;
+    if (std::all_of(query_nodes.begin(), query_nodes.end(), [](auto i) { return !i; }))
+        return [](const auto&) {};
 
-        auto &offsets = const_cast<std::vector<uint8_t>&>(seeder.get_offsets());
-        std::vector<uint8_t> *flags = nullptr;
-        const std::vector<std::vector<node_index>> *alt_query_nodes = nullptr;
+    auto &offsets = const_cast<std::vector<uint8_t>&>(seeder->get_offsets());
+    std::vector<uint8_t> *flags = nullptr;
+    const std::vector<std::vector<node_index>> *alt_query_nodes = nullptr;
 
-        if constexpr(std::is_base_of_v<MEMSeeder<node_index>, Seeder>)
-            flags = &const_cast<std::vector<uint8_t>&>(seeder.get_query_node_flags());
+    if constexpr(std::is_base_of_v<MEMSeeder<node_index>, Seeder>)
+        flags = &const_cast<std::vector<uint8_t>&>(seeder->get_query_node_flags());
 
-        if constexpr(std::is_base_of_v<SuffixSeeder<node_index>, Seeder>) {
-            alt_query_nodes = &seeder.get_alt_query_nodes();
+    if constexpr(std::is_base_of_v<SuffixSeeder<node_index>, Seeder>) {
+        alt_query_nodes = &seeder->get_alt_query_nodes();
 
-            const auto &base_seeder = seeder.get_base_seeder();
-            if (const auto *mem = dynamic_cast<const MEMSeeder<node_index>*>(&base_seeder))
-                flags = &const_cast<std::vector<uint8_t>&>(mem->get_query_node_flags());
+        const auto &base_seeder = seeder->get_base_seeder();
+        if (const auto *mem = dynamic_cast<const MEMSeeder<node_index>*>(&base_seeder))
+            flags = &const_cast<std::vector<uint8_t>&>(mem->get_query_node_flags());
+    }
+
+    auto signatures = anno_graph_.get_top_label_signatures(
+        query, num_top_labels_, config_.exact_kmer_match_fraction,
+        alt_query_nodes ? &query_nodes : nullptr, alt_query_nodes
+    );
+
+    if (signatures.empty())
+        return [](const auto&) {};
+
+    const auto &[label, signature] = signatures[0];
+
+    for (size_t i = 0; i < signature.size(); ++i) {
+        if (!signature[i]) {
+            query_nodes[i] = 0;
+            offsets[i] = 0;
+            if (flags)
+                (*flags)[i] = 0;
         }
+    }
 
-        auto signatures = anno_graph_.get_top_label_signatures(
-            query, num_top_labels_, config_.exact_kmer_match_fraction,
-            alt_query_nodes ? &query_nodes : nullptr, alt_query_nodes
-        );
+    target_column_ = anno_graph_.get_annotation().get_label_encoder().encode(label);
 
-        if (signatures.empty())
-            return;
-
-        const auto &[label, signature] = signatures[0];
-
-        for (size_t i = 0; i < signature.size(); ++i) {
-            if (!signature[i]) {
-                query_nodes[i] = 0;
-                offsets[i] = 0;
-                if (flags)
-                    (*flags)[i] = 0;
-            }
-        }
-
-        target_column_ = anno_graph_.get_annotation().get_label_encoder().encode(label);
-
-        seeder.call_seeds(callback);
-    };
+    return [seeder](const auto &callback) mutable { seeder->call_seeds(callback); };
 }
 
 template <typename NodeType>
