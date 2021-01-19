@@ -354,7 +354,7 @@ find_package(BZip2 REQUIRED)
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts zlib ${BZIP2_LIBRARIES}
+  -lhts zlib
   -lsdsl
   brwt
   jsoncpp_lib
