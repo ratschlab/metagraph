@@ -41,6 +41,18 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
     }
 }
 
+void remove_chunks(const std::vector<std::string> &files) {
+    for (const std::string &f : files) {
+        std::vector<std::string> suffixes = { "", ".up" };
+        if (std::filesystem::exists(f + ".count"))
+            suffixes.push_back(".count");
+
+        for (const std::string &suffix : suffixes) {
+            std::filesystem::remove(f + suffix);
+        }
+    }
+}
+
 template <class T, class Enable = void>
 struct Unaligned;
 
