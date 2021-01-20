@@ -164,7 +164,7 @@ template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::~KmerCollector() {
     if (!tmp_dir_.empty())
-        std::filesystem::remove_all(tmp_dir_);
+        utils::remove_temp_dir(tmp_dir_);
 }
 
 template <typename KMER, class KmerExtractor, class Container>

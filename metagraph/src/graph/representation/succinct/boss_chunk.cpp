@@ -138,8 +138,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
 }
 
 BOSS::Chunk::~Chunk() {
-    std::error_code ec;
-    fs::remove_all(dir_, ec);
+    utils::remove_temp_dir(dir_);
 }
 
 template <typename Array>
