@@ -12,15 +12,16 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
                      uint64_t num_columns,
                      uint64_t num_rows,
                      uint64_t num_relations)
-    : num_columns_(num_columns), num_rows_(num_columns > 0 ? num_rows : 0) {
+      : num_columns_(num_columns),
+        num_rows_(num_columns > 0 ? num_rows : 0) {
     //TODO(ddanciu): use an int_vector_buffer instead to save memory
-    // Why can't sdsl::enc_vector<> convert a 32-bit Vector??
-    Vector<uint64_t> elements(num_relations);
+    uint8_t col_index_width = num_columns ? sdsl::bits::hi(num_columns - 1) + 1 : 1;
+    sdsl::int_vector<> elements(num_relations, 0, col_index_width);
     sdsl::bit_vector boundary(num_relations + num_rows, 0);
     uint64_t idx = 0;
     uint64_t b_idx = 0;
     call_rows([&](const auto &column_indices) {
-        for (const uint64_t col : column_indices) {
+        for (uint64_t col : column_indices) {
             elements[idx++] = col;
             b_idx++;
         }
