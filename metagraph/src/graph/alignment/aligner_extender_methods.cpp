@@ -256,25 +256,27 @@ inline void update_ins_scores(const DBGAlignerConfig &config,
                               size_t length,
                               score_t xdrop_cutoff) {
     for (size_t i = 1; i < length; ++i) {
-        score_t ins_score = std::max(config.min_cell_score,
-            update_scores[i - 1] + (update_ops[i - 1] == Cigar::INSERTION
-                ? config.gap_extension_penalty
-                : config.gap_opening_penalty
-        ));
+        if (update_ops[i - 1] != Cigar::DELETION) {
+            score_t ins_score = std::max(config.min_cell_score,
+                update_scores[i - 1] + (update_ops[i - 1] == Cigar::INSERTION
+                    ? config.gap_extension_penalty
+                    : config.gap_opening_penalty
+            ));
 
-        if (ins_score >= xdrop_cutoff && ins_score > update_scores[i]) {
-            while (i < length && ins_score > update_scores[i]) {
-                update_scores[i] = ins_score;
-                update_ops[i] = Cigar::INSERTION;
-                update_prevs[i] = 0xFF;
+            if (ins_score >= xdrop_cutoff && ins_score > update_scores[i]) {
+                while (i < length && ins_score > update_scores[i]) {
+                    update_scores[i] = ins_score;
+                    update_ops[i] = Cigar::INSERTION;
+                    update_prevs[i] = 0xFF;
 
-                if (updated_mask)
-                    updated_mask[i] = 0xFF;
+                    if (updated_mask)
+                        updated_mask[i] = 0xFF;
 
-                ins_score += config.gap_extension_penalty;
-                ++i;
+                    ins_score += config.gap_extension_penalty;
+                    ++i;
+                }
+                --i;
             }
-            --i;
         }
     }
 }
