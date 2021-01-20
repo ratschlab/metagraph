@@ -149,7 +149,7 @@ class Config {
 
     std::filesystem::path tmp_dir;
 
-    size_t disk_cap_bytes = 20e9; // 20GB default
+    size_t disk_cap_bytes = -1;
 
     enum IdentityType {
         NO_IDENTITY = -1,

@@ -14,11 +14,11 @@ template <typename T>
 SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
                                         size_t reserved_num_elements,
                                         const std::filesystem::path &tmp_dir,
-                                        size_t max_disk_space_bytes,
+                                        size_t disk_cap_bytes,
                                         size_t merge_count)
     : num_threads_(num_threads),
       reserved_num_elements_(reserved_num_elements),
-      max_disk_space_bytes_(max_disk_space_bytes),
+      disk_cap_bytes_(disk_cap_bytes),
       merge_count_(merge_count),
       chunk_file_prefix_(tmp_dir/"chunk_"),
       num_blocks_(std::max(num_threads_, (size_t)1)),
@@ -135,14 +135,14 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
     if (is_done) {
         async_merge_l1_.remove_waiting_tasks();
-    } else if (total_chunk_size_bytes_ > max_disk_space_bytes_) {
+    } else if (total_chunk_size_bytes_ > disk_cap_bytes_) {
         async_merge_l1_.remove_waiting_tasks();
         std::string all_merged_file = merged_all_name(chunk_file_prefix_, merged_all_count_);
         // increment chunk_count, so that get_file_names() returns correct values
         merge_all(all_merged_file, get_file_names());
 
         total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
-        if (total_chunk_size_bytes_ > max_disk_space_bytes_ * 0.8) {
+        if (total_chunk_size_bytes_ > disk_cap_bytes_ * 0.8) {
             logger->critical("Disk space reduced by < 20%. Giving up.");
             std::exit(EXIT_FAILURE);
         }
