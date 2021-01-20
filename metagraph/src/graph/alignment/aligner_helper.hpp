@@ -330,8 +330,15 @@ class Alignment {
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
     Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
-    bool operator<(const Alignment &other) const { return score_ < other.score_; }
-    bool operator>(const Alignment &other) const { return score_ > other.score_; }
+    bool operator<(const Alignment &other) const {
+        return std::make_pair(-score_, get_query().size())
+             > std::make_pair(-other.score_, other.get_query().size());
+    }
+
+    bool operator>(const Alignment &other) const {
+        return std::make_pair(-score_, get_query().size())
+             < std::make_pair(-other.score_, other.get_query().size());
+    }
 
     typedef typename std::vector<NodeType>::iterator iterator;
     typedef typename std::vector<NodeType>::const_iterator const_iterator;
