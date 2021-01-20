@@ -1,7 +1,6 @@
 #include "row_sparse.hpp"
 
 #include "common/logger.hpp"
-#include "common/vector.hpp"
 #include "graph/representation/succinct/boss.hpp"
 
 namespace mtg {
@@ -50,12 +49,11 @@ std::vector<BinaryMatrix::Row> RowSparse::get_column(Column column) const {
 
 BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
-    Vector<uint64_t> result;
+    SetBitPositions result;
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
-
-    while (boundary_[start_idx] == 0) {
-        result.push_back(elements_[start_idx - row]);
-        start_idx++;
+    uint64_t end_idx = boundary_.next1(start_idx);
+    for (uint64_t i = start_idx; i != end_idx; ++i) {
+        result.push_back(elements_[i - row]);
     }
     return result;
 }
