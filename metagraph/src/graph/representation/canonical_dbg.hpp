@@ -145,6 +145,9 @@ class CanonicalDBG : public DeBruijnGraph {
 
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
+    void get_kmers_from_prefix(node_index node, std::vector<node_index> &parents) const;
+    void get_kmers_from_suffix(node_index node, std::vector<node_index> &children) const;
+
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);

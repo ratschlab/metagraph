@@ -126,6 +126,58 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 }
 
 void CanonicalDBG
+::get_kmers_from_suffix(node_index node, std::vector<node_index> &children) const {
+    const auto &alphabet = graph_.alphabet();
+    node_index next;
+    std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    assert(rev_seq[0] == '\0');
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+    if (dbg_succ) {
+        const auto &boss = dbg_succ->get_boss();
+        dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view(&rev_seq[1], get_k() - 1),
+            [&](node_index next, uint64_t /* match length */) {
+                auto edge = dbg_succ->kmer_to_boss_index(next);
+                char c = boss.decode(boss.get_minus_k_value(edge, get_k() - 2).first);
+                if (c == boss::BOSS::kSentinel)
+                    return;
+
+                ::reverse_complement(&c, &c + 1);
+                size_t i = boss.encode(c);
+
+                if (children[i] == DeBruijnGraph::npos) {
+                    if (!primary_)
+                        rev_comp_cache_.Put(next, next + offset_);
+
+                    children[i] = next + offset_;
+                }
+            },
+            get_k() - 1
+        );
+
+    } else {
+        for (size_t i = 0; i < alphabet.size(); ++i) {
+            if (children[i] != DeBruijnGraph::npos)
+                continue;
+
+            char c = alphabet[i];
+            ::reverse_complement(&c, &c + 1);
+
+            rev_seq[0] = c;
+            next = graph_.kmer_to_node(rev_seq);
+            if (next != DeBruijnGraph::npos) {
+                if (!primary_)
+                    rev_comp_cache_.Put(next, next + offset_);
+
+                children[i] = next + offset_;
+            }
+        }
+    }
+}
+
+void CanonicalDBG
 ::call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
@@ -158,34 +210,72 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            node_index next;
-            std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            assert(rev_seq[0] == '\0');
-            for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (children[i] != DeBruijnGraph::npos)
-                    continue;
-
-                char c = alphabet[i];
-                ::reverse_complement(&c, &c + 1);
-
-                rev_seq[0] = c;
-                next = graph_.kmer_to_node(rev_seq);
-                if (next != DeBruijnGraph::npos) {
-                    if (!primary_)
-                        rev_comp_cache_.Put(next, next + offset_);
-
-                    children[i] = next + offset_;
-                }
-            }
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_suffix(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t i = 0; i < children.size(); ++i) {
             if (children[i] != DeBruijnGraph::npos) {
                 callback(children[i], alphabet[i]);
                 assert(traverse(node, alphabet[i]) == children[i]);
+            }
+        }
+    }
+}
+
+void CanonicalDBG
+::get_kmers_from_prefix(node_index node, std::vector<node_index> &parents) const {
+    const auto &alphabet = graph_.alphabet();
+    std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    assert(rev_seq.back() == '\0');
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+    if (dbg_succ) {
+        const auto &boss = dbg_succ->get_boss();
+        auto encoded = boss.encode(std::string_view(rev_seq.data(), get_k() - 1));
+
+        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+        if (edge && edge_2 && end == encoded.end()) {
+            assert(edge == edge_2);
+            do {
+                node_index prev = dbg_succ->boss_to_kmer_index(edge);
+                if (prev) {
+                    char c = alphabet[boss.get_W(edge) % boss.alph_size];
+                    if (c == boss::BOSS::kSentinel)
+                        continue;
+
+                    ::reverse_complement(&c, &c + 1);
+                    size_t i = boss.encode(c);
+
+                    if (parents[i] == DeBruijnGraph::npos) {
+                        if (!primary_)
+                            rev_comp_cache_.Put(prev, prev + offset_);
+
+                        parents[i] = prev + offset_;
+                    }
+                }
+
+            } while (--edge && !boss.get_last(edge));
+        }
+
+    } else {
+        node_index prev;
+        for (size_t i = 0; i < alphabet.size(); ++i) {
+            if (parents[i] != DeBruijnGraph::npos)
+                continue;
+
+            char c = alphabet[i];
+            ::reverse_complement(&c, &c + 1);
+
+            rev_seq.back() = c;
+            prev = graph_.kmer_to_node(rev_seq);
+            if (prev != DeBruijnGraph::npos) {
+                if (!primary_)
+                    rev_comp_cache_.Put(prev, prev + offset_);
+
+                parents[i] = prev + offset_;
             }
         }
     }
@@ -224,28 +314,8 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left) {
-            node_index prev;
-            std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            assert(rev_seq.back() == '\0');
-            for (size_t i = 0; i < alphabet.size(); ++i) {
-                if (parents[i] != DeBruijnGraph::npos)
-                    continue;
-
-                char c = alphabet[i];
-                ::reverse_complement(&c, &c + 1);
-
-                rev_seq.back() = c;
-                prev = graph_.kmer_to_node(rev_seq);
-                if (prev != DeBruijnGraph::npos) {
-                    if (!primary_)
-                        rev_comp_cache_.Put(prev, prev + offset_);
-
-                    parents[i] = prev + offset_;
-                }
-            }
-        }
+        if (!graph_.is_canonical_mode() && max_num_edges_left)
+            get_kmers_from_prefix(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t i = 0; i < parents.size(); ++i) {
