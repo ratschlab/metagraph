@@ -912,7 +912,7 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
     }
     BOSS::Chunk *chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
                                              k, both_strands_mode, bits_per_count, swap_dir);
-    logger->trace("Chunk for ..$. done");
+    logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
@@ -923,12 +923,12 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
         BOSS::Chunk *next = build_boss_chunk<T>(false, // not the first chunk
                                                 real_names[F], dummy_names,
                                                 k, both_strands_mode, bits_per_count, swap_dir);
-        logger->trace("Chunk for ..{}. done", KmerExtractor2Bit().alphabet[F]);
+        logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
         #pragma omp ordered
         chunk->extend(*next);
+        logger->trace("Chunk ..{}. appended", KmerExtractor2Bit().alphabet[F]);
         delete next;
     }
-    logger->trace("All chunks concatenated");
     return chunk;
 }
 
