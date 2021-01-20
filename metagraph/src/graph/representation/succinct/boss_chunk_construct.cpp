@@ -246,9 +246,9 @@ Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
  * require one extra bit of storage per character)
  */
 template <typename T, class KmerCollector>
-BOSS::Chunk* construct_boss_chunk(KmerCollector &kmer_collector,
-                                  uint8_t bits_per_count,
-                                  std::filesystem::path swap_dir) {
+BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
+                                 uint8_t bits_per_count,
+                                 std::filesystem::path swap_dir) {
     using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
     using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
 
@@ -348,9 +348,10 @@ BOSS::Chunk* construct_boss_chunk(KmerCollector &kmer_collector,
         kmers_out->shutdown();
     });
 
-    BOSS::Chunk *result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
-                                          k, both_strands_mode, *kmers_out,
-                                          bits_per_count, swap_dir);
+    BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(),
+                       k, both_strands_mode, *kmers_out,
+                       bits_per_count, swap_dir);
+
     kmer_collector.clear();
 
     return result;
@@ -640,15 +641,15 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
                          std::filesystem::path dir);
 
 template <typename T>
-BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
-                        const std::vector<std::vector<std::string>> &dummy_source_names,
-                        const std::vector<std::string> &dummy_sink_names,
-                        std::filesystem::path dir,
-                        size_t k,
-                        bool both_strands_mode,
-                        uint8_t bits_per_count,
-                        std::filesystem::path swap_dir,
-                        size_t num_threads);
+BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
+                       const std::vector<std::vector<std::string>> &dummy_source_names,
+                       const std::vector<std::string> &dummy_sink_names,
+                       std::filesystem::path dir,
+                       size_t k,
+                       bool both_strands_mode,
+                       uint8_t bits_per_count,
+                       std::filesystem::path swap_dir,
+                       size_t num_threads);
 
 /**
  * Reconstructs all the required dummy k-mers and builds a BOSS table (chunk).
@@ -661,9 +662,9 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
  * the dummy-k kmers, for k=2..k
  */
 template <typename T, class KmerCollector>
-BOSS::Chunk* construct_boss_chunk_disk(KmerCollector &kmer_collector,
-                                       uint8_t bits_per_count,
-                                       std::filesystem::path swap_dir) {
+BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
+                                      uint8_t bits_per_count,
+                                      std::filesystem::path swap_dir) {
     using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
     using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
 
@@ -797,13 +798,13 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
 }
 
 template <typename T>
-BOSS::Chunk* build_boss_chunk(bool is_first_chunk,
-                              const std::string &real_name,
-                              const std::vector<std::string> &dummy_names,
-                              size_t k,
-                              bool both_strands_mode,
-                              uint8_t bits_per_count,
-                              std::filesystem::path swap_dir) {
+BOSS::Chunk build_boss_chunk(bool is_first_chunk,
+                             const std::string &real_name,
+                             const std::vector<std::string> &dummy_names,
+                             size_t k,
+                             bool both_strands_mode,
+                             uint8_t bits_per_count,
+                             std::filesystem::path swap_dir) {
     using T_INT = get_int_t<T>;
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
     using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
@@ -855,22 +856,22 @@ BOSS::Chunk* build_boss_chunk(bool is_first_chunk,
         kmers_out->shutdown();
     });
 
-    return new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
-                           k, both_strands_mode,
-                           reinterpret_container<T>(*kmers_out),
-                           bits_per_count, swap_dir);
+    return BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
+                       k, both_strands_mode,
+                       reinterpret_container<T>(*kmers_out),
+                       bits_per_count, swap_dir);
 }
 
 template <typename T>
-BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
-                        const std::vector<std::vector<std::string>> &dummy_source_names,
-                        const std::vector<std::string> &dummy_sink_names,
-                        std::filesystem::path dir,
-                        size_t k,
-                        bool both_strands_mode,
-                        uint8_t bits_per_count,
-                        std::filesystem::path swap_dir,
-                        size_t num_threads) {
+BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
+                       const std::vector<std::vector<std::string>> &dummy_source_names,
+                       const std::vector<std::string> &dummy_sink_names,
+                       std::filesystem::path dir,
+                       size_t k,
+                       bool both_strands_mode,
+                       uint8_t bits_per_count,
+                       std::filesystem::path swap_dir,
+                       size_t num_threads) {
     assert(real_names.size() == dummy_sink_names.size());
     assert(real_names.size() + 1 == dummy_source_names.front().size());
     assert(dummy_source_names.size() == k);
@@ -910,8 +911,8 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
     for (size_t i = 0; i < dummy_source_names.size(); ++i) {
         dummy_names.push_back(dummy_source_names[i][0]);
     }
-    BOSS::Chunk *chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
-                                             k, both_strands_mode, bits_per_count, swap_dir);
+    BOSS::Chunk chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
+                                            k, both_strands_mode, bits_per_count, swap_dir);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -920,14 +921,13 @@ BOSS::Chunk* build_boss(const std::vector<std::string> &real_names,
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
             dummy_names.push_back(dummy_source_names[i][F + 1]);
         }
-        BOSS::Chunk *next = build_boss_chunk<T>(false, // not the first chunk
-                                                real_names[F], dummy_names,
-                                                k, both_strands_mode, bits_per_count, swap_dir);
+        BOSS::Chunk next = build_boss_chunk<T>(false, // not the first chunk
+                                               real_names[F], dummy_names,
+                                               k, both_strands_mode, bits_per_count, swap_dir);
         logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
         #pragma omp ordered
-        chunk->extend(*next);
+        chunk.extend(next);
         logger->trace("Chunk ..{}. appended", KmerExtractor2Bit().alphabet[F]);
-        delete next;
     }
     return chunk;
 }
@@ -984,8 +984,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         kmer_collector_.add_sequences(std::move(sequences));
     }
 
-    BOSS::Chunk* build_chunk() {
-        BOSS::Chunk *result;
+    BOSS::Chunk build_chunk() {
+        BOSS::Chunk result;
 
         using T_INT = typename KmerCollector::Data::value_type;
         using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
@@ -997,12 +997,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
 
-            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
-                                     kmer_collector_.get_k() - 1,
-                                     kmer_collector_.is_both_strands_mode(),
-                                     reinterpret_container<T>(kmer_ints),
-                                     bits_per_count_,
-                                     swap_dir_);
+            result = BOSS::Chunk(kmer_collector_.alphabet_size(),
+                                 kmer_collector_.get_k() - 1,
+                                 kmer_collector_.is_both_strands_mode(),
+                                 reinterpret_container<T>(kmer_ints),
+                                 bits_per_count_,
+                                 swap_dir_);
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);

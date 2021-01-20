@@ -138,7 +138,8 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
 }
 
 BOSS::Chunk::~Chunk() {
-    utils::remove_temp_dir(dir_);
+    if (!dir_.empty())
+        utils::remove_temp_dir(dir_);
 }
 
 template <typename Array>
@@ -281,14 +282,14 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 
     BOSS *graph = new BOSS();
 
-    std::unique_ptr<Chunk> full_chunk;
+    Chunk full_chunk;
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
         auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
                                                         + kFileExtension;
 
-        auto graph_chunk = std::make_unique<Chunk>(1, 0, false, swap_dir);
-        if (!graph_chunk->load(filename)) {
+        Chunk graph_chunk(1, 0, false, swap_dir);
+        if (!graph_chunk.load(filename)) {
             std::cerr << "ERROR: File corrupted. Cannot load graph chunk "
                       << filename << std::endl;
             exit(1);
@@ -301,7 +302,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         if (i == 0) {
             full_chunk = std::move(graph_chunk);
         } else {
-            full_chunk->extend(*graph_chunk);
+            full_chunk.extend(graph_chunk);
         }
 
         if (verbose) {
@@ -309,9 +310,9 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         }
     }
 
-    full_chunk->initialize_boss(graph, weights);
+    full_chunk.initialize_boss(graph, weights);
 
-    return std::make_pair(graph, full_chunk->canonical_);
+    return std::make_pair(graph, full_chunk.canonical_);
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {

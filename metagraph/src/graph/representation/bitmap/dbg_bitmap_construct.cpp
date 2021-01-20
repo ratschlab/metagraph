@@ -48,7 +48,7 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
     bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
 
-    DBGBitmap::Chunk* build_chunk();
+    DBGBitmap::Chunk build_chunk();
 
     sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
 
@@ -123,12 +123,12 @@ BitmapChunkConstructor<KmerCollector>::get_weights(uint8_t bits_per_count) {
  * Initialize graph chunk from a list of sorted kmers.
  */
 template <typename KmerCollector>
-DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>::build_chunk() {
+DBGBitmap::Chunk BitmapChunkConstructor<KmerCollector>::build_chunk() {
     using KMER = typename KmerCollector::Kmer;
 
     const auto &kmers = kmer_collector_.data();
-    std::unique_ptr<DBGBitmap::Chunk> chunk {
-        new DBGBitmap::Chunk(
+
+    return DBGBitmap::Chunk(
             [&](const auto &index_callback) {
                 std::for_each(kmers.begin(), kmers.end(),
                     [&](const auto &kmer) { index_callback(utils::get_first(kmer) + 1); }
@@ -136,11 +136,7 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KmerCollector>::build_chunk() {
             },
             (1llu << (get_k() * KMER::kBitsPerChar)) + 1,
             kmers.size()
-        )
-    };
-    assert(chunk.get());
-
-    return chunk.release();
+    );
 }
 
 DBGBitmap* DBGBitmapConstructor
@@ -187,19 +183,19 @@ DBGBitmap* DBGBitmapConstructor
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
         const auto &chunk_filename = chunk_filenames.at(i);
-        std::unique_ptr<DBGBitmap::Chunk> chunk(new DBGBitmap::Chunk());
+        DBGBitmap::Chunk chunk;
 
         std::ifstream chunk_in(chunk_filename, std::ios::binary);
-        chunk->load(chunk_in);
+        chunk.load(chunk_in);
 
         if (!i) {
-            size = chunk->size();
-        } else if (size != chunk->size()) {
+            size = chunk.size();
+        } else if (size != chunk.size()) {
             logger->error("Inconsistent graph chunks");
             exit(1);
         }
 
-        cumulative_size += chunk->num_set_bits();
+        cumulative_size += chunk.num_set_bits();
     }
     assert(size > 0);
 
@@ -305,11 +301,11 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     graph->kmers_ = decltype(graph->kmers_)(
         [&](const auto &index_callback) {
             index_callback(0);
-            chunk->call_ones(index_callback);
+            chunk.call_ones(index_callback);
         },
-        chunk->size(), chunk->num_set_bits() + 1
+        chunk.size(), chunk.num_set_bits() + 1
     );
-    delete chunk;
+    chunk = DBGBitmap::Chunk();
     graph->complete_ = false;
 
     if (bits_per_count_) {

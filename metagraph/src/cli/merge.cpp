@@ -72,7 +72,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging blocks");
         timer.reset();
 
-        auto *chunk = graph::boss::merge_blocks_to_chunk(
+        graph::boss::BOSS::Chunk chunk = graph::boss::merge_blocks_to_chunk(
             graphs,
             config->part_idx,
             config->parts_total,
@@ -80,21 +80,20 @@ int merge_graph(Config *config) {
             config->num_bins_per_thread,
             get_verbose()
         );
-        if (!chunk) {
+        if (!chunk.size()) {
             logger->error("ERROR when building chunk {}", config->part_idx);
             exit(1);
         }
         logger->info("Blocks merged in {} sec", timer.elapsed());
 
         if (config->parts_total > 1) {
-            chunk->serialize(config->outfbase
+            chunk.serialize(config->outfbase
                               + "." + std::to_string(config->part_idx)
                               + "_" + std::to_string(config->parts_total));
         } else {
             graph = new graph::boss::BOSS(graphs[0]->get_k());
-            chunk->initialize_boss(graph);
+            chunk.initialize_boss(graph);
         }
-        delete chunk;
     } else {
         logger->info("Start merging graphs");
         timer.reset();
