@@ -10,8 +10,8 @@ from metagraph import helpers
 
 """Metagraph client."""
 
-DEFAULT_TOP_LABELS = 10000
-DEFAULT_DISCOVERY_THRESHOLD = 0.7
+DEFAULT_TOP_LABELS = 100
+DEFAULT_DISCOVERY_THRESHOLD = 0
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
 
 JsonDict = Dict[str, Any]
