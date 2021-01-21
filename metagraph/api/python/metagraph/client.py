@@ -25,10 +25,10 @@ class GraphClientJson:
     returning error message in the second element of the tuple returned.
     """
 
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+    def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
         self.host = host
         self.port = port
-        self.label = label
+        self.name = name
         self.api_path = api_path
 
     def search(self, sequence: Union[str, Iterable[str]],
@@ -114,9 +114,9 @@ class GraphClientJson:
 
 
 class GraphClient:
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+    def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
         self._json_client = GraphClientJson(host, port, api_path=api_path)
-        self.label = label
+        self.name = name
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -159,11 +159,11 @@ class MultiGraphClient:
     def __init__(self):
         self.graphs = {}
 
-    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
-        if not label:
-            label = f"{host}:{port}"
+    def add_graph(self, host: str, port: int, name: str = None, api_path: str = None) -> None:
+        if not name:
+            name = f"{host}:{port}"
 
-        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
+        self.graphs[name] = GraphClient(host, port, name, api_path=api_path)
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in
@@ -177,8 +177,8 @@ class MultiGraphClient:
             Dict[str, pd.DataFrame]:
 
         result = {}
-        for label, graph_client in self.graphs.items():
-            result[label] = graph_client.search(sequence, top_labels,
+        for name, graph_client in self.graphs.items():
+            result[name] = graph_client.search(sequence, top_labels,
                                                 discovery_threshold,
                                                 align,
                                                 max_num_nodes_per_seq_char)
@@ -191,9 +191,9 @@ class MultiGraphClient:
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
-        for label, graph_client in self.graphs.items():
+        for name, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence, discovery_threshold,
+            result[name] = graph_client.align(sequence, discovery_threshold,
                                                max_alternative_alignments,
                                                max_num_nodes_per_seq_char)
 
@@ -201,7 +201,7 @@ class MultiGraphClient:
 
     def column_labels(self) -> Dict[str, List[str]]:
         ret = {}
-        for label, graph_client in self.graphs.items():
-            ret[label] = graph_client.column_labels()
+        for name, graph_client in self.graphs.items():
+            ret[name] = graph_client.column_labels()
 
         return ret
