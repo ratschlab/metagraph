@@ -299,6 +299,24 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // check has_column
+    for (size_t j = 0; j < matrix.num_columns(); ++j) {
+        auto column = matrix.get_column(j);
+        if (column.empty())
+            continue;
+
+        column.resize(std::max(column.size() / 2, (size_t)1));
+
+        auto has_column = matrix.has_column(column, j);
+        EXPECT_EQ(column.size(), has_column.size());
+
+        if (column.size() == has_column.size()) {
+            std::sort(column.begin(), column.end());
+            std::sort(has_column.begin(), has_column.end());
+            EXPECT_EQ(column, has_column);
+        }
+    }
+
     // check serialization
     test_serialization(matrix);
 }

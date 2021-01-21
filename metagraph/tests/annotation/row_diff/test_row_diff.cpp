@@ -118,6 +118,45 @@ TEST(RowDiff, GetRows) {
     ASSERT_THAT(rows[11], ElementsAre(0));
 }
 
+TEST(RowDiff, HasColumn) {
+    // build graph
+    graph::DBGSuccinct graph(4);
+    graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
+    graph.add_sequence("ACTCTAG");
+
+    // build annotation
+    sdsl::bit_vector bterminal = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0 };
+    anchor_bv_type terminal(bterminal);
+    utils::TempFile fterm_temp;
+    std::ofstream fterm(fterm_temp.name(), ios::binary);
+    terminal.serialize(fterm);
+    fterm.flush();
+
+    std::vector<std::unique_ptr<bit_vector>> cols(2);
+    cols[0] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0  }));
+    cols[1] = std::make_unique<bit_vector_sd>(
+            std::initializer_list<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }));
+
+    annot::binmat::ColumnMajor mat(std::move(cols));
+
+    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    annot.load_anchor(fterm_temp.name());
+
+    std::vector<std::vector<uint64_t>> has_columns(2);
+    std::vector<uint64_t> rows{ 3, 3, 3, 3, 5, 5, 6, 7, 8, 9, 10, 11 };
+    auto get_rows = annot.get_rows(rows);
+
+    for (size_t i = 0; i < get_rows.size(); ++i) {
+        for (auto col : get_rows[i]) {
+            has_columns[col].push_back(rows[i]);
+        }
+    }
+
+    EXPECT_EQ(has_columns[0], annot.has_column(rows, 0));
+    EXPECT_EQ(has_columns[1], annot.has_column(rows, 1));
+}
+
 /**
  * Tests annotations on the graph in
  * https://docs.google.com/document/d/1e0MFgZRJfmDUSvmDPuC_lvnnWA0VKm5hPdzM8mdrHMM/edit#bookmark=id.ciri4266pkc4

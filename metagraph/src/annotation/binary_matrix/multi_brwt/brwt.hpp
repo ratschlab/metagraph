@@ -29,6 +29,7 @@ class BRWT : public BinaryMatrix {
     uint64_t num_rows() const override { return nonzero_rows_->size(); }
 
     bool get(Row row, Column column) const override;
+    std::vector<Row> has_column(const std::vector<Row> &rows, Column column) const override;
     SetBitPositions get_row(Row row) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     std::vector<Row> get_column(Column column) const override;
