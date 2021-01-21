@@ -101,7 +101,7 @@ class GraphClientJson:
         try:
             json_obj = ret.json()
         except:
-            return {}, str(ret.status_code) + " " + str(ret)
+            return {}, str(ret.status_code) + " " + ret.text
 
         if not ret.ok:
             error_msg = json_obj['error'] if 'error' in json_obj.keys() else str(json_obj)
