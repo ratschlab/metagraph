@@ -4,19 +4,13 @@ import pandas as pd
 def df_from_search_result(json_res):
     def _build_dict(row, result):
         d = dict(row)
+        # `properties` (optional): dictionary with metadata about the sample
         if 'properties' in d.keys():
             props = d.pop('properties')
         else:
             props = {}
 
         props['seq_description'] = result['seq_description']
-
-        # TODO: remove
-        if 'cigar' in result.keys():
-            # we did alignment
-            props['sequence'] = result['sequence']
-            props['score'] = result['score']
-            props['cigar'] = result['cigar']
 
         return {**d, **props}
 

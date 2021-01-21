@@ -40,20 +40,14 @@ class GraphClientJson:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
-               align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+               align: bool = False) -> Tuple[JsonDict, str]:
         if discovery_threshold < 0.0 or discovery_threshold > 1.0:
             raise ValueError(
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
-        if max_num_nodes_per_seq_char < 0:
-            warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
-
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
-                      "num_labels": top_labels,
-                      "align": align,
-                      "max_num_nodes_per_seq_char": max_num_nodes_per_seq_char}
+                      "num_labels": top_labels}
 
         return self._json_seq_query(sequence, param_dict, "search")
 
@@ -130,10 +124,22 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
+               **align_params) -> pd.DataFrame:
+        """See parameters for alignment `align_params` in align()"""
+
+        if align:
+            alignments = self.align(sequence, **align_params)
+
+            def to_fasta(df):
+                fasta = []
+                for i in range(df.shape[0]):
+                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
+                return '\n'.join(fasta)
+
+            sequence = to_fasta(alignments)
+
         (json_obj, err) = self._json_client.search(sequence, top_labels,
-                                                   discovery_threshold, align,
-                                                   max_num_nodes_per_seq_char)
+                                                   discovery_threshold)
 
         if err:
             raise RuntimeError(
@@ -182,15 +188,14 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> \
-            Dict[str, pd.DataFrame]:
+               **align_params) -> Dict[str, pd.DataFrame]:
+        """See parameters for alignment `align_params` in align()"""
 
         result = {}
         for name, graph_client in self.graphs.items():
             result[name] = graph_client.search(sequence, top_labels,
                                                 discovery_threshold,
-                                                align,
-                                                max_num_nodes_per_seq_char)
+                                                align, **align_params)
 
         return result
 

@@ -223,8 +223,7 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
-        self.assertIn('cigar', df.columns)
-        self.assertEqual((self.sample_query_expected_rows, 6), df.shape)
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
