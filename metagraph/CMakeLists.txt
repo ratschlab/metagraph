@@ -10,6 +10,11 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
+if(BUILD_STATIC)
+    SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+endif()
+
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
