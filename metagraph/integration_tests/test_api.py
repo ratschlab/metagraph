@@ -274,6 +274,10 @@ class TestAPIJson(TestAPIBase):
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
+    def setUp(self):
+        if not self.graph_client.ready():
+            self.fail("Server takes too long to initialize")
+
     def test_api_align_json(self):
         ret, _ = self.graph_client.align("TCGATCGA")
         self.assertEqual(len(ret), 1)

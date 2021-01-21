@@ -112,6 +112,14 @@ class GraphClientJson:
     def stats(self) -> Tuple[dict, str]:
         return self._do_request("stats", {}, post_req=False)
 
+    def ready(self) -> bool:
+        result = self.stats()
+        if len(result[0]) > 0:
+            return True
+        if result[1].startswith("503 Server is currently initializing"):
+            return False
+        raise RuntimeError(f"Error. Server response: {result[1]}")
+
 
 class GraphClient:
     def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
@@ -152,6 +160,9 @@ class GraphClient:
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
         return json_obj
+
+    def ready(self) -> bool:
+        return self._json_client.ready()
 
 
 class MultiGraphClient:
