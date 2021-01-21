@@ -80,10 +80,10 @@ class GraphClientJson:
     def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
                         endpoint: str) -> Tuple[JsonDict, str]:
         if isinstance(sequence, str):
-            fasta_str = f">query\n{sequence}"
-        else:
-            fasta_str = '\n'.join(
-                [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
+            sequence = [sequence]
+
+        fasta_str = '\n'.join(
+            [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
@@ -114,7 +114,7 @@ class GraphClientJson:
 
     def ready(self) -> bool:
         result = self.stats()
-        if len(result[0]) > 0:
+        if result[0]:
             return True
         if result[1].startswith("503 Server is currently initializing"):
             return False
