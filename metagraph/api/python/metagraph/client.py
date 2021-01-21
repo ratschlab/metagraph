@@ -28,8 +28,14 @@ class GraphClientJson:
     def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
         self.host = host
         self.port = port
+
+        self.server = f"http://{self.host}:{self.port}"
+        if api_path:
+            self.server = f"{self.server}/{api_path.lstrip('/')}"
+
         self.name = name
-        self.api_path = api_path
+        if not name:
+            name = self.server
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -86,12 +92,7 @@ class GraphClientJson:
         return self._do_request(endpoint, payload)
 
     def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
-        endpoint_path = endpoint
-
-        if self.api_path:
-            endpoint_path = f"{self.api_path.lstrip('/')}/{endpoint}"
-
-        url = f'http://{self.host}:{self.port}/{endpoint_path}'
+        url = f'{self.server}/{endpoint}'
         if post_req:
             ret = requests.post(url=url, json=payload)
         else:
@@ -103,8 +104,7 @@ class GraphClientJson:
             return {}, str(ret.status_code) + " " + str(ret)
 
         if not ret.ok:
-            error_msg = json_obj[
-                'error'] if 'error' in json_obj.keys() else str(json_obj)
+            error_msg = json_obj['error'] if 'error' in json_obj.keys() else str(json_obj)
             return {}, str(ret.status_code) + " " + error_msg
 
         return json_obj, ""
@@ -115,8 +115,8 @@ class GraphClientJson:
 
 class GraphClient:
     def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
-        self._json_client = GraphClientJson(host, port, api_path=api_path)
-        self.name = name
+        self._json_client = GraphClientJson(host, port, name, api_path=api_path)
+        self.name = self._json_client.name
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
@@ -160,10 +160,8 @@ class MultiGraphClient:
         self.graphs = {}
 
     def add_graph(self, host: str, port: int, name: str = None, api_path: str = None) -> None:
-        if not name:
-            name = f"{host}:{port}"
-
-        self.graphs[name] = GraphClient(host, port, name, api_path=api_path)
+        graph_client = GraphClient(host, port, name, api_path=api_path)
+        self.graphs[graph_client.name] = graph_client
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in
