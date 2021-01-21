@@ -4,6 +4,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/taxonomic/taxonomic.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "seq_io/kmc_parser.hpp"
@@ -364,6 +365,12 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     const auto graph = load_critical_dbg(config->infbase);
+
+//    query.cpp line 710
+    std::shared_ptr<annot::Taxonomy> taxonomy;
+    if (config->taxonomic_tree.size()) {
+        taxonomy = std::make_shared<annot::Taxonomy>(config->taxonomic_tree);
+    }
 
     if (!config->separately) {
         annotate_data(graph, *config, files, config->outfbase);

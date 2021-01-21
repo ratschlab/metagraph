@@ -247,6 +247,8 @@ Config::Config(int argc, char *argv[]) {
             separately = true;
         } else if (!strcmp(argv[i], "--sequentially")) {
             files_sequentially = true;
+        } else if (!strcmp(argv[i], "--taxonomic-tree")) {
+            taxonomic_tree = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -1000,6 +1002,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
+            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomic tree corresponding to the input files []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
