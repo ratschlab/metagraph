@@ -302,7 +302,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     const std::filesystem::path tmp_path = utils::create_temp_dir(
             std::filesystem::path(dest_dir).remove_filename(), "col");
-    logger->trace("Using temporary directory {}", tmp_path);
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -543,8 +542,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         logger->trace("Serialized {}", fpath);
     }
-    logger->trace("Removing temp directory: {}", tmp_path);
-    std::filesystem::remove_all(tmp_path);
+
+    utils::remove_temp_dir(tmp_path);
 
     if (!compute_row_reduction)
         return;
