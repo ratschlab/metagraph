@@ -132,7 +132,7 @@ KmerCollector<KMER, KmerExtractor, Container>
                 size_t num_threads,
                 double memory_preallocated,
                 const std::filesystem::path &swap_dir,
-                size_t __attribute__((unused)) max_disk_space,
+                size_t __attribute__((unused)) disk_cap_bytes,
                 bool canonical_only)
       : k_(k),
         num_threads_(num_threads),
@@ -150,7 +150,7 @@ KmerCollector<KMER, KmerExtractor, Container>
     if constexpr(utils::is_instance_v<Data, common::ChunkedWaitQueue>) {
         tmp_dir_ = utils::create_temp_dir(swap_dir, "kmers");
         kmers_ = std::make_unique<Container>(num_threads, buffer_size_,
-                                             tmp_dir_, max_disk_space);
+                                             tmp_dir_, disk_cap_bytes);
     } else {
         kmers_ = std::make_unique<Container>(num_threads, buffer_size_);
     }

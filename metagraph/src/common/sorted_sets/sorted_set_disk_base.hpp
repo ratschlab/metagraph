@@ -46,7 +46,7 @@ class SortedSetDiskBase {
     SortedSetDiskBase(size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
-                      size_t max_disk_space_bytes,
+                      size_t disk_cap_bytes,
                       size_t merge_count);
 
     virtual ~SortedSetDiskBase() {
@@ -164,7 +164,7 @@ class SortedSetDiskBase {
 
     size_t reserved_num_elements_;
 
-    size_t max_disk_space_bytes_;
+    size_t disk_cap_bytes_;
 
     size_t merge_count_;
 

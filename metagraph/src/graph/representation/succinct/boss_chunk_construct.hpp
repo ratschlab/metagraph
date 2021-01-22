@@ -28,7 +28,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                double memory_preallocated = 0,
                mtg::kmer::ContainerType container_type = mtg::kmer::ContainerType::VECTOR,
                const std::filesystem::path &swap_dir = "/tmp/",
-               size_t max_disk_space_bytes = 1e9);
+               size_t disk_cap_bytes = 1e9);
 
     virtual uint64_t get_k() const = 0;
 };

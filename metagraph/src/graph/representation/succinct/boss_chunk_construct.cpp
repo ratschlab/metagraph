@@ -955,7 +955,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          size_t num_threads,
                          double memory_preallocated,
                          const std::filesystem::path &swap_dir,
-                         size_t max_disk_space)
+                         size_t disk_cap_bytes)
         : swap_dir_(swap_dir),
           kmer_collector_(k + 1,
                           both_strands_mode,
@@ -963,7 +963,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           num_threads,
                           memory_preallocated,
                           swap_dir,
-                          max_disk_space,
+                          disk_cap_bytes,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
         if (filter_suffix.size()
@@ -1132,9 +1132,9 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &swap_dir,
-                                  size_t max_disk_space_bytes) {
+                                  size_t disk_cap_bytes) {
 #define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
-                   num_threads, memory_preallocated, swap_dir, max_disk_space_bytes
+                   num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:
