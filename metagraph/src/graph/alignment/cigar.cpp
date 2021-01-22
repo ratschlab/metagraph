@@ -182,9 +182,9 @@ bool Cigar::is_valid(const std::string_view reference,
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Operator::DELETION: {
-                if (i && cigar_[i - 1].first == Operator::INSERTION) {
-                    std::cerr << "DELETION after INSERTION" << std::endl
+            case Operator::INSERTION: {
+                if (i && cigar_[i - 1].first == Operator::DELETION) {
+                    std::cerr << "INSERTION after DELETION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -201,9 +201,9 @@ bool Cigar::is_valid(const std::string_view reference,
 
                 alt_it += op.second;
             } break;
-            case Operator::INSERTION: {
-                if (i && cigar_[i - 1].first == Operator::DELETION) {
-                    std::cerr << "INSERTION after DELETION" << std::endl
+            case Operator::DELETION: {
+                if (i && cigar_[i - 1].first == Operator::INSERTION) {
+                    std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

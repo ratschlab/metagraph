@@ -714,7 +714,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
     }
 }
 
-TYPED_TEST(DBGAlignerTest, align_delete_non_existent) {
+TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     size_t k = 4;
     std::string reference = "TTTCC"     "TTGTT";
     std::string query =     "TTTCC" "A" "TTGTT";
@@ -732,7 +732,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_non_existent) {
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty, path.get_score());
-    EXPECT_EQ("5=1D5=", path.get_cigar().to_string());
+    EXPECT_EQ("5=1I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -747,7 +747,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_non_existent) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_delete_multi) {
+TYPED_TEST(DBGAlignerTest, align_insert_multi) {
     size_t k = 4;
     std::string reference = "TTTCC"      "TTGTT";
     std::string query =     "TTTCC" "AA" "TTGTT";
@@ -766,7 +766,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_multi) {
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(reference)
         + config.gap_opening_penalty + config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("5=2D5=", path.get_cigar().to_string());
+    EXPECT_EQ("5=2I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -781,7 +781,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_multi) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_delete_long) {
+TYPED_TEST(DBGAlignerTest, align_insert_long) {
     size_t k = 4;
     std::string reference = "TTTCC"             "TTGTT";
     std::string query =     "TTTCC" "AAAAAAAAA" "TTGTT";
@@ -800,7 +800,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_long) {
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty
         + score_t(8) * config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("5=9D5=", path.get_cigar().to_string());
+    EXPECT_EQ("5=9I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -815,7 +815,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_long) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_delete_long_offset) {
+TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     size_t k = 4;
     std::string reference = "TTTCCG" "G"             "TTGTTA";
     std::string query =     "TTTCCG" "C" "AAAAAAAAA" "TTGTTA";
@@ -835,8 +835,8 @@ TYPED_TEST(DBGAlignerTest, align_delete_long_offset) {
     EXPECT_EQ(config.score_sequences(reference, "TTTCCGCTTGTTA")
         + config.gap_opening_penalty
         + score_t(8) * config.gap_extension_penalty, path.get_score());
-    EXPECT_TRUE(path.get_cigar().to_string() == "6=1X9D6="
-        || path.get_cigar().to_string() == "6=9D1X6=") << path.get_cigar().to_string();
+    EXPECT_TRUE(path.get_cigar().to_string() == "6=1X9I6="
+        || path.get_cigar().to_string() == "6=9I1X6=") << path.get_cigar().to_string();
     EXPECT_EQ(12u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -851,7 +851,7 @@ TYPED_TEST(DBGAlignerTest, align_delete_long_offset) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_insert) {
+TYPED_TEST(DBGAlignerTest, align_delete) {
     size_t k = 4;
     std::string reference = "TTCGAT" "TGGCCT";
     std::string query =     "TTCGAT"  "GGCCT";
@@ -872,8 +872,8 @@ TYPED_TEST(DBGAlignerTest, align_insert) {
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty, path.get_score());
 
     // TODO: the first should ideally always be true
-    EXPECT_TRUE("6=1I5=" == path.get_cigar().to_string()
-        || "5=1I6=" == path.get_cigar().to_string());
+    EXPECT_TRUE("6=1D5=" == path.get_cigar().to_string()
+        || "5=1D6=" == path.get_cigar().to_string());
     // EXPECT_EQ("6=1I5=", path.get_cigar().to_string());
 
     EXPECT_FALSE(path.is_exact_match());
@@ -909,7 +909,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
         + score_t(3) * config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("10=4I9=", path.get_cigar().to_string());
+    EXPECT_EQ("10=4D9=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -943,7 +943,7 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
         + score_t(3) * config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("4=4I9=", path.get_cigar().to_string());
+    EXPECT_EQ("4=4D9=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -958,7 +958,7 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_loop_insertion) {
+TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
     size_t k = 4;
     std::string reference = "AAAA" "TTTT" "CGAGGCCAA";
     std::string query =     "AAAA"        "CGAGGCCAA";
@@ -979,7 +979,7 @@ TYPED_TEST(DBGAlignerTest, align_loop_insertion) {
     EXPECT_EQ("AAAATTTCGAGGCCAA", path.get_sequence());
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty
         + score_t(2) * config.gap_extension_penalty, path.get_score());
-    EXPECT_EQ("4=3I9=", path.get_cigar().to_string());
+    EXPECT_EQ("4=3D9=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
@@ -1095,7 +1095,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_insert_after_delete) {
+TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     size_t k = 27;
     std::string reference = "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATG" "A"        "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
     std::string query =     "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATG" "ACAAATGT" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
@@ -1119,10 +1119,10 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_insert_after_delete) {
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC",
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
-    EXPECT_TRUE(path.get_cigar().to_string() == "45=7D8=1X39="
-             || path.get_cigar().to_string() == "44=2D1=5D8=1X39="
-             || path.get_cigar().to_string() == "44=3D1=4D8=1X39="
-             || path.get_cigar().to_string() == "44=4D1=3D8=1X39=")
+    EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
+             || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
+             || path.get_cigar().to_string() == "44=3I1=4I8=1X39="
+             || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
         << path.get_cigar().to_string();
     EXPECT_EQ(92u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -1145,10 +1145,10 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_insert_after_delete) {
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC",
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
-    EXPECT_TRUE(path.get_cigar().to_string() == "45=7D8=1X39="
-             || path.get_cigar().to_string() == "44=2D1=5D8=1X39="
-             || path.get_cigar().to_string() == "44=3D1=4D8=1X39="
-             || path.get_cigar().to_string() == "44=4D1=3D8=1X39=")
+    EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
+             || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
+             || path.get_cigar().to_string() == "44=3I1=4I8=1X39="
+             || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
         << path.get_cigar().to_string();
     EXPECT_EQ(92u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
@@ -1673,7 +1673,7 @@ TEST(DBGAlignerTest, align_dummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TEST(DBGAlignerTest, align_extended_delete_after_match) {
+TEST(DBGAlignerTest, align_extended_insert_after_match) {
     size_t k = 27;
     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG"    "GCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG"    "CCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
@@ -1692,7 +1692,7 @@ TEST(DBGAlignerTest, align_extended_delete_after_match) {
 
     EXPECT_EQ(47u, path.size());
     EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ("22=3D2=3X9=3I4=1D1=1X2D3=2D1=1D7=1I1=2I2=1X3=1X6=6S",
+    EXPECT_EQ("22=3I2=3X9=3D4=1I1=1X2I3=2I1=1I7=1D1=2D2=1X3=1X6=6S",
               path.get_cigar().to_string());
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph,

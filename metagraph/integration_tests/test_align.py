@@ -24,7 +24,7 @@ GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
 @unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
-class TestAlign(unittest.TestCase):
+class TestDNAAlign(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
@@ -251,7 +251,7 @@ class TestAlign(unittest.TestCase):
 
 
 @unittest.skipUnless(PROTEIN_MODE, "These alignment tests are only for the Protein alphabet")
-class TestAlign(unittest.TestCase):
+class TestProteinAlign(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
