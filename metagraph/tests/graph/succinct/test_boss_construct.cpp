@@ -197,10 +197,10 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
                 constructor->add_sequence(std::move(sequence));
             }
 
-            std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
+            BOSS::Chunk chunk = constructor->build_chunk();
 
             sdsl::int_vector<> weights;
-            chunk->initialize_boss(&constructed, &weights);
+            chunk.initialize_boss(&constructed, &weights);
 
             ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 
@@ -299,7 +299,7 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
             for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
                 for (bool weighted : { false, true }) {
                     for (size_t num_threads : { 1, 4 }) {
-                        std::unique_ptr<BOSS::Chunk> graph_data;
+                        BOSS::Chunk graph_data;
 
                         for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
                             std::unique_ptr<IBOSSChunkConstructor> constructor(
@@ -311,17 +311,16 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
                             constructor->add_sequence(std::string(100, 'T') + "A"
                                                             + std::string(100, 'G'));
 
-                            auto next_block = constructor->build_chunk();
-                            if (graph_data) {
-                                graph_data->extend(*next_block);
-                                delete next_block;
+                            BOSS::Chunk next_block = constructor->build_chunk();
+                            if (graph_data.size()) {
+                                graph_data.extend(next_block);
                             } else {
-                                graph_data.reset(next_block);
+                                graph_data = std::move(next_block);
                             }
                         }
 
                         BOSS boss;
-                        graph_data->initialize_boss(&boss);
+                        graph_data.initialize_boss(&boss);
 
                         EXPECT_EQ(boss_dynamic, boss);
                     }

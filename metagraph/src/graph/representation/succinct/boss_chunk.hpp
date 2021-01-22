@@ -22,6 +22,11 @@ class BOSS::Chunk {
   public:
     typedef uint8_t TAlphabet;
 
+    Chunk() {}
+
+    Chunk(Chunk&&) = default;
+    Chunk& operator=(Chunk&&) = default;
+
     /**
      * Creates an empty BOSS chunk with the given parameters
      * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
