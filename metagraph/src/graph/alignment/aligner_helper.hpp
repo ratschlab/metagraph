@@ -215,8 +215,6 @@ class SuffixSeeder;
 //       calling this class' methods
 template <typename NodeType = SequenceGraph::node_index>
 class Alignment {
-  friend SuffixSeeder<NodeType>;
-
   public:
     typedef NodeType node_index;
     typedef DBGAlignerConfig::score_t score_t;
