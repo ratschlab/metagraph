@@ -273,10 +273,14 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
                 // assert(column->second.prev_nodes.at(i + 1) == 0xFF);
                 // assert(column->second.scores.at(i + 1) >= score_track);
+
+#ifdef NDEBUG
                 if (column->second.ops.at(i - shift) == Cigar::DELETION)
                     logger->error("INSERTION after DELETION: {}", query_view);
 
+#else
                 assert(column->second.ops.at(i - shift) != Cigar::DELETION);
+#endif
                 score_track -= column->second.ops.at(i - shift) == Cigar::INSERTION
                     ? config.gap_extension_penalty
                     : config.gap_opening_penalty;
