@@ -138,6 +138,7 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
 }
 
 BOSS::Chunk::~Chunk() {
+    // remove the temp directory, but only if it was initialized
     if (!dir_.empty())
         utils::remove_temp_dir(dir_);
 }
