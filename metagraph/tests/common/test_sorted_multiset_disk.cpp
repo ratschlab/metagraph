@@ -42,11 +42,11 @@ void expect_equals(common::SortedMultisetDisk<TypeParam, uint8_t> &underTest,
 template <typename T>
 common::SortedMultisetDisk<T, uint8_t> create_sorted_set_disk(size_t container_size = 8) {
     constexpr size_t thread_count = 1;
-    constexpr size_t max_disk_space = 1e6;
+    constexpr size_t disk_cap_bytes = 1e6;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     return common::SortedMultisetDisk<T, uint8_t>(
-            thread_count, container_size, "./test_chunk_", max_disk_space);
+            thread_count, container_size, "./test_chunk_", disk_cap_bytes);
 }
 
 TYPED_TEST(SortedMultisetDiskTest, Empty) {
@@ -222,12 +222,12 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     constexpr uint32_t container_size = 2 * std::numeric_limits<uint8_t>::max();
 
     constexpr size_t thread_count = 1;
-    constexpr size_t max_disk_space = 1e6;
+    constexpr size_t disk_cap_bytes = 1e6;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     {
         common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-                thread_count, container_size, "./test_chunk_", max_disk_space);
+                thread_count, container_size, "./test_chunk_", disk_cap_bytes);
         // make sure we correctly count up to the max value of the counter
         for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max(); ++idx) {
             std::vector<TypeParam> values = { TypeParam(value) };
@@ -239,7 +239,7 @@ TYPED_TEST(SortedMultisetDiskTest, CounterOverflowAtMergeMemory) {
     // now let's generate an overflow in the counter
     {
         common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-                thread_count, container_size, "./test_chunk_", max_disk_space);
+                thread_count, container_size, "./test_chunk_", disk_cap_bytes);
         for (uint32_t idx = 0; idx < std::numeric_limits<uint8_t>::max() + 10; ++idx) {
             std::vector<TypeParam> values = { TypeParam(value) };
             underTest.insert(values.begin(), values.end());
@@ -258,12 +258,12 @@ TYPED_TEST(SortedMultisetDiskTest, ExhaustMaxAllowedDiskSpace) {
     constexpr uint32_t container_size = 256;
 
     constexpr size_t thread_count = 1;
-    constexpr size_t max_disk_space
+    constexpr size_t disk_cap_bytes
             = container_size * sizeof(std::pair<uint32_t, uint8_t>) * 2;
     std::filesystem::create_directory("./test_chunk_");
     std::atexit([]() { std::filesystem::remove_all("./test_chunk_"); });
     common::SortedMultisetDisk<TypeParam, uint8_t> underTest(
-            thread_count, container_size, "./test_chunk_", max_disk_space);
+            thread_count, container_size, "./test_chunk_", disk_cap_bytes);
     std::vector<TypeParam> values(container_size / 1.5);
     std::iota(values.begin(), values.end(), 0);
     // these values will fill the buffer and write to disk filling half the allowed space

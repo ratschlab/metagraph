@@ -271,6 +271,7 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
 template<typename T>
 bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
     if (data.wait_for(0s) != std::future_status::ready) {
+        logger->info("[Server] Got a request during initialization. Asked to come back later");
         response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
                         "Server is currently initializing, please come back later.");
         return false;
