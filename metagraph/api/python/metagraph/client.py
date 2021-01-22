@@ -47,10 +47,7 @@ class GraphClientJson:
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
         if align:
-            json_obj, err = self.align(sequence, discovery_threshold, **align_params)
-
-            if err:
-                raise RuntimeError(f"Error while calling the server API {str(err)}")
+            json_obj = self.align(sequence, discovery_threshold, **align_params)
 
             def to_fasta(df):
                 fasta = []
@@ -80,11 +77,8 @@ class GraphClientJson:
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
                   'discovery_fraction': discovery_threshold}
-        return self._json_seq_query(sequence, params, "align")
 
-    # noinspection PyTypeChecker
-    def column_labels(self) -> Tuple[JsonStrList, str]:
-        return self._do_request("column_labels", {}, False)
+        return self._json_seq_query(sequence, params, "align")
 
     def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
                         endpoint: str) -> Tuple[JsonDict, str]:
@@ -110,24 +104,31 @@ class GraphClientJson:
         try:
             json_obj = ret.json()
         except:
-            return {}, str(ret.status_code) + " " + ret.text
+            raise RuntimeError(
+                f"Error while calling the server API. {str(ret.status_code)}: {ret.text}")
 
         if not ret.ok:
             error_msg = json_obj['error'] if 'error' in json_obj.keys() else str(json_obj)
-            return {}, str(ret.status_code) + " " + error_msg
+            raise RuntimeError(
+                f"Error while calling the server API. {str(ret.status_code)}: {error_msg}")
 
-        return json_obj, ""
+        return json_obj
+
+    # noinspection PyTypeChecker
+    def column_labels(self) -> Tuple[JsonStrList, str]:
+        return self._do_request("column_labels", {}, post_req=False)
 
     def stats(self) -> Tuple[dict, str]:
         return self._do_request("stats", {}, post_req=False)
 
     def ready(self) -> bool:
-        result = self.stats()
-        if result[0]:
+        try:
+            self.stats()
             return True
-        if result[1].startswith("503 Server is currently initializing"):
-            return False
-        raise RuntimeError(f"Error. Server response: {result[1]}")
+        except RuntimeError as e:
+            if "503: Server is currently initializing" in str(e):
+                return False
+            raise e
 
 
 class GraphClient:
@@ -142,13 +143,9 @@ class GraphClient:
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
-        json_obj, err = self._json_client.search(sequence, top_labels,
-                                                 discovery_threshold,
-                                                 align, **align_params)
-
-        if err:
-            raise RuntimeError(
-                f"Error while calling the server API {str(err)}")
+        json_obj = self._json_client.search(sequence, top_labels,
+                                            discovery_threshold,
+                                            align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
 
@@ -156,21 +153,14 @@ class GraphClient:
               discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence, discovery_threshold,
-                                                max_alternative_alignments,
-                                                max_num_nodes_per_seq_char)
-
-        if err:
-            raise RuntimeError(f"Error while calling the server API {str(err)}")
+        json_obj = self._json_client.align(sequence, discovery_threshold,
+                                           max_alternative_alignments,
+                                           max_num_nodes_per_seq_char)
 
         return helpers.df_from_align_result(json_obj)
 
     def column_labels(self) -> List[str]:
-        json_obj, err = self._json_client.column_labels()
-
-        if err:
-            raise RuntimeError(f"Error while calling the server API {str(err)}")
-        return json_obj
+        return self._json_client.column_labels()
 
     def ready(self) -> bool:
         return self._json_client.ready()
