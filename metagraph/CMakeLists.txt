@@ -378,7 +378,7 @@ if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto)
+  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
 endif()
 
 # check for std::filesystem::temp_directory_path
