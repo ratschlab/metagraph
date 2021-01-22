@@ -223,8 +223,7 @@ class TestAPIClient(TestAPIBase):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
         df = ret[self.graph_name]
 
-        self.assertIn('cigar', df.columns)
-        self.assertEqual((self.sample_query_expected_rows, 6), df.shape)
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -274,13 +273,17 @@ class TestAPIJson(TestAPIBase):
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
+    def setUp(self):
+        if not self.graph_client.ready():
+            self.fail("Server takes too long to initialize")
+
     def test_api_align_json(self):
-        ret, _ = self.graph_client.align("TCGATCGA")
+        ret = self.graph_client.align("TCGATCGA")
         self.assertEqual(len(ret), 1)
 
     # do various queries
     def test_api_simple_query(self):
-        res_list, _ = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
+        res_list = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
 
         self.assertEqual(len(res_list), 1)
 
@@ -297,14 +300,14 @@ class TestAPIJson(TestAPIBase):
     def test_api_multiple_queries(self):
         repetitions = 4
 
-        res_list, _ = self.graph_client.search([self.sample_query] * repetitions)
+        res_list = self.graph_client.search([self.sample_query] * repetitions)
         self.assertEqual(len(res_list), repetitions)
 
         # testing if the returned query indices range from 0 to n - 1
         self.assertEqual(sorted(range(0, repetitions)), sorted([int(a['seq_description']) for a in res_list]))
 
     def test_api_stats(self):
-        res = self.graph_client.stats()[0]
+        res = self.graph_client.stats()
 
         self.assertIn("graph", res.keys())
         graph_props = res['graph']
