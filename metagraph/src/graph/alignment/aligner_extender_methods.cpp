@@ -78,7 +78,7 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
             dp_table.expand_to_cover(column_it, begin, end);
             assert(shift == column.start_index);
             if (scores.size() > old_size) {
-                update_del_scores(config,
+                update_ins_scores(config,
                                   scores.data() + begin - shift,
                                   column.prev_nodes.data() + begin - shift,
                                   column.ops.data() + begin - shift,
@@ -94,7 +94,7 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
         dp_table.expand_to_cover(column_it, begin, end);
         shift = column.start_index;
         if (scores.size() > old_size) {
-            update_del_scores(config,
+            update_ins_scores(config,
                               scores.data() + begin - shift,
                               column.prev_nodes.data() + begin - shift,
                               column.ops.data() + begin - shift,
@@ -248,7 +248,7 @@ void DefaultColumnExtender<NodeType>::check_and_push(ColumnRef&& next_column) {
  */
 
 template <typename score_t>
-inline void update_del_scores(const DBGAlignerConfig &config,
+inline void update_ins_scores(const DBGAlignerConfig &config,
                               score_t *update_scores,
                               uint8_t *update_prevs,
                               Cigar::Operator *update_ops,
@@ -256,22 +256,22 @@ inline void update_del_scores(const DBGAlignerConfig &config,
                               size_t length,
                               score_t xdrop_cutoff) {
     for (size_t i = 1; i < length; ++i) {
-        score_t del_score = std::max(config.min_cell_score,
-            update_scores[i - 1] + (update_ops[i - 1] == Cigar::DELETION
+        score_t ins_score = std::max(config.min_cell_score,
+            update_scores[i - 1] + (update_ops[i - 1] == Cigar::INSERTION
                 ? config.gap_extension_penalty
                 : config.gap_opening_penalty
         ));
 
-        if (del_score >= xdrop_cutoff && del_score > update_scores[i]) {
-            while (i < length && del_score > update_scores[i]) {
-                update_scores[i] = del_score;
-                update_ops[i] = Cigar::DELETION;
+        if (ins_score >= xdrop_cutoff && ins_score > update_scores[i]) {
+            while (i < length && ins_score > update_scores[i]) {
+                update_scores[i] = ins_score;
+                update_ops[i] = Cigar::INSERTION;
                 update_prevs[i] = 0xFF;
 
                 if (updated_mask)
                     updated_mask[i] = 0xFF;
 
-                del_score += config.gap_extension_penalty;
+                ins_score += config.gap_extension_penalty;
                 ++i;
             }
             --i;
@@ -317,7 +317,7 @@ inline void compute_HE_avx2(size_t length,
     assert(update_scores != incoming_scores);
     assert(update_gap_scores != incoming_gap_scores);
 
-    __m128i insert_p = _mm_set1_epi8(Cigar::INSERTION);
+    __m128i del_p = _mm_set1_epi8(Cigar::DELETION);
     for (size_t i = 1; i < length; i += 8) {
         // store score updates
         // load previous values for cells to update
@@ -332,7 +332,7 @@ inline void compute_HE_avx2(size_t length,
         // compute score for cell update
         __m256i H = _mm256_max_epi32(H_orig, match_score);
 
-        // compute insert score
+        // compute deletion score
         __m256i update_score_open = _mm256_add_epi32(
             rshiftpushback_epi32(incoming_p, incoming_scores[i + 7]),
             gap_opening_penalty
@@ -361,7 +361,7 @@ inline void compute_HE_avx2(size_t length,
         incoming_count = _mm256_blendv_epi8(update_gap_count_orig, incoming_count, gap_updated);
         update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, gap_updated_small);
 
-        // compute score for cell update. check if inserting a gap improves the update
+        // compute score for cell update. check if deleting improves the update
         __m256i update_cmp = _mm256_cmpgt_epi32(update_score, H);
         H = _mm256_max_epi32(H, update_score);
 
@@ -389,7 +389,7 @@ inline void compute_HE_avx2(size_t length,
         update_gap_prev = _mm_blendv_epi8(update_gap_prevs_orig, update_gap_prev, both_cmp_small);
         mm_storeu_si64(&update_gap_prevs[i], update_gap_prev);
 
-        __m128i update_op = _mm_blendv_epi8(mm_loadu_si64(&profile_ops[i]), insert_p, update_cmp_small);
+        __m128i update_op = _mm_blendv_epi8(mm_loadu_si64(&profile_ops[i]), del_p, update_cmp_small);
         mm_maskstorel_epi8(&update_ops[i], both_cmp_small, update_op);
 
         __m128i updated_mask_orig = mm_loadu_si64(&updated_mask[i]);
@@ -434,7 +434,7 @@ inline void compute_HE(size_t length,
             // compute score for cell update
             int32_t H = std::max(H_orig, match_score);
 
-            // compute insert score
+            // compute deletion score
             int32_t update_score_open = incoming_scores[i] + gap_opening_penalty;
             int32_t update_score_extend = incoming_gap_scores[i] + gap_extension_penalty;
             int32_t update_score = std::max(update_score_open, update_score_extend);
@@ -451,7 +451,7 @@ inline void compute_HE(size_t length,
                 update_gap_prev = update_gap_prevs[i];
             }
 
-            // compute score for cell update. check if inserting a gap improves the update
+            // compute score for cell update. check if deleting improves the update
             int32_t update_cmp = update_score > H ? 0xFFFFFFFF : 0x0;
             H = std::max(H, update_score);
 
@@ -472,7 +472,7 @@ inline void compute_HE(size_t length,
             update_gap_count[i] = incoming_count;
             update_gap_prevs[i] = update_gap_prev;
 
-            update_ops[i] = update_cmp ? Cigar::INSERTION : profile_ops[i];
+            update_ops[i] = update_cmp ? Cigar::DELETION : profile_ops[i];
             updated_mask[i] = 0xFF;
             update_prevs[i] = update_cmp ? update_gap_prev : prev_node;
         }
@@ -516,7 +516,7 @@ inline void compute_updates(Column &update_column,
 
     if (update_score >= xdrop_cutoff && update_score > update_scores[0]) {
         update_scores[0] = update_score;
-        update_ops[0] = Cigar::INSERTION;
+        update_ops[0] = Cigar::DELETION;
         update_prevs[0] = prev_node_rank;
         updated_mask[0] = 0xFF;
 
@@ -569,7 +569,7 @@ inline void compute_updates(Column &update_column,
 
 #endif
 
-    update_del_scores(config, update_scores, update_prevs, update_ops,
+    update_ins_scores(config, update_scores, update_prevs, update_ops,
                       updated_mask.data(), length, xdrop_cutoff);
 }
 
@@ -770,7 +770,7 @@ void DefaultColumnExtender<NodeType>
 
     if (dp_table.size() == 1 && out_columns.size() && out_columns.front().first != incoming_node) {
         dp_table.expand_to_cover(incoming_find, 0, size);
-        update_del_scores(config_,
+        update_ins_scores(config_,
                           incoming_find.value().scores.data(),
                           incoming_find.value().prev_nodes.data(),
                           incoming_find.value().ops.data(),
