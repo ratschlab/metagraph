@@ -40,7 +40,8 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
-                    const std::vector<Label> &labels) {
+                    const std::vector<Label> &labels,
+                    std::shared_ptr<annot::Taxonomy> taxonomy) {
     assert(check_compatibility());
 
     std::vector<row_index> indices;
@@ -62,6 +63,9 @@ void AnnotatedSequenceGraph
             row_major->add_labels_fast(indices, labels);
             return;
         }
+    }
+    if (taxonomy != nullptr) {
+        taxonomy->update_row_indices(indices, labels);
     }
 
     annotator_->add_labels(indices, labels);

@@ -33,7 +33,7 @@ void Taxonomy::dfs_linearization(
         const ChildrenList &tree,
         std::vector<TaxoLabel> &tree_linearization
 ) {
-    linerization_idx[node] = tree_linearization.size();
+    linearization_idx[node] = tree_linearization.size();
     tree_linearization.push_back(node);
     for(auto child: tree[node]) {
         dfs_linearization(child, tree, tree_linearization);
@@ -50,10 +50,12 @@ void Taxonomy::read_tree(const std::string &tree_filepath, Taxonomy::ChildrenLis
     while (f >> parent >> child) {
         if (!label_to_index.count(parent)) {
             label_to_index[parent] = next_available_label++;
+            index_to_label.push_back(parent);
             tree.push_back(std::vector<TaxoLabel>());
         }
         if (!label_to_index.count(child)) {
             label_to_index[child] = next_available_label++;
+            index_to_label.push_back(child);
             tree.push_back(std::vector<TaxoLabel>());
         }
         tree[label_to_index[parent]].push_back(label_to_index[child]);
@@ -77,7 +79,7 @@ void Taxonomy::read_tree(const std::string &tree_filepath, Taxonomy::ChildrenLis
 
 void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
     std::vector<TaxoLabel> tree_linearization;
-    linerization_idx.resize(tree.size());
+    linearization_idx.resize(tree.size());
     dfs_linearization(root_node, tree, tree_linearization);
 
     uint num_rmq_rows = log (tree_linearization.size()) + 2;
@@ -103,6 +105,15 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
         delta *= 2;
     }
 
+    precalc_log.resize(tree_linearization.size());
+    precalc_pow2.push_back(1);
+    for (uint i = 2; i < tree_linearization.size(); ++i) {
+        precalc_log[i] = 1 + precalc_log[i/2];
+        if(precalc_log[i] > precalc_log[i-1]) {
+            precalc_pow2.push_back(i);
+        }
+    }
+
     for (uint row = 0; row < num_rmq_rows; ++row) {
         for (uint i = 0; i < tree_linearization.size(); ++i) {
             std::cout << rmq_data[row][i] << " ";
@@ -113,7 +124,6 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
 }
 
 Taxonomy::Taxonomy(const std::string &tree_filepath) {
-
     if (!std::filesystem::exists(tree_filepath)) {
 //        TODO check extension
         logger->error("Can't open taxonomic tree file '{}'.", tree_filepath);
@@ -134,7 +144,51 @@ Taxonomy::Taxonomy(const std::string &tree_filepath) {
         }
         std::cout << std::endl;
     }
+}
 
+TaxoLabel Taxonomy::find_lca(const std::vector<TaxoLabel> &labels) {
+    uint64_t left_idx = linearization_idx[labels[0]];
+    uint64_t right_idx = linearization_idx[labels[0]];
+    for (const auto &label: labels) {
+        if (linearization_idx[label] < left_idx) {
+            left_idx = linearization_idx[label];
+        }
+        if (linearization_idx[label] > right_idx) {
+            right_idx = linearization_idx[label];
+        }
+    }
+    uint64_t log_dist = precalc_log[right_idx - left_idx];
+    uint64_t left_lca = rmq_data[log_dist][left_idx];
+    uint64_t right_lca = rmq_data[log_dist][right_idx - precalc_pow2[log_dist] + 1];
+    if (node_depth[left_lca] > node_depth[right_lca]) {
+        return left_lca;
+    }
+    return right_lca;
+
+}
+
+TaxoLabel Taxonomy::find_lca(const std::vector<Label> &raw_labels) {
+    std::vector<TaxoLabel> labels;
+    for (const auto &label: raw_labels) {
+        labels.push_back(label_to_index[label]);
+    }
+    return find_lca(labels);
+}
+
+TaxoLabel Taxonomy::find_lca(const TaxoLabel &label1, const TaxoLabel &label2) {
+    return find_lca(std::vector<TaxoLabel> {label1, label2});
+}
+
+void Taxonomy::update_row_indices(const std::vector<row_index> &indices, const std::vector<Label> &labels) {
+    TaxoLabel lca = find_lca(labels);
+
+    for (const auto &kmer: indices) {
+        if (taxonomic_map.count(kmer)) {
+            taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
+        } else {
+            taxonomic_map[kmer] = lca;
+        }
+    }
 }
 
 }

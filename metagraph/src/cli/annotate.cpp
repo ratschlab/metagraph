@@ -198,6 +198,7 @@ void add_kmer_counts(const std::string &file,
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
+                   std::shared_ptr<annot::Taxonomy> taxonomy,
                    const std::string &annotator_filename) {
     auto anno_graph = initialize_annotated_dbg(graph, config);
 
@@ -227,8 +228,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
                 thread_pool.enqueue(
-                    [&anno_graph](const std::string &sequence, const auto &labels) {
-                        anno_graph->annotate_sequence(sequence, labels);
+                    [&anno_graph, &taxonomy](const std::string &sequence, const auto &labels) {
+                        anno_graph->annotate_sequence(sequence, labels, taxonomy);
                     },
                     std::move(sequence), std::move(labels)
                 );
@@ -367,13 +368,13 @@ int annotate_graph(Config *config) {
     const auto graph = load_critical_dbg(config->infbase);
 
 //    query.cpp line 710
-    std::shared_ptr<annot::Taxonomy> taxonomy;
+    std::shared_ptr<annot::Taxonomy> taxonomy = nullptr;
     if (config->taxonomic_tree.size()) {
         taxonomy = std::make_shared<annot::Taxonomy>(config->taxonomic_tree);
     }
 
     if (!config->separately) {
-        annotate_data(graph, *config, files, config->outfbase);
+        annotate_data(graph, *config, files, taxonomy, config->outfbase);
 
     } else {
         // |config->separately| is true
@@ -387,7 +388,7 @@ int annotate_graph(Config *config) {
 
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
         for (size_t i = 0; i < files.size(); ++i) {
-            annotate_data(graph, *config, { files[i] },
+            annotate_data(graph, *config, { files[i] }, taxonomy,
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
                     : files[i]);
