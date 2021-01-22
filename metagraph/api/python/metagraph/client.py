@@ -33,17 +33,32 @@ class GraphClientJson:
         if api_path:
             self.server = f"{self.server}/{api_path.lstrip('/')}"
 
-        self.name = name
-        if not name:
-            name = self.server
+        self.name = name if name else self.server
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
-               align: bool = False) -> Tuple[JsonDict, str]:
+               align: bool = False,
+               **align_params) -> Tuple[JsonDict, str]:
+        """See parameters for alignment `align_params` in align()"""
+
         if discovery_threshold < 0.0 or discovery_threshold > 1.0:
             raise ValueError(
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+
+        if align:
+            json_obj, err = self.align(sequence, discovery_threshold, **align_params)
+
+            if err:
+                raise RuntimeError(f"Error while calling the server API {str(err)}")
+
+            def to_fasta(df):
+                fasta = []
+                for i in range(df.shape[0]):
+                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
+                return '\n'.join(fasta)
+
+            sequence = to_fasta(helpers.df_from_align_result(json_obj))
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
@@ -127,19 +142,9 @@ class GraphClient:
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
-        if align:
-            alignments = self.align(sequence, **align_params)
-
-            def to_fasta(df):
-                fasta = []
-                for i in range(df.shape[0]):
-                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
-                return '\n'.join(fasta)
-
-            sequence = to_fasta(alignments)
-
-        (json_obj, err) = self._json_client.search(sequence, top_labels,
-                                                   discovery_threshold)
+        json_obj, err = self._json_client.search(sequence, top_labels,
+                                                 discovery_threshold,
+                                                 align, **align_params)
 
         if err:
             raise RuntimeError(
@@ -152,13 +157,13 @@ class GraphClient:
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
         json_obj, err = self._json_client.align(sequence, discovery_threshold,
-                                                max_alternative_alignments, max_num_nodes_per_seq_char)
+                                                max_alternative_alignments,
+                                                max_num_nodes_per_seq_char)
 
         if err:
             raise RuntimeError(f"Error while calling the server API {str(err)}")
 
         return helpers.df_from_align_result(json_obj)
-
 
     def column_labels(self) -> List[str]:
         json_obj, err = self._json_client.column_labels()
