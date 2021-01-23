@@ -145,9 +145,6 @@ class CanonicalDBG : public DeBruijnGraph {
 
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
-    void get_kmers_from_prefix(node_index node, std::vector<node_index> &parents) const;
-    void get_kmers_from_suffix(node_index node, std::vector<node_index> &children) const;
-
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
@@ -186,6 +183,14 @@ class CanonicalDBG : public DeBruijnGraph {
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
     node_index reverse_complement(node_index node) const;
+
+    // find all parent nodes of node which are only represented in their reverse
+    // complement orientation in the underlying graph
+    void append_parent_nodes_using_node_rev_comp(node_index node, std::vector<node_index> &parents) const;
+
+    // find all child nodes of node which are only represented in their reverse
+    // complement orientation in the underlying graph
+    void append_child_nodes_using_node_rev_comp(node_index node, std::vector<node_index> &children) const;
 };
 
 } // namespace graph

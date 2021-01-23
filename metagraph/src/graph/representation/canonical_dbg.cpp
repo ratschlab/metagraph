@@ -125,13 +125,30 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }
 }
 
-void CanonicalDBG::get_kmers_from_suffix(node_index node,
+void CanonicalDBG
+::append_child_nodes_using_node_rev_comp(node_index node,
                                          std::vector<node_index> &children) const {
+    /**
+     *
+     * find children of node by searching for parents of its reverse complement
+     * e.g., node = ATGGCT. Find TGGCTA and TGGCTT by looking for  TAGCCA and AAGCCA
+     *         TGGCTA      TAGCCA
+     *        /                  \
+     *  ATGGCT         ->         AGCCAT
+     *        \                  /
+     *         TGGCTT      AAGCCA
+     */
+
     const auto &alphabet = graph_.alphabet();
+
+    //        rshift    rc
+    // ATGGCT -> TGGCT* -> *AGCCA
     std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq[0] == '\0');
 
+    // for each n, check for nAGCCA. If found, define and store the index for
+    // TGGCTrc(n) as index(nAGCCA) + offset_
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
     if (dbg_succ) {
         const auto &boss = dbg_succ->get_boss();
@@ -206,7 +223,7 @@ void CanonicalDBG
         });
 
         if (!graph_.is_canonical_mode() && max_num_edges_left)
-            get_kmers_from_suffix(node, children);
+            append_child_nodes_using_node_rev_comp(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t i = 0; i < children.size(); ++i) {
@@ -219,14 +236,32 @@ void CanonicalDBG
 }
 
 void CanonicalDBG
-::get_kmers_from_prefix(node_index node, std::vector<node_index> &parents) const {
+::append_parent_nodes_using_node_rev_comp(node_index node,
+                                          std::vector<node_index> &parents) const {
+    /**
+     * find parents of node by searching for children of its reverse complement
+     * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
+     *  TAGCCA                    TGGCTA
+     *        \                  /
+     *         AGCCAT  ->  ATGGCT
+     *        /                  \
+     *  AAGCCA                    TGGCTT
+     */
+
     const auto &alphabet = graph_.alphabet();
+
+    //        lshift    rc
+    // AGCCAT -> *AGCCA -> TGGCT*
     std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq.back() == '\0');
 
+    // for each n, check for TGGCTn. If found, define and store the index for
+    // rc(n)AGCCA as index(TGGCTn) + offset_
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
     if (dbg_succ) {
+        // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
+        // Then, convert the edge indices to get the DBGSuccinct node indices
         const auto &boss = dbg_succ->get_boss();
         auto encoded = boss.encode(std::string_view(rev_seq.data(), get_k() - 1));
 
@@ -304,7 +339,7 @@ void CanonicalDBG
         });
 
         if (!graph_.is_canonical_mode() && max_num_edges_left)
-            get_kmers_from_prefix(node, parents);
+            append_parent_nodes_using_node_rev_comp(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t i = 0; i < parents.size(); ++i) {
