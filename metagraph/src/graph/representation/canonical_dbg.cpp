@@ -234,12 +234,12 @@ void CanonicalDBG
 
         if (edge && edge_2 && end == encoded.end()) {
             assert(edge == edge_2);
-            do {
-                node_index prev = dbg_succ->boss_to_kmer_index(edge);
+            boss.call_outgoing(edge, [&](auto adjacent_edge) {
+                node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
                 if (prev) {
-                    char c = alphabet[boss.get_W(edge) % boss.alph_size];
+                    char c = alphabet[boss.get_W(adjacent_edge) % boss.alph_size];
                     if (c == boss::BOSS::kSentinel)
-                        continue;
+                        return;
 
                     size_t i = boss.encode(::reverse_complement(c));
 
@@ -250,7 +250,7 @@ void CanonicalDBG
                         parents[i] = prev + offset_;
                     }
                 }
-            } while (--edge && !boss.get_last(edge));
+            });
         }
 
     } else {

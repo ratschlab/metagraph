@@ -1795,10 +1795,10 @@ inline void masked_call_outgoing(const BOSS &boss,
             && "i has to point to the last outgoing edge in unmasked graph");
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
-    do {
-        if (!subgraph_mask || (*subgraph_mask)[i])
-            callback(i);
-    } while (--i > 0 && !boss.get_last(i));
+    boss.call_outgoing(i, [&](BOSS::edge_index adjacent_edge) {
+        if (!subgraph_mask || (*subgraph_mask)[adjacent_edge])
+            callback(adjacent_edge);
+    });
 }
 
 // If a single incoming edge is found, write it to |*i| and return true.
@@ -2968,6 +2968,13 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
         callback(std::move(sequence), std::move(edges));
 
     }, num_threads, true, kmers_in_single_form, subgraph_mask, true);
+}
+
+void BOSS::call_outgoing(edge_index edge, const Call<edge_index> &callback) const {
+    edge = succ_last(edge);
+    do {
+        callback(edge);
+    } while (--edge && !get_last(edge));
 }
 
 /**

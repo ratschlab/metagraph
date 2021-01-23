@@ -104,6 +104,11 @@ class BOSS {
     using Call = typename std::function<void(T...)>;
 
     /**
+     * Given the last outgoing edge of a given node, call all edges from that node
+     */
+    void call_outgoing(edge_index edge, const Call<edge_index> &callback) const;
+
+    /**
      * Traverse the boss graph and call all its edges
      * except for the dummy source nodes and the dummy sink nodes
      */
