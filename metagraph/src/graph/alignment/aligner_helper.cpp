@@ -965,21 +965,23 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const QueryAlignment &other)
-      : query_(other.query_),
-        query_rc_(other.query_rc_),
-        alignments_(other.alignments_) {
-    fix_pointers(other.get_query(),
-                 other.get_query_reverse_complement());
+auto QueryAlignment<NodeType>
+::operator=(const QueryAlignment &other) -> QueryAlignment& {
+    query_ = other.query_;
+    query_rc_ = other.query_rc_;
+    alignments_ = other.alignments_;
+    fix_pointers(other.get_query(), other.get_query_reverse_complement());
+    return *this;
 }
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(QueryAlignment&& other) noexcept
-      : query_(other.query_),
-        query_rc_(other.query_rc_),
-        alignments_(std::move(other.alignments_)) {
-    fix_pointers(other.get_query(),
-                 other.get_query_reverse_complement());
+auto QueryAlignment<NodeType>
+::operator=(QueryAlignment&& other) noexcept -> QueryAlignment& {
+    query_ = other.query_;
+    query_rc_ = other.query_rc_;
+    alignments_ = std::move(other.alignments_);
+    fix_pointers(other.get_query(), other.get_query_reverse_complement());
+    return *this;
 }
 
 template <typename NodeType>

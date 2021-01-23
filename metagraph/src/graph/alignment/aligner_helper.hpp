@@ -424,8 +424,10 @@ class QueryAlignment {
     typedef Alignment<NodeType> value_type;
 
     QueryAlignment(const std::string_view query);
-    QueryAlignment(const QueryAlignment &other);
-    QueryAlignment(QueryAlignment&& other) noexcept;
+    QueryAlignment(const QueryAlignment &other) { *this = other; }
+    QueryAlignment(QueryAlignment&& other) noexcept { *this = std::move(other); }
+    QueryAlignment& operator=(const QueryAlignment &other);
+    QueryAlignment& operator=(QueryAlignment&& other) noexcept;
 
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
@@ -478,8 +480,8 @@ class QueryAlignment {
     // vector may be incorrect, so this corrects them
     void fix_pointers(const std::string &query, const std::string &query_rc);
 
-    const std::string query_;
-    const std::string query_rc_;
+    std::string query_;
+    std::string query_rc_;
     std::vector<value_type> alignments_;
 };
 
