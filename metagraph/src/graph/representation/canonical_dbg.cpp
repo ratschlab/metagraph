@@ -256,7 +256,6 @@ void CanonicalDBG
                         parents[i] = prev + offset_;
                     }
                 }
-
             } while (--edge && !boss.get_last(edge));
         }
 
