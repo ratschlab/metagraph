@@ -128,7 +128,6 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 void CanonicalDBG::get_kmers_from_suffix(node_index node,
                                          std::vector<node_index> &children) const {
     const auto &alphabet = graph_.alphabet();
-    node_index next;
     std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq[0] == '\0');
@@ -144,8 +143,7 @@ void CanonicalDBG::get_kmers_from_suffix(node_index node,
                 if (c == boss::BOSS::kSentinel)
                     return;
 
-                ::reverse_complement(&c, &c + 1);
-                size_t i = boss.encode(c);
+                size_t i = boss.encode(::reverse_complement(c));
 
                 if (children[i] == DeBruijnGraph::npos) {
                     if (!primary_)
@@ -162,11 +160,8 @@ void CanonicalDBG::get_kmers_from_suffix(node_index node,
             if (children[i] != DeBruijnGraph::npos)
                 continue;
 
-            char c = alphabet[i];
-            ::reverse_complement(&c, &c + 1);
-
-            rev_seq[0] = c;
-            next = graph_.kmer_to_node(rev_seq);
+            rev_seq[0] = ::reverse_complement(alphabet[i]);
+            node_index next = graph_.kmer_to_node(rev_seq);
             if (next != DeBruijnGraph::npos) {
                 if (!primary_)
                     rev_comp_cache_.Put(next, next + offset_);
@@ -183,7 +178,7 @@ void CanonicalDBG
     assert(node <= offset_ * 2);
     if (node > offset_) {
         call_incoming_kmers(node - offset_, [&](node_index next, char c) {
-            ::reverse_complement(&c, &c + 1);
+            c = ::reverse_complement(c);
             callback(reverse_complement(next), c);
             assert(traverse(node, c) == reverse_complement(next));
         });
@@ -246,8 +241,7 @@ void CanonicalDBG
                     if (c == boss::BOSS::kSentinel)
                         continue;
 
-                    ::reverse_complement(&c, &c + 1);
-                    size_t i = boss.encode(c);
+                    size_t i = boss.encode(::reverse_complement(c));
 
                     if (parents[i] == DeBruijnGraph::npos) {
                         if (!primary_)
@@ -260,16 +254,12 @@ void CanonicalDBG
         }
 
     } else {
-        node_index prev;
         for (size_t i = 0; i < alphabet.size(); ++i) {
             if (parents[i] != DeBruijnGraph::npos)
                 continue;
 
-            char c = alphabet[i];
-            ::reverse_complement(&c, &c + 1);
-
-            rev_seq.back() = c;
-            prev = graph_.kmer_to_node(rev_seq);
+            rev_seq.back() = ::reverse_complement(alphabet[i]);
+            node_index prev = graph_.kmer_to_node(rev_seq);
             if (prev != DeBruijnGraph::npos) {
                 if (!primary_)
                     rev_comp_cache_.Put(prev, prev + offset_);
@@ -286,7 +276,7 @@ void CanonicalDBG
     assert(node <= offset_ * 2);
     if (node > offset_) {
         call_outgoing_kmers(node - offset_, [&](node_index prev, char c) {
-            ::reverse_complement(&c, &c + 1);
+            c = ::reverse_complement(c);
             callback(reverse_complement(prev), c);
             assert(traverse_back(node, c) == reverse_complement(prev));
         });
@@ -387,8 +377,7 @@ std::string CanonicalDBG::get_node_sequence(node_index index) const {
 DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char) const {
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        ::reverse_complement(&next_char, &next_char + 1);
-        node = traverse_back(node - offset_, next_char);
+        node = traverse_back(node - offset_, ::reverse_complement(next_char));
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
@@ -406,8 +395,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
                                                       char prev_char) const {
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        ::reverse_complement(&prev_char, &prev_char + 1);
-        node = traverse(node - offset_, prev_char);
+        node = traverse(node - offset_, ::reverse_complement(prev_char));
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
