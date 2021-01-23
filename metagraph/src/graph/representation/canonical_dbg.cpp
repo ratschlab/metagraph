@@ -125,8 +125,8 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }
 }
 
-void CanonicalDBG
-::get_kmers_from_suffix(node_index node, std::vector<node_index> &children) const {
+void CanonicalDBG::get_kmers_from_suffix(node_index node,
+                                         std::vector<node_index> &children) const {
     const auto &alphabet = graph_.alphabet();
     node_index next;
     std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
