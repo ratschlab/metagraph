@@ -171,14 +171,12 @@ class IExtender {
     operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
-    virtual void initialize(const DBGAlignment &path) = 0;
+    virtual void initialize(const DBGAlignment &seed) = 0;
     virtual const std::string_view get_query() const = 0;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
-    virtual const DBGAlignerConfig& get_config() const = 0;
 
   protected:
-    virtual void set_graph(const DeBruijnGraph &graph) = 0;
     virtual void reset() = 0;
     virtual const DBGAlignment& get_seed() const = 0;
 };
@@ -217,13 +215,13 @@ class DefaultColumnExtender : public IExtender<NodeType> {
         return *graph_;
     }
 
-    const DBGAlignerConfig& get_config() const override { return config_; }
+    const DBGAlignerConfig& get_config() const { return config_; }
 
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
     const ColumnQueue& get_column_queue() const { return columns_to_update; }
 
   protected:
-    virtual void set_graph(const DeBruijnGraph &graph) override { graph_ = &graph; }
+    virtual void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
     virtual void reset() override { dp_table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
