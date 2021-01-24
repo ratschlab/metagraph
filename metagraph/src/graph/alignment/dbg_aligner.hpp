@@ -40,8 +40,8 @@ class IDBGAligner {
     virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
-template <class ThisSeeder = ExactSeeder<>,
-          class ThisExtender = DefaultColumnExtender<>,
+template <class Seeder = ExactSeeder<>,
+          class Extender = DefaultColumnExtender<>,
           class AlignmentCompare = std::less<Alignment<>>>
 class SeedAndExtendAligner : public IDBGAligner {
   public:
@@ -72,7 +72,8 @@ class SeedAndExtendAligner : public IDBGAligner {
     virtual const DBGAlignerConfig& get_config() const override = 0;
 
   protected:
-    typedef const std::function<void(const std::function<void(Seeder<node_index>&&, Extender<node_index>&&)>&)> AlignmentCoreGenerator;
+    typedef const std::function<void(const std::function<void(ISeeder<node_index>&&,
+                                                              IExtender<node_index>&&)>&)> AlignmentCoreGenerator;
     typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
@@ -82,8 +83,8 @@ class SeedAndExtendAligner : public IDBGAligner {
                     const std::function<void(DBGAlignment&&)> &callback,
                     const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
 
-    virtual std::shared_ptr<Seeder<node_index>> build_seeder() const = 0;
-    virtual std::shared_ptr<Extender<node_index>> build_extender() const = 0;
+    virtual std::shared_ptr<ISeeder<node_index>> build_seeder() const = 0;
+    virtual std::shared_ptr<IExtender<node_index>> build_extender() const = 0;
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
@@ -112,10 +113,10 @@ class SeedAndExtendAligner : public IDBGAligner {
 };
 
 
-template <class ThisSeeder = ExactSeeder<>,
-          class ThisExtender = DefaultColumnExtender<>,
+template <class Seeder = ExactSeeder<>,
+          class Extender = DefaultColumnExtender<>,
           class AlignmentCompare = std::less<Alignment<>>>
-class DBGAligner : public SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare> {
+class DBGAligner : public SeedAndExtendAligner<Seeder, Extender, AlignmentCompare> {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment<node_index> DBGAlignment;
@@ -134,15 +135,15 @@ class DBGAligner : public SeedAndExtendAligner<ThisSeeder, ThisExtender, Alignme
     const DBGAlignerConfig& get_config() const override { return config_; }
 
   protected:
-    typedef typename SeedAndExtendAligner<ThisSeeder, ThisExtender>::AlignmentGenerator AlignmentGenerator;
+    typedef typename SeedAndExtendAligner<Seeder, Extender>::AlignmentGenerator AlignmentGenerator;
 
   private:
-    std::shared_ptr<Seeder<node_index>> build_seeder() const override {
-        return std::make_shared<ThisSeeder>(graph_, config_);
+    std::shared_ptr<ISeeder<node_index>> build_seeder() const override {
+        return std::make_shared<Seeder>(graph_, config_);
     }
 
-    std::shared_ptr<Extender<node_index>> build_extender() const override {
-        return std::make_shared<ThisExtender>(graph_, config_);
+    std::shared_ptr<IExtender<node_index>> build_extender() const override {
+        return std::make_shared<Extender>(graph_, config_);
     }
 
     const DeBruijnGraph& graph_;
@@ -150,13 +151,13 @@ class DBGAligner : public SeedAndExtendAligner<ThisSeeder, ThisExtender, Alignme
 };
 
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline void SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_core(const std::string_view query,
              const AlignmentCoreGenerator &alignment_core_generator,
              const std::function<void(DBGAlignment&&)> &callback,
              const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const {
-    alignment_core_generator([&](Seeder<node_index>&& seeder, Extender<node_index>&& extend) {
+    alignment_core_generator([&](ISeeder<node_index>&& seeder, IExtender<node_index>&& extend) {
         std::vector<DBGAlignment> seeds;
         seeder.call_seeds([&](DBGAlignment&& seed) {
             assert(seed.is_valid(get_graph(), &get_config()));
@@ -234,8 +235,8 @@ inline void SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
     });
 }
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_one_direction(const std::string_view query,
                       bool orientation) const -> DBGQueryAlignment {
     DBGQueryAlignment paths(query);
@@ -260,8 +261,8 @@ inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
     return paths;
 }
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_both_directions(const std::string_view query) const -> DBGQueryAlignment {
     DBGQueryAlignment paths(query);
 
@@ -354,8 +355,8 @@ inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
     return paths;
 }
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::build_alignment_core_generator(const std::string_view query,
                                  bool orientation) const -> AlignmentCoreGenerator {
     return [this,query,orientation](const auto &callback) {
@@ -368,8 +369,8 @@ inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
     };
 }
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::build_alignment_core_generator_from_seeds(const std::string_view query,
                                             bool orientation,
                                             std::vector<DBGAlignment>&& seeds) const
@@ -384,8 +385,8 @@ inline auto SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
     };
 }
 
-template <class ThisSeeder, class ThisExtender, class AlignmentCompare>
-inline void SeedAndExtendAligner<ThisSeeder, ThisExtender, AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_aggregate(DBGQueryAlignment &paths,
                   const AlignmentGenerator &alignment_generator) const {
     AlignmentAggregator<node_index, AlignmentCompare> path_queue(

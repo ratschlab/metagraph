@@ -18,11 +18,11 @@ namespace align {
 /******************* Abstract Seeder classes *******************/
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class Seeder {
+class ISeeder {
   public:
     typedef Alignment<NodeType> Seed;
 
-    virtual ~Seeder() {}
+    virtual ~ISeeder() {}
 
     virtual void initialize(std::string_view /* query string */,
                             bool /* orientation */) {}
@@ -34,9 +34,9 @@ class Seeder {
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class ExactMapSeeder : public Seeder<NodeType> {
+class ExactMapSeeder : public ISeeder<NodeType> {
   public:
-    typedef typename Seeder<NodeType>::Seed Seed;
+    typedef typename ISeeder<NodeType>::Seed Seed;
     typedef DBGAlignerConfig::score_t score_t;
 
     virtual ~ExactMapSeeder() {}
@@ -62,7 +62,7 @@ class ExactMapSeeder : public Seeder<NodeType> {
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class MEMSeeder : public ExactMapSeeder<NodeType> {
   public:
-    typedef typename Seeder<NodeType>::Seed Seed;
+    typedef typename ISeeder<NodeType>::Seed Seed;
     typedef DBGAlignerConfig::score_t score_t;
 
     void call_seeds(std::function<void(Seed&&)> callback) const;
@@ -74,7 +74,7 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
 /************************ Seeder classes ***********************/
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class ManualSeeder : public Seeder<NodeType> {
+class ManualSeeder : public ISeeder<NodeType> {
   public:
     typedef Alignment<NodeType> Seed;
 
@@ -101,7 +101,7 @@ class ManualSeeder : public Seeder<NodeType> {
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ExactSeeder : public ExactMapSeeder<NodeType> {
   public:
-    typedef typename Seeder<NodeType>::Seed Seed;
+    typedef typename ISeeder<NodeType>::Seed Seed;
     typedef DBGAlignerConfig::score_t score_t;
 
     ExactSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
@@ -120,7 +120,7 @@ class ExactSeeder : public ExactMapSeeder<NodeType> {
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
-    typedef typename Seeder<NodeType>::Seed Seed;
+    typedef typename ISeeder<NodeType>::Seed Seed;
 
     UniMEMSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config),
@@ -144,9 +144,9 @@ class UniMEMSeeder : public MEMSeeder<NodeType> {
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class SuffixSeeder : public Seeder<NodeType> {
+class SuffixSeeder : public ISeeder<NodeType> {
   public:
-    typedef typename Seeder<NodeType>::Seed Seed;
+    typedef typename ISeeder<NodeType>::Seed Seed;
 
     SuffixSeeder(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
 
@@ -170,13 +170,13 @@ class SuffixSeeder : public Seeder<NodeType> {
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class Extender {
+class IExtender {
   public:
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::node_index node_index;
     typedef typename DBGAlignment::score_t score_t;
 
-    virtual ~Extender() {}
+    virtual ~IExtender() {}
 
     virtual void
     operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
@@ -197,11 +197,11 @@ class Extender {
 
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class DefaultColumnExtender : public Extender<NodeType> {
+class DefaultColumnExtender : public IExtender<NodeType> {
   public:
-    typedef typename Extender<NodeType>::DBGAlignment DBGAlignment;
-    typedef typename Extender<NodeType>::node_index node_index;
-    typedef typename Extender<NodeType>::score_t score_t;
+    typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
+    typedef typename IExtender<NodeType>::node_index node_index;
+    typedef typename IExtender<NodeType>::score_t score_t;
     typedef std::tuple<NodeType,
                        score_t,
                        bool /* converged */> ColumnRef;
