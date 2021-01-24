@@ -50,15 +50,15 @@ ExactMapSeeder<NodeType>::ExactMapSeeder(const DeBruijnGraph &graph,
 
 template <typename NodeType>
 void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
-    const auto &graph = this->get_graph();
+    const DeBruijnGraph &graph = this->get_graph();
     size_t k = graph.get_k();
 
-    const auto &config = this->get_config();
+    const DBGAlignerConfig &config = this->get_config();
     assert(k >= config.min_seed_length);
 
-    const auto &query_nodes = this->get_query_nodes();
-    const auto &partial_sum = this->get_partial_sums();
-    auto query = this->get_query();
+    const std::vector<NodeType> &query_nodes = this->get_query_nodes();
+    const std::vector<score_t> &partial_sum = this->get_partial_sums();
+    std::string_view query = this->get_query();
     bool orientation = this->get_orientation();
 
     if (this->get_num_matching_nucleotides()
