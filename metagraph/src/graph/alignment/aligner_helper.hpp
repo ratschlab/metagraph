@@ -423,7 +423,7 @@ class QueryAlignment {
   public:
     typedef Alignment<NodeType> value_type;
 
-    QueryAlignment(const std::string_view query);
+    QueryAlignment(const std::string_view query, bool orientation = false);
     QueryAlignment(const QueryAlignment &other) { *this = other; }
     QueryAlignment(QueryAlignment&& other) noexcept { *this = std::move(other); }
     QueryAlignment& operator=(const QueryAlignment &other);

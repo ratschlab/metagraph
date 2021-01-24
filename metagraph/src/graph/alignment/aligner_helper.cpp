@@ -985,7 +985,8 @@ auto QueryAlignment<NodeType>
 }
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const std::string_view query) {
+QueryAlignment<NodeType>::QueryAlignment(const std::string_view query,
+                                         bool orientation) {
     // TODO: remove const_cast
     auto &qu = const_cast<std::string&>(query_);
     auto &qu_rc = const_cast<std::string&>(query_rc_);
@@ -1005,6 +1006,9 @@ QueryAlignment<NodeType>::QueryAlignment(const std::string_view query) {
     qu_rc.resize(query.size());
     memcpy(qu_rc.data(), qu.data(), qu.capacity());
     reverse_complement(qu_rc.begin(), qu_rc.end());
+
+    if (orientation)
+        std::swap(qu, qu_rc);
 }
 
 
