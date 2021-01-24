@@ -344,7 +344,7 @@ int align_to_graph(Config *config) {
     if (config->canonical && !graph->is_canonical_mode()) {
         logger->trace("Wrap as canonical DBG");
         // TODO: check and wrap into canonical only if the graph is primary
-        graph.reset(new CanonicalDBG(graph, true));
+        graph.reset(new CanonicalDBG(graph));
     }
 
     Timer timer;

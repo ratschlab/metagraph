@@ -10,39 +10,32 @@ namespace graph {
 using mtg::common::logger;
 
 
-// If the graph has even order and is primary, then only is_palindrome_cache_
-// is required. rev_comp_cache_ is only required if the underlying graph is not
-// primary.
-CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
-                           bool primary,
-                           size_t cache_size)
+CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         alphabet_encoder_({ graph_.alphabet().size() }),
-        primary_(primary && !graph->is_canonical_mode()),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
-        rev_comp_cache_(primary_ ? 0 : cache_size),
-        is_palindrome_cache_(graph_.get_k() % 2 || !primary_ ? 0 : cache_size) {
+        is_palindrome_cache_(graph_.get_k() % 2 ? 0 : cache_size) {
+    if (graph->is_canonical_mode())
+        throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
+
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alphabet_encoder_[graph_.alphabet()[i]] = i;
     }
 }
 
-CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph,
-                           bool primary,
-                           size_t cache_size)
-      : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph),
-                     primary, cache_size) { graph_ptr_ = graph; }
+CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
+      : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph), cache_size) {
+    graph_ptr_ = graph;
+}
 
-CanonicalDBG::CanonicalDBG(const DeBruijnGraph &graph, bool primary, size_t cache_size)
+CanonicalDBG::CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size)
       : CanonicalDBG(std::shared_ptr<const DeBruijnGraph>(&graph, [](const auto*) {}),
-                     primary,
                      cache_size) {}
 
-CanonicalDBG::CanonicalDBG(DeBruijnGraph &graph, bool primary, size_t cache_size)
+CanonicalDBG::CanonicalDBG(DeBruijnGraph &graph, size_t cache_size)
       : CanonicalDBG(std::shared_ptr<DeBruijnGraph>(&graph, [](const auto*) {}),
-                     primary,
                      cache_size) {}
 
 uint64_t CanonicalDBG::num_nodes() const {
@@ -60,7 +53,6 @@ void CanonicalDBG
     offset_ = graph_.max_index();
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
-    rev_comp_cache_.Clear();
 }
 
 
@@ -96,15 +88,8 @@ void CanonicalDBG
             return;
 
         if (*jt != DeBruijnGraph::npos) {
-            if (!primary_)
-                rev_comp_cache_.Put(*jt, *it != DeBruijnGraph::npos ? *it : *jt + offset_);
-
             callback(*jt);
-
         } else if (*it != DeBruijnGraph::npos) {
-            if (!primary_)
-                rev_comp_cache_.Put(*it, *it + offset_);
-
             callback(*it + offset_);
         } else {
             callback(DeBruijnGraph::npos);
@@ -162,12 +147,8 @@ void CanonicalDBG
 
                 size_t i = boss.encode(::reverse_complement(c));
 
-                if (children[i] == DeBruijnGraph::npos) {
-                    if (!primary_)
-                        rev_comp_cache_.Put(next, next + offset_);
-
+                if (children[i] == DeBruijnGraph::npos)
                     children[i] = next + offset_;
-                }
             },
             get_k() - 1
         );
@@ -179,12 +160,8 @@ void CanonicalDBG
 
             rev_seq[0] = ::reverse_complement(alphabet[i]);
             node_index next = graph_.kmer_to_node(rev_seq);
-            if (next != DeBruijnGraph::npos) {
-                if (!primary_)
-                    rev_comp_cache_.Put(next, next + offset_);
-
+            if (next != DeBruijnGraph::npos)
                 children[i] = next + offset_;
-            }
         }
     }
 }
@@ -278,12 +255,8 @@ void CanonicalDBG
 
                     size_t i = boss.encode(::reverse_complement(c));
 
-                    if (parents[i] == DeBruijnGraph::npos) {
-                        if (!primary_)
-                            rev_comp_cache_.Put(prev, prev + offset_);
-
+                    if (parents[i] == DeBruijnGraph::npos)
                         parents[i] = prev + offset_;
-                    }
                 }
             });
         }
@@ -295,12 +268,8 @@ void CanonicalDBG
 
             rev_seq.back() = ::reverse_complement(alphabet[i]);
             node_index prev = graph_.kmer_to_node(rev_seq);
-            if (prev != DeBruijnGraph::npos) {
-                if (!primary_)
-                    rev_comp_cache_.Put(prev, prev + offset_);
-
+            if (prev != DeBruijnGraph::npos)
                 parents[i] = prev + offset_;
-            }
         }
     }
 }
@@ -472,34 +441,16 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     if (node > offset_) {
         // we know that this node is definitely not present in the base graph
 
-        if (!primary_) {
-            rev_comp_cache_.Put(node - offset_, node);
-        } else if (!(graph_.get_k() & 1)) {
+        if (!(graph_.get_k() & 1))
             is_palindrome_cache_.Put(node - offset_, false);
-        }
 
         return node - offset_;
 
-    } else if ((graph_.get_k() & 1) && primary_) {
-        // if k is odd and the underlying graph is primary, then we know that
-        // the reverse complement doesn't exist, so we apply the offset
+    } else if (graph_.get_k() & 1) {
+        // if k is odd, then we know that the reverse complement doesn't exist,
+        // so we apply the offset
         return node + offset_;
 
-    }
-
-    if (!primary_) {
-        try {
-            return rev_comp_cache_.Get(node);
-
-        } catch (...) {
-            std::string rev_seq = graph_.get_node_sequence(node);
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-
-            node_index rev_node = graph_.kmer_to_node(rev_seq);
-            rev_node = rev_node != DeBruijnGraph::npos ? rev_node : node + offset_;
-            rev_comp_cache_.Put(node, rev_node);
-            return rev_node;
-        }
     }
 
     try {
@@ -525,16 +476,11 @@ void CanonicalDBG::reverse_complement(std::string &seq,
                                       std::vector<node_index> &path) const {
     ::reverse_complement(seq.begin(), seq.end());
 
-    if (primary_) {
-        std::vector<node_index> rev_path(path.size());
-        std::transform(path.begin(), path.end(), rev_path.rbegin(), [&](node_index i) {
-            return reverse_complement(i);
-        });
-        std::swap(path, rev_path);
-
-    } else {
-        path = map_sequence_to_nodes(*this, seq);
-    }
+    std::vector<node_index> rev_path(path.size());
+    std::transform(path.begin(), path.end(), rev_path.rbegin(), [&](node_index i) {
+        return reverse_complement(i);
+    });
+    std::swap(path, rev_path);
 }
 
 } // namespace graph

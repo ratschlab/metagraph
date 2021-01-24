@@ -22,43 +22,29 @@ class CanonicalDBG : public DeBruijnGraph {
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(const DeBruijnGraph &graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 100'000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(DeBruijnGraph &graph, bool primary = false, size_t cache_size = 100'000);
+    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 100'000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 100'000);
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 100'000);
 
     virtual ~CanonicalDBG() {}
 
@@ -162,8 +148,6 @@ class CanonicalDBG : public DeBruijnGraph {
 
     std::array<size_t, 256> alphabet_encoder_;
 
-    mutable bool primary_;
-
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> child_node_cache_;
@@ -171,12 +155,6 @@ class CanonicalDBG : public DeBruijnGraph {
     // cache the results of call_incoming_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> parent_node_cache_;
-
-    // caches for the results of reverse_complement.
-
-    // cache the index of the reverse complement of a node
-    mutable caches::fixed_sized_cache<node_index, node_index,
-                                      caches::LRUCachePolicy<node_index>> rev_comp_cache_;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
