@@ -7,25 +7,37 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+typedef DBGAlignerConfig::score_t score_t;
+
 template <typename NodeType>
-void ExactMapSeeder<NodeType>::initialize(std::string_view query, bool orientation) {
-    query_ = query;
-    orientation_ = orientation;
-    query_nodes_.clear();
-
-    if (query_.size() < this->get_graph().get_k())
-        return;
-
-    query_nodes_ = map_sequence_to_nodes(this->get_graph(), query_);
+ExactMapSeeder<NodeType>::ExactMapSeeder(const DeBruijnGraph &graph,
+                                         std::string_view query,
+                                         bool orientation,
+                                         std::vector<NodeType>&& nodes,
+                                         const DBGAlignerConfig &config)
+      : query_(query),
+        orientation_(orientation),
+        query_nodes_(std::move(nodes)),
+        graph_(graph),
+        config_(config),
+        num_matching_(0) {
+    assert(config_.check_config_scores());
+    for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
+        if (*it) {
+            auto jt = std::find(it + 1, query_nodes_.end(), NodeType());
+            num_matching_ += graph_.get_k() + std::distance(it, jt) - 1;
+            it = jt - 1;
+        }
+    }
 
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
                    partial_sum_.begin() + 1,
-                   [&](char c) { return this->get_config().get_row(c)[c]; });
+                   [&](char c) { return config_.get_row(c)[c]; });
 
     std::partial_sum(partial_sum_.begin(), partial_sum_.end(), partial_sum_.begin());
-    assert(this->get_config().match_score(query_) == partial_sum_.back());
-    assert(this->get_config().get_row(query_.front())[query_.front()] == partial_sum_[1]);
+    assert(config_.match_score(query_) == partial_sum_.back());
+    assert(config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
     assert(!partial_sum_.front());
 }
 
@@ -42,10 +54,8 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     auto query = this->get_query();
     bool orientation = this->get_orientation();
 
-    // if node suffixes of length < k were matched, then query_nodes.size() may
-    // be greater than query.size() - k + 1
-    if (this->get_num_matching_kmers()
-            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+    if (this->get_num_matching_nucleotides()
+            < config.exact_kmer_match_fraction * query.size()) {
         return;
     }
 
@@ -66,52 +76,43 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     }
 }
 
-template <typename NodeType>
-SuffixSeeder<NodeType>::SuffixSeeder(const DeBruijnGraph &graph,
-                                     const DBGAlignerConfig &config) {
-    if (!dynamic_cast<const DBGSuccinct*>(&graph))
-        throw std::runtime_error("Only implemented for DBGSuccinct");
+template <class BaseSeeder>
+void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
+    base_seeder_.call_seeds(callback);
 
-    if (config.max_seed_length > graph.get_k()) {
-        base_seeder_ = std::make_unique<UniMEMSeeder<NodeType>>(graph, config);
-    } else {
-        base_seeder_ = std::make_unique<ExactSeeder<NodeType>>(graph, config);
-    }
-}
+    const auto query = base_seeder_.get_query();
+    const auto &config = base_seeder_.get_config();
+    const auto &query_nodes = base_seeder_.get_query_nodes();
 
-template <typename NodeType>
-void SuffixSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
-    base_seeder_->call_seeds(callback);
-
-    const auto query = get_query();
-    const auto &config = get_config();
-    const auto &query_nodes = get_query_nodes();
-    const auto &graph = dynamic_cast<const DBGSuccinct&>(get_graph());
-
-    size_t k = graph.get_k();
-    if (this->get_num_matching_kmers()
-            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+    if (base_seeder_.get_num_matching_nucleotides()
+            < config.exact_kmer_match_fraction * query.size()) {
         return;
     }
 
-    bool orientation = this->get_orientation();
+    size_t k = dbg_succ_.get_k();
+
+    bool orientation = base_seeder_.get_orientation();
 
     for (size_t i = 0; i + config.min_seed_length <= query.size(); ++i) {
         if (i >= query_nodes.size() || !query_nodes[i]) {
             size_t max_seed_length = std::min(config.max_seed_length,
                 std::min(k, query.size() - i)
             );
-            graph.call_nodes_with_suffix_matching_longest_prefix(
+            dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(query.data() + i, max_seed_length),
-                [&](NodeType alt_node, size_t seed_length) {
+                [&](node_index alt_node, size_t seed_length) {
                     std::string_view seed_seq(query.data() + i, seed_length);
                     DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
 
                     if (match_score > config.min_cell_score) {
-                        Seed seed(seed_seq, { alt_node }, match_score, i,
-                                  orientation, k - seed_length);
+                        Seed seed(seed_seq,
+                                  std::vector<node_index>{ alt_node },
+                                  match_score,
+                                  i,
+                                  orientation,
+                                  k - seed_length);
 
-                        assert(seed.is_valid(graph, &config));
+                        assert(seed.is_valid(dbg_succ_, &config));
                         callback(std::move(seed));
                     }
                 },
@@ -133,8 +134,8 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
     bool orientation = this->get_orientation();
     const auto &partial_sum = this->get_partial_sums();
 
-    if (this->get_num_matching_kmers()
-            < config.exact_kmer_match_fraction * (query.size() - k + 1)) {
+    if (this->get_num_matching_nucleotides()
+            < config.exact_kmer_match_fraction * query.size()) {
         return;
     }
 
@@ -196,10 +197,12 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
 }
 
 
+template class ExactMapSeeder<>;
 template class ExactSeeder<>;
-template class SuffixSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
+template class SuffixSeeder<ExactSeeder<>>;
+template class SuffixSeeder<UniMEMSeeder<>>;
 
 } // namespace align
 } // namespace graph

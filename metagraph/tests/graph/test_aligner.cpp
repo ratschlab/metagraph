@@ -97,7 +97,7 @@ get_extend(std::shared_ptr<const DeBruijnGraph> graph,
     uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
 
     return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<>>(*graph, uniconfig).align(query)
+        ? DBGAligner<SuffixSeeder<UniMEMSeeder<>>>(*graph, uniconfig).align(query)
         : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
 }
 
@@ -1428,7 +1428,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -1464,7 +1464,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths.front();
@@ -1503,7 +1503,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;
     config.min_seed_length = 13;
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -1621,7 +1621,7 @@ TEST(DBGAlignerTest, align_dummy) {
     config.max_seed_length = k;
     graph->add_sequence(reference);
 
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -1656,7 +1656,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
 
-    DBGAligner<SuffixSeeder<>> aligner(*graph, config);
+    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();

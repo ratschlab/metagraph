@@ -83,9 +83,6 @@ class SeedAndExtendAligner : public IDBGAligner {
                     const std::function<void(DBGAlignment&&)> &callback,
                     const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
 
-    virtual std::shared_ptr<ISeeder<node_index>> build_seeder() const = 0;
-    virtual std::shared_ptr<IExtender<node_index>> build_extender() const = 0;
-
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
     DBGQueryAlignment align_one_direction(const std::string_view query,
@@ -138,14 +135,6 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender, AlignmentCompar
     typedef typename SeedAndExtendAligner<Seeder, Extender>::AlignmentGenerator AlignmentGenerator;
 
   private:
-    std::shared_ptr<ISeeder<node_index>> build_seeder() const override {
-        return std::make_shared<Seeder>(graph_, config_);
-    }
-
-    std::shared_ptr<IExtender<node_index>> build_extender() const override {
-        return std::make_shared<Extender>(graph_, config_);
-    }
-
     const DeBruijnGraph& graph_;
     const DBGAlignerConfig config_;
 };
@@ -360,12 +349,15 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::build_alignment_core_generator(const std::string_view query,
                                  bool orientation) const -> AlignmentCoreGenerator {
     return [this,query,orientation](const auto &callback) {
-        auto seeder = build_seeder();
-        seeder->initialize(query, orientation);
-        auto extender = build_extender();
-        extender->initialize_query(query);
+        Extender extender(get_graph(), get_config());
+        extender.initialize_query(query);
 
-        callback(std::move(*seeder), std::move(*extender));
+        callback(Seeder(get_graph(),
+                        query,
+                        orientation,
+                        map_sequence_to_nodes(get_graph(), query),
+                        get_config()),
+                 std::move(extender));
     };
 }
 
@@ -376,12 +368,9 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
                                             std::vector<DBGAlignment>&& seeds) const
         -> AlignmentCoreGenerator {
     return [this,query,orientation,s=std::move(seeds)](const auto &callback) mutable {
-        ManualSeeder<node_index> seeder(get_graph(), get_config(), std::move(s));
-        seeder.initialize(query, orientation);
-        auto extender = build_extender();
-        extender->initialize_query(query);
-
-        callback(std::move(seeder), std::move(*extender));
+        Extender extender(get_graph(), get_config());
+        extender.initialize_query(query);
+        callback(ManualSeeder<node_index>(std::move(s)), std::move(extender));
     };
 }
 
