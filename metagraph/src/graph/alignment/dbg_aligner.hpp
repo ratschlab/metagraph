@@ -398,7 +398,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
                                             bool orientation,
                                             std::vector<DBGAlignment>&& seeds) const
         -> AlignmentCoreGenerator {
-    return [this,query,orientation,s=std::move(seeds)](const auto &callback) mutable {
+    return [this,query,s=std::move(seeds)](const auto &callback) mutable {
         callback(ManualSeeder<node_index>(std::move(s)),
                  Extender(get_graph(), get_config(), query));
     };
