@@ -43,6 +43,7 @@ class ExactMapSeeder : public ISeeder<NodeType> {
 
     virtual ~ExactMapSeeder() {}
 
+  protected:
     const std::string_view get_query() const { return query_; }
     bool get_orientation() const { return orientation_; }
 
@@ -63,8 +64,6 @@ class ExactMapSeeder : public ISeeder<NodeType> {
     std::vector<DBGAlignerConfig::score_t> partial_sum_;
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
-
-  protected:
     size_t num_matching_;
 };
 
@@ -140,20 +139,19 @@ class UniMEMSeeder : public MEMSeeder<NodeType> {
 };
 
 template <class BaseSeeder>
-class SuffixSeeder : public ISeeder<typename BaseSeeder::node_index> {
+class SuffixSeeder : public BaseSeeder {
   public:
     typedef typename BaseSeeder::node_index node_index;
     typedef typename BaseSeeder::Seed Seed;
 
     template <typename ... Args>
     SuffixSeeder(Args&&... args)
-          : base_seeder_(std::forward<Args>(args)...),
-            dbg_succ_(dynamic_cast<const DBGSuccinct&>(base_seeder_.get_graph())) {}
+          : BaseSeeder(std::forward<Args>(args)...),
+            dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->get_graph())) {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
 
   private:
-    BaseSeeder base_seeder_;
     const DBGSuccinct &dbg_succ_;
 };
 

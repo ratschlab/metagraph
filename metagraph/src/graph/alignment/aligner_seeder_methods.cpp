@@ -88,20 +88,19 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
 
 template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
-    base_seeder_.call_seeds(callback);
+    this->BaseSeeder::call_seeds(callback);
 
-    const std::string_view query = base_seeder_.get_query();
-    const DBGAlignerConfig &config = base_seeder_.get_config();
-    const std::vector<node_index> &query_nodes = base_seeder_.get_query_nodes();
+    const std::string_view query = this->get_query();
+    const DBGAlignerConfig &config = this->get_config();
+    const std::vector<node_index> &query_nodes = this->get_query_nodes();
 
-    if (base_seeder_.get_num_matching_nucleotides()
+    if (this->get_num_matching_nucleotides()
             < config.exact_match_fraction * query.size()) {
         return;
     }
 
     size_t k = dbg_succ_.get_k();
-
-    bool orientation = base_seeder_.get_orientation();
+    bool orientation = this->get_orientation();
 
     auto call_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         std::string_view seed_seq(query.data() + i, seed_length);
