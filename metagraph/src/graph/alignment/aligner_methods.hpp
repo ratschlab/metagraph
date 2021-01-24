@@ -206,13 +206,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
 
   protected:
-    const DeBruijnGraph& get_graph() const {
-        assert(graph_);
-        return *graph_;
-    }
+    const DeBruijnGraph& get_graph() const { return graph_; }
     const std::string_view get_query() const { return query; }
     const ColumnQueue& get_column_queue() const { return columns_to_update; }
-    virtual void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
     virtual void reset() override { dp_table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
@@ -242,7 +238,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual ColumnQueue& get_column_queue() { return columns_to_update; }
 
   private:
-    const DeBruijnGraph *graph_;
+    const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
 
     // keep track of which columns to use next

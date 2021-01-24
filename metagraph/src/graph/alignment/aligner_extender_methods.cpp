@@ -22,7 +22,7 @@ template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
                                                        const DBGAlignerConfig &config,
                                                        std::string_view query)
-      : graph_(&graph), config_(config), query(query) {
+      : graph_(graph), config_(config), query(query) {
     assert(config_.check_config_scores());
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
@@ -33,7 +33,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     assert(config_.match_score(query) == partial_sums_.front());
     assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
 
-    for (char c : graph_->alphabet()) {
+    for (char c : graph_.alphabet()) {
         auto &profile_score_row = profile_score.emplace(c, query.size() + 8).first.value();
         auto &profile_op_row = profile_op.emplace(c, query.size() + 8).first.value();
 
@@ -579,12 +579,11 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
              score_t min_path_score) {
-    assert(graph_);
     assert(columns_to_update.empty());
 
     const auto &path = get_seed();
 
-    if (!graph_->outdegree(path.back())) {
+    if (!graph_.outdegree(path.back())) {
         callback(DBGAlignment(), NodeType());
         return;
     }
@@ -653,14 +652,16 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
     double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
     bool added = false;
 
-    if (dynamic_cast<const DBGSuccinct*>(graph_)) {
-        const auto &dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_);
-        const auto &boss = dbg_succ.get_boss();
-        graph_->adjacent_outgoing_nodes(node, [&](auto next_node) {
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+    if (dbg_succ) {
+        // If an outgoing node is already in the DPTable, then there's no need
+        // to decode the last character of that node.
+        const auto &boss = dbg_succ->get_boss();
+        graph_.adjacent_outgoing_nodes(node, [&](auto next_node) {
             auto find = dp_table.find(next_node);
             char c = find == dp_table.end()
                 ? boss.decode(
-                      boss.get_W(dbg_succ.kmer_to_boss_index(next_node)) % boss.alph_size
+                      boss.get_W(dbg_succ->kmer_to_boss_index(next_node)) % boss.alph_size
                   )
                 : find->second.last_char;
             if (c != '$' && ((dp_table.size() < max_num_nodes
@@ -676,7 +677,7 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
             }
         });
     } else {
-        graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
+        graph_.call_outgoing_kmers(node, [&](auto next_node, char c) {
             if (c != '$' && ((dp_table.size() < max_num_nodes
                                 && num_bytes <= config_.max_ram_per_alignment)
                     || dp_table.count(next_node))) {
@@ -720,7 +721,7 @@ void DefaultColumnExtender<NodeType>
         auto out_columns = fork_extension(node, callback, min_path_score);
 
         assert(std::all_of(out_columns.begin(), out_columns.end(), [&](const auto &pair) {
-            return graph_->traverse(node, pair.second) == pair.first;
+            return graph_.traverse(node, pair.second) == pair.first;
         }));
 
         update_columns(node, out_columns, min_path_score);
@@ -749,7 +750,7 @@ void DefaultColumnExtender<NodeType>
         logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
-    dp_table.extract_alignments(*graph_,
+    dp_table.extract_alignments(graph_,
                                 config_,
                                 std::string_view(align_start, size - 1),
                                 callback,
