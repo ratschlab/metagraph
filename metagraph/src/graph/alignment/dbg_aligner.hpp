@@ -98,7 +98,6 @@ class SeedAndExtendAligner : public IDBGAligner {
 
     virtual AlignmentCoreGenerator
     build_alignment_core_generator_from_seeds(const std::string_view query,
-                                              bool orientation,
                                               std::vector<DBGAlignment>&& seeds) const;
 };
 
@@ -351,7 +350,7 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
         align_core(
             paths.get_query_reverse_complement(),
             build_alignment_core_generator_from_seeds(paths.get_query_reverse_complement(),
-                                                      true, std::move(reverse_seeds)),
+                                                      std::move(reverse_seeds)),
             [&](DBGAlignment&& path) {
                 // If the path originated from a backwards alignment (forward alignment
                 // of a reverse complement) and did not skip the first characters
@@ -395,7 +394,6 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 template <class Seeder, class Extender, class AlignmentCompare>
 inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::build_alignment_core_generator_from_seeds(const std::string_view query,
-                                            bool orientation,
                                             std::vector<DBGAlignment>&& seeds) const
         -> AlignmentCoreGenerator {
     return [this,query,s=std::move(seeds)](const auto &callback) mutable {
