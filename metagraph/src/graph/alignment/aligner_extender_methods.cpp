@@ -19,10 +19,11 @@ using mtg::common::logger;
 
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::initialize_query(const std::string_view query) {
-    this->query = query;
-
+DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
+                                                       const DBGAlignerConfig &config,
+                                                       std::string_view query)
+      : graph_(&graph), config_(config), query(query) {
+    assert(config_.check_config_scores());
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
                    partial_sums_.begin(),
@@ -32,8 +33,6 @@ void DefaultColumnExtender<NodeType>
     assert(config_.match_score(query) == partial_sums_.front());
     assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
 
-    profile_score.clear();
-    profile_op.clear();
     for (char c : graph_->alphabet()) {
         auto &profile_score_row = profile_score.emplace(c, query.size() + 8).first.value();
         auto &profile_op_row = profile_op.emplace(c, query.size() + 8).first.value();

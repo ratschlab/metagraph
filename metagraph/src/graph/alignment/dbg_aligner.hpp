@@ -52,21 +52,8 @@ class SeedAndExtendAligner : public IDBGAligner {
 
     virtual ~SeedAndExtendAligner() {}
 
-    virtual void
-    align_batch(const QueryGenerator &generate_query,
-                const AlignmentCallback &callback) const override {
-        generate_query([&](std::string_view header, std::string_view query, bool orientation) {
-            assert(get_config().num_alternative_paths);
-            if (get_graph().is_canonical_mode()) {
-                // From a given seed, align forwards, then reverse complement and
-                // align backwards. The graph needs to be canonical to ensure that
-                // all paths exist even when complementing.
-                callback(header, align_both_directions(query));
-            } else {
-                callback(header, align_one_direction(query, orientation));
-            }
-        });
-    }
+    virtual void align_batch(const QueryGenerator &generate_query,
+                             const AlignmentCallback &callback) const override;
 
     virtual const DeBruijnGraph& get_graph() const override = 0;
     virtual const DBGAlignerConfig& get_config() const override = 0;
@@ -139,6 +126,23 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender, AlignmentCompar
     const DBGAlignerConfig config_;
 };
 
+
+template <class Seeder, class Extender, class AlignmentCompare>
+inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
+::align_batch(const QueryGenerator &generate_query,
+              const AlignmentCallback &callback) const {
+    generate_query([&](std::string_view header, std::string_view query, bool orientation) {
+        assert(get_config().num_alternative_paths);
+        if (get_graph().is_canonical_mode()) {
+            // From a given seed, align forwards, then reverse complement and
+            // align backwards. The graph needs to be canonical to ensure that
+            // all paths exist even when complementing.
+            callback(header, align_both_directions(query));
+        } else {
+            callback(header, align_one_direction(query, orientation));
+        }
+    });
+}
 
 template <class Seeder, class Extender, class AlignmentCompare>
 inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
@@ -349,15 +353,12 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::build_alignment_core_generator(const std::string_view query,
                                  bool orientation) const -> AlignmentCoreGenerator {
     return [this,query,orientation](const auto &callback) {
-        Extender extender(get_graph(), get_config());
-        extender.initialize_query(query);
-
         callback(Seeder(get_graph(),
                         query,
                         orientation,
                         map_sequence_to_nodes(get_graph(), query),
                         get_config()),
-                 std::move(extender));
+                 Extender(get_graph(), get_config(), query));
     };
 }
 
@@ -368,9 +369,8 @@ inline auto SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
                                             std::vector<DBGAlignment>&& seeds) const
         -> AlignmentCoreGenerator {
     return [this,query,orientation,s=std::move(seeds)](const auto &callback) mutable {
-        Extender extender(get_graph(), get_config());
-        extender.initialize_query(query);
-        callback(ManualSeeder<node_index>(std::move(s)), std::move(extender));
+        callback(ManualSeeder<node_index>(std::move(s)),
+                 Extender(get_graph(), get_config(), query));
     };
 }
 

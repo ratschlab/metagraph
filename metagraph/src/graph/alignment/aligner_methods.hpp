@@ -172,7 +172,6 @@ class IExtender {
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &path) = 0;
-    virtual void initialize_query(const std::string_view query) = 0;
     virtual const std::string_view get_query() const = 0;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
@@ -198,9 +197,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                                              std::vector<ColumnRef>,
                                              utils::LessSecond> ColumnQueue;
 
-    DefaultColumnExtender(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(&graph), config_(config) { assert(config_.check_config_scores()); }
-
+    DefaultColumnExtender(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
+                          std::string_view query);
     DefaultColumnExtender(DefaultColumnExtender&&) = default;
 
     virtual ~DefaultColumnExtender() {}
@@ -211,7 +210,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual void initialize(const DBGAlignment &path) override;
 
-    virtual void initialize_query(const std::string_view query) override;
     const std::string_view get_query() const override { return query; }
 
     const DeBruijnGraph& get_graph() const override {
