@@ -154,8 +154,10 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
                               [](uint8_t flags) { return flags & 2; }))
             < query_node_flags.end()) {
         // find end of MEM
-        auto next = std::find_if(it, query_node_flags.end(),
-                                 [](uint8_t flags) { return (flags & 1) == 1 || (flags & 2) == 0; });
+        auto next = std::find_if(
+            it, query_node_flags.end(),
+            [](uint8_t flags) { return (flags & 1) == 1 || (flags & 2) == 0; }
+        );
 
         if (next != query_node_flags.end() && ((*next) & 2))
             ++next;
@@ -167,7 +169,6 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
         assert(it == query_node_flags.end() || query_nodes[i] != DeBruijnGraph::npos);
 
         size_t mem_length = (next - it) + k - 1;
-
         assert(i + mem_length <= query.size());
 
         const char *begin_it = query.data() + i;
@@ -175,10 +176,9 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
 
         assert(end_it >= begin_it + config.min_seed_length);
 
-        score_t match_score = partial_sum[end_it - query.data()]
-            - partial_sum[begin_it - query.data()];
+        score_t match_score = partial_sum[end_it - query.data()] - partial_sum[i];
 
-        auto node_begin_it = query_nodes.begin() + (it - query_node_flags.begin());
+        auto node_begin_it = query_nodes.begin() + i;
         auto node_end_it = node_begin_it + (next - it);
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
