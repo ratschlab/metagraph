@@ -363,11 +363,11 @@ class Alignment {
             && query_begin_ + cigar_.front().second == query_end_;
     }
 
-    Json::Value to_json(const std::string &query,
+    Json::Value to_json(const std::string_view query,
                         const DeBruijnGraph &graph,
                         bool is_secondary = false,
-                        const std::string &name = "",
-                        const std::string &label = "") const;
+                        const std::string_view name = {},
+                        const std::string_view label = {}) const;
 
     std::shared_ptr<const std::string>
     load_from_json(const Json::Value &alignment,
@@ -393,7 +393,7 @@ class Alignment {
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
-    Json::Value path_json(size_t node_size, const std::string &label = "") const;
+    Json::Value path_json(size_t node_size, const std::string_view label = {}) const;
 
     const char* query_begin_;
     const char* query_end_;

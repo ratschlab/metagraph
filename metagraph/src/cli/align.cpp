@@ -405,6 +405,7 @@ int align_to_graph(Config *config) {
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
+        seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
 
         Timer data_reading_timer;
 
@@ -412,61 +413,84 @@ int align_to_graph(Config *config) {
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query, const std::string &header) {
-                auto paths = aligner->align(query);
+        const uint64_t batch_size = config->query_batch_size_in_bytes;
 
-                std::lock_guard<std::mutex> lock(print_mutex);
-                if (!config->output_json) {
-                    *out << header << "\t" << paths.get_query();
-                    if (paths.empty()) {
-                        *out << "\t*\t*\t" << config->alignment_min_path_score
-                             << "\t*\t*\t*";
-                    } else {
-                        for (const auto &path : paths) {
-                            *out << "\t" << path;
+        auto it = fasta_parser.begin();
+        auto end = fasta_parser.end();
+        while (it != end) {
+            uint64_t num_bytes_read = 0;
+            // A generator that can be called multiple times until all sequences
+            // are called.
+            std::vector<std::pair<std::string, std::string>> seq_batch;
+            num_bytes_read = 0;
+            for ( ; it != end && num_bytes_read <= batch_size; ++it) {
+                seq_batch.emplace_back(
+                    it->seq.s,
+                    config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                        && it->comment.l
+                       ? utils::join_strings({ it->name.s, it->comment.s },
+                                             config->fasta_anno_comment_delim,
+                                             true)
+                       : std::string(it->name.s)
+                );
+                num_bytes_read += it->seq.l;
+            }
+
+            thread_pool.enqueue([&](auto batch) {
+                aligner->align_batch(
+                    [&](const auto &query_callback) {
+                        for (const auto &[seq, header] : batch) {
+                            query_callback(header, seq, false /* orientation */);
+                        }
+                    },
+                    [&](std::string_view header, auto&& paths) {
+                        const std::string_view query = paths.get_query();
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        if (!config->output_json) {
+                            *out << header << "\t" << query;
+                            if (paths.empty()) {
+                                *out << "\t*\t*\t" << config->alignment_min_path_score
+                                     << "\t*\t*\t*";
+                            } else {
+                                for (const auto &path : paths) {
+                                    *out << "\t" << path;
+                                }
+                            }
+
+                            *out << "\n";
+                        } else {
+                            Json::StreamWriterBuilder builder;
+                            builder["indentation"] = "";
+
+                            bool secondary = false;
+                            for (const auto &path : paths) {
+                                const auto& path_query = path.get_orientation()
+                                    ? paths.get_query_reverse_complement()
+                                    : paths.get_query();
+
+                                *out << Json::writeString(builder,
+                                                          path.to_json(path_query,
+                                                                       *graph,
+                                                                       secondary,
+                                                                       header)) << "\n";
+
+                                secondary = true;
+                            }
+
+                            if (paths.empty()) {
+                                *out << Json::writeString(builder,
+                                                          DBGAligner<>::DBGAlignment().to_json(
+                                                              query,
+                                                              *graph,
+                                                              secondary,
+                                                              header)
+                                                          ) << "\n";
+                            }
                         }
                     }
-
-                    *out << "\n";
-                } else {
-                    Json::StreamWriterBuilder builder;
-                    builder["indentation"] = "";
-
-                    bool secondary = false;
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        *out << Json::writeString(builder,
-                                                  path.to_json(path_query,
-                                                               *graph,
-                                                               secondary,
-                                                               header)) << "\n";
-
-                        secondary = true;
-                    }
-
-                    if (paths.empty()) {
-                        *out << Json::writeString(builder,
-                                                  DBGAligner<>::DBGAlignment().to_json(
-                                                      query,
-                                                      *graph,
-                                                      secondary,
-                                                      header)
-                                                  ) << "\n";
-                    }
-                }
-            }, std::string(read_stream->seq.s),
-               config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                   && read_stream->comment.l
-                       ? utils::join_strings(
-                           { read_stream->name.s, read_stream->comment.s },
-                           config->fasta_anno_comment_delim,
-                           true)
-                       : std::string(read_stream->name.s));
-        });
+                );
+            }, std::move(seq_batch));
+        };
 
         thread_pool.join();
 

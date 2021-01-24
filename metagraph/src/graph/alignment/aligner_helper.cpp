@@ -546,7 +546,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
 Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           const std::string &label) const {
+                                           const std::string_view label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -703,25 +703,25 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
 
-    if (label.size())
-        path["name"] = label;
+    if (label.data())
+        path["name"] = std::string(label);
 
     return path;
 }
 
 template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(const std::string &query,
+Json::Value Alignment<NodeType>::to_json(const std::string_view query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
-                                         const std::string &read_name,
-                                         const std::string &label) const {
+                                         const std::string_view read_name,
+                                         const std::string_view label) const {
     assert(is_valid(graph));
 
     // encode alignment
     Json::Value alignment;
 
-    alignment["name"] = read_name;
-    alignment["sequence"] = query;
+    alignment["name"] = read_name.data() ? std::string(read_name) : "";
+    alignment["sequence"] = std::string(query);
 
     if (sequence_.size())
         alignment["annotation"]["ref_sequence"] = sequence_;
@@ -729,7 +729,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
     if (query_end_ == query_begin_)
         return alignment;
 
-    auto query_start = query.c_str();
+    const char *query_start = query.data();
     assert(query_start + cigar_.get_clipping() == query_begin_);
     assert(query_end_ >= query_start);
 
