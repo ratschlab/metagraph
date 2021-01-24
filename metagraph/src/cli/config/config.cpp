@@ -861,7 +861,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
-            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [0.7]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");

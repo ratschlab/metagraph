@@ -22,13 +22,20 @@ ExactMapSeeder<NodeType>::ExactMapSeeder(const DeBruijnGraph &graph,
         config_(config),
         num_matching_(0) {
     assert(config_.check_config_scores());
+
+    // count the number of matching nucleotides
+    size_t last_match_count = 0;
     for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
         if (*it) {
             auto jt = std::find(it + 1, query_nodes_.end(), NodeType());
-            num_matching_ += graph_.get_k() + std::distance(it, jt) - 1;
+            num_matching_ += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
+            last_match_count = graph_.get_k();
             it = jt - 1;
+        } else if (last_match_count) {
+            --last_match_count;
         }
     }
+    assert(num_matching_ <= query_.size());
 
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
@@ -55,7 +62,7 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     bool orientation = this->get_orientation();
 
     if (this->get_num_matching_nucleotides()
-            < config.exact_kmer_match_fraction * query.size()) {
+            < config.exact_match_fraction * query.size()) {
         return;
     }
 
@@ -66,8 +73,11 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
             score_t match_score = partial_sum[i + k] - partial_sum[i];
 
             if (match_score > config.min_cell_score) {
-                Seed seed(std::string_view(query.data() + i, k), { query_nodes[i] },
-                          match_score, i, orientation);
+                Seed seed(std::string_view(query.data() + i, k),
+                          { query_nodes[i] },
+                          match_score,
+                          i,
+                          orientation);
 
                 assert(seed.is_valid(graph, &config));
                 callback(std::move(seed));
@@ -80,18 +90,35 @@ template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
     base_seeder_.call_seeds(callback);
 
-    const auto query = base_seeder_.get_query();
-    const auto &config = base_seeder_.get_config();
-    const auto &query_nodes = base_seeder_.get_query_nodes();
+    const std::string_view query = base_seeder_.get_query();
+    const DBGAlignerConfig &config = base_seeder_.get_config();
+    const std::vector<node_index> &query_nodes = base_seeder_.get_query_nodes();
 
     if (base_seeder_.get_num_matching_nucleotides()
-            < config.exact_kmer_match_fraction * query.size()) {
+            < config.exact_match_fraction * query.size()) {
         return;
     }
 
     size_t k = dbg_succ_.get_k();
 
     bool orientation = base_seeder_.get_orientation();
+
+    auto call_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
+        std::string_view seed_seq(query.data() + i, seed_length);
+        DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
+
+        if (match_score > config.min_cell_score) {
+            Seed seed(seed_seq,
+                      { alt_node },
+                      match_score,
+                      i,
+                      orientation,
+                      k - seed_length);
+
+            assert(seed.is_valid(dbg_succ_, &config));
+            callback(std::move(seed));
+        }
+    };
 
     for (size_t i = 0; i + config.min_seed_length <= query.size(); ++i) {
         if (i >= query_nodes.size() || !query_nodes[i]) {
@@ -101,20 +128,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(query.data() + i, max_seed_length),
                 [&](node_index alt_node, size_t seed_length) {
-                    std::string_view seed_seq(query.data() + i, seed_length);
-                    DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
-
-                    if (match_score > config.min_cell_score) {
-                        Seed seed(seed_seq,
-                                  std::vector<node_index>{ alt_node },
-                                  match_score,
-                                  i,
-                                  orientation,
-                                  k - seed_length);
-
-                        assert(seed.is_valid(dbg_succ_, &config));
-                        callback(std::move(seed));
-                    }
+                    call_suffix_seed(i, alt_node, seed_length);
                 },
                 config.min_seed_length,
                 config.max_num_seeds_per_locus
@@ -125,17 +139,17 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
 template <typename NodeType>
 void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
-    const auto &graph = this->get_graph();
+    const DeBruijnGraph &graph = this->get_graph();
     size_t k = graph.get_k();
 
     auto query = this->get_query();
-    const auto &query_nodes = this->get_query_nodes();
-    const auto &config = this->get_config();
+    const std::vector<NodeType> &query_nodes = this->get_query_nodes();
+    const DBGAlignerConfig &config = this->get_config();
     bool orientation = this->get_orientation();
-    const auto &partial_sum = this->get_partial_sums();
+    const std::vector<score_t> &partial_sum = this->get_partial_sums();
 
     if (this->get_num_matching_nucleotides()
-            < config.exact_kmer_match_fraction * query.size()) {
+            < config.exact_match_fraction * query.size()) {
         return;
     }
 
@@ -183,10 +197,10 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
         if (match_score > config.min_cell_score) {
-            Seed seed(std::string_view(begin_it, end_it - begin_it),
-                      std::vector<NodeType>(node_begin_it, node_end_it),
+            Seed seed(std::string_view(begin_it, mem_length),
+                      { node_begin_it, node_end_it },
                       match_score,
-                      begin_it - query.data(),
+                      i,
                       orientation);
             assert(seed.is_valid(graph, &config));
             callback(std::move(seed));

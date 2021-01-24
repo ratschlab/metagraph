@@ -1393,23 +1393,29 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                         "CGATCGATCGATCGATCGATCGA";
 
     for (size_t xdrop : { 27, 30 }) {
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
-        config.gap_opening_penalty = -5;
-        config.gap_extension_penalty = -2;
-        config.xdrop = xdrop;
-        config.exact_kmer_match_fraction = 0.0;
-        config.max_nodes_per_seq_char = 10.0;
-        config.queue_size = 20;
-        config.num_alternative_paths = 2;
-        config.min_path_score = 0;
-        config.min_cell_score = 0;
+        for (double discovery_fraction : { 0.0, 1.0 }) {
+            DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+            config.gap_opening_penalty = -5;
+            config.gap_extension_penalty = -2;
+            config.xdrop = xdrop;
+            config.exact_match_fraction = discovery_fraction;
+            config.max_nodes_per_seq_char = 10.0;
+            config.queue_size = 20;
+            config.num_alternative_paths = 2;
+            config.min_path_score = 0;
+            config.min_cell_score = 0;
 
-        DBGAligner<> aligner(*graph, config);
-        auto paths = aligner.align(query);
+            DBGAligner<> aligner(*graph, config);
+            auto paths = aligner.align(query);
 
-        ASSERT_EQ(2ull, paths.size());
-        EXPECT_EQ(557llu, paths[0].get_score()) << paths[0];
-        EXPECT_EQ(556llu, paths[1].get_score()) << paths[1];
+            if (discovery_fraction == 0.0) {
+                ASSERT_EQ(2ull, paths.size());
+                EXPECT_EQ(557llu, paths[0].get_score()) << paths[0];
+                EXPECT_EQ(556llu, paths[1].get_score()) << paths[1];
+            } else {
+                EXPECT_EQ(0ull, paths.size());
+            }
+        }
     }
 }
 
