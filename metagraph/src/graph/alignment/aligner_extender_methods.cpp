@@ -660,8 +660,7 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
             auto find = dp_table.find(next_node);
             char c = find == dp_table.end()
                 ? boss.decode(
-                      boss.get_W(dbg_succ->kmer_to_boss_index(next_node)) % boss.alph_size
-                  )
+                      boss.get_W(dbg_succ->kmer_to_boss_index(next_node)) % boss.alph_size)
                 : find->second.last_char;
             if (c != '$' && ((dp_table.size() < max_num_nodes
                                 && num_bytes <= config_.max_ram_per_alignment)
