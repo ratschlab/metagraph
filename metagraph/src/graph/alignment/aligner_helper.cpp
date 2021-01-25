@@ -965,8 +965,8 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-auto QueryAlignment<NodeType>
-::operator=(const QueryAlignment &other) -> QueryAlignment& {
+QueryAlignment<NodeType>& QueryAlignment<NodeType>
+::operator=(const QueryAlignment &other) {
     query_ = other.query_;
     query_rc_ = other.query_rc_;
     alignments_ = other.alignments_;
