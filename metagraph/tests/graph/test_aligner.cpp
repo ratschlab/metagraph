@@ -265,7 +265,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
 TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
-    std::string query = "AGCTNCGAGGCCAA";
+    std::string query     = "AGCTNCGAGGCCAA";
+    //                           X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -351,6 +352,8 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     size_t k = 4;
     std::string reference_1 = "AGCTTCGAA";
     std::string reference_2 = "AGCTTCGAC";
+    //                                 X
+
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
@@ -381,8 +384,10 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
 
 TYPED_TEST(DBGAlignerTest, align_branch) {
     size_t k = 6;
-    std::string reference_1 = "AGCTTCGA" "AT" "ATTTGTT";
-    std::string reference_2 = "AGCTTCGA" "CG" "ATTTGTT";
+    std::string reference_1 = "AGCTTCGAATATTTGTT";
+    std::string reference_2 = "AGCTTCGACGATTTGTT";
+    //                                 XX
+
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
@@ -413,8 +418,10 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
 
 TYPED_TEST(DBGAlignerTest, align_branch_with_cycle) {
     size_t k = 4;
-    std::string reference_1 = "AGCTTCGA" "AT" "ATTTGTT";
-    std::string reference_2 = "AGCTTCGA" "CG" "ATTTGTT";
+    std::string reference_1 = "AGCTTCGAATATTTGTT";
+    std::string reference_2 = "AGCTTCGACGATTTGTT";
+    //                                 XX
+
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
@@ -476,8 +483,9 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
 
 TYPED_TEST(DBGAlignerTest, variation) {
     size_t k = 4;
-    std::string reference = "AGCAA" "C" "TCGAAA";
-    std::string query =     "AGCAA" "T" "TCGAAA";
+    std::string reference = "AGCAACTCGAAA";
+    std::string query =     "AGCAATTCGAAA";
+    //                            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -507,9 +515,10 @@ TYPED_TEST(DBGAlignerTest, variation) {
 
 TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     size_t k = 4;
-    std::string reference_1 = "TTAAGCAA" "CTC" "GAAA";
-    std::string reference_2 = "TTAAGCAA" "GTC" "GAAA";
-    std::string query =       "TTAAGCAA" "TGG" "GAAA";
+    std::string reference_1 = "TTAAGCAACTCGAAA";
+    std::string reference_2 = "TTAAGCAAGTCGAAA";
+    std::string query =       "TTAAGCAATGGGAAA";
+    //                                 XXX
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
@@ -545,8 +554,9 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
 
 TYPED_TEST(DBGAlignerTest, multiple_variations) {
     size_t k = 4;
-    std::string reference = "ACGCAA" "C" "TCTCTG" "A" "A" "C" "TTGT";
-    std::string query =     "ACGCAA" "T" "TCTCTG" "T" "A" "T" "TTGT";
+    std::string reference = "ACGCAACTCTCTGAACTTGT";
+    std::string query =     "ACGCAATTCTCTGTATTTGT";
+    //                             X      X X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -576,9 +586,10 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
 
 TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     size_t k = 4;
-    std::string reference_1 = "AAAA" "CTTTTTT";
-    std::string reference_2 = "AAAA" "TTGGGGG";
-    std::string query =       "AAAA" "TTTTTTT";
+    std::string reference_1 = "AAAACTTTTTT";
+    std::string reference_2 = "AAAATTGGGGG";
+    std::string query =       "AAAATTTTTTT";
+    //                             X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
@@ -612,11 +623,12 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
 
 TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     size_t k = 4;
-    std::vector<std::string> references = {"ACAA" "TTTT" "TTTT",
-                                           "ACAA" "TTTT" "TGTT",
-                                           "ACAA" "GTTT" "TTTT",
-                                           "ACAA" "GTTT" "TGTT"};
-    std::string query =                    "ACAA" "CTTT" "TCTT";
+    std::vector<std::string> references = {"ACAATTTTTTTT",
+                                           "ACAATTTTTGTT",
+                                           "ACAAGTTTTTTT",
+                                           "ACAAGTTTTGTT"};
+    std::string query =                    "ACAACTTTTCTT";
+    //                                          X    X
 
     auto graph = build_graph_batch<TypeParam>(k, references);
 
@@ -648,8 +660,9 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
 TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     size_t k = 4;
-    std::string reference = "AAAG" "C" "GGACCCTTT" "C" "CGTTAT";
-    std::string query =     "AAAG" "G" "GGACCCTTT" "T" "CGTTAT";
+    std::string reference = "AAAGCGGACCCTTTCCGTTAT";
+    std::string query =     "AAAGGGGACCCTTTTCGTTAT";
+    //                           X         X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -679,8 +692,9 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
 
 TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
     size_t k = 4;
-    std::string reference = "AAAG" "C" "GGACCCTTT" "C" "CGTTAT";
-    std::string query =     "AAAG" "G" "GGACCCTTT" "T" "CGTTAT";
+    std::string reference = "AAAGCGGACCCTTTCCGTTAT";
+    std::string query =     "AAAGGGGACCCTTTTCGTTAT";
+    //                           X         X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -716,8 +730,9 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
 
 TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     size_t k = 4;
-    std::string reference = "TTTCC"     "TTGTT";
-    std::string query =     "TTTCC" "A" "TTGTT";
+    std::string reference = "TTTCCTTGTT";
+    std::string query =     "TTTCCATTGTT";
+    //                            I
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -749,8 +764,9 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
 
 TYPED_TEST(DBGAlignerTest, align_insert_multi) {
     size_t k = 4;
-    std::string reference = "TTTCC"      "TTGTT";
-    std::string query =     "TTTCC" "AA" "TTGTT";
+    std::string reference = "TTTCCTTGTT";
+    std::string query =     "TTTCCAATTGTT";
+    //                            II
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -783,8 +799,9 @@ TYPED_TEST(DBGAlignerTest, align_insert_multi) {
 
 TYPED_TEST(DBGAlignerTest, align_insert_long) {
     size_t k = 4;
-    std::string reference = "TTTCC"             "TTGTT";
-    std::string query =     "TTTCC" "AAAAAAAAA" "TTGTT";
+    std::string reference = "TTTCCTTGTT";
+    std::string query =     "TTTCCAAAAAAAAATTGTT";
+    //                            IIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -817,8 +834,9 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
 
 TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     size_t k = 4;
-    std::string reference = "TTTCCG" "G"             "TTGTTA";
-    std::string query =     "TTTCCG" "C" "AAAAAAAAA" "TTGTTA";
+    std::string reference = "TTTCCGGTTGTTA";
+    std::string query =     "TTTCCGCAAAAAAAAATTGTTA";
+    //                             XIIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
@@ -853,8 +871,9 @@ TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
 
 TYPED_TEST(DBGAlignerTest, align_delete) {
     size_t k = 4;
-    std::string reference = "TTCGAT" "TGGCCT";
-    std::string query =     "TTCGAT"  "GGCCT";
+    std::string reference = "TTCGATTGGCCT";
+    std::string query =     "TTCGATGGCCT";
+    //                             D
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -892,8 +911,9 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
 
 TYPED_TEST(DBGAlignerTest, align_gap) {
     size_t k = 4;
-    std::string reference = "TTTCTGTATA" "CCTT" "GGCGCTCTC";
-    std::string query =     "TTTCTGTATA"        "GGCGCTCTC";
+    std::string reference = "TTTCTGTATACCTTGGCGCTCTC";
+    std::string query =     "TTTCTGTATAGGCGCTCTC";
+    //                                 DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -926,8 +946,9 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
 
 TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     size_t k = 4;
-    std::string reference = "TTTC" "CCTT" "GGCGCTCTC";
-    std::string query =     "TTTC"        "GGCGCTCTC";
+    std::string reference = "TTTCCCTTGGCGCTCTC";
+    std::string query =     "TTTCGGCGCTCTC";
+    //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -960,8 +981,9 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
 
 TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
     size_t k = 4;
-    std::string reference = "AAAA" "TTTT" "CGAGGCCAA";
-    std::string query =     "AAAA"        "CGAGGCCAA";
+    std::string reference = "AAAATTTTCGAGGCCAA";
+    std::string query =     "AAAACGAGGCCAA";
+    //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::unit_scoring_matrix(
@@ -1029,8 +1051,9 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
 
 TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     size_t k = 4;
-    std::string reference = "TTTCC" "CT" "GGCGCTCTC";
-    std::string query =     "TTTCC" "GG" "GGCGCTCTC";
+    std::string reference = "TTTCCCTGGCGCTCTC";
+    std::string query =     "TTTCCGGGGCGCTCTC";
+    //                       SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -6, -6));
@@ -1064,8 +1087,9 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
 
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     size_t k = 4;
-    std::string reference = "TTTC" "CCTTAA" "GGCGCTCTC";
-    std::string query =     "TTTC"          "GGCGCTCTC";
+    std::string reference = "TTTCCCTTAAGGCGCTCTC";
+    std::string query =           "TTTCGGCGCTCTC";
+    //                             SSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1097,8 +1121,8 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
 
 TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     size_t k = 27;
-    std::string reference = "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATG" "A"        "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
-    std::string query =     "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATG" "ACAAATGT" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
+    std::string reference = "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGAGATCTAATTAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
+    std::string query =     "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGACAAATGTGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
     // the alignment may be misrepresented as
     // "TTTGTGGCTAGAGCTCGAGATCGCGCG"                    "GCCACAATT" "GACAAATG" "A" "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
     // "TTTGTGGCTAGAGCTCGAGATCGCGCG" "GCCACAATTGACAAAT"             "GACAAATG" "T" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
@@ -1116,8 +1140,8 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     EXPECT_EQ(67ull, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(
-        "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "T" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC",
-        "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
+        "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGAGATCTAATTAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC",
+        "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGAGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
     EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
              || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
@@ -1160,8 +1184,9 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
 
 TYPED_TEST(DBGAlignerTest, align_clipping1) {
     size_t k = 4;
-    std::string reference = "GGCC" "TGTTTG";
-    std::string query =     "ACCC" "TGTTTG";
+    std::string reference = "GGCCTGTTTG";
+    std::string query =     "ACCCTGTTTG";
+    //                       SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1192,8 +1217,9 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
 
 TYPED_TEST(DBGAlignerTest, align_clipping2) {
     size_t k = 4;
-    std::string reference = "AAA" "AGCTTCGAGGCCAA";
-    std::string query =      "TT" "AGCTTCGAGGCCAA";
+    std::string reference = "AAAAGCTTCGAGGCCAA";
+    std::string query =      "TTAGCTTCGAGGCCAA";
+    //                        SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1223,8 +1249,9 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
 
 TYPED_TEST(DBGAlignerTest, align_long_clipping) {
     size_t k = 4;
-    std::string reference = "TTTTTTT" "AAAAGCTTCGAGGCCAA";
-    std::string query =     "CCCCCCC" "AAAAGCTTCGAGGCCAA";
+    std::string reference = "TTTTTTTAAAAGCTTCGAGGCCAA";
+    std::string query =     "CCCCCCCAAAAGCTTCGAGGCCAA";
+    //                       SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1255,8 +1282,9 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
 
 TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     size_t k = 4;
-    std::string reference = "AAAAGCTTCGAGGCCAA" "TTTTTTT";
-    std::string query =     "AAAAGCTTCGAGGCCAA" "CCCCCCC";
+    std::string reference = "AAAAGCTTCGAGGCCAATTTTTTT";
+    std::string query =     "AAAAGCTTCGAGGCCAACCCCCCC";
+    //                                        SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1286,8 +1314,9 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
 
 TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     size_t k = 7;
-    std::string reference = "AAAAG" "CTTTCGAGGCCAA";
-    std::string query =        "AC" "CTTTCGAGGCCAA";
+    std::string reference = "AAAAGCTTTCGAGGCCAA";
+    std::string query =        "ACCTTTCGAGGCCAA";
+    //                          SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1319,8 +1348,8 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity) {
     size_t k = 27;
-    std::string reference = "CTAGAACTTAAAGTATAATAATACTAA" "TAA" "TAAAA" "TA" "A" "AATACA";
-    std::string query =     "CTAGAACTTAAAGTATAATAATACTAA" "TAA"  "AAG"  "TA" "C" "AATACA";
+    std::string reference = "CTAGAACTTAAAGTATAATAATACTAATAATAAAATAAAATACA";
+    std::string query =     "CTAGAACTTAAAGTATAATAATACTAATAAAAGTACAATACA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
@@ -1422,8 +1451,9 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
         size_t k = 7;
-        std::string reference = "AAAAG" "CTTTCGAGGCCAA";
-        std::string query =        "AC" "CTTTCGAGGCCAA";
+        std::string reference = "AAAAGCTTTCGAGGCCAA";
+        std::string query =        "ACCTTTCGAGGCCAA";
+        //                          SS
 
         auto graph = std::make_shared<DBGSuccinct>(k);
         graph->add_sequence(reference);
@@ -1458,8 +1488,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     }
     {
         size_t k = 15;
-        std::string reference = "TTTCGAGGCCAAAG" "CTTTCGAGGCCAA";
-        std::string query =                 "AC" "CTTTCGAGGCCAA";
+        std::string reference = "TTTCGAGGCCAAAGCTTTCGAGGCCAA";
+        std::string query =                 "ACCTTTCGAGGCCAA";
+        //                                    X
 
         auto graph = std::make_shared<DBGSuccinct>(k);
         graph->add_sequence(reference);
@@ -1497,8 +1528,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 #if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     size_t k = 18;
-    std::string reference = "AAAAA" "CTTTCGAGGCCAA";
-    std::string query =     "GGGGG" "CTTTCGAGGCCAA";
+    std::string reference = "AAAAACTTTCGAGGCCAA";
+    std::string query =     "GGGGGCTTTCGAGGCCAA";
+    //                       SSSSS
 
     auto graph = std::make_shared<DBGSuccinct>(k, true);
     graph->add_sequence(reference);
@@ -1535,8 +1567,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
     size_t k = 7;
-    std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
-    std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
+    std::string reference = "AAAAGCTTTCGAGGCCAA";
+    std::string query =     "AAAAGTTTTCGAGGCCAA";
+    //                       SSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1567,8 +1600,9 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerTest, align_both_directions) {
     size_t k = 7;
-    std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
-    std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
+    std::string reference = "AAAAGCTTTCGAGGCCAA";
+    std::string query =     "AAAAGTTTTCGAGGCCAA";
+    //                            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DBGMode::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1619,8 +1653,9 @@ TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
 
 TEST(DBGAlignerTest, align_dummy) {
     size_t k = 7;
-    std::string reference = "AAAAG" "C" "TTTCGAGGCCAA";
-    std::string query =     "AAAAG" "T" "TTTCGAGGCCAA";
+    std::string reference = "AAAAGCTTTCGAGGCCAA";
+    std::string query =     "AAAAGTTTTCGAGGCCAA";
+    //                            X
 
     auto graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1652,9 +1687,9 @@ TEST(DBGAlignerTest, align_dummy) {
 
 TEST(DBGAlignerTest, align_extended_insert_after_match) {
     size_t k = 27;
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG"    "GCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG"    "CCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-    std::string query =       "CGTGGCCCAGGCCCAGGCCCAG" "TGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
+    std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
     auto graph = std::make_shared<DBGSuccinct>(k);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
     config.max_seed_length = k;
