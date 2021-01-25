@@ -61,7 +61,7 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     std::string_view query = this->query_;
     bool orientation = this->orientation_;
 
-    if (this->num_matching_ < config.exact_match_fraction * query.size())
+    if (this->num_matching_ < config.min_exact_match_threshold * query.size())
         return;
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
@@ -89,7 +89,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     const DBGAlignerConfig &config = this->config_;
     const std::vector<node_index> &query_nodes = this->query_nodes_;
 
-    if (this->num_matching_ < config.exact_match_fraction * query.size())
+    if (this->num_matching_ < config.min_exact_match_threshold * query.size())
         return;
 
     size_t k = dbg_succ_.get_k();
@@ -136,7 +136,7 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
     bool orientation = this->orientation_;
     const std::vector<score_t> &partial_sum = this->partial_sum_;
 
-    if (this->num_matching_ < config.exact_match_fraction * query.size())
+    if (this->num_matching_ < config.min_exact_match_threshold * query.size())
         return;
 
     std::vector<uint8_t> query_node_flags(query_nodes.size(), 0);

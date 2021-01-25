@@ -129,6 +129,10 @@ std::string process_search_request(const std::string &received_message,
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
+    config.alignment_min_exact_match_threshold
+            = json.get("min_exact_match_threshold",
+                       config.alignment_min_exact_match_threshold).asDouble();
+
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
@@ -137,6 +141,13 @@ std::string process_search_request(const std::string &received_message,
         throw std::domain_error(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
                 + std::to_string(config.discovery_fraction));
+    }
+
+    if (config.alignment_min_exact_match_threshold < 0.0
+            || config.alignment_min_exact_match_threshold > 1.0) {
+        throw std::domain_error(
+                "Min exact match threshold should be within [0, 1.0]. Instead got "
+                + std::to_string(config.alignment_min_exact_match_threshold));
     }
 
     config.count_labels = true;
@@ -197,8 +208,16 @@ std::string process_align_request(const std::string &received_message,
         config.alignment_num_alternative_paths = 1;
     }
 
-    config.discovery_fraction
-            = json.get("discovery_fraction", config.discovery_fraction).asDouble();
+    config.alignment_min_exact_match_threshold
+            = json.get("min_exact_match_threshold",
+                       config.alignment_min_exact_match_threshold).asDouble();
+
+    if (config.alignment_min_exact_match_threshold < 0.0
+            || config.alignment_min_exact_match_threshold > 1.0) {
+        throw std::domain_error(
+                "Min exact match threshold should be within [0, 1.0]. Instead got "
+                + std::to_string(config.alignment_min_exact_match_threshold));
+    }
 
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
