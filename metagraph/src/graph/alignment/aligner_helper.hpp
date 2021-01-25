@@ -330,7 +330,7 @@ class Alignment {
 
     bool operator<(const Alignment &other) const {
         return std::make_pair(-score_, get_query().size())
-             > std::make_pair(-other.score_, other.get_query().size());
+                > std::make_pair(-other.score_, other.get_query().size());
     }
 
     bool operator>(const Alignment &other) const {
