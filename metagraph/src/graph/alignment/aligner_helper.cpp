@@ -975,8 +975,8 @@ QueryAlignment<NodeType>& QueryAlignment<NodeType>
 }
 
 template <typename NodeType>
-auto QueryAlignment<NodeType>
-::operator=(QueryAlignment&& other) noexcept -> QueryAlignment& {
+QueryAlignment<NodeType>& QueryAlignment<NodeType>
+::operator=(QueryAlignment&& other) noexcept {
     query_ = other.query_;
     query_rc_ = other.query_rc_;
     alignments_ = std::move(other.alignments_);
