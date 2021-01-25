@@ -1,7 +1,5 @@
 #include "align.hpp"
 
-#include <sstream>
-
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -446,20 +444,20 @@ int align_to_graph(Config *config) {
                     },
                     [&](std::string_view header, auto&& paths) {
                         const std::string_view query = paths.get_query();
-                        std::ostringstream sout;
+                        std::string sout;
 
                         if (!config->output_json) {
-                            sout << header << "\t" << query;
+                            sout += fmt::format("{}\t{}", header, query);
                             if (paths.empty()) {
-                                sout << fmt::format("\t*\t*\t{}\t*\t*\t*",
+                                sout += fmt::format("\t*\t*\t{}\t*\t*\t*",
                                                     config->alignment_min_path_score);
                             } else {
                                 for (const auto &path : paths) {
-                                    sout << "\t" << path;
+                                    sout += fmt::format("\t{}", path);
                                 }
                             }
 
-                            sout << "\n";
+                            sout += "\n";
                         } else {
                             Json::StreamWriterBuilder builder;
                             builder["indentation"] = "";
@@ -474,7 +472,9 @@ int align_to_graph(Config *config) {
                                     path_query, *graph, secondary, header
                                 );
 
-                                sout << Json::writeString(builder, json_line) << "\n";
+                                sout += fmt::format(
+                                    "{}\n", Json::writeString(builder, json_line)
+                                );
                                 secondary = true;
                             }
 
@@ -482,12 +482,14 @@ int align_to_graph(Config *config) {
                                 Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
                                     query, *graph, secondary, header
                                 );
-                                sout << Json::writeString(builder, json_line) << "\n";
+                                sout += fmt::format(
+                                    "{}\n", Json::writeString(builder, json_line)
+                                );
                             }
                         }
 
                         std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << sout.str();
+                        *out << sout;
                     }
                 );
             }, std::move(seq_batch));
