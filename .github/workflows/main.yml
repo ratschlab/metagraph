@@ -176,7 +176,7 @@ jobs:
 
   Release:
     name: Create Release
-    if: ${{ github.ref == 'refs/tags/v*'}}
+    if: contains(github.ref, "tags/v")
     runs-on: ubuntu-latest
     needs: Linux
     steps:
