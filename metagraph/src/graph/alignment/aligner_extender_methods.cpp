@@ -652,8 +652,7 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
     double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
     bool added = false;
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
-    if (dbg_succ) {
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         // If an outgoing node is already in the DPTable, then there's no need
         // to decode the last character of that node.
         const auto &boss = dbg_succ->get_boss();

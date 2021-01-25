@@ -1,5 +1,7 @@
 #include "align.hpp"
 
+#include <sstream>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -424,40 +426,40 @@ int align_to_graph(Config *config) {
             std::vector<std::pair<std::string, std::string>> seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {
-                seq_batch.emplace_back(
-                    it->seq.s,
-                    config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                std::string header
+                    = config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                         && it->comment.l
-                       ? utils::join_strings({ it->name.s, it->comment.s },
-                                             config->fasta_anno_comment_delim,
-                                             true)
-                       : std::string(it->name.s)
-                );
+                            ? utils::join_strings({ it->name.s, it->comment.s },
+                                                  config->fasta_anno_comment_delim,
+                                                  true)
+                            : std::string(it->name.s);
+                seq_batch.emplace_back(it->seq.s, std::move(header));
                 num_bytes_read += it->seq.l;
             }
 
             thread_pool.enqueue([&](auto batch) {
                 aligner->align_batch(
-                    [&](const auto &query_callback) {
+                    [&](const IDBGAligner::QueryCallback &query_callback) {
                         for (const auto &[seq, header] : batch) {
-                            query_callback(header, seq, false /* orientation */);
+                            query_callback(header, seq, false /* orientation of seq */);
                         }
                     },
                     [&](std::string_view header, auto&& paths) {
                         const std::string_view query = paths.get_query();
-                        std::lock_guard<std::mutex> lock(print_mutex);
+                        std::ostringstream sout;
+
                         if (!config->output_json) {
-                            *out << header << "\t" << query;
+                            sout << header << "\t" << query;
                             if (paths.empty()) {
-                                *out << "\t*\t*\t" << config->alignment_min_path_score
-                                     << "\t*\t*\t*";
+                                sout << fmt::format("\t*\t*\t{}\t*\t*\t*",
+                                                    config->alignment_min_path_score);
                             } else {
                                 for (const auto &path : paths) {
-                                    *out << "\t" << path;
+                                    sout << "\t" << path;
                                 }
                             }
 
-                            *out << "\n";
+                            sout << "\n";
                         } else {
                             Json::StreamWriterBuilder builder;
                             builder["indentation"] = "";
@@ -468,25 +470,24 @@ int align_to_graph(Config *config) {
                                     ? paths.get_query_reverse_complement()
                                     : paths.get_query();
 
-                                *out << Json::writeString(builder,
-                                                          path.to_json(path_query,
-                                                                       *graph,
-                                                                       secondary,
-                                                                       header)) << "\n";
+                                Json::Value json_line = path.to_json(
+                                    path_query, *graph, secondary, header
+                                );
 
+                                sout << Json::writeString(builder, json_line) << "\n";
                                 secondary = true;
                             }
 
                             if (paths.empty()) {
-                                *out << Json::writeString(builder,
-                                                          DBGAligner<>::DBGAlignment().to_json(
-                                                              query,
-                                                              *graph,
-                                                              secondary,
-                                                              header)
-                                                          ) << "\n";
+                                Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
+                                    query, *graph, secondary, header
+                                );
+                                sout << Json::writeString(builder, json_line) << "\n";
                             }
                         }
+
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << sout.str();
                     }
                 );
             }, std::move(seq_batch));
