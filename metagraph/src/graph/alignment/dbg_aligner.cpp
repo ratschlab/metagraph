@@ -5,12 +5,12 @@ namespace graph {
 namespace align {
 
 IDBGAligner::DBGQueryAlignment IDBGAligner::align(const std::string_view query,
-                                                  bool query_orientation) const {
+                                                  bool is_reverse_complement) const {
     DBGQueryAlignment result(query);
     std::string empty_header;
     align_batch(
         [&](const QueryCallback &callback) {
-            callback(empty_header, query, query_orientation);
+            callback(empty_header, query, is_reverse_complement);
         },
         [&](std::string_view, DBGQueryAlignment&& alignment) {
             result = std::move(alignment);

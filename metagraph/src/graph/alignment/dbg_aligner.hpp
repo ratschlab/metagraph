@@ -23,18 +23,20 @@ class IDBGAligner {
     typedef Alignment<node_index> DBGAlignment;
     typedef QueryAlignment<node_index> DBGQueryAlignment;
     typedef typename DBGAlignment::score_t score_t;
+
     typedef std::function<void(std::string_view /* header */,
                                std::string_view /* seq */,
                                bool /* orientation of seq */)> QueryCallback;
     typedef std::function<void(const QueryCallback&)> QueryGenerator;
-    typedef std::function<void(std::string_view, DBGQueryAlignment&&)> AlignmentCallback;
+    typedef std::function<void(std::string_view /* header */,
+                               DBGQueryAlignment&& /* alignments */)> AlignmentCallback;
 
     virtual ~IDBGAligner() {}
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const = 0;
     virtual DBGQueryAlignment align(const std::string_view query,
-                                    bool query_orientation = false) const;
+                                    bool is_reverse_complement = false) const;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
@@ -128,7 +130,7 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender, AlignmentCompar
 
     virtual Extender build_extender(const std::string_view query,
                                     const ISeeder<node_index> &) const override {
-        return { get_graph(), get_config(), query };
+        return { graph_, config_, query };
     }
 
   private:
@@ -141,36 +143,38 @@ template <class Seeder, class Extender, class AlignmentCompare>
 inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
-    generate_query([&](std::string_view header, std::string_view query, bool query_orientation) {
-        DBGQueryAlignment paths(query, query_orientation);
+    generate_query([&](std::string_view header,
+                       std::string_view query,
+                       bool is_reverse_complement) {
+        DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view forward = paths.get_query();
         std::string_view reverse = paths.get_query_reverse_complement();
 
-        std::string_view this_query = query_orientation ? reverse : forward;
+        std::string_view this_query = is_reverse_complement ? reverse : forward;
         assert(this_query == query);
 
-        assert(get_config().num_alternative_paths);
-        Seeder seeder(get_graph(),
+        assert(config_.num_alternative_paths);
+        Seeder seeder(graph_,
                       this_query, // use this_query since paths stores a copy
-                      query_orientation,
-                      map_sequence_to_nodes(get_graph(), query),
-                      get_config());
+                      is_reverse_complement,
+                      map_sequence_to_nodes(graph_, query),
+                      config_);
 
-        if (get_graph().is_canonical_mode()) {
-            assert(!query_orientation);
+        if (graph_.is_canonical_mode()) {
+            assert(!is_reverse_complement);
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
             this->align_both_directions(paths, seeder);
-        } else if (get_config().forward_and_reverse_complement) {
-            assert(!query_orientation);
+        } else if (config_.forward_and_reverse_complement) {
+            assert(!is_reverse_complement);
 
             this->align_best_direction(paths, seeder,
-                                       Seeder(get_graph(), reverse, !query_orientation,
-                                              map_sequence_to_nodes(get_graph(), reverse),
-                                              get_config()));
+                                       Seeder(graph_, reverse, !is_reverse_complement,
+                                              map_sequence_to_nodes(graph_, reverse),
+                                              config_));
         } else {
-            this->align_one_direction(paths, query_orientation, seeder);
+            this->align_one_direction(paths, is_reverse_complement, seeder);
         }
 
         callback(header, std::move(paths));
