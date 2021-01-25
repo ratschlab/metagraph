@@ -102,7 +102,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
         }
 
         // Use the seeder that seeds to node suffixes
-        if (aligner_config.max_seed_length == graph.get_k()) {
+        if (aligner_config.max_seed_length == k) {
             return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder<>>>>(
                 graph, aligner_config
             );

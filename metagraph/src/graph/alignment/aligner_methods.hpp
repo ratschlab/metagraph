@@ -79,6 +79,8 @@ class ManualSeeder : public ISeeder<NodeType> {
 
     ManualSeeder(std::vector<Seed>&& seeds) : seeds_(std::move(seeds)) {}
 
+    virtual ~ManualSeeder() {}
+
     void call_seeds(std::function<void(Seed&&)> callback) const override {
         for (const Seed &seed : seeds_) {
             callback(Seed(seed));
@@ -97,6 +99,8 @@ class ExactSeeder : public ExactMapSeeder<NodeType> {
 
     template <typename... Args>
     ExactSeeder(Args&&... args) : ExactMapSeeder<NodeType>(std::forward<Args>(args)...) {}
+
+    virtual ~ExactSeeder() {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
 };
@@ -118,6 +122,8 @@ class UniMEMSeeder : public MEMSeeder<NodeType> {
         assert(is_mem_terminus_.size() == this->graph_.max_index() + 1);
     }
 
+    virtual ~UniMEMSeeder() {}
+
     const bitmap& get_mem_terminator() const override { return is_mem_terminus_; }
 
   private:
@@ -134,6 +140,8 @@ class SuffixSeeder : public BaseSeeder {
     SuffixSeeder(Args&&... args)
           : BaseSeeder(std::forward<Args>(args)...),
             dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->graph_)) {}
+
+    virtual ~SuffixSeeder() {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
 
