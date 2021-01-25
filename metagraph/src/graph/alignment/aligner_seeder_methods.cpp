@@ -110,9 +110,9 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
     for (size_t i = 0; i + config.min_seed_length <= query.size(); ++i) {
         if (i >= query_nodes.size() || !query_nodes[i]) {
-            size_t max_seed_length = std::min(config.max_seed_length,
-                std::min(k, query.size() - i)
-            );
+            size_t max_seed_length = std::min({
+                config.max_seed_length, k, query.size() - i
+            });
             dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(query.data() + i, max_seed_length),
                 [&](node_index alt_node, size_t seed_length) {

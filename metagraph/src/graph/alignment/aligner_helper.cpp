@@ -44,7 +44,8 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::DELETION
                 ? table_init.scores[start_pos]
-                : table_init.scores[start_pos] - last_char_score + config.gap_opening_penalty + config.gap_opening_penalty,
+                : table_init.scores[start_pos] - last_char_score
+                    + config.gap_opening_penalty + config.gap_opening_penalty,
             config.min_cell_score
         );
         table_init.gap_count[start_pos] = 1;
@@ -410,8 +411,8 @@ void Alignment<NodeType>::trim_offset() {
             continue;
         }
 
-        size_t jump = std::min(std::min(offset_, size_t(it->second)),
-                               static_cast<size_t>(nodes_.end() - jt));
+        size_t jump = std::min({ offset_, size_t(it->second),
+                               static_cast<size_t>(nodes_.end() - jt) });
         offset_ -= jump;
         counter += jump;
         jt += jump;
