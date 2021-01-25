@@ -44,26 +44,12 @@ class ExactMapSeeder : public ISeeder<NodeType> {
     virtual ~ExactMapSeeder() {}
 
   protected:
-    const std::string_view get_query() const { return query_; }
-    bool get_orientation() const { return orientation_; }
-
-    const std::vector<NodeType>& get_query_nodes() const { return query_nodes_; }
-    const std::vector<DBGAlignerConfig::score_t>& get_partial_sums() const {
-        return partial_sum_;
-    }
-
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
-
-    size_t get_num_matching_nucleotides() const { return num_matching_; }
-
-  private:
+    const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
     std::vector<NodeType> query_nodes_;
-    std::vector<DBGAlignerConfig::score_t> partial_sum_;
-    const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+    std::vector<DBGAlignerConfig::score_t> partial_sum_;
     size_t num_matching_;
 };
 
@@ -72,7 +58,7 @@ class MEMSeeder : public ExactMapSeeder<NodeType> {
   public:
     typedef typename ISeeder<NodeType>::Seed Seed;
 
-    template <typename ... Args>
+    template <typename... Args>
     MEMSeeder(Args&&... args) : ExactMapSeeder<NodeType>(std::forward<Args>(args)...) {}
 
     virtual ~MEMSeeder() {}
@@ -109,7 +95,7 @@ class ExactSeeder : public ExactMapSeeder<NodeType> {
     typedef NodeType node_index;
     typedef typename ISeeder<NodeType>::Seed Seed;
 
-    template <typename ... Args>
+    template <typename... Args>
     ExactSeeder(Args&&... args) : ExactMapSeeder<NodeType>(std::forward<Args>(args)...) {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
@@ -121,15 +107,15 @@ class UniMEMSeeder : public MEMSeeder<NodeType> {
     typedef NodeType node_index;
     typedef typename ISeeder<NodeType>::Seed Seed;
 
-    template <typename ... Args>
+    template <typename... Args>
     UniMEMSeeder(Args&&... args)
           : MEMSeeder<NodeType>(std::forward<Args>(args)...),
             is_mem_terminus_([&](auto i) {
-                                 return this->get_graph().has_multiple_outgoing(i)
-                                     || this->get_graph().indegree(i) > 1;
+                                 return this->graph_.has_multiple_outgoing(i)
+                                     || this->graph_.indegree(i) > 1;
                              },
-                             this->get_graph().max_index() + 1) {
-        assert(is_mem_terminus_.size() == this->get_graph().max_index() + 1);
+                             this->graph_.max_index() + 1) {
+        assert(is_mem_terminus_.size() == this->graph_.max_index() + 1);
     }
 
     const bitmap& get_mem_terminator() const override { return is_mem_terminus_; }
@@ -144,10 +130,10 @@ class SuffixSeeder : public BaseSeeder {
     typedef typename BaseSeeder::node_index node_index;
     typedef typename BaseSeeder::Seed Seed;
 
-    template <typename ... Args>
+    template <typename... Args>
     SuffixSeeder(Args&&... args)
           : BaseSeeder(std::forward<Args>(args)...),
-            dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->get_graph())) {}
+            dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->graph_)) {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
 
@@ -183,9 +169,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef typename IExtender<NodeType>::score_t score_t;
-    typedef std::tuple<NodeType,
-                       score_t,
-                       bool /* converged */> ColumnRef;
+
+    typedef std::tuple<NodeType, score_t, bool /* converged */> ColumnRef;
     typedef boost::container::priority_deque<ColumnRef,
                                              std::vector<ColumnRef>,
                                              utils::LessSecond> ColumnQueue;
@@ -206,9 +191,15 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
 
   protected:
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const std::string_view get_query() const { return query; }
-    const ColumnQueue& get_column_queue() const { return columns_to_update; }
+    const DeBruijnGraph &graph_;
+    const DBGAlignerConfig &config_;
+    std::string_view query;
+
+    // keep track of which columns to use next
+    ColumnQueue columns_to_update;
+
+    DPTable<NodeType> dp_table;
+
     virtual void reset() override { dp_table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
@@ -234,30 +225,25 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                    std::function<void(DBGAlignment&&, NodeType)>,
                    score_t);
 
-    virtual DPTable<NodeType>& get_dp_table() { return dp_table; }
-    virtual ColumnQueue& get_column_queue() { return columns_to_update; }
-
   private:
-    const DeBruijnGraph &graph_;
-    const DBGAlignerConfig &config_;
-
-    // keep track of which columns to use next
-    ColumnQueue columns_to_update;
-
-    DPTable<NodeType> dp_table;
-
     // compute perfect match scores for all suffixes
     // used for branch and bound checks
     std::vector<score_t> partial_sums_;
 
+    // a quick lookup table of char pair match/mismatch scores for the current query
     tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op;
 
-    std::string_view query;
-
+    // the initial seed
     const DBGAlignment *path_;
+
+    // starting position of the alignment
     const char *align_start;
+
+    // max size of a column
     size_t size;
+
+    // start of the partial sum table
     const score_t *match_score_begin;
     NodeType start_node;
     score_t start_score;

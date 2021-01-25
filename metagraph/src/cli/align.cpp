@@ -438,9 +438,9 @@ int align_to_graph(Config *config) {
 
             thread_pool.enqueue([&](auto batch) {
                 aligner->align_batch(
-                    [&](const auto &query_callback) {
+                    [&](const IDBGAligner::QueryCallback &query_callback) {
                         for (const auto &[seq, header] : batch) {
-                            query_callback(header, seq, false /* orientation */);
+                            query_callback(header, seq, false /* orientation of seq */);
                         }
                     },
                     [&](std::string_view header, auto&& paths) {

@@ -25,7 +25,7 @@ class IDBGAligner {
     typedef typename DBGAlignment::score_t score_t;
     typedef std::function<void(std::string_view /* header */,
                                std::string_view /* seq */,
-                               bool /* orientation */)> QueryCallback;
+                               bool /* orientation of seq */)> QueryCallback;
     typedef std::function<void(const QueryCallback&)> QueryGenerator;
     typedef std::function<void(std::string_view, DBGQueryAlignment&&)> AlignmentCallback;
 
@@ -34,7 +34,7 @@ class IDBGAligner {
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const = 0;
     virtual DBGQueryAlignment align(const std::string_view query,
-                                    bool orientation = false) const;
+                                    bool query_orientation = false) const;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
@@ -65,14 +65,14 @@ class SeedAndExtendAligner : public IDBGAligner {
     // Generate seeds, then extend them
     void align_core(const std::string_view query,
                     ISeeder<node_index>&& seeder,
-                    IExtender<node_index>&& extend,
+                    IExtender<node_index>&& extender,
                     const std::function<void(DBGAlignment&&)> &callback,
                     const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
     void align_one_direction(DBGQueryAlignment &paths,
-                             bool orientation,
+                             bool orientation_to_align,
                              ISeeder<node_index>&& seeder) const;
 
     // Align both the forward and reverse complement of the query sequence,
@@ -131,41 +131,41 @@ template <class Seeder, class Extender, class AlignmentCompare>
 inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
-    generate_query([&](std::string_view header, std::string_view query, bool orientation) {
-        DBGQueryAlignment paths(query, orientation);
+    generate_query([&](std::string_view header, std::string_view query, bool query_orientation) {
+        DBGQueryAlignment paths(query, query_orientation);
         std::string_view forward = paths.get_query();
         std::string_view reverse = paths.get_query_reverse_complement();
 
-        std::string_view this_query = orientation ? reverse : forward;
+        std::string_view this_query = query_orientation ? reverse : forward;
         assert(this_query == query);
 
         assert(get_config().num_alternative_paths);
         Seeder seeder(get_graph(),
                       this_query, // use this_query since paths stores a copy
-                      orientation,
+                      query_orientation,
                       map_sequence_to_nodes(get_graph(), query),
                       get_config());
 
         if (get_graph().is_canonical_mode()) {
-            assert(!orientation);
+            assert(!query_orientation);
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
             align_both_directions(paths, std::move(seeder));
         } else if (get_config().forward_and_reverse_complement) {
-            assert(!orientation);
+            assert(!query_orientation);
 
             align_best_direction(
                 paths,
                 std::move(seeder),
                 Seeder(get_graph(),
                        reverse,
-                       !orientation,
+                       !query_orientation,
                        map_sequence_to_nodes(get_graph(), reverse),
                        get_config())
             );
         } else {
-            align_one_direction(paths, orientation, std::move(seeder));
+            align_one_direction(paths, query_orientation, std::move(seeder));
         }
 
         callback(header, std::move(paths));
@@ -176,7 +176,7 @@ template <class Seeder, class Extender, class AlignmentCompare>
 inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_core(const std::string_view query,
              ISeeder<node_index>&& seeder,
-             IExtender<node_index>&& extend,
+             IExtender<node_index>&& extender,
              const std::function<void(DBGAlignment&&)> &callback,
              const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const {
     std::vector<DBGAlignment> seeds;
@@ -205,8 +205,8 @@ inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
         }
 
         bool extended = false;
-        extend.initialize(seed);
-        extend([&](DBGAlignment&& extension, auto start_node) {
+        extender.initialize(seed);
+        extender([&](DBGAlignment&& extension, auto start_node) {
             if (!start_node && !extended) {
                 // no good extension found
                 if (seed.get_score() >= min_path_score) {
@@ -258,10 +258,10 @@ inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 template <class Seeder, class Extender, class AlignmentCompare>
 inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
 ::align_one_direction(DBGQueryAlignment &paths,
-                      bool orientation,
+                      bool orientation_to_align,
                       ISeeder<node_index>&& seeder) const {
-    std::string_view query = orientation ? paths.get_query_reverse_complement()
-                                         : paths.get_query();
+    std::string_view query = orientation_to_align ? paths.get_query_reverse_complement()
+                                                  : paths.get_query();
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
