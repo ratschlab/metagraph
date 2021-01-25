@@ -35,7 +35,7 @@ class IDBGAligner {
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const = 0;
-    virtual DBGQueryAlignment align(const std::string_view query,
+    virtual DBGQueryAlignment align(std::string_view query,
                                     bool is_reverse_complement = false) const;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
@@ -62,7 +62,7 @@ class SeedAndExtendAligner : public IDBGAligner {
                                      const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
 
     // Generate seeds, then extend them
-    void align_core(const std::string_view query,
+    void align_core(std::string_view query,
                     const ISeeder<node_index> &seeder,
                     IExtender<node_index>&& extender,
                     const std::function<void(DBGAlignment&&)> &callback,
@@ -93,7 +93,7 @@ class SeedAndExtendAligner : public IDBGAligner {
     virtual void align_aggregate(DBGQueryAlignment &paths,
                                  const AlignmentGenerator &alignment_generator) const;
 
-    virtual Extender build_extender(const std::string_view query,
+    virtual Extender build_extender(std::string_view query,
                                     const ISeeder<node_index> &seeder) const = 0;
 };
 
@@ -128,7 +128,7 @@ class DBGAligner : public SeedAndExtendAligner<Seeder, Extender, AlignmentCompar
   protected:
     typedef typename BaseAligner::AlignmentGenerator AlignmentGenerator;
 
-    virtual Extender build_extender(const std::string_view query,
+    virtual Extender build_extender(std::string_view query,
                                     const ISeeder<node_index> &) const override {
         return { graph_, config_, query };
     }
@@ -183,7 +183,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 
 template <class Seeder, class Extender, class AlignmentCompare>
 inline void SeedAndExtendAligner<Seeder, Extender, AlignmentCompare>
-::align_core(const std::string_view query,
+::align_core(std::string_view query,
              const ISeeder<node_index> &seeder,
              IExtender<node_index>&& extender,
              const std::function<void(DBGAlignment&&)> &callback,

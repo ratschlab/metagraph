@@ -445,7 +445,7 @@ int align_to_graph(Config *config) {
                         }
                     },
                     [&](std::string_view header, auto&& paths) {
-                        const std::string_view query = paths.get_query();
+                        std::string_view query = paths.get_query();
                         std::string sout;
 
                         if (!config->output_json) {

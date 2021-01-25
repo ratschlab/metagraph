@@ -4,7 +4,7 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-IDBGAligner::DBGQueryAlignment IDBGAligner::align(const std::string_view query,
+IDBGAligner::DBGQueryAlignment IDBGAligner::align(std::string_view query,
                                                   bool is_reverse_complement) const {
     DBGQueryAlignment result(query);
     std::string empty_header;

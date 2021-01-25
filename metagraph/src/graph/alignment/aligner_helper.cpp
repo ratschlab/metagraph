@@ -59,7 +59,7 @@ template <typename NodeType>
 void DPTable<NodeType>
 ::extract_alignments(const DeBruijnGraph &graph,
                      const DBGAlignerConfig &config,
-                     const std::string_view query_view,
+                     std::string_view query_view,
                      std::function<void(Alignment<NodeType>&&, NodeType)> callback,
                      score_t min_path_score,
                      const Alignment<NodeType> &seed,
@@ -141,7 +141,7 @@ void DPTable<NodeType>
 
 
 template <typename NodeType>
-Alignment<NodeType>::Alignment(const std::string_view query,
+Alignment<NodeType>::Alignment(std::string_view query,
                                std::vector<NodeType>&& nodes,
                                std::string&& sequence,
                                score_t score,
@@ -181,7 +181,7 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                                const DBGAlignerConfig &config,
-                               const std::string_view query_view,
+                               std::string_view query_view,
                                typename DPTable<NodeType>::const_iterator column,
                                size_t start_pos,
                                size_t offset,
@@ -428,7 +428,7 @@ void Alignment<NodeType>::trim_offset() {
 
 template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
-                                             const std::string_view query_rev_comp) {
+                                             std::string_view query_rev_comp) {
     assert(graph.is_canonical_mode());
 
     if (empty())
@@ -547,7 +547,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
 Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           const std::string_view label) const {
+                                           std::string_view label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -711,11 +711,11 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 }
 
 template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(const std::string_view query,
+Json::Value Alignment<NodeType>::to_json(std::string_view query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
-                                         const std::string_view read_name,
-                                         const std::string_view label) const {
+                                         std::string_view read_name,
+                                         std::string_view label) const {
     assert(is_valid(graph));
 
     // encode alignment
@@ -986,7 +986,7 @@ QueryAlignment<NodeType>& QueryAlignment<NodeType>
 }
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const std::string_view query,
+QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
                                          bool is_reverse_complement) {
     // TODO: remove const_cast
     auto &qu = const_cast<std::string&>(query_);

@@ -85,7 +85,7 @@ template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
     this->BaseSeeder::call_seeds(callback);
 
-    const std::string_view query = this->query_;
+    std::string_view query = this->query_;
     const DBGAlignerConfig &config = this->config_;
     const std::vector<node_index> &query_nodes = this->query_nodes_;
 
