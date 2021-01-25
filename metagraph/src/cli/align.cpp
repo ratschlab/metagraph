@@ -94,7 +94,9 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &aligner_config) {
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    if (aligner_config.min_seed_length < graph.get_k()) {
+    size_t k = graph.get_k();
+
+    if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
             logger->error("SuffixSeeder can be used only with succinct graph representation");
@@ -112,8 +114,8 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
             );
         }
 
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
+    } else if (aligner_config.max_seed_length == k) {
+        assert(aligner_config.min_seed_length == k);
 
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
