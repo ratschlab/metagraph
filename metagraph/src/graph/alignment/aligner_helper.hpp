@@ -449,8 +449,9 @@ class QueryAlignment {
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
-    const std::string& get_query() const { return *query_; }
-    const std::string& get_query_reverse_complement() const { return *query_rc_; }
+    const std::string& get_query(bool reverse_complement = false) const {
+        return !reverse_complement ? *query_ : *query_rc_;
+    }
     const value_type& front() const { return alignments_.front(); }
     const value_type& back() const { return alignments_.back(); }
     const value_type& operator[](size_t i) const { return alignments_[i]; }

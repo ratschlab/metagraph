@@ -330,6 +330,47 @@ void gfa_map_files(const Config *config,
     }
 }
 
+std::string format_alignment(std::string_view header,
+                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const DeBruijnGraph &graph,
+                             const Config &config) {
+    std::string sout;
+    if (!config.output_json) {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths) {
+                sout += fmt::format("\t{}", path);
+            }
+        }
+
+        sout += "\n";
+    } else {
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "";
+
+        bool secondary = false;
+        for (const auto &path : paths) {
+            Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
+                                                 graph, secondary, header);
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+            secondary = true;
+        }
+
+        if (paths.empty()) {
+            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
+                paths.get_query(), graph, secondary, header
+            );
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+        }
+    }
+
+    return sout;
+}
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -444,51 +485,8 @@ int align_to_graph(Config *config) {
                             query_callback(header, seq, false /* orientation of seq */);
                         }
                     },
-                    [&](std::string_view header, auto&& paths) {
-                        std::string_view query = paths.get_query();
-                        std::string sout;
-
-                        if (!config->output_json) {
-                            sout += fmt::format("{}\t{}", header, query);
-                            if (paths.empty()) {
-                                sout += fmt::format("\t*\t*\t{}\t*\t*\t*",
-                                                    config->alignment_min_path_score);
-                            } else {
-                                for (const auto &path : paths) {
-                                    sout += fmt::format("\t{}", path);
-                                }
-                            }
-
-                            sout += "\n";
-                        } else {
-                            Json::StreamWriterBuilder builder;
-                            builder["indentation"] = "";
-
-                            bool secondary = false;
-                            for (const auto &path : paths) {
-                                const auto& path_query = path.get_orientation()
-                                    ? paths.get_query_reverse_complement()
-                                    : paths.get_query();
-
-                                Json::Value json_line = path.to_json(
-                                    path_query, *graph, secondary, header
-                                );
-
-                                sout += fmt::format(
-                                    "{}\n", Json::writeString(builder, json_line)
-                                );
-                                secondary = true;
-                            }
-
-                            if (paths.empty()) {
-                                Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
-                                    query, *graph, secondary, header
-                                );
-                                sout += fmt::format(
-                                    "{}\n", Json::writeString(builder, json_line)
-                                );
-                            }
-                        }
+                    [&](std::string_view header, DBGAligner<>::DBGQueryAlignment&& paths) {
+                        std::string sout = format_alignment(header, paths, *graph, *config);
 
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << sout;

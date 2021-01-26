@@ -22,6 +22,7 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 const std::string test_data_dir = "../tests/data";
+const bool PICK_REV_COMP = true;
 
 typedef DBGAligner<>::score_t score_t;
 
@@ -177,10 +178,7 @@ TYPED_TEST(DBGAlignerTest, align_big_self_loop) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -208,10 +206,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -239,10 +234,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -286,10 +278,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -322,10 +311,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 
@@ -374,10 +360,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -408,10 +391,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -442,10 +422,7 @@ TYPED_TEST(DBGAlignerTest, align_branch_with_cycle) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -473,10 +450,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -505,10 +479,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -544,10 +515,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -576,10 +544,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -613,10 +578,7 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -649,10 +611,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph,
-                             path,
-                             paths.get_query(),
-                             paths.get_query_reverse_complement());
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
     }
 
     check_extend(graph, aligner.get_config(), paths, query);
@@ -682,10 +641,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -719,10 +675,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph,
-                             path,
-                             paths.get_query(),
-                             paths.get_query_reverse_complement());
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
         check_extend(graph, aligner.get_config(), paths, query);
     }
@@ -754,10 +707,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -789,10 +739,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_multi) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -824,10 +771,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -861,10 +805,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -900,10 +841,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     // TODO: enable this when the above is correct
     // check_extend(graph, aligner.get_config(), paths, query);
@@ -936,10 +874,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -971,10 +906,7 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1008,10 +940,7 @@ TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1041,10 +970,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1076,10 +1002,7 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     // TODO: re-enable this when gap extension is fixed
     check_extend(graph, aligner.get_config(), paths, query);
@@ -1111,10 +1034,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1154,10 +1074,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     auto extends = get_extend(graph, aligner.get_config(), paths, query);
     ASSERT_EQ(1ull, extends.size());
@@ -1207,10 +1124,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1239,10 +1153,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1272,10 +1183,7 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1304,10 +1212,7 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     EXPECT_EQ(7u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1338,10 +1243,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1369,10 +1271,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity) {
     // EXPECT_EQ(0u, path.get_end_clipping());
     // EXPECT_EQ(0u, path.get_offset());
     // EXPECT_TRUE(path.is_valid(*graph, &config));
-    // check_json_dump_load(*graph,
-    //                      path,
-    //                      paths.get_query(),
-    //                      paths.get_query_reverse_complement());
+    // check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     // check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1479,10 +1378,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph,
-                             path,
-                             paths.get_query(),
-                             paths.get_query_reverse_complement());
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
         check_extend(graph, aligner.get_config(), paths, query);
     }
@@ -1516,10 +1412,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph,
-                             path,
-                             paths.get_query(),
-                             paths.get_query_reverse_complement());
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
         check_extend(graph, aligner.get_config(), paths, query);
     }
@@ -1556,10 +1449,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(5u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1589,10 +1479,7 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1622,10 +1509,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1642,11 +1526,7 @@ TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths.front();
-
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1677,10 +1557,7 @@ TEST(DBGAlignerTest, align_dummy) {
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
@@ -1707,10 +1584,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     EXPECT_EQ("22=3I2=3X9=3D4=1I1=1X2I3=2I1=1I7=1D1=2D2=1X3=1X6=6S",
               path.get_cigar().to_string());
     EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph,
-                         path,
-                         paths.get_query(),
-                         paths.get_query_reverse_complement());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
