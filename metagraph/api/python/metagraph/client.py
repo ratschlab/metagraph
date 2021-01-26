@@ -64,19 +64,19 @@ class GraphClientJson:
         return self._json_seq_query(sequence, param_dict, "search")
 
     def align(self, sequence: Union[str, Iterable[str]],
-              min_exact_match_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
-        if min_exact_match_threshold < 0.0 or min_exact_match_threshold > 1.0:
+        if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
-                f"min_exact_match_threshold should be between 0 and 1 inclusive. Got {min_exact_match_threshold}")
+                f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
 
         if max_num_nodes_per_seq_char < 0:
             warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
 
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
-                  'min_exact_match_threshold': min_exact_match_threshold}
+                  'min_exact_match': min_exact_match}
 
         return self._json_seq_query(sequence, params, "align")
 
@@ -150,10 +150,10 @@ class GraphClient:
         return helpers.df_from_search_result(json_obj)
 
     def align(self, sequence: Union[str, Iterable[str]],
-              min_exact_match_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        json_obj = self._json_client.align(sequence, min_exact_match_threshold,
+        json_obj = self._json_client.align(sequence, min_exact_match,
                                            max_alternative_alignments,
                                            max_num_nodes_per_seq_char)
 
@@ -195,14 +195,14 @@ class MultiGraphClient:
         return result
 
     def align(self, sequence: Union[str, Iterable[str]],
-              min_exact_match_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
         for name, graph_client in self.graphs.items():
             # TODO: do this async
-            result[name] = graph_client.align(sequence, min_exact_match_threshold,
+            result[name] = graph_client.align(sequence, min_exact_match,
                                               max_alternative_alignments,
                                               max_num_nodes_per_seq_char)
 

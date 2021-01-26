@@ -227,8 +227,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_num_seeds_per_locus = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-nodes-per-seq-char")) {
             alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-min-exact-match-threshold")) {
-            alignment_min_exact_match_threshold = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-min-exact-match")) {
+            alignment_min_exact_match = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--max-hull-forks")) {
             max_hull_forks = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-ram")) {
@@ -890,7 +890,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match-threshold [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case COMPARE: {
@@ -1123,7 +1123,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match-threshold [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case SERVER_QUERY: {

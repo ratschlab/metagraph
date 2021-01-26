@@ -1427,7 +1427,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
             config.gap_opening_penalty = -5;
             config.gap_extension_penalty = -2;
             config.xdrop = xdrop;
-            config.min_exact_match_threshold = discovery_fraction;
+            config.min_exact_match = discovery_fraction;
             config.max_nodes_per_seq_char = 10.0;
             config.queue_size = 20;
             config.num_alternative_paths = 2;
