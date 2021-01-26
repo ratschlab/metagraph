@@ -41,6 +41,15 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         table_init.ops[start_pos] = last_op;
         table_init.prev_nodes[start_pos] = 0;
         table_init.gap_prev_nodes[start_pos] = 0;
+
+        if (last_op != Cigar::DELETION && last_op != Cigar::MATCH
+                && last_op != Cigar::MISMATCH) {
+            throw std::runtime_error("Seeds must end in DELETION, MATCH, or MISMATCH");
+        }
+
+        // This vector stores the best scores for partial alignments ending in a
+        // delete operation. If the last operation in the seed is MATCH or MISMATCH,
+        // then we replace it with a score corresponding to INSERTION followed by DELETION
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::DELETION
                 ? table_init.scores[start_pos]
@@ -48,6 +57,7 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
                     + config.gap_opening_penalty + config.gap_opening_penalty,
             config.min_cell_score
         );
+
         table_init.gap_count[start_pos] = 1;
         update = true;
     }
