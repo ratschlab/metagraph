@@ -43,14 +43,19 @@ void AnnotatedSequenceGraph
                     const std::vector<Label> &labels,
                     std::shared_ptr<annot::Taxonomy> taxonomy) {
     assert(check_compatibility());
+    std::cout << "\n\n\nin annotate_sequence !!\n";
 
     std::vector<row_index> indices;
     indices.reserve(sequence.size());
 
+    std::cout << "sequence=" << sequence << "\n";
+
     graph_->map_to_nodes(sequence, [&](node_index i) {
+//      std::cout << "map node =" << i << "\n";
         if (i > 0)
             indices.push_back(graph_to_anno_index(i));
     });
+    std::cout << "size indices=" << indices.size() << "\n";
 
     if (!indices.size())
         return;
@@ -66,6 +71,7 @@ void AnnotatedSequenceGraph
     }
     if (taxonomy != nullptr) {
         taxonomy->update_row_indices(indices, labels);
+//        std::cout << "fixme\n";
     }
 
     annotator_->add_labels(indices, labels);

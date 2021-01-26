@@ -395,6 +395,8 @@ int annotate_graph(Config *config) {
         }
     }
 
+    std::cout << "before export_to_file\n";
+    taxonomy->export_to_file(config->outfbase + ".taxo");
     return 0;
 }
 

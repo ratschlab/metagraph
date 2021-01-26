@@ -147,6 +147,11 @@ Taxonomy::Taxonomy(const std::string &tree_filepath) {
 }
 
 TaxoLabel Taxonomy::find_lca(const std::vector<TaxoLabel> &labels) {
+//    std::cout << "\nin find_lca with: ";
+//    for (auto it: labels) {
+//        std::cout << it << " ";
+//    }
+//    std::cout << "\n";
     uint64_t left_idx = linearization_idx[labels[0]];
     uint64_t right_idx = linearization_idx[labels[0]];
     for (const auto &label: labels) {
@@ -157,9 +162,12 @@ TaxoLabel Taxonomy::find_lca(const std::vector<TaxoLabel> &labels) {
             right_idx = linearization_idx[label];
         }
     }
+//    std::cout << "left_idx=" << left_idx << " right_idx=" << right_idx << "\n";
     uint64_t log_dist = precalc_log[right_idx - left_idx];
     uint64_t left_lca = rmq_data[log_dist][left_idx];
     uint64_t right_lca = rmq_data[log_dist][right_idx - precalc_pow2[log_dist] + 1];
+//    std::cout << "left_lca=" << left_lca << " right_lca=" << right_lca << "\n";
+
     if (node_depth[left_lca] > node_depth[right_lca]) {
         return left_lca;
     }
@@ -170,6 +178,10 @@ TaxoLabel Taxonomy::find_lca(const std::vector<TaxoLabel> &labels) {
 TaxoLabel Taxonomy::find_lca(const std::vector<Label> &raw_labels) {
     std::vector<TaxoLabel> labels;
     for (const auto &label: raw_labels) {
+        if (! label_to_index.count(label)) {
+            std::cerr << "\ncannot find label: " << label << " in label_to_index\n";
+            exit(1);
+        }
         labels.push_back(label_to_index[label]);
     }
     return find_lca(labels);
@@ -180,15 +192,60 @@ TaxoLabel Taxonomy::find_lca(const TaxoLabel &label1, const TaxoLabel &label2) {
 }
 
 void Taxonomy::update_row_indices(const std::vector<row_index> &indices, const std::vector<Label> &labels) {
+    std:: cout << "here update_row_indices :\n";
+    for (auto i: indices) {
+        std::cout << i << " ";
+    }
+    std::cout << "\n";
+    for (auto i: labels) {
+        std::cout << i << " ";
+    }
+
     TaxoLabel lca = find_lca(labels);
+    std::cout << "\n lca =" << lca << "\n";
 
     for (const auto &kmer: indices) {
         if (taxonomic_map.count(kmer)) {
             taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
+//            std::cout << " upd (" << kmer << ") -> " << taxonomic_map[kmer] << "\n";
         } else {
             taxonomic_map[kmer] = lca;
+//            std::cout << " fst (" << kmer << ") -> " << taxonomic_map[kmer] << "\n";
         }
     }
+}
+
+bool Taxonomy::export_to_file(const std::string &filepath) {
+    std::ofstream f(filepath.c_str(), std::ios::out);
+    if (!f.is_open()) {
+//        Print error.
+        return false;
+    }
+
+    std::vector<uint> distrib(30);
+    f << taxonomic_map.size() << "\n";
+    for (auto &it: taxonomic_map) {
+        f << it.first << " " << it.second << "\n";
+        distrib[it.second] ++;
+    }
+    for (int i = 0; i < 30; ++i) {
+        std::cout << "distrib["<<i<<"]=" << distrib[i] << "\n";
+    }
+
+    f << index_to_label.size() << "\n";
+    for (auto &it: index_to_label) {
+        f << it << " ";
+    }
+    f << "\n";
+
+    uint64_t num_nodes = index_to_label.size();
+    f << 2 * num_nodes - 1 << "\n";
+    for (uint i = 0; i < 2 * num_nodes - 1; ++i) {
+        f << rmq_data[0][i] << " ";
+    }
+    f << "\n";
+    f.close();
+    return true;
 }
 
 }

@@ -47,6 +47,7 @@ class Taxonomy {
     Taxonomy(const std::string &tree_filepath);
     void update_row_indices(const std::vector<row_index> &indices,
                             const std::vector<Label> &labels);
+    bool export_to_file(const std::string &filepath);
 };
 
 }
