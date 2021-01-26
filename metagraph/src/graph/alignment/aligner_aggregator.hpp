@@ -16,7 +16,8 @@ class AlignmentAggregator {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
-    AlignmentAggregator(std::string_view query, std::string_view rc_query,
+    AlignmentAggregator(std::string_view query,
+                        std::string_view rc_query,
                         const DBGAlignerConfig &config)
           : query_(query), rc_query_(rc_query), config_(config) {
         assert(config_.num_alternative_paths);
