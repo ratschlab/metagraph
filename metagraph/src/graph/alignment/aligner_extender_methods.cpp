@@ -139,8 +139,14 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
 
 template <typename NodeType>
 std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<NodeType>
-::emplace_node(NodeType node, NodeType, char c, size_t size,
-               size_t best_pos, size_t last_priority_pos, size_t begin, size_t end) {
+::emplace_node(NodeType node,
+               NodeType,
+               char c,
+               size_t size,
+               size_t best_pos,
+               size_t last_priority_pos,
+               size_t begin,
+               size_t end) {
     end = std::min(end, size);
     auto find = dp_table.find(node);
     if (find == dp_table.end()) {
@@ -576,9 +582,8 @@ inline void compute_updates(Column &update_column,
 
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
-             score_t min_path_score) {
+void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
+                                                 score_t min_path_score) {
     assert(columns_to_update.empty());
 
     const auto &path = get_seed();
@@ -643,10 +648,7 @@ void DefaultColumnExtender<NodeType>
 
 template <typename NodeType>
 std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
-::fork_extension(NodeType node,
-                 std::function<void(DBGAlignment&&, NodeType)>,
-                 score_t) {
-    overlapping_range_ = false;
+::fork_extension(NodeType node, ExtensionCallback, score_t) {
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
 
     double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
@@ -698,9 +700,8 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
-              score_t min_path_score) {
+void DefaultColumnExtender<NodeType>::extend_main(ExtensionCallback callback,
+                                                  score_t min_path_score) {
     assert(start_score == dp_table.best_score().second);
 
     while (columns_to_update.size()) {
@@ -716,6 +717,7 @@ void DefaultColumnExtender<NodeType>
         if (best_score_update != cur_col.last_priority_value())
             continue;
 
+        overlapping_range_ = false;
         auto out_columns = fork_extension(node, callback, min_path_score);
 
         assert(std::all_of(out_columns.begin(), out_columns.end(), [&](const auto &pair) {

@@ -156,11 +156,12 @@ class IExtender {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::node_index node_index;
     typedef typename DBGAlignment::score_t score_t;
+    typedef std::function<void(DBGAlignment&&, NodeType)> ExtensionCallback;
 
     virtual ~IExtender() {}
 
     virtual void
-    operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
+    operator()(ExtensionCallback callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &seed) = 0;
@@ -177,6 +178,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef typename IExtender<NodeType>::score_t score_t;
+    typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
 
     typedef std::tuple<NodeType, score_t, bool /* converged */> ColumnRef;
     typedef boost::container::priority_deque<ColumnRef,
@@ -191,7 +193,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual ~DefaultColumnExtender() {}
 
     virtual void
-    operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
+    operator()(ExtensionCallback callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
     virtual void initialize(const DBGAlignment &path) override;
@@ -211,9 +213,14 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual void reset() override { dp_table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
-    emplace_node(NodeType node, NodeType incoming_node, char c, size_t size,
-                 size_t best_pos = 0, size_t last_priority_pos = 0,
-                 size_t begin = 0, size_t end = std::numeric_limits<size_t>::max());
+    emplace_node(NodeType node,
+                 NodeType incoming_node,
+                 char c,
+                 size_t size,
+                 size_t best_pos = 0,
+                 size_t last_priority_pos = 0,
+                 size_t begin = 0,
+                 size_t end = std::numeric_limits<size_t>::max());
 
     virtual bool add_seed(size_t clipping);
 
@@ -221,17 +228,14 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual void check_and_push(ColumnRef&& next_column);
 
-    void extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
-                     score_t min_path_score);
+    void extend_main(ExtensionCallback callback, score_t min_path_score);
 
     void update_columns(NodeType incoming_node,
                         const std::deque<std::pair<NodeType, char>> &out_columns,
                         score_t min_path_score);
 
     virtual std::deque<std::pair<NodeType, char>>
-    fork_extension(NodeType /* fork after this node */,
-                   std::function<void(DBGAlignment&&, NodeType)>,
-                   score_t);
+    fork_extension(NodeType /* fork after this node */, ExtensionCallback, score_t);
 
   private:
     // compute perfect match scores for all suffixes
