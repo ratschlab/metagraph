@@ -424,10 +424,6 @@ class QueryAlignment {
     typedef Alignment<NodeType> value_type;
 
     QueryAlignment(std::string_view query, bool is_reverse_complement = false);
-    QueryAlignment(const QueryAlignment &other) { *this = other; }
-    QueryAlignment(QueryAlignment&& other) noexcept { *this = std::move(other); }
-    QueryAlignment& operator=(const QueryAlignment &other);
-    QueryAlignment& operator=(QueryAlignment&& other) noexcept;
 
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
@@ -438,13 +434,13 @@ class QueryAlignment {
 
         // sanity checks
         assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query().data() >= query_.c_str());
+            || alignments_.back().get_query().data() >= query_->c_str());
         assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= query_.c_str() + query_.size());
+            || alignments_.back().get_query_end() <= query_->c_str() + query_->size());
         assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query().data() >= query_rc_.c_str());
+            || alignments_.back().get_query().data() >= query_rc_->c_str());
         assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= query_rc_.c_str() + query_rc_.size());
+            || alignments_.back().get_query_end() <= query_rc_->c_str() + query_rc_->size());
     }
 
     void push_back(const value_type &alignment) { emplace_back(alignment); }
@@ -453,8 +449,8 @@ class QueryAlignment {
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
-    const std::string& get_query() const { return query_; }
-    const std::string& get_query_reverse_complement() const { return query_rc_; }
+    const std::string& get_query() const { return *query_; }
+    const std::string& get_query_reverse_complement() const { return *query_rc_; }
     const value_type& front() const { return alignments_.front(); }
     const value_type& back() const { return alignments_.back(); }
     const value_type& operator[](size_t i) const { return alignments_[i]; }
@@ -476,12 +472,8 @@ class QueryAlignment {
     bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
 
   private:
-    // When a QueryAlignment is copied or moved, the pointers in the alignment
-    // vector may be incorrect, so this corrects them
-    void fix_pointers(const std::string &query, const std::string &query_rc);
-
-    std::string query_;
-    std::string query_rc_;
+    std::shared_ptr<std::string> query_;
+    std::shared_ptr<std::string> query_rc_;
     std::vector<value_type> alignments_;
 };
 

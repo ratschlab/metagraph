@@ -966,69 +966,30 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-QueryAlignment<NodeType>& QueryAlignment<NodeType>
-::operator=(const QueryAlignment &other) {
-    query_ = other.query_;
-    query_rc_ = other.query_rc_;
-    alignments_ = other.alignments_;
-    fix_pointers(other.get_query(), other.get_query_reverse_complement());
-    return *this;
-}
-
-template <typename NodeType>
-QueryAlignment<NodeType>& QueryAlignment<NodeType>
-::operator=(QueryAlignment&& other) noexcept {
-    query_ = other.query_;
-    query_rc_ = other.query_rc_;
-    alignments_ = std::move(other.alignments_);
-    fix_pointers(other.get_query(), other.get_query_reverse_complement());
-    return *this;
-}
-
-template <typename NodeType>
 QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
-                                         bool is_reverse_complement) {
-    // TODO: remove const_cast
-    auto &qu = const_cast<std::string&>(query_);
-    auto &qu_rc = const_cast<std::string&>(query_rc_);
-
+                                         bool is_reverse_complement)
+          : query_(new std::string()), query_rc_(new std::string()) {
     // pad sequences for easier access in 64-bit blocks
-    qu.reserve(query.size() + 8);
-    qu.resize(query.size());
+    query_->reserve(query.size() + 8);
+    query_->resize(query.size());
+    query_rc_->reserve(query.size() + 8);
+    query_rc_->resize(query.size());
 
     // TODO: use alphabet encoder
-    // transform to upper and fix weird characters
-    std::transform(query.begin(), query.end(), qu.begin(), [](char c) {
+    // transform to upper and fix non-standard characters
+    std::transform(query.begin(), query.end(), query_->begin(), [](char c) {
         return c >= 0 ? toupper(c) : 127;
     });
-    memset(qu.data() + qu.size(), '\0', qu.capacity() - qu.size());
 
-    qu_rc.reserve(query.size() + 8);
-    qu_rc.resize(query.size());
-    memcpy(qu_rc.data(), qu.data(), qu.capacity());
-    reverse_complement(qu_rc.begin(), qu_rc.end());
+    // fill padding with '\0'
+    memset(query_->data() + query_->size(), '\0', query_->capacity() - query_->size());
+
+    // set the reverse complement
+    memcpy(query_rc_->data(), query_->data(), query_->capacity());
+    reverse_complement(query_rc_->begin(), query_rc_->end());
 
     if (is_reverse_complement)
-        std::swap(qu, qu_rc);
-}
-
-
-template <typename NodeType>
-void QueryAlignment<NodeType>
-::fix_pointers(const std::string &query, const std::string &query_rc) {
-    for (auto &alignment : alignments_) {
-        const auto &other_query = alignment.get_orientation() ? query_rc : query;
-        const auto &this_query = alignment.get_orientation() ? query_rc_ : query_;
-
-        std::string_view query = alignment.get_query();
-        assert(query.data() >= other_query.c_str());
-        assert(query.data() + query.size() <= other_query.c_str() + other_query.size());
-
-        alignment.set_query_begin(this_query.c_str() + (query.data() - other_query.c_str()));
-
-        assert(alignment.get_query().begin() >= this_query.c_str());
-        assert(alignment.get_query().end() <= this_query.c_str() + this_query.size());
-    }
+        std::swap(query_, query_rc_);
 }
 
 
