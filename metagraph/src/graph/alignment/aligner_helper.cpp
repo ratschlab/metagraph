@@ -411,8 +411,8 @@ void Alignment<NodeType>::trim_offset() {
             continue;
         }
 
-        size_t jump = std::min({ offset_, size_t(it->second),
-                               static_cast<size_t>(nodes_.end() - jt) });
+        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
+                                          static_cast<size_t>(nodes_.end() - jt) });
         offset_ -= jump;
         counter += jump;
         jt += jump;
