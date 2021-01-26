@@ -54,7 +54,8 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
             last_op == Cigar::DELETION
                 ? table_init.scores[start_pos]
                 : table_init.scores[start_pos] - last_char_score
-                    + config.gap_opening_penalty + config.gap_opening_penalty,
+                                               + config.gap_opening_penalty
+                                               + config.gap_opening_penalty,
             config.min_cell_score
         );
 
