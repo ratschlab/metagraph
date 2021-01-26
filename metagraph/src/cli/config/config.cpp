@@ -193,8 +193,6 @@ Config::Config(int argc, char *argv[]) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
-        } else if (!strcmp(argv[i], "--batch-align")) {
-            batch_align = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-queue-size")) {
@@ -460,12 +458,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    // only the best alignment is used in query
-    // |alignment_num_alternative_paths| must be set to 1
-    if (identity == QUERY && align_sequences
-                          && alignment_num_alternative_paths != 1)
-        print_usage_and_exit = true;
-
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
@@ -485,8 +477,7 @@ Config::Config(int argc, char *argv[]) {
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
-            && alignment_num_alternative_paths == 0) {
+    if (alignment_num_alternative_paths == 0) {
         std::cerr << "Error: align-alternative-alignments must be > 0" << std::endl;
         print_usage_and_exit = true;
     }
@@ -1078,7 +1069,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 #if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \tfor each input sequence, query its reverse complement as well [off]\n");
 #endif
-            fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers [off]\n");
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
@@ -1087,40 +1077,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
-            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
-            // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [inf]\n");
-            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [10.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");
-            fprintf(stderr, "\t   --max-hull-forks [INT]\tmaximum number of forks to take when expanding query graph [4]\n");
-            fprintf(stderr, "\t   --max-hull-depth [INT]\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for scoring:\n");
-            fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
-            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
-            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
-            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
-            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());

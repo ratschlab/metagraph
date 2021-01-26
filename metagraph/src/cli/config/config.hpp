@@ -43,7 +43,6 @@ class Config {
     bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
-    bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
     bool clear_dummy = false;

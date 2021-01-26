@@ -64,14 +64,6 @@ std::string convert_query_response_to_json(const std::string &ret_str) {
         if (!query_desc_parts.empty())
             res_obj[SEQ_DESCRIPTION_JSON_FIELD] = query_desc_parts[0];
 
-        if (query_desc_parts.size() > 1) {
-            // we aligned first, so extracting aligned sequence and score:
-
-            res_obj[SEQUENCE_JSON_FIELD] = query_desc_parts[1];
-            res_obj[SCORE_JSON_FIELD] = (int)atoi(query_desc_parts[2].c_str());
-            res_obj[CIGAR_JSON_FIELD] = query_desc_parts[3];
-        }
-
         res_obj["results"] = Json::Value(Json::arrayValue);
 
         for (size_t i = 2; i < parts.size(); ++i) {
@@ -129,10 +121,6 @@ std::string process_search_request(const std::string &received_message,
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
-    config.alignment_max_nodes_per_seq_char = json.get(
-        "max_num_nodes_per_seq_char",
-        config.alignment_max_nodes_per_seq_char).asDouble();
-
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
         throw std::domain_error(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
@@ -142,13 +130,6 @@ std::string process_search_request(const std::string &received_message,
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
-
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
-    if (json.get("align", false).asBool()) {
-        aligner_config.reset(new graph::align::DBGAlignerConfig(
-            initialize_aligner_config(anno_graph.get_graph().get_k(), config)
-        ));
-    }
 
     std::ostringstream oss;
     std::mutex oss_mutex;
@@ -163,7 +144,7 @@ std::string process_search_request(const std::string &received_message,
 
     // dummy pool doing everything in the caller thread
     ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
+    QueryExecutor engine(config, anno_graph, dummy_pool);
 
     engine.query_fasta(tf.name(),
         [&](const std::string &res) {
