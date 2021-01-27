@@ -15,6 +15,7 @@
 #include "cli/server.hpp"
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
+#include "cli/classify.hpp"
 
 using namespace mtg;
 using mtg::common::logger;
@@ -85,6 +86,9 @@ int main(int argc, char *argv[]) {
 
         case Config::ALIGN:
             return cli::align_to_graph(config.get());
+
+        case Config::CLASSIFY:
+            return cli::classify(config.get());
 
         case Config::NO_IDENTITY:
             assert(false);

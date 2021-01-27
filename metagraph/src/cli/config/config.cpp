@@ -69,6 +69,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "classify")) {
+        identity = CLASSIFY;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -766,6 +768,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
+            fprintf(stderr, "\tclassify\ttodo\n\n");
+
             return;
         }
         case BUILD: {
@@ -1136,6 +1140,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+        } break;
+        case CLASSIFY: {
+            fprintf(stderr, "Usage: %s classify -i <GRAPH> -a <TAXO_ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
+                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for classify:\n");
+            fprintf(stderr, "TODO\n");
         } break;
     }
 

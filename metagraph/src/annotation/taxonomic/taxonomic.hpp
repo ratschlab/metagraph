@@ -1,8 +1,6 @@
 #ifndef __TAXONOMIC_HPP__
 #define __TAXONOMIC_HPP__
 
-#include <cassert>
-#include <tsl/hopscotch_map.h>
 #include "annotation/representation/base/annotation.hpp"
 
 
@@ -35,11 +33,9 @@ class Taxonomy {
     void read_tree(const std::string &tree_filepath, ChildrenList &tree);
     void calculate_node_depth(const TaxoLabel &node, const ChildrenList &tree);
     void rmq_preprocessing(const ChildrenList &tree);
-    void dfs_linearization(
-        const TaxoLabel &node,
-        const ChildrenList &tree,
-        std::vector<TaxoLabel> &tree_linearization
-    );
+    void dfs_linearization(const TaxoLabel &node,
+                           const ChildrenList &tree,
+                           std::vector<TaxoLabel> &tree_linearization);
     TaxoLabel find_lca(const TaxoLabel &label1, const TaxoLabel &label2);
     TaxoLabel find_lca(const std::vector<Label> &labels);
     TaxoLabel find_lca(const std::vector<TaxoLabel> &labels);
@@ -47,7 +43,7 @@ class Taxonomy {
     Taxonomy(const std::string &tree_filepath);
     void update_row_indices(const std::vector<row_index> &indices,
                             const std::vector<Label> &labels);
-    bool export_to_file(const std::string &filepath);
+    void export_to_file(const std::string &filepath);
 };
 
 }

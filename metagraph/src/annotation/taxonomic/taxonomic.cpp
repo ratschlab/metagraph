@@ -215,16 +215,16 @@ void Taxonomy::update_row_indices(const std::vector<row_index> &indices, const s
     }
 }
 
-bool Taxonomy::export_to_file(const std::string &filepath) {
+void Taxonomy::export_to_file(const std::string &filepath) {
     std::ofstream f(filepath.c_str(), std::ios::out);
     if (!f.is_open()) {
-//        Print error.
-        return false;
+        logger->error("Can't open taxonomic file '{}'.", filepath.c_str());
+        std::exit(1);
     }
 
     std::vector<uint> distrib(30);
     f << taxonomic_map.size() << "\n";
-    for (auto &it: taxonomic_map) {
+    for (auto &it: taxonomic_map) { // Certainly can be serialized.
         f << it.first << " " << it.second << "\n";
         distrib[it.second] ++;
     }
@@ -239,13 +239,11 @@ bool Taxonomy::export_to_file(const std::string &filepath) {
     f << "\n";
 
     uint64_t num_nodes = index_to_label.size();
-    f << 2 * num_nodes - 1 << "\n";
-    for (uint i = 0; i < 2 * num_nodes - 1; ++i) {
+    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
         f << rmq_data[0][i] << " ";
     }
     f << "\n";
     f.close();
-    return true;
 }
 
 }
