@@ -4,11 +4,9 @@
 #include "test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
 
-#include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_methods.hpp"
 #include "seq_io/sequence_io.hpp"
 
-#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/alphabets.hpp"
 
@@ -23,12 +21,6 @@ using namespace mtg::kmer;
 
 const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
-
-typedef DBGAligner<>::score_t score_t;
-
-int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
-    return config.get_row(a)[b];
-}
 
 void check_score_matrix(const DBGAlignerConfig &config,
                         const char* alphabet,
@@ -84,35 +76,6 @@ TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
         alphabets::kAlphabetProtein,
         alphabets::kSigmaProtein
     );
-}
-
-
-DBGAligner<>::DBGQueryAlignment
-get_extend(std::shared_ptr<const DeBruijnGraph> graph,
-           const DBGAlignerConfig &config,
-           const DBGAligner<>::DBGQueryAlignment &paths,
-           const std::string &query) {
-    assert(graph.get());
-    EXPECT_EQ(query, paths.get_query());
-    auto uniconfig = config;
-    uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
-
-    return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<UniMEMSeeder<>>>(*graph, uniconfig).align(query)
-        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
-}
-
-void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
-                  const DBGAlignerConfig &config,
-                  const DBGAligner<>::DBGQueryAlignment &paths,
-                  const std::string &query) {
-    auto unimem_paths = get_extend(graph, config, paths, query);
-
-    ASSERT_EQ(paths.size(), unimem_paths.size());
-
-    for (size_t i = 0; i < paths.size(); ++i) {
-        EXPECT_EQ(paths[i], unimem_paths[i]) << paths[i] << "\n" << unimem_paths[i];
-    }
 }
 
 

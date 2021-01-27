@@ -639,9 +639,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         );
     }
 
-    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
-    if (num_bytes > config_.max_ram_per_alignment)
-        logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
+    if (ram_limit_reached()) {
+        logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
+                     static_cast<double>(dp_table.num_bytes()) / 1024 / 1024,
+                     config_.max_ram_per_alignment);
+    }
 
     extend_main(callback, min_path_score);
 }
@@ -650,9 +652,6 @@ template <typename NodeType>
 std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
 ::fork_extension(NodeType node, ExtensionCallback, score_t) {
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
-
-    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
-    bool added = false;
 
     if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         // If an outgoing node is already in the DPTable, then there's no need
@@ -664,37 +663,29 @@ std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
                 ? boss.decode(
                       boss.get_W(dbg_succ->kmer_to_boss_index(next_node)) % boss.alph_size)
                 : find->second.last_char;
-            if (c != '$' && ((dp_table.size() < max_num_nodes
-                                && num_bytes <= config_.max_ram_per_alignment)
-                    || find != dp_table.end())) {
+            if (c != boss::BOSS::kSentinel
+                    && ((dp_table.size() < max_num_nodes && !ram_limit_reached())
+                        || find != dp_table.end())) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
-                added = true;
-                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     } else {
         graph_.call_outgoing_kmers(node, [&](auto next_node, char c) {
-            if (c != '$' && ((dp_table.size() < max_num_nodes
-                                && num_bytes <= config_.max_ram_per_alignment)
-                    || dp_table.count(next_node))) {
+            if (c != boss::BOSS::kSentinel
+                    && ((dp_table.size() < max_num_nodes && !ram_limit_reached())
+                        || dp_table.count(next_node))) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
-                added = true;
-                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     }
-
-    if (added && num_bytes > config_.max_ram_per_alignment)
-        logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
-                     num_bytes, config_.max_ram_per_alignment);
 
     return out_columns;
 }
@@ -724,7 +715,14 @@ void DefaultColumnExtender<NodeType>::extend_main(ExtensionCallback callback,
             return graph_.traverse(node, pair.second) == pair.first;
         }));
 
+        bool ram_limit_reached_before = ram_limit_reached();
         update_columns(node, out_columns, min_path_score);
+
+        if (!ram_limit_reached_before && ram_limit_reached()) {
+            logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
+                         static_cast<double>(dp_table.num_bytes()) / 1024 / 1024,
+                         config_.max_ram_per_alignment);
+        }
     }
 
 #ifndef NDEBUG

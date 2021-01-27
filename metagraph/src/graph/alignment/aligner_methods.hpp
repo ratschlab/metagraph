@@ -145,6 +145,8 @@ class SuffixSeeder : public BaseSeeder {
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
 
+    BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
+
   private:
     const DBGSuccinct &dbg_succ_;
 };
@@ -236,6 +238,11 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual std::deque<std::pair<NodeType, char>>
     fork_extension(NodeType /* fork after this node */, ExtensionCallback, score_t);
+
+    inline bool ram_limit_reached() const {
+        return static_cast<double>(dp_table.num_bytes()) / 1024 / 1024
+            > config_.max_ram_per_alignment;
+    }
 
   private:
     // compute perfect match scores for all suffixes
