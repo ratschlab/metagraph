@@ -88,26 +88,24 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
         return;
 
-    size_t k = dbg_succ_.get_k();
-
     auto call_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         std::string_view seed_seq(this->query_.data() + i, seed_length);
         DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
 
         if (match_score > this->config_.min_cell_score) {
-            Seed seed(seed_seq, { alt_node }, match_score, i,
-                      this->orientation_, k - seed_length);
+            Seed seed(seed_seq, { alt_node }, match_score, i, this->orientation_,
+                      this->graph_.get_k() - seed_length);
 
-            assert(seed.is_valid(dbg_succ_, &this->config_));
+            assert(seed.is_valid(this->graph_, &this->config_));
             callback(std::move(seed));
         }
     };
 
     for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
-            size_t max_seed_length = std::min({
-                this->config_.max_seed_length, k, this->query_.size() - i
-            });
+            size_t max_seed_length = std::min({ this->config_.max_seed_length,
+                                                this->graph_.get_k(),
+                                                this->query_.size() - i });
             dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(this->query_.data() + i, max_seed_length),
                 [&](node_index alt_node, size_t seed_length) {
