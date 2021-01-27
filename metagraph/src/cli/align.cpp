@@ -440,10 +440,11 @@ int align_to_graph(Config *config) {
 
     auto aligner = build_aligner(*graph, *config);
 
-    if (aligner->get_config().min_seed_length < graph->get_k()
-            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
-        exit(1);
+    if (auto *seed_extend = dynamic_cast<ISeedAndExtendAligner<>*>(aligner.get())) {
+        if (seed_extend->get_config().min_seed_length < graph->get_k()) {
+            logger->error("Seeds of length < k not supported with --canonical flag");
+            exit(1);
+        }
     }
 
     for (const auto &file : files) {
