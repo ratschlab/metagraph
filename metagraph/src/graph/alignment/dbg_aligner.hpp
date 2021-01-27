@@ -33,6 +33,8 @@ class IDBGAligner {
                              const AlignmentCallback &callback) const = 0;
     DBGQueryAlignment align(std::string_view query,
                             bool is_reverse_complement = false) const;
+
+    virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
 template <class AlignmentCompare = std::less<IDBGAligner::DBGAlignment>>
@@ -54,7 +56,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
     virtual ~ISeedAndExtendAligner() {}
 
     const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
+    virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
     typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
