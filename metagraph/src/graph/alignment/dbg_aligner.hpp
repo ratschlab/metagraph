@@ -31,8 +31,8 @@ class IDBGAligner {
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const = 0;
-    virtual DBGQueryAlignment align(std::string_view query,
-                                    bool is_reverse_complement = false) const;
+    DBGQueryAlignment align(std::string_view query,
+                            bool is_reverse_complement = false) const;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
@@ -46,11 +46,24 @@ class ISeedAndExtendAligner : public IDBGAligner {
     typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
     typedef IDBGAligner::score_t score_t;
 
+    ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : graph_(graph), config_(config) {
+        assert(config_.num_alternative_paths);
+        if (!config_.check_config_scores()) {
+            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+        }
+    }
+
     virtual ~ISeedAndExtendAligner() {}
 
+    virtual const DeBruijnGraph& get_graph() const override final { return graph_; }
+    virtual const DBGAlignerConfig& get_config() const override final { return config_; }
+
   protected:
-    typedef const std::function<void(const std::function<void(DBGAlignment&&)>&,
-                                     const std::function<score_t(const DBGAlignment&)>&)> AlignmentGenerator;
+    typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
+    typedef std::function<score_t(const DBGAlignment&)> MinScoreComputer;
+    typedef const std::function<void(const LocalAlignmentCallback&,
+                                     const ThresholdComputer&)> AlignmentGenerator;
 
     virtual std::unique_ptr<IExtender<node_index>>
     build_extender(std::string_view query, const ISeeder<node_index> &seeder) const = 0;
@@ -59,8 +72,8 @@ class ISeedAndExtendAligner : public IDBGAligner {
     void align_core(std::string_view query,
                     const ISeeder<node_index> &seeder,
                     IExtender<node_index>&& extender,
-                    const std::function<void(DBGAlignment&&)> &callback,
-                    const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
+                    const LocalAlignmentCallback &callback,
+                    const MinScoreComputer &get_min_path_score) const;
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
@@ -87,6 +100,10 @@ class ISeedAndExtendAligner : public IDBGAligner {
     virtual void
     align_aggregate(DBGQueryAlignment &paths,
                     const AlignmentGenerator &alignment_generator) const;
+
+  protected:
+    const DeBruijnGraph &graph_;
+    const DBGAlignerConfig &config_;
 };
 
 template <class Seeder = ExactSeeder<>,
@@ -103,28 +120,17 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     typedef IDBGAligner::AlignmentCallback AlignmentCallback;
 
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {
-        assert(config_.num_alternative_paths);
-        if (!config_.check_config_scores()) {
-            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
-        }
-    }
+          : ISeedAndExtendAligner<AlignmentCompare>(graph, config) {}
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const override;
 
-    const DeBruijnGraph& get_graph() const override { return graph_; }
-    const DBGAlignerConfig& get_config() const override { return config_; }
-
   protected:
     virtual std::unique_ptr<IExtender<node_index>>
-    build_extender(std::string_view query, const ISeeder<node_index> &) const override {
-        return std::make_unique<Extender>(graph_, config_, query);
+    build_extender(std::string_view query,
+                   const ISeeder<node_index> &) const override final {
+        return std::make_unique<Extender>(this->graph_, this->config_, query);
     }
-
-  private:
-    const DeBruijnGraph& graph_;
-    const DBGAlignerConfig config_;
 };
 
 
@@ -140,23 +146,24 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         assert(this_query == query);
 
         assert(config_.num_alternative_paths);
-        Seeder seeder(graph_, this_query, // use this_query since paths stores a copy
-                      is_reverse_complement, map_sequence_to_nodes(graph_, query),
-                      config_);
+        Seeder seeder(this->graph_, this_query, // use this_query since paths stores a copy
+                      is_reverse_complement, map_sequence_to_nodes(this->graph_, query),
+                      this->config_);
 
-        if (graph_.is_canonical_mode()) {
+        if (this->graph_.is_canonical_mode()) {
             assert(!is_reverse_complement);
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
             this->align_both_directions(paths, seeder);
-        } else if (config_.forward_and_reverse_complement) {
+        } else if (this->config_.forward_and_reverse_complement) {
             assert(!is_reverse_complement);
             std::string_view reverse = paths.get_query(true);
 
             this->align_best_direction(
-                paths, seeder, Seeder(graph_, reverse, !is_reverse_complement,
-                                      map_sequence_to_nodes(graph_, reverse), config_)
+                paths, seeder, Seeder(this->graph_, reverse, !is_reverse_complement,
+                                      map_sequence_to_nodes(this->graph_, reverse),
+                                      this->config_)
             );
         } else {
             this->align_one_direction(paths, is_reverse_complement, seeder);
