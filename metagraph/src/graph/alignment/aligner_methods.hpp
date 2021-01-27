@@ -6,7 +6,6 @@
 #include <priority_deque.hpp>
 
 #include "aligner_helper.hpp"
-#include "common/utils/template_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
 
@@ -123,7 +122,7 @@ class SuffixSeeder : public BaseSeeder {
     template <typename... Args>
     SuffixSeeder(Args&&... args)
           : BaseSeeder(std::forward<Args>(args)...),
-            dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->graph_)) {}
+            dbg_succ_(get_base_dbg_succ(this->graph_)) {}
 
     virtual ~SuffixSeeder() {}
 
@@ -133,6 +132,8 @@ class SuffixSeeder : public BaseSeeder {
 
   private:
     const DBGSuccinct &dbg_succ_;
+
+    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 };
 
 

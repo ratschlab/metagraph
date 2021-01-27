@@ -99,8 +99,11 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
     if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            if (!canonical || !dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
+                logger->error("SuffixSeeder can be used only with succinct graph representation");
+                exit(1);
+            }
         }
 
         // Use the seeder that seeds to node suffixes
@@ -433,12 +436,6 @@ int align_to_graph(Config *config) {
     }
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
-
-    if (config->canonical && !graph->is_canonical_mode()
-            && aligner_config.min_seed_length < graph->get_k()) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
-        exit(1);
-    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);

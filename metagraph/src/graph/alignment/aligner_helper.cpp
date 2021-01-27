@@ -1,6 +1,7 @@
 #include "aligner_helper.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 
 
@@ -324,31 +325,72 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
             + sequence_;
 
-        // if the alignment starts from a source k-mer, then traverse forwards
-        // until a non-dummy k-mer is hit and check if its reverse complement exists
-        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-        if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
-            const auto &boss = dbg_succ->get_boss();
-            assert(rev_seq.length() == graph.get_k());
-            auto edge = dbg_succ->kmer_to_boss_index(nodes_.back());
-            auto edge_label = boss.get_W(edge) % boss.alph_size;
+        if (rev_seq[0] == boss::BOSS::kSentinel) {
+            // If the alignment starts from a source k-mer, then traverse forwards
+            // until a non-dummy k-mer is hit and check if its reverse complement exists.
 
-            // TODO: for efficiency, the last outgoing edge is taken at each step.
-            // This is valid for canonical graphs since the reverse complement of
-            // the found non-dummy k-mer is guaranteed to exist, but this node may
-            // not exist in a non-canonical graph.
-            for (size_t i = 0; i < offset_; ++i) {
-                edge = boss.fwd(edge, edge_label);
-                edge_label = boss.get_W(edge) % boss.alph_size;
-                if (edge_label == boss::BOSS::kSentinelCode) {
-                    // reverse complement not found
-                    *this = Alignment();
-                    return;
+            // An appropriate node may not exist if offset_ is greater than the
+            // number of sentinel characters (i.e., if some non-sentinel characters
+            // from the node prefix are not included).
+
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(
+                canonical ? canonical->get_graph() : graph
+            );
+
+            // TODO: This picks the node which is found by always traversing
+            // the last outgoing edge. Is there a better way to pick a node?
+            if (!canonical || nodes_.back() == canonical->get_base_node(nodes_.back())) {
+                // the node is present in the underlying graph, so use
+                // lower-level methods
+                const auto &boss = dbg_succ.get_boss();
+                auto edge = dbg_succ.kmer_to_boss_index(nodes_.back());
+                auto edge_label = boss.get_W(edge) % boss.alph_size;
+
+                // TODO: for efficiency, the last outgoing edge is taken at each step.
+                // This is valid for canonical graphs since the reverse complement of
+                // the found non-dummy k-mer is guaranteed to exist, but this node may
+                // not exist in a non-canonical graph.
+                for (size_t i = 0; i < offset_; ++i) {
+                    edge = boss.fwd(edge, edge_label);
+                    edge_label = boss.get_W(edge) % boss.alph_size;
+                    if (edge_label == boss::BOSS::kSentinelCode) {
+                        // reverse complement not found
+                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
+                        *this = Alignment();
+                        return;
+                    }
+
+                    nodes_.push_back(dbg_succ.boss_to_kmer_index(edge));
+                    assert(nodes_.back());
+                    rev_seq.push_back(boss.decode(edge_label));
                 }
+            } else {
+                // the node is a reverse-complement, so need to use CanonicalDBG
+                // to traverse
+                for (size_t i = 0; i < offset_; ++i) {
+                    NodeType next_node = 0;
+                    char last_char;
+                    graph.call_outgoing_kmers(nodes_.back(), [&](NodeType next, char c) {
+                        if (c == boss::BOSS::kSentinel)
+                            return;
 
-                nodes_.push_back(dbg_succ->boss_to_kmer_index(edge));
-                rev_seq.push_back(boss.decode(edge_label));
+                        next_node = next;
+                        last_char = c;
+                    });
+
+                    if (!next_node) {
+                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
+                        *this = Alignment();
+                        return;
+                    } else {
+                        nodes_.push_back(next_node);
+                        rev_seq.push_back(last_char);
+                    }
+                }
             }
+
+            assert(nodes_.size() == offset_ + 1);
             nodes_.assign(nodes_.begin() + offset_, nodes_.end());
             rev_seq.assign(rev_seq.begin() + offset_, rev_seq.end());
 
