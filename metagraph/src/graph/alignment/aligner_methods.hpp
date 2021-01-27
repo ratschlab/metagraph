@@ -18,8 +18,6 @@ class DBGSuccinct;
 
 namespace align {
 
-/******************* Abstract Seeder classes *******************/
-
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ISeeder {
   public:
@@ -29,47 +27,6 @@ class ISeeder {
 
     virtual void call_seeds(std::function<void(Seed&&)> callback) const = 0;
 };
-
-template <typename NodeType = typename DeBruijnGraph::node_index>
-class ExactMapSeeder : public ISeeder<NodeType> {
-  public:
-    typedef typename ISeeder<NodeType>::Seed Seed;
-
-    ExactMapSeeder(const DeBruijnGraph &graph,
-                   std::string_view query,
-                   bool orientation,
-                   std::vector<NodeType>&& nodes,
-                   const DBGAlignerConfig &config);
-
-    virtual ~ExactMapSeeder() {}
-
-  protected:
-    const DeBruijnGraph &graph_;
-    std::string_view query_;
-    bool orientation_;
-    std::vector<NodeType> query_nodes_;
-    const DBGAlignerConfig &config_;
-    std::vector<DBGAlignerConfig::score_t> partial_sum_;
-    size_t num_matching_;
-};
-
-template <typename NodeType = typename DeBruijnGraph::node_index>
-class MEMSeeder : public ExactMapSeeder<NodeType> {
-  public:
-    typedef typename ISeeder<NodeType>::Seed Seed;
-
-    template <typename... Args>
-    MEMSeeder(Args&&... args) : ExactMapSeeder<NodeType>(std::forward<Args>(args)...) {}
-
-    virtual ~MEMSeeder() {}
-
-    void call_seeds(std::function<void(Seed&&)> callback) const override;
-
-    virtual const bitmap& get_mem_terminator() const = 0;
-};
-
-
-/************************ Seeder classes ***********************/
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class ManualSeeder : public ISeeder<NodeType> {
@@ -92,17 +49,44 @@ class ManualSeeder : public ISeeder<NodeType> {
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
-class ExactSeeder : public ExactMapSeeder<NodeType> {
+class ExactSeeder : public ISeeder<NodeType> {
   public:
     typedef NodeType node_index;
     typedef typename ISeeder<NodeType>::Seed Seed;
 
-    template <typename... Args>
-    ExactSeeder(Args&&... args) : ExactMapSeeder<NodeType>(std::forward<Args>(args)...) {}
+    ExactSeeder(const DeBruijnGraph &graph,
+                std::string_view query,
+                bool orientation,
+                std::vector<NodeType>&& nodes,
+                const DBGAlignerConfig &config);
 
     virtual ~ExactSeeder() {}
 
     void call_seeds(std::function<void(Seed&&)> callback) const override;
+
+  protected:
+    const DeBruijnGraph &graph_;
+    std::string_view query_;
+    bool orientation_;
+    std::vector<NodeType> query_nodes_;
+    const DBGAlignerConfig &config_;
+    std::vector<DBGAlignerConfig::score_t> partial_sum_;
+    size_t num_matching_;
+};
+
+template <typename NodeType = typename DeBruijnGraph::node_index>
+class MEMSeeder : public ExactSeeder<NodeType> {
+  public:
+    typedef typename ISeeder<NodeType>::Seed Seed;
+
+    template <typename... Args>
+    MEMSeeder(Args&&... args) : ExactSeeder<NodeType>(std::forward<Args>(args)...) {}
+
+    virtual ~MEMSeeder() {}
+
+    void call_seeds(std::function<void(Seed&&)> callback) const override;
+
+    virtual const bitmap& get_mem_terminator() const = 0;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>

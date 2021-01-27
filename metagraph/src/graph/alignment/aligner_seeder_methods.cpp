@@ -10,11 +10,11 @@ namespace align {
 typedef DBGAlignerConfig::score_t score_t;
 
 template <typename NodeType>
-ExactMapSeeder<NodeType>::ExactMapSeeder(const DeBruijnGraph &graph,
-                                         std::string_view query,
-                                         bool orientation,
-                                         std::vector<NodeType>&& nodes,
-                                         const DBGAlignerConfig &config)
+ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
+                                   std::string_view query,
+                                   bool orientation,
+                                   std::vector<NodeType>&& nodes,
+                                   const DBGAlignerConfig &config)
       : graph_(graph),
         query_(query),
         orientation_(orientation),
@@ -85,41 +85,36 @@ template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
     this->BaseSeeder::call_seeds(callback);
 
-    std::string_view query = this->query_;
-    const DBGAlignerConfig &config = this->config_;
-    const std::vector<node_index> &query_nodes = this->query_nodes_;
-
-    if (this->num_matching_ < config.min_exact_match * query.size())
+    if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
         return;
 
     size_t k = dbg_succ_.get_k();
-    bool orientation = this->orientation_;
 
     auto call_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
-        std::string_view seed_seq(query.data() + i, seed_length);
-        DBGAlignerConfig::score_t match_score = config.match_score(seed_seq);
+        std::string_view seed_seq(this->query_.data() + i, seed_length);
+        DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
 
-        if (match_score > config.min_cell_score) {
+        if (match_score > this->config_.min_cell_score) {
             Seed seed(seed_seq, { alt_node }, match_score, i,
-                      orientation, k - seed_length);
+                      this->orientation_, k - seed_length);
 
-            assert(seed.is_valid(dbg_succ_, &config));
+            assert(seed.is_valid(dbg_succ_, &this->config_));
             callback(std::move(seed));
         }
     };
 
-    for (size_t i = 0; i + config.min_seed_length <= query.size(); ++i) {
-        if (i >= query_nodes.size() || !query_nodes[i]) {
+    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+        if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
             size_t max_seed_length = std::min({
-                config.max_seed_length, k, query.size() - i
+                this->config_.max_seed_length, k, this->query_.size() - i
             });
             dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
-                std::string_view(query.data() + i, max_seed_length),
+                std::string_view(this->query_.data() + i, max_seed_length),
                 [&](node_index alt_node, size_t seed_length) {
                     call_suffix_seed(i, alt_node, seed_length);
                 },
-                config.min_seed_length,
-                config.max_num_seeds_per_locus
+                this->config_.min_seed_length,
+                this->config_.max_num_seeds_per_locus
             );
         }
     }
@@ -127,24 +122,17 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
 template <typename NodeType>
 void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
-    const DeBruijnGraph &graph = this->graph_;
-    size_t k = graph.get_k();
+    size_t k = this->graph_.get_k();
 
-    auto query = this->query_;
-    const std::vector<NodeType> &query_nodes = this->query_nodes_;
-    const DBGAlignerConfig &config = this->config_;
-    bool orientation = this->orientation_;
-    const std::vector<score_t> &partial_sum = this->partial_sum_;
-
-    if (this->num_matching_ < config.min_exact_match * query.size())
+    if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
         return;
 
-    std::vector<uint8_t> query_node_flags(query_nodes.size(), 0);
+    std::vector<uint8_t> query_node_flags(this->query_nodes_.size(), 0);
     for (size_t i = 0; i < query_node_flags.size(); ++i) {
-        if (query_nodes[i] != DeBruijnGraph::npos) {
+        if (this->query_nodes_[i] != DeBruijnGraph::npos) {
             // the second bit indicates that a node has been found, while the
             // first bit indicates if the node is a maximal exact match terminus
-            query_node_flags[i] = 2 | get_mem_terminator()[query_nodes[i]];
+            query_node_flags[i] = 2 | get_mem_terminator()[this->query_nodes_[i]];
         }
     }
 
@@ -166,27 +154,29 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
         assert(next <= query_node_flags.end());
 
         size_t i = it - query_node_flags.begin();
-        assert(it == query_node_flags.end() || query_nodes[i] != DeBruijnGraph::npos);
+        assert(it == query_node_flags.end()
+                || this->query_nodes_[i] != DeBruijnGraph::npos);
 
         size_t mem_length = (next - it) + k - 1;
-        assert(i + mem_length <= query.size());
+        assert(i + mem_length <= this->query_.size());
 
-        const char *begin_it = query.data() + i;
+        const char *begin_it = this->query_.data() + i;
         const char *end_it = begin_it + mem_length;
 
-        assert(end_it >= begin_it + config.min_seed_length);
+        assert(end_it >= begin_it + this->config_.min_seed_length);
 
-        score_t match_score = partial_sum[end_it - query.data()] - partial_sum[i];
+        score_t match_score = this->partial_sum_[end_it - this->query_.data()]
+                                    - this->partial_sum_[i];
 
-        auto node_begin_it = query_nodes.begin() + i;
+        auto node_begin_it = this->query_nodes_.begin() + i;
         auto node_end_it = node_begin_it + (next - it);
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
-        if (match_score > config.min_cell_score) {
+        if (match_score > this->config_.min_cell_score) {
             Seed seed(std::string_view(begin_it, mem_length),
                       { node_begin_it, node_end_it },
-                      match_score, i, orientation);
-            assert(seed.is_valid(graph, &config));
+                      match_score, i,this->orientation_);
+            assert(seed.is_valid(this->graph_, &this->config_));
             callback(std::move(seed));
         }
 
@@ -195,7 +185,6 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
 }
 
 
-template class ExactMapSeeder<>;
 template class ExactSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
