@@ -258,10 +258,11 @@ class Alignment {
     void append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }
+    bool empty() const { return nodes_.empty(); }
+    const std::vector<NodeType>& get_nodes() const { return nodes_; }
+    const NodeType& operator[](size_t i) const { return nodes_[i]; }
     const NodeType& front() const { return nodes_.front(); }
     const NodeType& back() const { return nodes_.back(); }
-    const std::vector<NodeType>& get_nodes() const { return nodes_; }
-    bool empty() const { return nodes_.empty(); }
 
     score_t get_score() const { return score_; }
     uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
@@ -319,10 +320,7 @@ class Alignment {
                             std::string_view query_rev_comp);
 
     const std::string& get_sequence() const { return sequence_; }
-
     const Cigar& get_cigar() const { return cigar_; }
-    void set_cigar(Cigar&& cigar) { cigar_ = std::move(cigar); }
-
     bool get_orientation() const { return orientation_; }
     size_t get_offset() const { return offset_; }
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
@@ -343,9 +341,6 @@ class Alignment {
 
     const_iterator begin() const { return nodes_.cbegin(); }
     const_iterator end() const { return nodes_.cend(); }
-
-    const NodeType& operator[](size_t i) const { return nodes_[i]; }
-    const NodeType& at(size_t i) const { return nodes_.at(i); }
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
@@ -421,7 +416,7 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 template <typename NodeType = SequenceGraph::node_index>
 class QueryAlignment {
   public:
-    typedef Alignment<NodeType> value_type;
+    typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
 
     QueryAlignment(std::string_view query, bool is_reverse_complement = false);
 
@@ -443,39 +438,23 @@ class QueryAlignment {
             || alignments_.back().get_query_end() <= query_rc_->c_str() + query_rc_->size());
     }
 
-    void push_back(const value_type &alignment) { emplace_back(alignment); }
-    void push_back(value_type&& alignment) { emplace_back(std::move(alignment)); }
-
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
     const std::string& get_query(bool reverse_complement = false) const {
         return !reverse_complement ? *query_ : *query_rc_;
     }
-    const value_type& front() const { return alignments_.front(); }
-    const value_type& back() const { return alignments_.back(); }
-    const value_type& operator[](size_t i) const { return alignments_[i]; }
 
-    typedef typename std::vector<value_type>::const_iterator const_iterator;
-
+    const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
     const_iterator begin() const { return alignments_.cbegin(); }
     const_iterator end() const { return alignments_.cend(); }
     const_iterator cbegin() const { return alignments_.cbegin(); }
     const_iterator cend() const { return alignments_.cend(); }
 
-    template <class Iterator>
-    void erase(Iterator begin, Iterator end) { alignments_.erase(begin, end); }
-
-    bool operator==(const QueryAlignment &other) const {
-        return query_ == other.query_ && alignments_ == other.alignments_;
-    }
-
-    bool operator!=(const QueryAlignment &other) const { return !(*this == other); }
-
   private:
     std::shared_ptr<std::string> query_;
     std::shared_ptr<std::string> query_rc_;
-    std::vector<value_type> alignments_;
+    std::vector<Alignment<NodeType>> alignments_;
 };
 
 
