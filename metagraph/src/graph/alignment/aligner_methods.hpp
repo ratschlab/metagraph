@@ -190,7 +190,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
-    DefaultColumnExtender(DefaultColumnExtender&&) = default;
 
     virtual ~DefaultColumnExtender() {}
 
