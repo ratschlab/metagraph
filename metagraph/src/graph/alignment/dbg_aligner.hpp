@@ -63,7 +63,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
     typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
     typedef std::function<score_t(const DBGAlignment&)> MinScoreComputer;
     typedef const std::function<void(const LocalAlignmentCallback&,
-                                     const ThresholdComputer&)> AlignmentGenerator;
+                                     const MinScoreComputer&)> AlignmentGenerator;
 
     virtual std::unique_ptr<IExtender<node_index>>
     build_extender(std::string_view query, const ISeeder<node_index> &seeder) const = 0;
@@ -145,7 +145,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
-        assert(config_.num_alternative_paths);
+        assert(this->config_.num_alternative_paths);
         Seeder seeder(this->graph_, this_query, // use this_query since paths stores a copy
                       is_reverse_complement, map_sequence_to_nodes(this->graph_, query),
                       this->config_);
