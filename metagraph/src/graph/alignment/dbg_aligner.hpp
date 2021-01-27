@@ -103,7 +103,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
   protected:
     const DeBruijnGraph &graph_;
-    const DBGAlignerConfig &config_;
+    DBGAlignerConfig config_;
 };
 
 template <class Seeder = ExactSeeder<>,
