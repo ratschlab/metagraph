@@ -110,7 +110,6 @@ template <class Seeder = ExactSeeder<>,
           class AlignmentCompare = std::less<Alignment<>>>
 class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
-    typedef ISeedAndExtendAligner<AlignmentCompare> BaseAligner;
     typedef IDBGAligner::node_index node_index;
     typedef IDBGAligner::DBGAlignment DBGAlignment;
     typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
