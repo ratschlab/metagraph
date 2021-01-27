@@ -91,14 +91,15 @@ std::string Classifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
 //    like in src/graph/annotated_dbg.cpp line 53
     graph.map_to_nodes(sequence, [&](const auto &i) {
         if (i > 0) {
-//            std::cout << "map to node " << i << std::endl;
-            raw_node_score[taxonomic_map[i]]++;
+            std::cout << i << " ";
+            raw_node_score[taxonomic_map[i - 1]]++;
             total_kmers++;
         }
     });
+    std::cout << "\n\n";
 
     std::cout << "before\n";
-    for (auto &it: raw_node_score) {
+    for (const auto &it: raw_node_score) {
         std::cout << "taxon_before=" << it.first << " -> " << it.second << "\n";
     }
     tsl::hopscotch_set<TaxoLabel> nodes_already_propagated;
@@ -108,48 +109,48 @@ std::string Classifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     TaxoLabel best_lca = root_node;
     for (const auto &node_pair: raw_node_score) {
         uint64_t node = node_pair.first;
+        std::cout << "node in for = " << node << "\n";
         if (nodes_already_propagated.count(node)) {
+            std::cout << "skip\n";
             continue;
         }
-        uint64_t first_processed_parent = node;
         uint64_t amount_from_processed_parents = 0;
         uint64_t amount_from_unprocessed_parents = raw_node_score[node];
 
+        std::vector<TaxoLabel> processed_parents;
+        std::vector<TaxoLabel> unprocessed_parents;
+
         TaxoLabel it_node = node;
+        unprocessed_parents.push_back(it_node);
         do {
             it_node = node_parent[it_node];
             if (!nodes_already_propagated.count(it_node)) {
-                amount_from_unprocessed_parents += raw_node_score[it_node];
+                if (raw_node_score.count(it_node)) {
+                    amount_from_unprocessed_parents += raw_node_score[it_node];
+                }
+                unprocessed_parents.push_back(it_node);
             } else {
-                first_processed_parent = it_node;
-                amount_from_processed_parents = raw_node_score[it_node];
-                break;
+                if (raw_node_score.count(it_node)) {
+                    amount_from_processed_parents += raw_node_score[it_node];
+                }
+                processed_parents.push_back(it_node);
             }
         } while (it_node != root_node);
-        while (it_node != root_node) {
-            it_node = node_parent[it_node];
-            amount_from_processed_parents += raw_node_score[it_node];
-        }
-        it_node = node;
-        while (it_node != first_processed_parent) {
+
+        std::cout << " amount_from_processed_parents=" << amount_from_processed_parents <<
+                " amount_from_unprocessed_parents=" << amount_from_unprocessed_parents <<
+                "\n";
+
+        for (const auto &it_node: unprocessed_parents) {
             prc_node_score[it_node] = amount_from_processed_parents +
-                                        amount_from_unprocessed_parents;
-            if (!nodes_already_propagated.count(it_node)) {
-                nodes_already_propagated.insert(it_node);
-            }
+                                      amount_from_unprocessed_parents;
+            nodes_already_propagated.insert(it_node);
             if (prc_node_score[it_node] >= desired_number_kmers &&
                 node_depth[it_node] < node_depth[best_lca]) {
                 best_lca = it_node;
             }
-            it_node = node_parent[it_node];
         }
-        prc_node_score[it_node] += amount_from_unprocessed_parents;
-        if (prc_node_score[it_node] >= desired_number_kmers &&
-            node_depth[it_node] < node_depth[best_lca]) {
-            best_lca = it_node;
-        }
-        while (it_node != root_node) {
-            it_node = node_parent[it_node];
+        for (const auto &it_node: processed_parents) {
             prc_node_score[it_node] += amount_from_unprocessed_parents;
             if (prc_node_score[it_node] >= desired_number_kmers &&
                 node_depth[it_node] < node_depth[best_lca]) {
