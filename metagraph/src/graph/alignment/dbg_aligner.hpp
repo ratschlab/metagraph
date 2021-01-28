@@ -70,9 +70,7 @@ class DBGAligner : public ISeedAndExtendAligner {
     typedef IDBGAligner::AlignmentCallback AlignmentCallback;
 
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : aligner_core_(graph, config),
-            graph_(aligner_core_.get_graph()),
-            config_(aligner_core_.get_config()) {}
+          : config_(config), aligner_core_(graph, config_), graph_(graph) {}
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const override final;
@@ -80,11 +78,9 @@ class DBGAligner : public ISeedAndExtendAligner {
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
+    DBGAlignerConfig config_;
     SeedAndExtendAlignerCore<AlignmentCompare> aligner_core_;
-
-    // references to members of aligner_core_ for convenience
     const DeBruijnGraph &graph_;
-    const DBGAlignerConfig &config_;
 };
 
 template <class AlignmentCompare>
@@ -114,11 +110,6 @@ class SeedAndExtendAlignerCore {
             throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
         }
     }
-
-    virtual ~SeedAndExtendAlignerCore() {}
-
-    const DeBruijnGraph& get_graph() const { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
@@ -160,7 +151,7 @@ class SeedAndExtendAlignerCore {
                     const AlignmentGenerator &alignment_generator) const;
 
     const DeBruijnGraph &graph_;
-    DBGAlignerConfig config_;
+    const DBGAlignerConfig &config_;
 };
 
 
