@@ -166,7 +166,6 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
-        assert(graph_.num_alternative_paths);
         Seeder seeder(graph_, this_query, // use this_query since paths stores a copy
                       is_reverse_complement, map_sequence_to_nodes(graph_, query),
                       config_);
