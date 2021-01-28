@@ -112,9 +112,8 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }
 }
 
-void CanonicalDBG
-::append_child_nodes_using_node_rev_comp(node_index node,
-                                         std::vector<node_index> &children) const {
+void CanonicalDBG::append_next_rc_nodes(node_index node,
+                                        std::vector<node_index> &children) const {
     /**
      *
      * find children of node by searching for parents of its reverse complement
@@ -202,7 +201,7 @@ void CanonicalDBG
         });
 
         if (!graph_.is_canonical_mode() && max_num_edges_left)
-            append_child_nodes_using_node_rev_comp(node, children);
+            append_next_rc_nodes(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t c = 0; c < children.size(); ++c) {
@@ -214,9 +213,8 @@ void CanonicalDBG
     }
 }
 
-void CanonicalDBG
-::append_parent_nodes_using_node_rev_comp(node_index node,
-                                          std::vector<node_index> &parents) const {
+void CanonicalDBG::append_prev_rc_nodes(node_index node,
+                                        std::vector<node_index> &parents) const {
     /**
      * find parents of node by searching for children of its reverse complement
      * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
@@ -309,7 +307,7 @@ void CanonicalDBG
         });
 
         if (!graph_.is_canonical_mode() && max_num_edges_left)
-            append_parent_nodes_using_node_rev_comp(node, parents);
+            append_prev_rc_nodes(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t c = 0; c < parents.size(); ++c) {

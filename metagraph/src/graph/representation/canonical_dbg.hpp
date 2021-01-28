@@ -163,13 +163,13 @@ class CanonicalDBG : public DeBruijnGraph {
 
     node_index reverse_complement(node_index node) const;
 
-    // find all parent nodes of node which are only represented in their reverse
-    // complement orientation in the underlying graph
-    void append_parent_nodes_using_node_rev_comp(node_index node, std::vector<node_index> &parents) const;
+    // find all parent nodes of node in the CanonicalDBG which are represented
+    // in the reverse complement orientation in the underlying primary graph
+    void append_prev_rc_nodes(node_index node, std::vector<node_index> &parents) const;
 
-    // find all child nodes of node which are only represented in their reverse
-    // complement orientation in the underlying graph
-    void append_child_nodes_using_node_rev_comp(node_index node, std::vector<node_index> &children) const;
+    // find all child nodes of node in the CanonicalDBG which are represented
+    // in the reverse complement orientation in the underlying primary graph
+    void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
 };
 
 } // namespace graph
