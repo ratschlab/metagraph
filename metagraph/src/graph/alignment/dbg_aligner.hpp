@@ -41,15 +41,73 @@ class IDBGAligner {
                      const AlignmentCallback &callback) const;
 };
 
-template <class AlignmentCompare = LocalAlignmentLess<>>
 class ISeedAndExtendAligner : public IDBGAligner {
+  public:
+    typedef DeBruijnGraph::node_index node_index;
+    typedef Alignment<node_index> DBGAlignment;
+    typedef QueryAlignment<node_index> DBGQueryAlignment;
+    typedef typename DBGAlignment::score_t score_t;
+
+    virtual ~ISeedAndExtendAligner() {}
+
+    virtual const DBGAlignerConfig& get_config() const = 0;
+};
+
+
+template <class AlignmentCompare = LocalAlignmentLess<>>
+class SeedAndExtendAlignerCore;
+
+template <class Seeder = ExactSeeder<>,
+          class Extender = DefaultColumnExtender<>,
+          class AlignmentCompare = LocalAlignmentLess<>>
+class DBGAligner : public ISeedAndExtendAligner {
+  public:
+    typedef IDBGAligner::node_index node_index;
+    typedef IDBGAligner::DBGAlignment DBGAlignment;
+    typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
+    typedef IDBGAligner::score_t score_t;
+    typedef IDBGAligner::QueryGenerator QueryGenerator;
+    typedef IDBGAligner::AlignmentCallback AlignmentCallback;
+
+    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+          : aligner_core_(graph, config),
+            graph_(aligner_core_.get_graph()),
+            config_(aligner_core_.get_config()) {}
+
+    virtual void align_batch(const QueryGenerator &generate_query,
+                             const AlignmentCallback &callback) const override final;
+
+    virtual const DBGAlignerConfig& get_config() const override final { return config_; }
+
+  protected:
+    SeedAndExtendAlignerCore<AlignmentCompare> aligner_core_;
+
+    // references to members of aligner_core_ for convenience
+    const DeBruijnGraph &graph_;
+    const DBGAlignerConfig &config_;
+};
+
+template <class AlignmentCompare>
+class SeedAndExtendAlignerCore {
   public:
     typedef IDBGAligner::node_index node_index;
     typedef IDBGAligner::DBGAlignment DBGAlignment;
     typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
     typedef IDBGAligner::score_t score_t;
 
-    ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+    typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
+    typedef std::function<score_t(const DBGAlignment&)> MinScoreComputer;
+    typedef const std::function<void(const LocalAlignmentCallback&,
+                                     const MinScoreComputer&)> AlignmentGenerator;
+
+    typedef std::function<void(const ISeeder<node_index>&,
+                               IExtender<node_index>&&)> AlignCoreCallback;
+    typedef std::function<void(std::string_view /* reverse_query */,
+                               const ISeeder<node_index> & /* forward seeder */,
+                               std::vector<DBGAlignment>&& /* rev_comp_seeds */,
+                               const AlignCoreCallback&)> AlignCoreGenerator;
+
+    SeedAndExtendAlignerCore(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {
         assert(config_.num_alternative_paths);
         if (!config_.check_config_scores()) {
@@ -57,23 +115,10 @@ class ISeedAndExtendAligner : public IDBGAligner {
         }
     }
 
-    virtual ~ISeedAndExtendAligner() {}
+    virtual ~SeedAndExtendAlignerCore() {}
 
     const DeBruijnGraph& get_graph() const { return graph_; }
     const DBGAlignerConfig& get_config() const { return config_; }
-
-  protected:
-    typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
-    typedef std::function<score_t(const DBGAlignment&)> MinScoreComputer;
-    typedef const std::function<void(const LocalAlignmentCallback&,
-                                     const MinScoreComputer&)> AlignmentGenerator;
-
-    // Generate seeds, then extend them
-    void align_core(std::string_view query,
-                    const ISeeder<node_index> &seeder,
-                    IExtender<node_index>&& extender,
-                    const LocalAlignmentCallback &callback,
-                    const MinScoreComputer &get_min_path_score) const;
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
@@ -97,16 +142,16 @@ class ISeedAndExtendAligner : public IDBGAligner {
     // 4. Reverse complement A' to get the final alignment A''
     void align_both_directions(DBGQueryAlignment &paths,
                                const ISeeder<node_index> &forward_seeder,
-                               IExtender<node_index>&& forward_extender) const;
+                               IExtender<node_index>&& forward_extender,
+                               const AlignCoreGenerator &rev_comp_core_generator) const;
 
-    // Given the reverse complement of the query, the seeder for the forward
-    // direction of the query, and an initial set of seeds for reverse_query,
-    // generate a seeder and extender pair to extend in the reverse complement direction
-    virtual std::pair<std::unique_ptr<ISeeder<node_index>>,
-                      std::unique_ptr<IExtender<node_index>>>
-    build_rev_comp_seeder_extender(std::string_view reverse_query,
-                                   const ISeeder<node_index> &forward_seeder,
-                                   std::vector<DBGAlignment>&& rev_comp_seeds) const = 0;
+  protected:
+    // Generate seeds, then extend them
+    void align_core(std::string_view query,
+                    const ISeeder<node_index> &seeder,
+                    IExtender<node_index>&& extender,
+                    const LocalAlignmentCallback &callback,
+                    const MinScoreComputer &get_min_path_score) const;
 
     // Given alignments generated by a generator, add them to a priority queue
     // and add the top ones to paths.
@@ -116,46 +161,6 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
-};
-
-template <class Seeder = ExactSeeder<>,
-          class Extender = DefaultColumnExtender<>,
-          class AlignmentCompare = LocalAlignmentLess<>>
-class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
-  public:
-    typedef IDBGAligner::node_index node_index;
-    typedef IDBGAligner::DBGAlignment DBGAlignment;
-    typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
-    typedef IDBGAligner::score_t score_t;
-    typedef IDBGAligner::QueryGenerator QueryGenerator;
-    typedef IDBGAligner::AlignmentCallback AlignmentCallback;
-
-    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : ISeedAndExtendAligner<AlignmentCompare>(graph, config) {}
-
-    virtual void align_batch(const QueryGenerator &generate_query,
-                             const AlignmentCallback &callback) const override final;
-
-  protected:
-    inline Extender build_extender(std::string_view query) const {
-        return { this->graph_, this->config_, query };
-    }
-
-    // Given the reverse complement of the query, the seeder for the forward
-    // direction of the query, and an initial set of seeds for reverse_query,
-    // generate a seeder and extender pair to extend in the reverse complement direction
-    virtual std::pair<std::unique_ptr<ISeeder<node_index>>,
-                      std::unique_ptr<IExtender<node_index>>>
-    build_rev_comp_seeder_extender(std::string_view reverse_query,
-                                   const ISeeder<node_index> &,
-                                   std::vector<DBGAlignment>&& rev_comp_seeds) const override final {
-        auto seeder_rc = std::make_unique<ManualSeeder<node_index>>(
-            std::move(rev_comp_seeds)
-        );
-
-        return std::make_pair(std::move(seeder_rc),
-                              std::make_unique<Extender>(build_extender(reverse_query)));
-    }
 };
 
 
@@ -170,30 +175,42 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
-        assert(this->config_.num_alternative_paths);
-        Seeder seeder(this->graph_, this_query, // use this_query since paths stores a copy
-                      is_reverse_complement, map_sequence_to_nodes(this->graph_, query),
-                      this->config_);
+        assert(graph_.num_alternative_paths);
+        Seeder seeder(graph_, this_query, // use this_query since paths stores a copy
+                      is_reverse_complement, map_sequence_to_nodes(graph_, query),
+                      config_);
 
-        if (this->graph_.is_canonical_mode()) {
+        Extender extender(graph_, config_, this_query);
+
+        if (graph_.is_canonical_mode()) {
             assert(!is_reverse_complement);
+
+            auto build_rev_comp_alignment_core = [&](std::string_view reverse,
+                                                     const auto &,
+                                                     auto&& rev_comp_seeds,
+                                                     const auto &callback) {
+                ManualSeeder<node_index> seeder_rc(std::move(rev_comp_seeds));
+                callback(seeder_rc, Extender(graph_, config_, reverse));
+            };
+
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
-            this->align_both_directions(paths, seeder, build_extender(this_query));
-        } else if (this->config_.forward_and_reverse_complement) {
+            aligner_core_.align_both_directions(paths, seeder, std::move(extender),
+                                                build_rev_comp_alignment_core);
+        } else if (config_.forward_and_reverse_complement) {
             assert(!is_reverse_complement);
             std::string_view reverse = paths.get_query(true);
 
-            Seeder seeder_rc(this->graph_, reverse, !is_reverse_complement,
-                             map_sequence_to_nodes(this->graph_, reverse), this->config_);
+            Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
+                             map_sequence_to_nodes(graph_, reverse), config_);
 
-            this->align_best_direction(paths, seeder, seeder_rc,
-                                       build_extender(this_query),
-                                       build_extender(reverse));
+            aligner_core_.align_best_direction(paths, seeder, seeder_rc,
+                                               std::move(extender),
+                                               Extender(graph_, config_, reverse));
         } else {
-            this->align_one_direction(paths, is_reverse_complement, seeder,
-                                      build_extender(this_query));
+            aligner_core_.align_one_direction(paths, is_reverse_complement, seeder,
+                                              std::move(extender));
         }
 
         callback(header, std::move(paths));
