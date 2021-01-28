@@ -2,6 +2,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 namespace mtg {
@@ -13,10 +14,11 @@ using mtg::common::logger;
 CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
+        k_odd_(graph_.get_k() % 2),
         alphabet_encoder_({ graph_.alphabet().size() }),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
-        is_palindrome_cache_(graph_.get_k() % 2 ? 0 : cache_size) {
+        is_palindrome_cache_(k_odd_ ? 0 : cache_size) {
     if (graph->is_canonical_mode())
         throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
 
@@ -141,14 +143,14 @@ void CanonicalDBG
             std::string_view(&rev_seq[1], get_k() - 1),
             [&](node_index next, uint64_t /* match length */) {
                 auto edge = dbg_succ->kmer_to_boss_index(next);
-                char c = boss.decode(boss.get_minus_k_value(edge, get_k() - 2).first);
-                if (c == boss::BOSS::kSentinel)
+                boss::BOSS::TAlphabet c = boss.get_minus_k_value(edge, get_k() - 2).first;
+                if (c == boss::BOSS::kSentinelCode)
                     return;
 
-                size_t i = boss.encode(::reverse_complement(c));
+                c = kmer::KmerExtractorBOSS::complement(c);
 
-                if (children[i] == DeBruijnGraph::npos)
-                    children[i] = next + offset_;
+                if (children[c] == DeBruijnGraph::npos)
+                    children[c] = next + offset_;
             },
             get_k() - 1
         );
@@ -158,7 +160,7 @@ void CanonicalDBG
             if (children[c] != DeBruijnGraph::npos)
                 continue;
 
-            rev_seq[0] = ::reverse_complement(alphabet[c]);
+            rev_seq[0] = complement(alphabet[c]);
             node_index next = graph_.kmer_to_node(rev_seq);
             if (next != DeBruijnGraph::npos)
                 children[c] = next + offset_;
@@ -172,7 +174,7 @@ void CanonicalDBG
     assert(node <= offset_ * 2);
     if (node > offset_) {
         call_incoming_kmers(node - offset_, [&](node_index next, char c) {
-            c = ::reverse_complement(c);
+            c = complement(c);
             callback(reverse_complement(next), c);
             assert(traverse(node, c) == reverse_complement(next));
         });
@@ -203,10 +205,10 @@ void CanonicalDBG
             append_child_nodes_using_node_rev_comp(node, children);
 
         child_node_cache_.Put(node, children);
-        for (size_t i = 0; i < children.size(); ++i) {
-            if (children[i] != DeBruijnGraph::npos) {
-                callback(children[i], alphabet[i]);
-                assert(traverse(node, alphabet[i]) == children[i]);
+        for (size_t c = 0; c < children.size(); ++c) {
+            if (children[c] != DeBruijnGraph::npos) {
+                callback(children[c], alphabet[c]);
+                assert(traverse(node, alphabet[c]) == children[c]);
             }
         }
     }
@@ -248,14 +250,14 @@ void CanonicalDBG
             boss.call_outgoing(edge, [&](auto adjacent_edge) {
                 node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
                 if (prev) {
-                    char c = alphabet[boss.get_W(adjacent_edge) % boss.alph_size];
-                    if (c == boss::BOSS::kSentinel)
+                    boss::BOSS::TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
+                    if (c == boss::BOSS::kSentinelCode)
                         return;
 
-                    size_t i = boss.encode(::reverse_complement(c));
+                    c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[i] == DeBruijnGraph::npos)
-                        parents[i] = prev + offset_;
+                    if (parents[c] == DeBruijnGraph::npos)
+                        parents[c] = prev + offset_;
                 }
             });
         }
@@ -265,7 +267,7 @@ void CanonicalDBG
             if (parents[c] != DeBruijnGraph::npos)
                 continue;
 
-            rev_seq.back() = ::reverse_complement(alphabet[c]);
+            rev_seq.back() = complement(alphabet[c]);
             node_index prev = graph_.kmer_to_node(rev_seq);
             if (prev != DeBruijnGraph::npos)
                 parents[c] = prev + offset_;
@@ -279,7 +281,7 @@ void CanonicalDBG
     assert(node <= offset_ * 2);
     if (node > offset_) {
         call_outgoing_kmers(node - offset_, [&](node_index prev, char c) {
-            c = ::reverse_complement(c);
+            c = complement(c);
             callback(reverse_complement(prev), c);
             assert(traverse_back(node, c) == reverse_complement(prev));
         });
@@ -310,10 +312,10 @@ void CanonicalDBG
             append_parent_nodes_using_node_rev_comp(node, parents);
 
         parent_node_cache_.Put(node, parents);
-        for (size_t i = 0; i < parents.size(); ++i) {
-            if (parents[i] != DeBruijnGraph::npos) {
-                callback(parents[i], alphabet[i]);
-                assert(traverse_back(node, alphabet[i]) == parents[i]);
+        for (size_t c = 0; c < parents.size(); ++c) {
+            if (parents[c] != DeBruijnGraph::npos) {
+                callback(parents[c], alphabet[c]);
+                assert(traverse_back(node, alphabet[c]) == parents[c]);
             }
         }
     }
@@ -380,7 +382,7 @@ std::string CanonicalDBG::get_node_sequence(node_index index) const {
 DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char) const {
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        node = traverse_back(node - offset_, ::reverse_complement(next_char));
+        node = traverse_back(node - offset_, complement(next_char));
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
@@ -398,7 +400,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
                                                       char prev_char) const {
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        node = traverse(node - offset_, ::reverse_complement(prev_char));
+        node = traverse(node - offset_, complement(prev_char));
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
@@ -440,12 +442,12 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     if (node > offset_) {
         // we know that this node is definitely not present in the base graph
 
-        if (!(graph_.get_k() & 1))
+        if (!k_odd_)
             is_palindrome_cache_.Put(node - offset_, false);
 
         return node - offset_;
 
-    } else if (graph_.get_k() & 1) {
+    } else if (k_odd_) {
         // if k is odd, then we know that the reverse complement doesn't exist,
         // so we apply the offset
         return node + offset_;

@@ -71,7 +71,7 @@ inline void reverse_complement(std::string &seq) {
     reverse_complement(seq.begin(), seq.end());
 }
 
-inline char reverse_complement(char c) {
+inline char complement(char c) {
     reverse_complement(&c, &c + 1);
     return c;
 }
