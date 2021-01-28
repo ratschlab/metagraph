@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include <iostream> // TODO delete
+#include "common/serialization.hpp"
 
 
 namespace mtg {
@@ -83,22 +84,27 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
     dfs_linearization(root_node, tree, tree_linearization);
 
     uint num_rmq_rows = log (tree_linearization.size()) + 2;
-    rmq_data = new std::unique_ptr<TaxoLabel[]>[num_rmq_rows];
-    for (uint i = 0; i < num_rmq_rows; ++i) {
-        rmq_data[i] = std::make_unique<TaxoLabel[]>(tree_linearization.size());
+//    rmq_data = std::make_unique<std::vector<TaxoLabel>>(num_rmq_rows);
+    rmq_data.resize(num_rmq_rows); // = new std::unique_ptr<std::vector<TaxoLabel>>[num_rmq_rows];
+    for (uint64_t i = 0; i < num_rmq_rows; ++i) {
+//        rmq_data[i] = std::make_unique<std::vector<TaxoLabel>>();
+        rmq_data[i].resize(tree_linearization.size());
     }
 
 //    Copy tree_linearization on rmq line 0.
-    for (uint i = 0; i < tree_linearization.size(); ++i) {
+    for (uint64_t i = 0; i < tree_linearization.size(); ++i) {
+//        rmq_data[0]->push_back(std::move(tree_linearization[i]));
         rmq_data[0][i] = tree_linearization[i];
     }
 
     uint delta = 1;
-    for (uint row = 1; row < num_rmq_rows; ++row) {
-        for (uint i = 0; i + delta < tree_linearization.size(); ++i) {
+    for (uint64_t row = 1; row < num_rmq_rows; ++row) {
+        for (uint64_t i = 0; i + delta < tree_linearization.size(); ++i) {
             if (node_depth[rmq_data[row-1][i]] > node_depth[rmq_data[row-1][i + delta]]) {
+//                rmq[row]->push_back(std::move(rmq_data[row-1][i]));
                 rmq_data[row][i] = rmq_data[row-1][i];
             } else {
+//                rmq[row]->push_back(std::move(rmq_data[row-1][i + delta]));
                 rmq_data[row][i] = rmq_data[row-1][i + delta];
             }
         }
@@ -107,14 +113,14 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
 
     precalc_log.resize(tree_linearization.size());
     precalc_pow2.push_back(1);
-    for (uint i = 2; i < tree_linearization.size(); ++i) {
+    for (uint64_t i = 2; i < tree_linearization.size(); ++i) {
         precalc_log[i] = 1 + precalc_log[i/2];
         if(precalc_log[i] > precalc_log[i-1]) {
             precalc_pow2.push_back(i);
         }
     }
 
-    for (uint row = 0; row < num_rmq_rows; ++row) {
+    for (uint64_t row = 0; row < num_rmq_rows; ++row) {
         for (uint i = 0; i < tree_linearization.size(); ++i) {
             std::cout << rmq_data[row][i] << " ";
         }
@@ -216,33 +222,36 @@ void Taxonomy::update_row_indices(const std::vector<row_index> &indices, const s
 }
 
 void Taxonomy::export_to_file(const std::string &filepath) {
-    std::ofstream f(filepath.c_str(), std::ios::out);
+    std::ofstream f(filepath.c_str(), std::ios::out | std::ios::binary);
     if (!f.is_open()) {
         logger->error("Can't open taxonomic file '{}'.", filepath.c_str());
         std::exit(1);
     }
 
-    std::vector<uint> distrib(30);
-    f << taxonomic_map.size() << "\n";
-    for (auto &it: taxonomic_map) { // Certainly can be serialized.
-        f << it.first << " " << it.second << "\n";
-        distrib[it.second] ++;
-    }
-    for (int i = 0; i < 30; ++i) {
-        std::cout << "distrib["<<i<<"]=" << distrib[i] << "\n";
-    }
+//    std::vector<uint> distrib(30);
+    serialize_number_number_map(f, taxonomic_map);
+//    f << taxonomic_map.size() << "\n";
+//    for (auto &it: taxonomic_map) { // Certainly can be serialized.
+//        f << it.first << " " << it.second << "\n";
+//        distrib[it.second] ++;
+//    }
+//    for (int i = 0; i < 30; ++i) {
+//        std::cout << "distrib["<<i<<"]=" << distrib[i] << "\n";
+//    }
 
-    f << index_to_label.size() << "\n";
-    for (auto &it: index_to_label) {
-        f << it << " ";
-    }
-    f << "\n";
+    serialize_string_vector(f, index_to_label);
+//    f << index_to_label.size() << "\n";
+//    for (auto &it: index_to_label) {
+//        f << it << " ";
+//    }
+//    f << "\n";
 
-    uint64_t num_nodes = index_to_label.size();
-    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
-        f << rmq_data[0][i] << " ";
-    }
-    f << "\n";
+    serialize_number_vector_raw(f, rmq_data[0]);
+//    uint64_t num_nodes = index_to_label.size();
+//    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
+//        f << rmq_data[0][i] << " ";
+//    }
+//    f << "\n";
     f.close();
 }
 

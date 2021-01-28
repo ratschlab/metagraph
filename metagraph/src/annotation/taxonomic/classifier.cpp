@@ -13,6 +13,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/serialization.hpp"
 
 namespace mtg {
 namespace annot {
@@ -25,29 +26,72 @@ void Classifier::import_taxonomy(
         const std::string &filepath,
         std::vector<TaxoLabel> &linearization
     ) {
-    std::ifstream f(filepath.c_str(), std::ios::in);
+    std::cout << "in inport" << std::endl;
+    std::ifstream f(filepath.c_str(), std::ios::in | std::ios::binary);
     if (!f.is_open()) {
         logger->error("Can't open taxonomic file '{}'.", filepath.c_str());
         std::exit(1);
     }
-    uint64_t size_map;
-    uint64_t key;
-    uint64_t value;
-    f >> size_map;
-    for (uint64_t i = 0; i < size_map; ++i) {
-        f >> key >> value;
-        taxonomic_map[key] = value;
+    std::cout << "in inport 2" << std::endl;
+//    uint64_t size_map;
+//    uint64_t key;
+//    uint64_t value;
+//    f >> size_map;
+//    for (uint64_t i = 0; i < size_map; ++i) {
+//        f >> key >> value;
+//        taxonomic_map[key] = value;
+//    }
+    if (!load_number_number_map(f, &taxonomic_map)) {
+        logger->error("Can't load serialized 'taxonomic_map' from file '{}'.", filepath.c_str());
+        std::exit(1);
     }
 
-    f >> num_nodes;
-    index_to_label.resize(num_nodes);
-    for (uint64_t i = 0; i < num_nodes; ++i) {
-        f >> index_to_label[i];
+    std::vector<uint> distrib(30);
+    for (auto &it: taxonomic_map) {
+        distrib[it.second]++;
+//        std::cout << it.first << " " << it.second << "\n";
     }
-    linearization.resize(2 * num_nodes - 1);
-    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
-        f >> linearization[i];
+    for (int i = 0; i < 30; ++i) {
+        std::cout << distrib[i] << " ";
     }
+
+    std::cout << "in inport 3" << std::endl;
+//    f >> num_nodes;
+//    index_to_label.resize(num_nodes);
+//    for (uint64_t i = 0; i < num_nodes; ++i) {
+//        f >> index_to_label[i];
+//    }
+    if (!load_string_vector(f, &index_to_label)) {
+        logger->error("Can't load serialized 'index_to_label' from file '{}'.", filepath.c_str());
+        std::exit(1);
+    }
+    num_nodes = index_to_label.size();
+
+    for (auto &it: index_to_label) {
+        std::cout << it << " ";
+    }
+    std::cout << "\n";
+
+
+    std::cout << "in inport 4" << std::endl;
+//    linearization.resize(2 * num_nodes - 1);
+//    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
+//        f >> linearization[i];
+//    }
+//    F_ = load_number_vector_raw<edge_index>(instream);
+
+    linearization = load_number_vector_raw<TaxoLabel>(f);
+
+    for (auto &it : linearization) {
+        std::cout << it << " ";
+    }
+    std::cout << "\n";
+
+    std::cout << "in inport fin" << std::endl;
+//    if (!linearization = load_number_vector_raw<TaxoLabel>(f)) {
+//        logger->error("Can't load serialized 'linearization' from file '{}'.", filepath.c_str());
+//        std::exit(1);
+//    }
     f.close();
 }
 
@@ -61,6 +105,7 @@ Classifier::Classifier(const std::string &filepath) {
     node_depth.resize(num_nodes);
     node_parent.resize(num_nodes);
     for (uint64_t i = 1; i < linearization.size(); ++i) {
+        std::cout << "in this for i=" << i << std::endl;
         uint64_t act = linearization[i];
         uint64_t prv = linearization[i - 1];
         if (!visited_node[act]) {

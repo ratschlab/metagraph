@@ -21,7 +21,7 @@ class Taxonomy {
     TaxoLabel root_node;
 
 //   TODO what is this rmq. https://stackoverflow.com/questions/15488470/syntax-for-dynamically-allocating-a-2d-array-of-smart-pointers
-    std::unique_ptr<TaxoLabel[]> *rmq_data;
+    std::vector<std::vector<TaxoLabel>> rmq_data;
     std::vector<uint64_t> node_depth; // The root has the maximal depth;
     std::vector<uint64_t> linearization_idx;
     tsl::hopscotch_map<Label, TaxoLabel> label_to_index;

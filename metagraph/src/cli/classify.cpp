@@ -50,17 +50,17 @@ int classify(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
-    assert(config->infbase_annotators.size() == 1);
+//    assert(config->infbase_annotators.size() == 1);
 
     Timer timer;
     logger->trace("Loading taxonomy data ...", timer.elapsed());
-    mtg::annot::Classifier taxo_classifier(config->infbase_annotators[0]);
-
-    config->infbase_annotators.pop_back();
+    mtg::annot::Classifier taxo_classifier(config->taxonomic_tree );
+    std::cout << "after Classifier constructor" << std::endl;
+//    config->infbase_annotators.pop_back();
 
     logger->trace("Graph loading ...");
     auto graph = load_critical_dbg(config->infbase);
-    auto anno_graph = initialize_annotated_dbg(graph, *config);
+//    auto anno_graph = initialize_annotated_dbg(graph, *config);
 
 
     logger->trace("Processing the classification", timer.elapsed());
@@ -71,7 +71,7 @@ int classify(Config *config) {
         Timer curr_timer;
         execute_fasta_file(file,
                            thread_pool,
-                           anno_graph->get_graph(),
+                           *graph,
                            taxo_classifier,
                            [](const std::string &result) { std::cout << result << std::endl; });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
