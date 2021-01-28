@@ -125,8 +125,7 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
-bool Cigar::is_valid(const std::string_view reference,
-                     const std::string_view query) const {
+bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
 

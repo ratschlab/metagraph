@@ -39,7 +39,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
     aligner_config.xdrop = config.alignment_xdrop;
-    aligner_config.exact_kmer_match_fraction = config.discovery_fraction;
+    aligner_config.min_exact_match = config.alignment_min_exact_match;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
     aligner_config.forward_and_reverse_complement = config.align_both_strands;
@@ -68,7 +68,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
-    logger->trace("\t Exact k-mer match fraction: {}", aligner_config.exact_kmer_match_fraction);
+    logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
@@ -94,7 +94,9 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &aligner_config) {
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    if (aligner_config.min_seed_length < graph.get_k()) {
+    size_t k = graph.get_k();
+
+    if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
             logger->error("SuffixSeeder can be used only with succinct graph representation");
@@ -102,10 +104,18 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
+        if (aligner_config.max_seed_length == k) {
+            return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder<>>>>(
+                graph, aligner_config
+            );
+        } else {
+            return std::make_unique<DBGAligner<SuffixSeeder<UniMEMSeeder<>>>>(
+                graph, aligner_config
+            );
+        }
 
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
+    } else if (aligner_config.max_seed_length == k) {
+        assert(aligner_config.min_seed_length == k);
 
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
@@ -320,6 +330,47 @@ void gfa_map_files(const Config *config,
     }
 }
 
+std::string format_alignment(std::string_view header,
+                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const DeBruijnGraph &graph,
+                             const Config &config) {
+    std::string sout;
+    if (!config.output_json) {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths) {
+                sout += fmt::format("\t{}", path);
+            }
+        }
+
+        sout += "\n";
+    } else {
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "";
+
+        bool secondary = false;
+        for (const auto &path : paths) {
+            Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
+                                                 graph, secondary, header);
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+            secondary = true;
+        }
+
+        if (paths.empty()) {
+            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
+                paths.get_query(), graph, secondary, header
+            );
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+        }
+    }
+
+    return sout;
+}
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -389,14 +440,16 @@ int align_to_graph(Config *config) {
 
     auto aligner = build_aligner(*graph, *config);
 
-    if (aligner->get_config().min_seed_length < graph->get_k()
-            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
-        exit(1);
+    if (auto *seed_extend = dynamic_cast<ISeedAndExtendAligner*>(aligner.get())) {
+        if (seed_extend->get_config().min_seed_length < graph->get_k()) {
+            logger->error("Seeds of length < k not supported with --canonical flag");
+            exit(1);
+        }
     }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
+        seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
 
         Timer data_reading_timer;
 
@@ -404,61 +457,41 @@ int align_to_graph(Config *config) {
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query, const std::string &header) {
-                auto paths = aligner->align(query);
+        const uint64_t batch_size = config->query_batch_size_in_bytes;
 
-                std::lock_guard<std::mutex> lock(print_mutex);
-                if (!config->output_json) {
-                    *out << header << "\t" << paths.get_query();
-                    if (paths.empty()) {
-                        *out << "\t*\t*\t" << config->alignment_min_path_score
-                             << "\t*\t*\t*";
-                    } else {
-                        for (const auto &path : paths) {
-                            *out << "\t" << path;
-                        }
+        auto it = fasta_parser.begin();
+        auto end = fasta_parser.end();
+        while (it != end) {
+            uint64_t num_bytes_read = 0;
+            // A generator that can be called multiple times until all sequences
+            // are called.
+            std::vector<std::pair<std::string, std::string>> seq_batch;
+            num_bytes_read = 0;
+            for ( ; it != end && num_bytes_read <= batch_size; ++it) {
+                std::string header
+                    = config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                        && it->comment.l
+                            ? utils::join_strings({ it->name.s, it->comment.s },
+                                                  config->fasta_anno_comment_delim,
+                                                  true)
+                            : std::string(it->name.s);
+                seq_batch.emplace_back(std::move(header), it->seq.s);
+                num_bytes_read += it->seq.l;
+            }
+
+            thread_pool.enqueue([&](auto seq_batch) {
+                aligner->align_batch(seq_batch,
+                    [&](std::string_view header, DBGAligner<>::DBGQueryAlignment&& paths) {
+                        std::string sout = format_alignment(
+                            header, paths, *graph, *config
+                        );
+
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << sout;
                     }
-
-                    *out << "\n";
-                } else {
-                    Json::StreamWriterBuilder builder;
-                    builder["indentation"] = "";
-
-                    bool secondary = false;
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        *out << Json::writeString(builder,
-                                                  path.to_json(path_query,
-                                                               *graph,
-                                                               secondary,
-                                                               header)) << "\n";
-
-                        secondary = true;
-                    }
-
-                    if (paths.empty()) {
-                        *out << Json::writeString(builder,
-                                                  DBGAligner<>::DBGAlignment().to_json(
-                                                      query,
-                                                      *graph,
-                                                      secondary,
-                                                      header)
-                                                  ) << "\n";
-                    }
-                }
-            }, std::string(read_stream->seq.s),
-               config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                   && read_stream->comment.l
-                       ? utils::join_strings(
-                           { read_stream->name.s, read_stream->comment.s },
-                           config->fasta_anno_comment_delim,
-                           true)
-                       : std::string(read_stream->name.s));
-        });
+                );
+            }, std::move(seq_batch));
+        };
 
         thread_pool.join();
 
