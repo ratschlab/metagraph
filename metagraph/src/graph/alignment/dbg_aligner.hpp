@@ -43,13 +43,7 @@ class IDBGAligner {
 
 class ISeedAndExtendAligner : public IDBGAligner {
   public:
-    typedef DeBruijnGraph::node_index node_index;
-    typedef Alignment<node_index> DBGAlignment;
-    typedef QueryAlignment<node_index> DBGQueryAlignment;
-    typedef typename DBGAlignment::score_t score_t;
-
     virtual ~ISeedAndExtendAligner() {}
-
     virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
