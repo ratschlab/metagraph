@@ -154,14 +154,14 @@ void CanonicalDBG
         );
 
     } else {
-        for (size_t i = 0; i < alphabet.size(); ++i) {
-            if (children[i] != DeBruijnGraph::npos)
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (children[c] != DeBruijnGraph::npos)
                 continue;
 
-            rev_seq[0] = ::reverse_complement(alphabet[i]);
+            rev_seq[0] = ::reverse_complement(alphabet[c]);
             node_index next = graph_.kmer_to_node(rev_seq);
             if (next != DeBruijnGraph::npos)
-                children[i] = next + offset_;
+                children[c] = next + offset_;
         }
     }
 }
@@ -183,9 +183,9 @@ void CanonicalDBG
 
     try {
         auto children = child_node_cache_.Get(node);
-        for (size_t i = 0; i < alphabet.size(); ++i) {
-            if (children[i] != DeBruijnGraph::npos)
-                callback(children[i], alphabet[i]);
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (children[c] != DeBruijnGraph::npos)
+                callback(children[c], alphabet[c]);
         }
 
     } catch (...) {
@@ -261,14 +261,14 @@ void CanonicalDBG
         }
 
     } else {
-        for (size_t i = 0; i < alphabet.size(); ++i) {
-            if (parents[i] != DeBruijnGraph::npos)
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (parents[c] != DeBruijnGraph::npos)
                 continue;
 
-            rev_seq.back() = ::reverse_complement(alphabet[i]);
+            rev_seq.back() = ::reverse_complement(alphabet[c]);
             node_index prev = graph_.kmer_to_node(rev_seq);
             if (prev != DeBruijnGraph::npos)
-                parents[i] = prev + offset_;
+                parents[c] = prev + offset_;
         }
     }
 }
@@ -290,9 +290,9 @@ void CanonicalDBG
 
     try {
         auto parents = parent_node_cache_.Get(node);
-        for (size_t i = 0; i < alphabet.size(); ++i) {
-            if (parents[i] != DeBruijnGraph::npos)
-                callback(parents[i], alphabet[i]);
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (parents[c] != DeBruijnGraph::npos)
+                callback(parents[c], alphabet[c]);
         }
 
     } catch (...) {
