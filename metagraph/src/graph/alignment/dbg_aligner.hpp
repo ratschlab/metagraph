@@ -35,7 +35,7 @@ class IDBGAligner {
                             bool is_reverse_complement = false) const;
 };
 
-template <class AlignmentCompare = std::less<IDBGAligner::DBGAlignment>>
+template <class AlignmentCompare = LocalAlignmentLess<>>
 class ISeedAndExtendAligner : public IDBGAligner {
   public:
     typedef IDBGAligner::node_index node_index;
@@ -114,7 +114,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
 template <class Seeder = ExactSeeder<>,
           class Extender = DefaultColumnExtender<>,
-          class AlignmentCompare = std::less<Alignment<>>>
+          class AlignmentCompare = LocalAlignmentLess<>>
 class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     typedef IDBGAligner::node_index node_index;

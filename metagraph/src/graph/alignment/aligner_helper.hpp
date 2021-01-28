@@ -326,16 +326,6 @@ class Alignment {
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
     Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
-    bool operator<(const Alignment &other) const {
-        return std::make_pair(-score_, get_query().size())
-                > std::make_pair(-other.score_, other.get_query().size());
-    }
-
-    bool operator>(const Alignment &other) const {
-        return std::make_pair(-score_, get_query().size())
-                < std::make_pair(-other.score_, other.get_query().size());
-    }
-
     typedef typename std::vector<NodeType>::iterator iterator;
     typedef typename std::vector<NodeType>::const_iterator const_iterator;
 
@@ -411,6 +401,14 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 
     return out;
 }
+
+template <typename NodeType = SequenceGraph::node_index>
+struct LocalAlignmentLess {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+        return std::make_pair(-a.get_score(), a.get_query().size())
+                > std::make_pair(-b.get_score(), b.get_query().size());
+    }
+};
 
 
 template <typename NodeType = SequenceGraph::node_index>

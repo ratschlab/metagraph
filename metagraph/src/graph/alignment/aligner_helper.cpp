@@ -1005,6 +1005,7 @@ QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
 
 
 template class Alignment<>;
+template class LocalAlignmentLess<>;
 template class QueryAlignment<>;
 template class DPTable<>;
 
