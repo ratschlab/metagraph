@@ -64,7 +64,7 @@ class DBGAligner : public ISeedAndExtendAligner {
     typedef IDBGAligner::AlignmentCallback AlignmentCallback;
 
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : config_(config), aligner_core_(graph, config_), graph_(graph) {}
+          : graph_(graph), config_(config), aligner_core_(graph_, config_) {}
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const override final;
@@ -72,9 +72,9 @@ class DBGAligner : public ISeedAndExtendAligner {
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
+    const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
     SeedAndExtendAlignerCore<AlignmentCompare> aligner_core_;
-    const DeBruijnGraph &graph_;
 };
 
 template <class AlignmentCompare>
