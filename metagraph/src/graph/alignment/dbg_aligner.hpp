@@ -13,6 +13,7 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+
 class IDBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
@@ -29,10 +30,15 @@ class IDBGAligner {
 
     virtual ~IDBGAligner() {}
 
+    // Main aligner
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const = 0;
+
+    // Convenience methods
     DBGQueryAlignment align(std::string_view query,
                             bool is_reverse_complement = false) const;
+    void align_batch(const std::vector<std::pair<std::string, std::string>> &seq_batch,
+                     const AlignmentCallback &callback) const;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess<>>

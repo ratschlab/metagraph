@@ -475,19 +475,16 @@ int align_to_graph(Config *config) {
                                                   config->fasta_anno_comment_delim,
                                                   true)
                             : std::string(it->name.s);
-                seq_batch.emplace_back(it->seq.s, std::move(header));
+                seq_batch.emplace_back(std::move(header), it->seq.s);
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&](auto batch) {
-                aligner->align_batch(
-                    [&](const IDBGAligner::QueryCallback &query_callback) {
-                        for (const auto &[seq, header] : batch) {
-                            query_callback(header, seq, false /* orientation of seq */);
-                        }
-                    },
+            thread_pool.enqueue([&](auto seq_batch) {
+                aligner->align_batch(seq_batch,
                     [&](std::string_view header, DBGAligner<>::DBGQueryAlignment&& paths) {
-                        std::string sout = format_alignment(header, paths, *graph, *config);
+                        std::string sout = format_alignment(
+                            header, paths, *graph, *config
+                        );
 
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << sout;

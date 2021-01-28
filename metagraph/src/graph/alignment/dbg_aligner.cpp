@@ -22,6 +22,16 @@ IDBGAligner::DBGQueryAlignment IDBGAligner::align(std::string_view query,
     return result;
 }
 
+void IDBGAligner
+::align_batch(const std::vector<std::pair<std::string, std::string>> &seq_batch,
+              const AlignmentCallback &callback) const {
+    align_batch([&](const QueryCallback &query_callback) {
+        for (const auto &[header, seq] : seq_batch) {
+            query_callback(header, seq, false /* orientation of seq */);
+        }
+    }, callback);
+}
+
 template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_core(std::string_view query,
