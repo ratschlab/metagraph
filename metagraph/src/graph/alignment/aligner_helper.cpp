@@ -41,12 +41,24 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
         table_init.ops[start_pos] = last_op;
         table_init.prev_nodes[start_pos] = 0;
         table_init.gap_prev_nodes[start_pos] = 0;
+
+        if (last_op != Cigar::DELETION && last_op != Cigar::MATCH
+                && last_op != Cigar::MISMATCH) {
+            throw std::runtime_error("Seeds must end in DELETION, MATCH, or MISMATCH");
+        }
+
+        // This vector stores the best scores for partial alignments ending in a
+        // delete operation. If the last operation in the seed is MATCH or MISMATCH,
+        // then we replace it with a score corresponding to INSERTION followed by DELETION
         table_init.gap_scores[start_pos] = std::max(
             last_op == Cigar::DELETION
                 ? table_init.scores[start_pos]
-                : table_init.scores[start_pos] - last_char_score + config.gap_opening_penalty + config.gap_opening_penalty,
+                : table_init.scores[start_pos] - last_char_score
+                                               + config.gap_opening_penalty
+                                               + config.gap_opening_penalty,
             config.min_cell_score
         );
+
         table_init.gap_count[start_pos] = 1;
         update = true;
     }
@@ -58,7 +70,7 @@ template <typename NodeType>
 void DPTable<NodeType>
 ::extract_alignments(const DeBruijnGraph &graph,
                      const DBGAlignerConfig &config,
-                     const std::string_view query_view,
+                     std::string_view query_view,
                      std::function<void(Alignment<NodeType>&&, NodeType)> callback,
                      score_t min_path_score,
                      const Alignment<NodeType> &seed,
@@ -140,7 +152,7 @@ void DPTable<NodeType>
 
 
 template <typename NodeType>
-Alignment<NodeType>::Alignment(const std::string_view query,
+Alignment<NodeType>::Alignment(std::string_view query,
                                std::vector<NodeType>&& nodes,
                                std::string&& sequence,
                                score_t score,
@@ -180,7 +192,7 @@ Alignment<NodeType>::Alignment(const std::string_view query,
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                                const DBGAlignerConfig &config,
-                               const std::string_view query_view,
+                               std::string_view query_view,
                                typename DPTable<NodeType>::const_iterator column,
                                size_t start_pos,
                                size_t offset,
@@ -410,8 +422,8 @@ void Alignment<NodeType>::trim_offset() {
             continue;
         }
 
-        size_t jump = std::min(std::min(offset_, size_t(it->second)),
-                               static_cast<size_t>(nodes_.end() - jt));
+        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
+                                          static_cast<size_t>(nodes_.end() - jt) });
         offset_ -= jump;
         counter += jump;
         jt += jump;
@@ -427,7 +439,7 @@ void Alignment<NodeType>::trim_offset() {
 
 template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
-                                             const std::string_view query_rev_comp) {
+                                             std::string_view query_rev_comp) {
     assert(graph.is_canonical_mode());
 
     if (empty())
@@ -546,7 +558,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
 template <typename NodeType>
 Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           const std::string &label) const {
+                                           std::string_view label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -703,25 +715,25 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     path["length"] = Json::Value::UInt64(nodes_.size());
     //path["is_circular"]; // bool
 
-    if (label.size())
-        path["name"] = label;
+    if (label.data())
+        path["name"] = std::string(label);
 
     return path;
 }
 
 template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(const std::string &query,
+Json::Value Alignment<NodeType>::to_json(std::string_view query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
-                                         const std::string &read_name,
-                                         const std::string &label) const {
+                                         std::string_view read_name,
+                                         std::string_view label) const {
     assert(is_valid(graph));
 
     // encode alignment
     Json::Value alignment;
 
-    alignment["name"] = read_name;
-    alignment["sequence"] = query;
+    alignment["name"] = read_name.data() ? std::string(read_name) : "";
+    alignment["sequence"] = std::string(query);
 
     if (sequence_.size())
         alignment["annotation"]["ref_sequence"] = sequence_;
@@ -729,7 +741,7 @@ Json::Value Alignment<NodeType>::to_json(const std::string &query,
     if (query_end_ == query_begin_)
         return alignment;
 
-    auto query_start = query.c_str();
+    const char *query_start = query.data();
     assert(query_start + cigar_.get_clipping() == query_begin_);
     assert(query_end_ >= query_start);
 
@@ -965,67 +977,35 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 
 
 template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const QueryAlignment &other)
-      : query_(other.query_),
-        query_rc_(other.query_rc_),
-        alignments_(other.alignments_) {
-    fix_pointers(other.get_query(),
-                 other.get_query_reverse_complement());
-}
-
-template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(QueryAlignment&& other) noexcept
-      : query_(other.query_),
-        query_rc_(other.query_rc_),
-        alignments_(std::move(other.alignments_)) {
-    fix_pointers(other.get_query(),
-                 other.get_query_reverse_complement());
-}
-
-template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(const std::string_view query) {
-    // TODO: remove const_cast
-    auto &qu = const_cast<std::string&>(query_);
-    auto &qu_rc = const_cast<std::string&>(query_rc_);
-
+QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
+                                         bool is_reverse_complement)
+          : query_(new std::string()), query_rc_(new std::string()) {
     // pad sequences for easier access in 64-bit blocks
-    qu.reserve(query.size() + 8);
-    qu.resize(query.size());
+    query_->reserve(query.size() + 8);
+    query_->resize(query.size());
+    query_rc_->reserve(query.size() + 8);
+    query_rc_->resize(query.size());
 
     // TODO: use alphabet encoder
-    // transform to upper and fix weird characters
-    std::transform(query.begin(), query.end(), qu.begin(), [](char c) {
+    // transform to upper and fix non-standard characters
+    std::transform(query.begin(), query.end(), query_->begin(), [](char c) {
         return c >= 0 ? toupper(c) : 127;
     });
-    memset(qu.data() + qu.size(), '\0', qu.capacity() - qu.size());
 
-    qu_rc.reserve(query.size() + 8);
-    qu_rc.resize(query.size());
-    memcpy(qu_rc.data(), qu.data(), qu.capacity());
-    reverse_complement(qu_rc.begin(), qu_rc.end());
-}
+    // fill padding with '\0'
+    memset(query_->data() + query_->size(), '\0', query_->capacity() - query_->size());
 
+    // set the reverse complement
+    memcpy(query_rc_->data(), query_->data(), query_->capacity());
+    reverse_complement(query_rc_->begin(), query_rc_->end());
 
-template <typename NodeType>
-void QueryAlignment<NodeType>
-::fix_pointers(const std::string &query, const std::string &query_rc) {
-    for (auto &alignment : alignments_) {
-        const auto &other_query = alignment.get_orientation() ? query_rc : query;
-        const auto &this_query = alignment.get_orientation() ? query_rc_ : query_;
-
-        std::string_view query = alignment.get_query();
-        assert(query.data() >= other_query.c_str());
-        assert(query.data() + query.size() <= other_query.c_str() + other_query.size());
-
-        alignment.set_query_begin(this_query.c_str() + (query.data() - other_query.c_str()));
-
-        assert(alignment.get_query().begin() >= this_query.c_str());
-        assert(alignment.get_query().end() <= this_query.c_str() + this_query.size());
-    }
+    if (is_reverse_complement)
+        std::swap(query_, query_rc_);
 }
 
 
 template class Alignment<>;
+template struct LocalAlignmentLess<>;
 template class QueryAlignment<>;
 template class DPTable<>;
 

@@ -141,7 +141,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -161,7 +161,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_bad_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nNNNNNNNN" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -178,14 +178,14 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_align_empty_fasta_desc(self):
         fasta_str = ">\nTCGATCGA"
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
         ret = self.raw_post_request('align', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
 
     def test_api_raw_search_empty_fasta_desc(self):
         fasta_str = ">\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'discovery_fraction': 0.1})
+        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1})
         ret = self.raw_post_request('search', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
@@ -220,7 +220,7 @@ class TestAPIClient(TestAPIBase):
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_simple_query_align_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
@@ -251,7 +251,7 @@ class TestAPIClient(TestAPIBase):
         repetitions = 4
         alignment_cnt = 3
         seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
-        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, discovery_threshold=1.0)
+        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)

@@ -38,8 +38,8 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
         score_matrix_(std::move(score_matrix)) {}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
-::score_cigar(const std::string_view reference,
-              const std::string_view query,
+::score_cigar(std::string_view reference,
+              std::string_view query,
               const Cigar &cigar) const {
     score_t score = 0;
 

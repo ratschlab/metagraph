@@ -19,10 +19,11 @@ using mtg::common::logger;
 
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::initialize_query(const std::string_view query) {
-    this->query = query;
-
+DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
+                                                       const DBGAlignerConfig &config,
+                                                       std::string_view query)
+      : graph_(graph), config_(config), query(query) {
+    assert(config_.check_config_scores());
     partial_sums_.resize(query.size());
     std::transform(query.begin(), query.end(),
                    partial_sums_.begin(),
@@ -32,9 +33,7 @@ void DefaultColumnExtender<NodeType>
     assert(config_.match_score(query) == partial_sums_.front());
     assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
 
-    profile_score.clear();
-    profile_op.clear();
-    for (char c : graph_->alphabet()) {
+    for (char c : graph_.alphabet()) {
         auto &profile_score_row = profile_score.emplace(c, query.size() + 8).first.value();
         auto &profile_op_row = profile_op.emplace(c, query.size() + 8).first.value();
 
@@ -140,8 +139,14 @@ std::pair<size_t, size_t> get_column_boundaries(DPTable &dp_table,
 
 template <typename NodeType>
 std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<NodeType>
-::emplace_node(NodeType node, NodeType, char c, size_t size,
-               size_t best_pos, size_t last_priority_pos, size_t begin, size_t end) {
+::emplace_node(NodeType node,
+               NodeType,
+               char c,
+               size_t size,
+               size_t best_pos,
+               size_t last_priority_pos,
+               size_t begin,
+               size_t end) {
     end = std::min(end, size);
     auto find = dp_table.find(node);
     if (find == dp_table.end()) {
@@ -577,15 +582,13 @@ inline void compute_updates(Column &update_column,
 
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::operator()(std::function<void(DBGAlignment&&, NodeType)> callback,
-             score_t min_path_score) {
-    assert(graph_);
+void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
+                                                 score_t min_path_score) {
     assert(columns_to_update.empty());
 
     const auto &path = get_seed();
 
-    if (!graph_->outdegree(path.back())) {
+    if (!graph_.outdegree(path.back())) {
         callback(DBGAlignment(), NodeType());
         return;
     }
@@ -636,73 +639,60 @@ void DefaultColumnExtender<NodeType>
         );
     }
 
-    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
-    if (num_bytes > config_.max_ram_per_alignment)
-        logger->warn("Alignment RAM limit too low. Alignment may be fragmented.");
+    if (ram_limit_reached()) {
+        logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
+                     static_cast<double>(dp_table.num_bytes()) / 1024 / 1024,
+                     config_.max_ram_per_alignment);
+    }
 
     extend_main(callback, min_path_score);
 }
 
 template <typename NodeType>
 std::deque<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
-::fork_extension(NodeType node,
-                 std::function<void(DBGAlignment&&, NodeType)>,
-                 score_t) {
-    overlapping_range_ = false;
+::fork_extension(NodeType node, ExtensionCallback, score_t) {
     std::deque<std::pair<DeBruijnGraph::node_index, char>> out_columns;
 
-    double num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
-    bool added = false;
-
-    if (dynamic_cast<const DBGSuccinct*>(graph_)) {
-        const auto &dbg_succ = *dynamic_cast<const DBGSuccinct*>(graph_);
-        const auto &boss = dbg_succ.get_boss();
-        graph_->adjacent_outgoing_nodes(node, [&](auto next_node) {
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
+        // If an outgoing node is already in the DPTable, then there's no need
+        // to decode the last character of that node.
+        const auto &boss = dbg_succ->get_boss();
+        graph_.adjacent_outgoing_nodes(node, [&](auto next_node) {
             auto find = dp_table.find(next_node);
             char c = find == dp_table.end()
                 ? boss.decode(
-                      boss.get_W(dbg_succ.kmer_to_boss_index(next_node)) % boss.alph_size
-                  )
+                      boss.get_W(dbg_succ->kmer_to_boss_index(next_node)) % boss.alph_size)
                 : find->second.last_char;
-            if (c != '$' && ((dp_table.size() < max_num_nodes
-                                && num_bytes <= config_.max_ram_per_alignment)
-                    || find != dp_table.end())) {
+            if (c != boss::BOSS::kSentinel
+                    && ((dp_table.size() < max_num_nodes && !ram_limit_reached())
+                        || find != dp_table.end())) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
-                added = true;
-                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     } else {
-        graph_->call_outgoing_kmers(node, [&](auto next_node, char c) {
-            if (c != '$' && ((dp_table.size() < max_num_nodes
-                                && num_bytes <= config_.max_ram_per_alignment)
-                    || dp_table.count(next_node))) {
+        graph_.call_outgoing_kmers(node, [&](auto next_node, char c) {
+            if (c != boss::BOSS::kSentinel
+                    && ((dp_table.size() < max_num_nodes && !ram_limit_reached())
+                        || dp_table.count(next_node))) {
                 if (next_node == node) {
                     out_columns.emplace_front(next_node, c);
                 } else {
                     out_columns.emplace_back(next_node, c);
                 }
-                added = true;
-                num_bytes = static_cast<double>(dp_table.num_bytes()) / 1024 / 1024;
             }
         });
     }
-
-    if (added && num_bytes > config_.max_ram_per_alignment)
-        logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
-                     num_bytes, config_.max_ram_per_alignment);
 
     return out_columns;
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::extend_main(std::function<void(DBGAlignment&&, NodeType)> callback,
-              score_t min_path_score) {
+void DefaultColumnExtender<NodeType>::extend_main(ExtensionCallback callback,
+                                                  score_t min_path_score) {
     assert(start_score == dp_table.best_score().second);
 
     while (columns_to_update.size()) {
@@ -718,13 +708,21 @@ void DefaultColumnExtender<NodeType>
         if (best_score_update != cur_col.last_priority_value())
             continue;
 
+        overlapping_range_ = false;
         auto out_columns = fork_extension(node, callback, min_path_score);
 
         assert(std::all_of(out_columns.begin(), out_columns.end(), [&](const auto &pair) {
-            return graph_->traverse(node, pair.second) == pair.first;
+            return graph_.traverse(node, pair.second) == pair.first;
         }));
 
+        bool ram_limit_reached_before = ram_limit_reached();
         update_columns(node, out_columns, min_path_score);
+
+        if (!ram_limit_reached_before && ram_limit_reached()) {
+            logger->warn("Alignment RAM limit too low: {} MB > {} MB. Alignment may be fragmented.",
+                         static_cast<double>(dp_table.num_bytes()) / 1024 / 1024,
+                         config_.max_ram_per_alignment);
+        }
     }
 
 #ifndef NDEBUG
@@ -750,7 +748,7 @@ void DefaultColumnExtender<NodeType>
         logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
-    dp_table.extract_alignments(*graph_,
+    dp_table.extract_alignments(graph_,
                                 config_,
                                 std::string_view(align_start, size - 1),
                                 callback,

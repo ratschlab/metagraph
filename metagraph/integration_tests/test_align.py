@@ -52,7 +52,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -90,7 +90,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -128,7 +128,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -161,7 +161,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align --align-both-strands -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -199,7 +199,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -236,7 +236,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
