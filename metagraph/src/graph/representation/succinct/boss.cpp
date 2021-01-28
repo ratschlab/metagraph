@@ -2970,13 +2970,6 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
     }, num_threads, true, kmers_in_single_form, subgraph_mask, true);
 }
 
-void BOSS::call_outgoing(edge_index edge, const Call<edge_index> &callback) const {
-    edge = succ_last(edge);
-    do {
-        callback(edge);
-    } while (--edge && !get_last(edge));
-}
-
 /**
  * Traverse the boss graph and call all its edges
  * except for the dummy source nodes and the dummy sink nodes

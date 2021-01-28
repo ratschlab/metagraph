@@ -734,6 +734,13 @@ BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
             : npos;
 }
 
+inline void BOSS::call_outgoing(edge_index edge, const Call<edge_index> &callback) const {
+    assert(get_last(edge));
+    do {
+        callback(edge);
+    } while (--edge && !get_last(edge));
+}
+
 } // namespace boss
 } // namespace graph
 } // namespace mtg
