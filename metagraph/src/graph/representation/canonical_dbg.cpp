@@ -235,8 +235,7 @@ void CanonicalDBG
 
     // for each n, check for TGGCTn. If found, define and store the index for
     // rc(n)AGCCA as index(TGGCTn) + offset_
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
-    if (dbg_succ) {
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
         // Then, convert the edge indices to get the DBGSuccinct node indices
         const auto &boss = dbg_succ->get_boss();
