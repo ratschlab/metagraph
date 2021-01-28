@@ -574,6 +574,11 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
     }
 }
 
+TYPED_TEST(CanonicalDBGTest, WrapCanonicalGraphFail) {
+    EXPECT_THROW(CanonicalDBG(build_graph_batch<TypeParam>(3, {}, DBGMode::CANONICAL)),
+                 std::runtime_error);
+}
+
 // TODO: A different combination of forward and reverse complement k-mers may be
 //       generated in the reconstruction.
 // TYPED_TEST(CanonicalDBGTest, CallUnitigsSingleKmerForm) {
