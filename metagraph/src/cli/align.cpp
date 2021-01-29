@@ -493,6 +493,8 @@ int align_to_graph(Config *config) {
                 });
             };
 
+            ++num_batches;
+
             uint64_t mbatch_size = it == end && num_batches < get_num_threads()
                 ? num_bytes_read / std::max(get_num_threads() - num_batches,
                                             static_cast<size_t>(1))
@@ -523,8 +525,6 @@ int align_to_graph(Config *config) {
             } else {
                 thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
             }
-
-            ++num_batches;
         };
 
         thread_pool.join();
