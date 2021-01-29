@@ -392,17 +392,6 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
-    if (config->canonical && !graph->is_canonical_mode()) {
-        logger->trace("Wrap as canonical DBG");
-        // TODO: check and wrap into canonical only if the graph is primary
-        graph.reset(new CanonicalDBG(graph, true));
-
-        if (config->alignment_min_seed_length < graph->get_k()) {
-            logger->error("Seeds of length < k not supported with --canonical flag");
-            exit(1);
-        }
-    }
-
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -443,7 +432,13 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    auto aligner = build_aligner(*graph, *config);
+    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
+
+    if (config->canonical && !graph->is_canonical_mode()
+            && aligner_config.min_seed_length < graph->get_k()) {
+        logger->error("Seeds of length < k not supported with --canonical flag");
+        exit(1);
+    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
@@ -459,11 +454,15 @@ int align_to_graph(Config *config) {
 
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
+
+        size_t num_batches = 0;
+
         while (it != end) {
             uint64_t num_bytes_read = 0;
-            // A generator that can be called multiple times until all sequences
-            // are called.
-            std::vector<std::pair<std::string, std::string>> seq_batch;
+
+            // Read a batch to pass on to a thread
+            typedef std::vector<std::pair<std::string, std::string>> SeqBatch;
+            SeqBatch seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {
                 std::string header
@@ -477,25 +476,63 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&](auto seq_batch) {
-                aligner->align_batch(seq_batch,
-                    [&](std::string_view header, DBGAligner<>::DBGQueryAlignment&& paths) {
-                        std::string sout = format_alignment(
-                            header, paths, *graph, *config
-                        );
+            auto process_batch = [&](SeqBatch batch, uint64_t size) {
+                auto aln_graph = graph;
+                if (config->canonical && !graph->is_canonical_mode())
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << sout;
+                auto aligner = build_aligner(*aln_graph, aligner_config);
+
+                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                    std::string sout = format_alignment(
+                        header, paths, *aln_graph, *config
+                    );
+
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << sout;
+                });
+            };
+
+            ++num_batches;
+
+            uint64_t mbatch_size = it == end && num_batches < get_num_threads()
+                ? num_bytes_read / std::max(get_num_threads() - num_batches,
+                                            static_cast<size_t>(1))
+                : 0;
+
+            if (mbatch_size) {
+                // split remaining batch
+                logger->trace("Splitting final batch into minibatches");
+
+                auto it = seq_batch.begin();
+                auto b_end = seq_batch.end();
+                uint64_t num_minibatches = 0;
+                while (it != b_end) {
+                    uint64_t cur_minibatch_read = 0;
+                    auto last_mv_it = std::make_move_iterator(it);
+                    for ( ; it != b_end && cur_minibatch_read < mbatch_size; ++it) {
+                        cur_minibatch_read += it->second.size();
                     }
-                );
-            }, std::move(seq_batch));
+
+                    thread_pool.enqueue(process_batch,
+                                        SeqBatch(last_mv_it, std::make_move_iterator(it)),
+                                        mbatch_size);
+                    ++num_minibatches;
+                }
+
+                logger->trace("Num minibatches: {}, minibatch size: {} KiB",
+                              num_minibatches, mbatch_size >> 10);
+            } else {
+                thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+            }
         };
 
         thread_pool.join();
 
         logger->trace("File '{}' processed in {} sec, "
+                      "num batches: {}, batch size: {} KiB, "
                       "current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(),
+                      file, data_reading_timer.elapsed(), num_batches, batch_size >> 10,
                       get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())

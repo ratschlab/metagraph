@@ -104,6 +104,11 @@ class BOSS {
     using Call = typename std::function<void(T...)>;
 
     /**
+     * Given the last outgoing edge of a given node, call all edges from that node
+     */
+    void call_outgoing(edge_index edge, const Call<edge_index> &callback) const;
+
+    /**
      * Traverse the boss graph and call all its edges
      * except for the dummy source nodes and the dummy sink nodes
      */
@@ -727,6 +732,13 @@ BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
     return edge && *(end - 1) < alph_size
             ? pick_edge(edge, *(end - 1))
             : npos;
+}
+
+inline void BOSS::call_outgoing(edge_index edge, const Call<edge_index> &callback) const {
+    assert(get_last(edge));
+    do {
+        callback(edge);
+    } while (--edge && !get_last(edge));
 }
 
 } // namespace boss

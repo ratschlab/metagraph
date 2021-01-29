@@ -66,7 +66,7 @@ build_graph(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<Graph>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<Graph>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<Graph>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -98,7 +98,7 @@ build_graph<DBGHashString>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGHashString>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGHashString>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGHashString>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -119,7 +119,7 @@ build_graph<DBGBitmap>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGBitmap>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -145,7 +145,7 @@ build_graph<DBGSuccinct>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGSuccinct>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -320,7 +320,7 @@ build_graph_batch<DBGBitmap>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGBitmap>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -341,7 +341,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGSuccinct>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), 2 /* cache size */);
     }
 
     return graph;

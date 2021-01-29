@@ -24,7 +24,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                        const Config &config) {
     // TODO: check and wrap into canonical only if the graph is primary
     if (config.canonical && !graph->is_canonical_mode())
-        graph = std::make_shared<CanonicalDBG>(graph, true);
+        graph = std::make_shared<CanonicalDBG>(graph);
 
     uint64_t max_index = graph->max_index();
     if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get()))
