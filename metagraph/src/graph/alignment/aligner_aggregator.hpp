@@ -68,44 +68,46 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         } else if (alignment.get_score() > path_queue_.minimum().get_score()) {
             path_queue_.update(path_queue_.begin(), std::move(alignment));
         }
-    } else {
-        // alignment chaining
-        bool updated = false;
-        if (!alignment.get_orientation()) {
-            AlignmentSuffix suffix(alignment, config_, graph_.get_k());
-            const std::string_view aln_query = alignment.get_query();
-            auto start = best_score_.begin() + (aln_query.data() - query_.data());
-            auto end = start + aln_query.size();
-            for (auto it = start; it != end; ++it) {
-                if (suffix.get_score() > *it) {
-                    *it = suffix.get_score();
-                    updated = true;
-                }
-                ++suffix;
-                while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
-                    ++suffix;
-                }
+
+        return;
+    }
+
+    // alignment chaining
+    bool updated = false;
+    if (!alignment.get_orientation()) {
+        AlignmentSuffix suffix(alignment, config_, graph_.get_k());
+        const std::string_view aln_query = alignment.get_query();
+        auto start = best_score_.begin() + (aln_query.data() - query_.data());
+        auto end = start + aln_query.size();
+        for (auto it = start; it != end; ++it) {
+            if (suffix.get_score() > *it) {
+                *it = suffix.get_score();
+                updated = true;
             }
-        } else {
-            AlignmentSuffix suffix(alignment, config_, graph_.get_k());
-            const std::string_view aln_query = alignment.get_query();
-            auto start = best_score_.rbegin() + (aln_query.data() - rc_query_.data());
-            auto end = start + aln_query.size();
-            for (auto it = start; it != end; ++it) {
-                if (suffix.get_score() > *it) {
-                    *it = suffix.get_score();
-                    updated = true;
-                }
+            ++suffix;
+            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
                 ++suffix;
-                while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
-                    ++suffix;
-                }
             }
         }
-
-        if (updated)
-            path_queue_.emplace(std::move(alignment));
+    } else {
+        AlignmentSuffix suffix(alignment, config_, graph_.get_k());
+        const std::string_view aln_query = alignment.get_query();
+        auto start = best_score_.rbegin() + (aln_query.data() - rc_query_.data());
+        auto end = start + aln_query.size();
+        for (auto it = start; it != end; ++it) {
+            if (suffix.get_score() > *it) {
+                *it = suffix.get_score();
+                updated = true;
+            }
+            ++suffix;
+            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                ++suffix;
+            }
+        }
     }
+
+    if (updated)
+        path_queue_.emplace(std::move(alignment));
 }
 
 template <typename NodeType, class AlignmentCompare>
@@ -114,15 +116,17 @@ inline auto AlignmentAggregator<NodeType, AlignmentCompare>
     if (!config_.chain_alignments) {
         return path_queue_.size() ? path_queue_.minimum().get_score()
                                   : config_.min_path_score;
-    } else if (!seed.get_orientation()) {
+    }
+
+    if (!seed.get_orientation()) {
         const std::string_view seed_query = seed.get_query();
         auto start = best_score_.begin() + (seed_query.data() - query_.data());
         return *std::min_element(start, start + seed_query.size());
-    } else {
-        const std::string_view seed_query = seed.get_query();
-        auto start = best_score_.rbegin() + (seed_query.data() - rc_query_.data());
-        return *std::min_element(start, start + seed_query.size());
     }
+
+    const std::string_view seed_query = seed.get_query();
+    auto start = best_score_.rbegin() + (seed_query.data() - rc_query_.data());
+    return *std::min_element(start, start + seed_query.size());
 }
 
 template <typename NodeType, class AlignmentCompare>
@@ -141,7 +145,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         return;
     }
 
+#ifndef NDEBUG
     mtg::common::logger->trace("Chaining {} local alignment(s)", path_queue_.size());
+#endif
 
     // heap sort
     std::vector<DBGAlignment> cur_paths;
@@ -151,10 +157,12 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     while (path_queue_.size()) {
         const auto &top_path = path_queue_.maximum();
+#ifndef NDEBUG
         mtg::common::logger->trace("Alignment: {}\tOrientation: {}\tOffset: {}",
                                    top_path.get_cigar().to_string(),
                                    top_path.get_orientation(),
                                    top_path.get_offset());
+#endif
 
         if (!top_path.get_clipping() && !top_path.get_end_clipping()) {
             callback(DBGAlignment(top_path));
@@ -164,6 +172,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         if (top_path.get_score() > best_alignment.get_score())
             best_alignment = top_path;
 
+#ifdef NDEBUG
+        if (top_path != *last_path && !top_path.get_orientation()
+                && top_path.get_query().size() >= graph_.get_k()) {
+#else
         if (top_path == *last_path) {
             mtg::common::logger->trace("\tSkipping duplicate alignment");
         } else if (top_path.get_orientation()) {
@@ -172,6 +184,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         } else if (top_path.get_query().size() < graph_.get_k()) {
             mtg::common::logger->trace("\tSkipping short alignment");
         } else {
+#endif
             cur_paths.emplace_back(top_path);
             last_path = &cur_paths.back();
         }
@@ -183,8 +196,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         cur_paths.emplace_back(std::move(best_alignment));
 
     if (cur_paths.size() <= 1) {
+#ifndef NDEBUG
         mtg::common::logger->trace("Nothing to chain: {} path(s) selected",
                                    cur_paths.size());
+#endif
         for (auto&& path : cur_paths) {
             callback(std::move(path));
         }
@@ -209,9 +224,13 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     });
 
     if (cur_chain.first <= config_.min_path_score) {
+#ifndef NDEBUG
         mtg::common::logger->trace("No good chain found");
+#endif
     } else {
+#ifndef NDEBUG
         mtg::common::logger->trace("Best chain score: {}", cur_chain.first);
+#endif
         assert(cur_chain.second.size());
 
         for (auto&& path : cur_chain.second) {
@@ -271,7 +290,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             if (first.empty() || second.empty())
                 continue;
 
+#ifndef NDEBUG
             mtg::common::logger->trace("Chain: {}\n{}", first, second);
+#endif
 
             assert(first.is_valid(graph_, &config_));
             assert(second.is_valid(graph_, &config_));
