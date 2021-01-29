@@ -12,6 +12,7 @@ import gzip
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -27,7 +28,7 @@ class TestCleanWeighted(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(GRAPH_TYPES)
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_no_cleaning_contigs(self, representation):
 
         construct_command = '{exe} build --mask-dummy \
@@ -89,7 +90,7 @@ class TestCleanWeighted(unittest.TestCase):
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
-    @parameterized.expand(GRAPH_TYPES)
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_no_cleaning_contigs_2bit_counts(self, representation):
 
         construct_command = '{exe} build --mask-dummy \
@@ -152,6 +153,7 @@ class TestCleanWeighted(unittest.TestCase):
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
 
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestCleanWeightedCanonical(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()

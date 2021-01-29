@@ -7,17 +7,26 @@
 
 #include "../test_helpers.hpp"
 
+#include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_helper.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 
 
-namespace mtg {
-namespace test {
+namespace {
 
+using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::align;
+using namespace mtg::test;
+using namespace mtg::kmer;
 
+
+typedef DBGAligner<>::score_t score_t;
+
+inline int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
+    return config.get_row(a)[b];
+}
 
 template <typename NodeType>
 inline void check_json_dump_load(const DeBruijnGraph &graph,
@@ -68,7 +77,7 @@ inline get_extend(std::shared_ptr<const DeBruijnGraph> graph,
     uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
 
     return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<>>(*graph, uniconfig).align(query)
+        ? DBGAligner<SuffixSeeder<UniMEMSeeder<>>>(*graph, uniconfig).align(query)
         : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
 }
 
@@ -91,9 +100,7 @@ inline void check_chain(const DBGAligner<>::DBGQueryAlignment &paths,
                         size_t expected_size) {
     for (const auto &path : paths) {
         EXPECT_TRUE(path.is_valid(graph, &config)) << path;
-        check_json_dump_load(graph, path,
-                             paths.get_query(),
-                             paths.get_query_reverse_complement());
+        check_json_dump_load(graph, path, paths.get_query(), paths.get_query(true));
     }
 
     if (!std::is_sorted(paths.begin(), paths.end(),
@@ -110,7 +117,6 @@ inline void check_chain(const DBGAligner<>::DBGQueryAlignment &paths,
     }
 }
 
-} // namespace test
-} // namespace mtg
+} // namespace
 
 #endif // __TEST_DBG_ALIGNER_HELPERS_HPP__

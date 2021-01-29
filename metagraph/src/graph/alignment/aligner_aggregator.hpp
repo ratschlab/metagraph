@@ -16,8 +16,8 @@ class AlignmentAggregator {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::score_t score_t;
 
-    AlignmentAggregator(const std::string_view query,
-                        const std::string_view rc_query,
+    AlignmentAggregator(std::string_view query,
+                        std::string_view rc_query,
                         const DeBruijnGraph &graph,
                         const DBGAlignerConfig &config)
           : query_(query), rc_query_(rc_query), graph_(graph), config_(config),
@@ -39,8 +39,8 @@ class AlignmentAggregator {
     bool empty() const { return path_queue_.empty(); }
 
   private:
-    const std::string_view query_;
-    const std::string_view rc_query_;
+    std::string_view query_;
+    std::string_view rc_query_;
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
     boost::container::priority_deque<DBGAlignment,

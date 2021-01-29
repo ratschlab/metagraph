@@ -47,8 +47,7 @@ void ThreadPool::join() {
 
 void ThreadPool::remove_waiting_tasks() {
     std::unique_lock<std::mutex> lock(this->queue_mutex);
-    std::queue<std::function<void()>> empty;
-    this->tasks.swap(empty);
+    this->tasks = std::queue<std::function<void()>>();
     this->empty_condition.notify_all();
 }
 
@@ -60,7 +59,7 @@ void ThreadPool::initialize(size_t num_workers) {
     if (!num_workers)
         return;
 
-    for(size_t i = 0; i < num_workers; ++i) {
+    for (size_t i = 0; i < num_workers; ++i) {
         workers.emplace_back([this]() {
             while (true) {
                 std::function<void()> task;

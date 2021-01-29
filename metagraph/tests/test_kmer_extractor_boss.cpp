@@ -116,10 +116,7 @@ TEST(ExtractKmers, encode_decode_string) {
         }
         EXPECT_EQ(last_part, reconstructed);
 #else
-        ASSERT_LT(2u, kmers.size());
-        kmers.erase(kmers.begin());
-        kmers.erase(kmers.end() - 1);
-
+        ASSERT_LT(0u, kmers.size());
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         for (uint64_t i = 1; i < kmers.size(); ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);

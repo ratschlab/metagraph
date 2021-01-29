@@ -58,7 +58,7 @@ class KmerCollector {
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
                   const std::filesystem::path &swap_dir = "/tmp/",
-                  size_t max_disk_space = 1e9,
+                  size_t disk_cap_bytes = 1e9,
                   bool canonical_only = false);
 
     ~KmerCollector();
@@ -96,11 +96,12 @@ class KmerCollector {
 
     void clear() { join(); kmers_->clear(); }
 
+    Container& container() { join(); return *kmers_; }
+
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
     inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
-    inline size_t max_disk_space() const { return max_disk_space_; }
 
   private:
     void join();
@@ -122,9 +123,6 @@ class KmerCollector {
     std::filesystem::path tmp_dir_;
 
     size_t buffer_size_;
-
-    /** Maximum disk space in bytes used by #kmers_ */
-    size_t max_disk_space_;
 };
 
 /** Visible For Testing */

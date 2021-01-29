@@ -3,26 +3,36 @@
 ## Install
 
 ### Prerequisites
-- cmake 3.10
-- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- cmake 3.10 or higher
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- bzip2
 - HTSlib
-- folly (optional)
-- Python 3 (for running integration tests)
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
+#### Optional
+- boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
+- Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
 ```
-brew install libomp cmake make htslib boost folly
+brew install libomp cmake make bzip2 htslib boost jemalloc
 ```
 
-For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-Start).
+For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
+```
+sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+```
+
+For **CentOS** (8 or higher)
+```
+yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+```
+
+All prerequisites can also be installed by users **without root** using [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
 
 
 ### Compile
-1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
-2. make sure all submodules are downloaded: `git submodule update --init --recursive`
-3. install **sdsl-lite** in `metagraph/external-libraries/` by running the following script
+1. `git clone --recursive https://github.com/ratschlab/metagraph.git`
+2. install *sdsl-lite* in `metagraph/external-libraries/` by running the following script from the repository root directory
 ```bash
 git submodule sync
 git submodule update --init --recursive
@@ -32,10 +42,10 @@ pushd metagraph/external-libraries/sdsl-lite
 popd
 ```
 
-4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
-5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
-6. run unit tests `./unit_tests`
-6. run integration tests `./integration_tests`
+3. make a **build** directory `mkdir -p metagraph/build && cd metagraph/build`
+4. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))` (for alphabets other than DNA, see below)
+5. (optional) run unit tests `./unit_tests`
+6. (optional) run integration tests `./integration_tests`
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (`Release` by default)

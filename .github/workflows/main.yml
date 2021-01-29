@@ -4,12 +4,13 @@ on: [push]
 
 jobs:
 
-  build-linux:
+  Linux:
 
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
+        alphabet: [DNA, Protein]
         build_type: [Debug, Release]
         compiler: [g++-8, g++-9, g++-10]
         include:
@@ -25,6 +26,12 @@ jobs:
             cxx: g++-10
             cc: gcc-10
 
+        exclude:
+          - alphabet: Protein
+            compiler: g++-8
+          - alphabet: Protein
+            compiler: g++-9
+
     steps:
     - uses: actions/checkout@v1
 
@@ -34,13 +41,20 @@ jobs:
     - name: install dependencies
       run: |
         # If clang, use the default version. Otherwise the compiler install with apt-get.
-        [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
+        if [[ "${{ matrix.compiler }}" == "g++-8" ]]; then
+            sudo apt-get --allow-downgrades install \
+                g++-8=8-20180414-1ubuntu2 \
+                gcc-8-base=8-20180414-1ubuntu2 \
+                gcc-8=8-20180414-1ubuntu2 \
+                libstdc++-8-dev=8-20180414-1ubuntu2 \
+                cpp-8=8-20180414-1ubuntu2 \
+                libgcc-8-dev=8-20180414-1ubuntu2 \
+                libmpx2=8-20180414-1ubuntu2
+        elif [[ "${{ matrix.compiler }}" != "clang" ]]; then
+            sudo apt-get install ${{ matrix.compiler }}
+        fi
 
-        wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
-        tar -vxjf htslib-1.9.tar.bz2
-        cd htslib-1.9
-        make -j 2
-        sudo make install
+        sudo apt-get install libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
     - name: install dependencies for integration tests
       run: |
@@ -60,7 +74,8 @@ jobs:
         export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
@@ -82,12 +97,13 @@ jobs:
         cd metagraph/build && make check
 
 
-  build-macos:
+  MacOS:
 
     runs-on: macos-latest
 
     strategy:
       matrix:
+        alphabet: [DNA]
         build_type: [Debug, Release]
 
     steps:
@@ -97,7 +113,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install htslib libomp
+      run: brew install bzip2 htslib libomp boost jemalloc
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
@@ -111,7 +127,9 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
-        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
+              -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph

@@ -122,18 +122,18 @@ void print_bin_stats(const std::vector<std::vector<uint64_t>> &bins) {
 }
 
 
-BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
-                          std::vector<uint64_t> kv,
-                          const std::vector<uint64_t> &nv,
-                          bool verbose);
+BOSS::Chunk merge_blocks(const std::vector<const BOSS*> &Gv,
+                         std::vector<uint64_t> kv,
+                         const std::vector<uint64_t> &nv,
+                         bool verbose);
 
 
-BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
-                                   size_t chunk_idx,
-                                   size_t num_chunks,
-                                   size_t num_threads,
-                                   size_t num_bins_per_thread,
-                                   bool verbose) {
+BOSS::Chunk merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
+                                  size_t chunk_idx,
+                                  size_t num_chunks,
+                                  size_t num_threads,
+                                  size_t num_bins_per_thread,
+                                  bool verbose) {
     assert(graphs.size() > 0);
     assert(num_chunks > 0);
     assert(chunk_idx < num_chunks);
@@ -179,27 +179,23 @@ BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
     if (verbose)
         print_bin_stats(bins);
 
-    std::vector<BOSS::Chunk*> blocks(bins.front().size() - 1, NULL);
+    size_t num_blocks = bins.front().size() - 1;
 
-    BOSS::Chunk *result = new BOSS::Chunk(graphs.at(0)->alph_size,
-                                          graphs.at(0)->get_k(),
-                                          false);
+    BOSS::Chunk result(graphs.at(0)->alph_size, graphs.at(0)->get_k(), false);
 
     #pragma omp parallel for num_threads(num_threads) ordered
-    for (size_t curr_idx = 0; curr_idx < blocks.size(); ++curr_idx) {
+    for (size_t curr_idx = 0; curr_idx < num_blocks; ++curr_idx) {
         std::vector<uint64_t> kv;
         std::vector<uint64_t> nv;
         for (size_t i = 0; i < graphs.size(); i++) {
             kv.push_back(bins.at(i).at(curr_idx));
             nv.push_back(bins.at(i).at(curr_idx + 1));
         }
-        BOSS::Chunk *chunk = merge_blocks(graphs, kv, nv, verbose);
-        assert(chunk);
+        BOSS::Chunk chunk = merge_blocks(graphs, kv, nv, verbose);
         #pragma omp ordered
         {
-            result->extend(*chunk);
+            result.extend(chunk);
         }
-        delete chunk;
     }
 
     return result;
@@ -215,10 +211,10 @@ BOSS* merge(const std::vector<const BOSS*> &Gv, bool verbose) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    std::unique_ptr<BOSS::Chunk> merged(merge_blocks(Gv, kv, nv, verbose));
+    BOSS::Chunk merged = merge_blocks(Gv, kv, nv, verbose);
 
     BOSS *graph = new BOSS(Gv.at(0)->get_k());
-    merged->initialize_boss(graph);
+    merged.initialize_boss(graph);
     return graph;
 }
 
@@ -254,16 +250,14 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
     return last_added_nodes;
 }
 
-BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
-                          std::vector<uint64_t> kv,
-                          const std::vector<uint64_t> &nv,
-                          bool verbose) {
+BOSS::Chunk merge_blocks(const std::vector<const BOSS*> &Gv,
+                         std::vector<uint64_t> kv,
+                         const std::vector<uint64_t> &nv,
+                         bool verbose) {
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
 
-    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->alph_size,
-                                         Gv.at(0)->get_k(),
-                                         false);
+    BOSS::Chunk chunk(Gv.at(0)->alph_size, Gv.at(0)->get_k(), false);
 
     const size_t alph_size = Gv.at(0)->alph_size;
 
@@ -332,22 +326,22 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
         bool remove_dummy_edge = false;
 
         // handle multiple outgoing edges
-        if (chunk->size() > 1 && val != chunk->get_W_back() % alph_size) {
-            auto pred_node = last_added_nodes[chunk->get_W_back() % alph_size];
+        if (chunk.size() > 1 && val != chunk.get_W_back() % alph_size) {
+            auto pred_node = last_added_nodes[chunk.get_W_back() % alph_size];
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
                 if (seq1.back() != BOSS::kSentinelCode
-                        && chunk->get_W_back() == BOSS::kSentinelCode) {
+                        && chunk.get_W_back() == BOSS::kSentinelCode) {
                     remove_dummy_edge = true;
-                    chunk->alter_W_back(next_in_W);
+                    chunk.alter_W_back(next_in_W);
                 } else {
-                    chunk->alter_last_back(false);
+                    chunk.alter_last_back(false);
                 }
             }
         }
         if (!remove_dummy_edge)
-            chunk->push_back(next_in_W, seq1.back(), true);
+            chunk.push_back(next_in_W, seq1.back(), true);
 
         last_added_nodes[val] = seq1;
         ++added;

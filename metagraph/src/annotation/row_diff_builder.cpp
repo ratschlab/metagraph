@@ -269,7 +269,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
                                const std::filesystem::path &dest_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size) {
+                               uint64_t buf_size,
+                               bool compute_row_reduction) {
     if (source_files.empty())
         return;
 
@@ -301,7 +302,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     const std::filesystem::path tmp_path = utils::create_temp_dir(
             std::filesystem::path(dest_dir).remove_filename(), "col");
-    logger->trace("Using temporary directory {}", tmp_path);
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -341,22 +341,24 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     ThreadPool async_writer(1, 1);
-
+    sdsl::int_vector_buffer row_reduction;
     const bool new_reduction_vector = !std::filesystem::exists(row_reduction_fname);
-    if (new_reduction_vector) {
-        // create an empty vector
-        sdsl::int_vector_buffer(row_reduction_fname,
-                                std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
-    }
+    if (compute_row_reduction) {
+        if (new_reduction_vector) {
+            // create an empty vector
+            sdsl::int_vector_buffer(row_reduction_fname,
+                                    std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
+        }
 
-    sdsl::int_vector_buffer row_reduction(row_reduction_fname,
-                                          std::ios::in | std::ios::out, 1024 * 1024);
+        row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
+                                                std::ios::in | std::ios::out, 1024 * 1024);
 
-    if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
-        logger->error("Incompatible sizes of '{}': {} and '{}': {}",
-                      row_reduction_fname, row_reduction.size(),
-                      anchors_fname, anchor.size());
-        exit(1);
+        if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
+            logger->error("Incompatible sizes of '{}': {} and '{}': {}",
+                          row_reduction_fname, row_reduction.size(),
+                          anchors_fname, anchor.size());
+            exit(1);
+        }
     }
 
     // total number of set bits in the original rows
@@ -402,6 +404,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
             },
             [&](uint64_t block_begin) {
+                if (!compute_row_reduction)
+                    return;
+
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
                 std::vector<uint32_t> nbits_block;
                 nbits_block.swap(row_nbits_block);
@@ -537,8 +542,11 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         logger->trace("Serialized {}", fpath);
     }
-    logger->trace("Removing temp directory: {}", tmp_path);
-    std::filesystem::remove_all(tmp_path);
+
+    utils::remove_temp_dir(tmp_path);
+
+    if (!compute_row_reduction)
+        return;
 
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",

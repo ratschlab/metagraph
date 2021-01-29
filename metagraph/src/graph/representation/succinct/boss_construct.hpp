@@ -31,15 +31,13 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     void build_graph(BOSS *graph) {
         auto chunk = constructor_->build_chunk();
         // initialize graph from the chunk built
-        chunk->initialize_boss(graph);
-        delete chunk;
+        chunk.initialize_boss(graph);
     }
 
     void build_graph(BOSS *graph, sdsl::int_vector<> *weights) {
         auto chunk = constructor_->build_chunk();
         // initialize graph from the chunk built
-        chunk->initialize_boss(graph, weights);
-        delete chunk;
+        chunk.initialize_boss(graph, weights);
     }
 
     uint64_t get_k() const { return constructor_->get_k(); }

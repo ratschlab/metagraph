@@ -8,6 +8,8 @@
 
 namespace {
 
+#if ! _PROTEIN_GRAPH
+
 using namespace mtg;
 using namespace mtg::test;
 
@@ -1360,5 +1362,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
         }
     }
 }
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

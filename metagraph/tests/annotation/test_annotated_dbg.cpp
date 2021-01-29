@@ -1007,6 +1007,7 @@ typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
 TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
 
 
+#if ! _PROTEIN_GRAPH
 template <typename GraphAnnotationPair>
 class AnnotatedDBGNoNTest : public ::testing::Test {};
 typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
@@ -1017,6 +1018,8 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>
                         > GraphNoNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
+#endif
+
 
 
 TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
@@ -1047,6 +1050,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(AnnotatedDBGNoNTest, check_labels) {
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1069,6 +1073,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, check_labels) {
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
     }
 }
+#endif
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
     for (size_t k = 1; k < 10; ++k) {
@@ -1359,6 +1364,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1568,6 +1574,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
         }
     }
 }
+#endif
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
@@ -1734,6 +1741,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
     for (size_t k = 1; k < 10; ++k) {
@@ -1863,6 +1871,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
         }
     }
 }
+#endif
 
 TEST(AnnotatedDBG, score_kmer_presence_mask) {
     auto anno_graph = build_anno_graph<DBGSuccinct>(31, {}, {});

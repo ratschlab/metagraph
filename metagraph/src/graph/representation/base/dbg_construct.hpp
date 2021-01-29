@@ -18,7 +18,7 @@ class IGraphChunkConstructor {
     virtual void add_sequences(std::vector<std::string>&& sequences) = 0;
     virtual void add_sequences(std::vector<std::pair<std::string, uint64_t>>&& sequences) = 0;
 
-    virtual GraphChunk* build_chunk() = 0;
+    virtual GraphChunk build_chunk() = 0;
 };
 
 

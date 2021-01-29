@@ -12,6 +12,7 @@ import gzip
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -34,7 +35,7 @@ class TestBuildWeighted(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(BUILDS)
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -65,6 +66,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -122,6 +124,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -209,6 +212,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -239,6 +243,7 @@ class TestBuildWeighted(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -336,6 +341,7 @@ class TestBuildWeighted(unittest.TestCase):
                           ]
                           )
     ))
+    @unittest.skipIf(PROTEIN_MODE, "Too large k-mer size for Protein alphabets")
     def test_kmer_count_width_large(self, build, k_width_result):
         representation, tmp_dir = build_params[build]
         k, count_width, avg_count_expected = k_width_result
