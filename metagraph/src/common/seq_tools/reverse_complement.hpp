@@ -28,7 +28,7 @@
 
 #include <htslib/kseq.h>
 
-const unsigned char kCompTab[] = {
+const unsigned char COMPL_TAB[] = {
       0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
      16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
      32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
@@ -53,13 +53,13 @@ void reverse_complement(const Iterator &begin, const Iterator &end) {
     char c0;
 
     for (int64_t i = 0; i < half; ++i) {
-        c0 = kCompTab[static_cast<int>(*(begin + i))];
-        *(begin + i) = kCompTab[static_cast<int>(*(end - 1 - i))];
+        c0 = COMPL_TAB[static_cast<int>(*(begin + i))];
+        *(begin + i) = COMPL_TAB[static_cast<int>(*(end - 1 - i))];
         *(end - 1 - i) = c0;
     }
 
     if ((end - begin) & 1) {
-        *(begin + half) = kCompTab[static_cast<int>(*(begin + half))];
+        *(begin + half) = COMPL_TAB[static_cast<int>(*(begin + half))];
     }
 };
 
@@ -72,7 +72,7 @@ inline void reverse_complement(std::string &seq) {
 }
 
 inline char complement(char c) {
-    return kCompTab[static_cast<int>(c)];
+    return COMPL_TAB[static_cast<int>(c)];
 }
 
 #endif // __REVERSE_COMPLEMENT_HPP__
