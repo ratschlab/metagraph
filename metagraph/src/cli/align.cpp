@@ -396,6 +396,11 @@ int align_to_graph(Config *config) {
         logger->trace("Wrap as canonical DBG");
         // TODO: check and wrap into canonical only if the graph is primary
         graph.reset(new CanonicalDBG(graph));
+
+        if (config->alignment_min_seed_length < graph->get_k()) {
+            logger->error("Seeds of length < k not supported with --canonical flag");
+            exit(1);
+        }
     }
 
     Timer timer;
@@ -439,13 +444,6 @@ int align_to_graph(Config *config) {
     }
 
     auto aligner = build_aligner(*graph, *config);
-
-    if (auto *seed_extend = dynamic_cast<ISeedAndExtendAligner*>(aligner.get())) {
-        if (seed_extend->get_config().min_seed_length < graph->get_k()) {
-            logger->error("Seeds of length < k not supported with --canonical flag");
-            exit(1);
-        }
-    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
