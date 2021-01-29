@@ -457,8 +457,8 @@ int align_to_graph(Config *config) {
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
-            // A generator that can be called multiple times until all sequences
-            // are called.
+
+            // Read a batch to pass on to a thread
             std::vector<std::pair<std::string, std::string>> seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {
