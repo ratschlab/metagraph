@@ -15,6 +15,7 @@ jobs:
         compiler: [g++-8, g++-9, g++-10]
         include:
           - compiler: g++-8
+            version: 8-20180414-1ubuntu2
             cxx: g++-8
             cc: gcc-8
 
