@@ -377,11 +377,15 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                    [](const auto &iter) { return iter->second.last_char; });
 
     if (correction < 0) {
-        logger->warn("Incorrect score found: {} -> {}\nQuery: {}\nTarget: {}\nCIGAR: {}",
-                     score_, score_ + correction,
-                     seed.get_sequence() + std::string(query_view),
-                     seed.get_sequence() + sequence_,
-                     seed.get_cigar().to_string() + cigar_.to_string());
+        logger->warn(
+            "Correcting score: {} -> {}\nQuery: {}\nTarget: {}\nSeed: {}\nExtension: {}",
+            score_,
+            score_ + correction,
+            seed.get_sequence() + std::string(query_view),
+            seed.get_sequence() + sequence_,
+            seed.get_cigar().to_string(),
+            cigar_.to_string()
+        );
     }
 }
 
