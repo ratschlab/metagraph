@@ -392,17 +392,6 @@ int align_to_graph(Config *config) {
     if (dbg)
         dbg->reset_mask();
 
-    if (config->canonical && !graph->is_canonical_mode()) {
-        logger->trace("Wrap as canonical DBG");
-        // TODO: check and wrap into canonical only if the graph is primary
-        graph.reset(new CanonicalDBG(graph));
-
-        if (config->alignment_min_seed_length < graph->get_k()) {
-            logger->error("Seeds of length < k not supported with --canonical flag");
-            exit(1);
-        }
-    }
-
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -443,7 +432,13 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    auto aligner = build_aligner(*graph, *config);
+    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
+
+    if (config->canonical && !graph->is_canonical_mode()
+            && aligner_config.min_seed_length < graph->get_k()) {
+        logger->error("Seeds of length < k not supported with --canonical flag");
+        exit(1);
+    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
@@ -459,6 +454,7 @@ int align_to_graph(Config *config) {
 
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
+
         while (it != end) {
             uint64_t num_bytes_read = 0;
             // A generator that can be called multiple times until all sequences
@@ -477,18 +473,21 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&](auto seq_batch) {
-                aligner->align_batch(seq_batch,
-                    [&](std::string_view header, DBGAligner<>::DBGQueryAlignment&& paths) {
-                        std::string sout = format_alignment(
-                            header, paths, *graph, *config
-                        );
+            thread_pool.enqueue([&,batch=std::move(seq_batch),aln_graph=graph]() mutable {
+                if (config->canonical && !graph->is_canonical_mode())
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
 
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << sout;
-                    }
-                );
-            }, std::move(seq_batch));
+                auto aligner = build_aligner(*aln_graph, aligner_config);
+
+                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                    std::string sout = format_alignment(
+                        header, paths, *aln_graph, *config
+                    );
+
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << sout;
+                });
+            });
         };
 
         thread_pool.join();
