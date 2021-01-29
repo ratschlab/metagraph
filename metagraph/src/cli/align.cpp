@@ -461,7 +461,8 @@ int align_to_graph(Config *config) {
             uint64_t num_bytes_read = 0;
 
             // Read a batch to pass on to a thread
-            std::vector<std::pair<std::string, std::string>> seq_batch;
+            typedef std::vector<std::pair<std::string, std::string>> SeqBatch;
+            SeqBatch seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {
                 std::string header
@@ -475,9 +476,12 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&,batch=std::move(seq_batch),aln_graph=graph]() mutable {
+            ++num_batches;
+
+            auto process_batch = [&](SeqBatch batch, uint64_t size) {
+                auto aln_graph = graph;
                 if (config->canonical && !graph->is_canonical_mode())
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, batch_size);
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
@@ -489,9 +493,34 @@ int align_to_graph(Config *config) {
                     std::lock_guard<std::mutex> lock(print_mutex);
                     *out << sout;
                 });
-            });
+            };
 
-            ++num_batches;
+            uint64_t mbatch_size = num_bytes_read / std::max(1u, get_num_threads());
+            if (it == end && num_batches < get_num_threads() && mbatch_size) {
+                // split remaining batch
+                logger->trace("Splitting final batch");
+
+                auto it = seq_batch.begin();
+                auto b_end = seq_batch.end();
+                uint64_t num_minibatches = 0;
+                while (it != b_end) {
+                    uint64_t cur_minibatch_read = 0;
+                    auto last_mv_it = std::make_move_iterator(it);
+                    for ( ; it != b_end && cur_minibatch_read < mbatch_size; ++it) {
+                        cur_minibatch_read += it->second.size();
+                    }
+
+                    thread_pool.enqueue(process_batch,
+                                        SeqBatch(last_mv_it, std::make_move_iterator(it)),
+                                        mbatch_size);
+                    ++num_minibatches;
+                }
+
+                logger->trace("Num minibatches: {}, minibatch size: {} KiB",
+                              num_minibatches, mbatch_size >> 10);
+            } else {
+                thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+            }
         };
 
         thread_pool.join();
