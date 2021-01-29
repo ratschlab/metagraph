@@ -44,7 +44,7 @@ jobs:
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         [ "${{ matrix.compiler }}" != "clang" ] && sudo apt-get install ${{ matrix.compiler }}
 
-        sudo apt-get install g++-8=8-20180414-1ubuntu2 libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+        sudo apt-get install g++-8=8-20180414-1ubuntu2 gcc-8-base=8-20180414-1ubuntu2 gcc-8=8-20180414-1ubuntu2 libstdc++-8-dev=8-20180414-1ubuntu2 libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
     - name: install dependencies for integration tests
       run: |
