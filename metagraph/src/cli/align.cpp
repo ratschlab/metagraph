@@ -475,7 +475,7 @@ int align_to_graph(Config *config) {
 
             thread_pool.enqueue([&,batch=std::move(seq_batch),aln_graph=graph]() mutable {
                 if (config->canonical && !graph->is_canonical_mode())
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, batch_size);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
