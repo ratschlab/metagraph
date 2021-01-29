@@ -455,6 +455,8 @@ int align_to_graph(Config *config) {
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
 
+        size_t num_batches = 0;
+
         while (it != end) {
             uint64_t num_bytes_read = 0;
 
@@ -488,13 +490,16 @@ int align_to_graph(Config *config) {
                     *out << sout;
                 });
             });
+
+            ++num_batches;
         };
 
         thread_pool.join();
 
         logger->trace("File '{}' processed in {} sec, "
+                      "num batches: {}, batch size: {} KiB, "
                       "current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(),
+                      file, data_reading_timer.elapsed(), num_batches, batch_size >> 10,
                       get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())
