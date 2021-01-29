@@ -476,8 +476,6 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            ++num_batches;
-
             auto process_batch = [&](SeqBatch batch, uint64_t size) {
                 auto aln_graph = graph;
                 if (config->canonical && !graph->is_canonical_mode())
@@ -495,10 +493,14 @@ int align_to_graph(Config *config) {
                 });
             };
 
-            uint64_t mbatch_size = num_bytes_read / std::max(1u, get_num_threads());
-            if (it == end && num_batches < get_num_threads() && mbatch_size) {
+            uint64_t mbatch_size = it == end && num_batches < get_num_threads()
+                ? num_bytes_read / std::max(get_num_threads() - num_batches,
+                                            static_cast<size_t>(1))
+                : 0;
+
+            if (mbatch_size) {
                 // split remaining batch
-                logger->trace("Splitting final batch");
+                logger->trace("Splitting final batch into minibatches");
 
                 auto it = seq_batch.begin();
                 auto b_end = seq_batch.end();
@@ -521,6 +523,8 @@ int align_to_graph(Config *config) {
             } else {
                 thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
             }
+
+            ++num_batches;
         };
 
         thread_pool.join();
