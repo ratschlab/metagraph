@@ -434,7 +434,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
                 --node_it_;
             }
         } break;
-        case Cigar::Operator::DELETION: {
+        case Cigar::Operator::INSERTION: {
             assert(end_it_ > begin_it_);
             if ((--(cigar_it_.base())).offset()) {
                 score_ -= config_->gap_extension_penalty;
@@ -444,7 +444,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
 
             --end_it_;
         } break;
-        case Cigar::Operator::INSERTION: {
+        case Cigar::Operator::DELETION: {
             assert((--(cigar_it_.base())).get_it() >= alignment_->get_cigar().begin());
             assert(ref_end_it_ > ref_begin_it_);
             assert(node_it_ > alignment_->begin());
@@ -503,7 +503,7 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
             ++begin_it_;
             ++ref_begin_it_;
         } break;
-        case Cigar::Operator::DELETION: {
+        case Cigar::Operator::INSERTION: {
             assert(begin_it_ < end_it_);
             if (cigar_it_.count_left() == 1) {
                 score_ -= config_->gap_opening_penalty;
@@ -513,7 +513,7 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
 
             ++begin_it_;
         } break;
-        case Cigar::Operator::INSERTION: {
+        case Cigar::Operator::DELETION: {
             assert(ref_begin_it_ < ref_end_it_);
             if (cigar_it_.count_left() == 1) {
                 score_ -= config_->gap_opening_penalty;
@@ -550,7 +550,7 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             --ref_begin_it_;
             score_ += config_->get_row(*begin_it_)[*ref_begin_it_];
         } break;
-        case Cigar::Operator::DELETION: {
+        case Cigar::Operator::INSERTION: {
             assert(begin_it_ >= alignment_->get_query().data());
             if (cigar_it_.count_left() == 1) {
                 score_ += config_->gap_opening_penalty;
@@ -560,7 +560,7 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
 
             --begin_it_;
         } break;
-        case Cigar::Operator::INSERTION: {
+        case Cigar::Operator::DELETION: {
             assert(cigar_it_.get_it() >= alignment_->get_cigar().begin());
             assert(ref_begin_it_ >= alignment_->get_sequence().data());
             if (cigar_it_.count_left() == 1) {
@@ -724,11 +724,11 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     // Now, find the maximal scoring combination of a prefix of the first alignment
     // and a suffix of the second alignment such that they do not overlap.
-    // When trimming, INSERTION only consumes the reference, so these can be discarded
+    // When trimming, DELETION only consumes the reference, so these can be discarded
 
     AlignmentPrefix<NodeType> first_prefix(first, config, graph);
-    AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
     AlignmentSuffix<NodeType> second_suffix(second, config, graph.get_k());
+    AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
     AlignmentSuffix<NodeType> best_second_suffix = second_suffix;
 
     size_t overlap = first_prefix.get_query().data() + first_prefix.get_query().size()
@@ -741,7 +741,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     // initialize: trim overlap from the left of second
     for (size_t i = 0; i < overlap; ++i) {
         assert(!second_suffix.eof());
-        while (second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+        while (second_suffix.get_front_op() == Cigar::Operator::DELETION) {
             assert(!second_suffix.eof());
             ++second_suffix;
             assert(Alignment(second_suffix).is_valid(graph, &config));
@@ -749,7 +749,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         assert(!second_suffix.eof());
         ++second_suffix;
         assert(Alignment(second_suffix).is_valid(graph, &config));
-        while (!second_suffix.eof() && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+        while (!second_suffix.eof() && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
             assert(!second_suffix.eof());
             ++second_suffix;
             assert(Alignment(second_suffix).is_valid(graph, &config));
@@ -774,7 +774,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
             == second_suffix.get_query().data());
 
         while (!first_prefix.eof()
-                && first_prefix.get_back_op() == Cigar::Operator::INSERTION
+                && first_prefix.get_back_op() == Cigar::Operator::DELETION
                 && first_prefix.get_node_end_it() > node_it) {
             ++first_prefix;
             assert(Alignment(first_prefix).is_valid(graph, &config));
@@ -794,7 +794,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         assert(Alignment(first_prefix).is_valid(graph, &config));
 
         while (!first_prefix.eof()
-                && first_prefix.get_back_op() == Cigar::Operator::INSERTION
+                && first_prefix.get_back_op() == Cigar::Operator::DELETION
                 && first_prefix.get_node_end_it() > node_it) {
             ++first_prefix;
             assert(Alignment(first_prefix).is_valid(graph, &config));
@@ -802,7 +802,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
         if (!second_suffix.eof()) {
             while (!second_suffix.reof()
-                    && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                    && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
                 --second_suffix;
                 assert(Alignment(second_suffix).is_valid(graph, &config));
             }
@@ -814,7 +814,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         assert(Alignment(second_suffix).is_valid(graph, &config));
 
         while (!second_suffix.reof()
-                && second_suffix.get_front_op() == Cigar::Operator::INSERTION) {
+                && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
             --second_suffix;
             assert(Alignment(second_suffix).is_valid(graph, &config));
         }

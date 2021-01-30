@@ -85,7 +85,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 updated = true;
             }
             ++suffix;
-            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
+            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::DELETION) {
                 ++suffix;
             }
         }
@@ -100,7 +100,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 updated = true;
             }
             ++suffix;
-            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::INSERTION) {
+            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::DELETION) {
                 ++suffix;
             }
         }
