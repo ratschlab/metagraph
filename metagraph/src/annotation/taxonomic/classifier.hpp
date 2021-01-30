@@ -14,21 +14,22 @@ namespace annot {
 class Classifier {
   public:
 //    typedef std::string Label; // Maybe better to point this to the real structure.
-    typedef std::uint64_t TaxoLabel;
+    typedef std::uint64_t TaxId;
     typedef annot::MultiLabelEncoded<std::string> Annotator;
-    using row_index = Annotator::Index;
+    using KmerId = Annotator::Index;
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
 
   private:
-    TaxoLabel root_node;
+    TaxId root_node;
     uint64_t num_nodes;
     std::vector<uint64_t> node_depth; // The root has the maximal depth;
     std::vector<uint64_t> node_parent;
     std::vector<std::string> index_to_label;
-    tsl::hopscotch_map<row_index, TaxoLabel> taxonomic_map;
+    tsl::hopscotch_map<KmerId, TaxId> taxonomic_map;
 
-    void import_taxonomy(const std::string &filepath, std::vector<TaxoLabel> &linearization);
+    void import_taxonomy(const std::string &filepath,
+                         std::vector<TaxId> &linearization);
 
   public:
     Classifier(const std::string &filepath); // receive the file exported by Taxonomy obj.

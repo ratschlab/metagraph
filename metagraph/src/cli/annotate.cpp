@@ -236,6 +236,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             }
         );
     }
+    std::cout << "finished will all the call_annotations" << std::endl;
 
     thread_pool.join();
 
@@ -370,7 +371,9 @@ int annotate_graph(Config *config) {
 //    query.cpp line 710
     std::shared_ptr<annot::Taxonomy> taxonomy = nullptr;
     if (config->taxonomic_tree.size()) {
-        taxonomy = std::make_shared<annot::Taxonomy>(config->taxonomic_tree);
+        taxonomy = std::make_shared<annot::Taxonomy>(config->taxonomic_tree,
+                                                     config->lookup_table,
+                                                     config->fasta_header_delimiter);
     }
 
     if (!config->separately) {

@@ -48,8 +48,6 @@ void AnnotatedSequenceGraph
     std::vector<row_index> indices;
     indices.reserve(sequence.size());
 
-    std::cout << "sequence=" << sequence << "\n";
-
     graph_->map_to_nodes(sequence, [&](node_index i) {
 //      std::cout << "map node =" << i << "\n";
         if (i > 0)
@@ -70,7 +68,10 @@ void AnnotatedSequenceGraph
         }
     }
     if (taxonomy != nullptr) {
-        taxonomy->update_row_indices(indices, labels);
+        uint64_t lca = 0;
+        if (taxonomy->find_lca(labels, lca) ) {
+            taxonomy->update_kmers_lca(indices, lca);
+        }
 //        std::cout << "fixme\n";
     }
 

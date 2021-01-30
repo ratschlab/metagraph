@@ -251,6 +251,8 @@ Config::Config(int argc, char *argv[]) {
             files_sequentially = true;
         } else if (!strcmp(argv[i], "--taxonomic-tree")) {
             taxonomic_tree = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--lookup-table")) {
+            lookup_table = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {

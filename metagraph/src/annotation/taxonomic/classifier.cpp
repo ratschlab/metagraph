@@ -20,11 +20,11 @@ namespace annot {
 
 using mtg::common::logger;
 
-typedef Classifier::TaxoLabel TaxoLabel;
+//typedef Classifier::TaxoLabel TaxoLabel;
 
 void Classifier::import_taxonomy(
         const std::string &filepath,
-        std::vector<TaxoLabel> &linearization
+        std::vector<TaxId> &linearization
     ) {
     std::cout << "in inport" << std::endl;
     std::ifstream f(filepath.c_str(), std::ios::in | std::ios::binary);
@@ -80,7 +80,7 @@ void Classifier::import_taxonomy(
 //    }
 //    F_ = load_number_vector_raw<edge_index>(instream);
 
-    linearization = load_number_vector_raw<TaxoLabel>(f);
+    linearization = load_number_vector_raw<TaxId>(f);
 
     for (auto &it : linearization) {
         std::cout << it << " ";
@@ -88,7 +88,7 @@ void Classifier::import_taxonomy(
     std::cout << "\n";
 
     std::cout << "in inport fin" << std::endl;
-//    if (!linearization = load_number_vector_raw<TaxoLabel>(f)) {
+//    if (!linearization = load_number_vector_raw<TaxId>(f)) {
 //        logger->error("Can't load serialized 'linearization' from file '{}'.", filepath.c_str());
 //        std::exit(1);
 //    }
@@ -97,7 +97,7 @@ void Classifier::import_taxonomy(
 
 Classifier::Classifier(const std::string &filepath) {
     std::cout << "inside classifier constructor \n" << std::endl;
-    std::vector<TaxoLabel> linearization;
+    std::vector<TaxId> linearization;
     import_taxonomy(filepath, linearization);
     root_node = linearization[0];
 
@@ -129,7 +129,7 @@ std::string Classifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                const std::string &sequence,
                                const double &lca_coverage_threshold) {
     std::cout << "inside assign_class" << std::endl;
-    tsl::hopscotch_map<TaxoLabel, uint64_t> raw_node_score;
+    tsl::hopscotch_map<TaxId, uint64_t> raw_node_score;
     uint64_t total_kmers = 0;
 
     std::cout << "sequence=" << sequence << std::endl;
@@ -147,11 +147,11 @@ std::string Classifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     for (const auto &it: raw_node_score) {
         std::cout << "taxon_before=" << it.first << " -> " << it.second << "\n";
     }
-    tsl::hopscotch_set<TaxoLabel> nodes_already_propagated;
-    tsl::hopscotch_map<TaxoLabel, uint64_t> prc_node_score;
+    tsl::hopscotch_set<TaxId> nodes_already_propagated;
+    tsl::hopscotch_map<TaxId, uint64_t> prc_node_score;
 
     uint64_t desired_number_kmers = total_kmers * lca_coverage_threshold;
-    TaxoLabel best_lca = root_node;
+    TaxId best_lca = root_node;
     for (const auto &node_pair: raw_node_score) {
         uint64_t node = node_pair.first;
         std::cout << "node in for = " << node << "\n";
@@ -162,10 +162,10 @@ std::string Classifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
         uint64_t amount_from_processed_parents = 0;
         uint64_t amount_from_unprocessed_parents = raw_node_score[node];
 
-        std::vector<TaxoLabel> processed_parents;
-        std::vector<TaxoLabel> unprocessed_parents;
+        std::vector<TaxId> processed_parents;
+        std::vector<TaxId> unprocessed_parents;
 
-        TaxoLabel it_node = node;
+        TaxId it_node = node;
         unprocessed_parents.push_back(it_node);
         do {
             it_node = node_parent[it_node];
