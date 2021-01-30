@@ -62,11 +62,11 @@ void Taxonomy::read_tree(const std::string &tree_filepath,
             std::cout << "something already existent in full_parents_list!!" << "\n";
         }
         full_parents_list[act] = parent;
-        if (cnt < 20) {
-            std::cout << "tree -> " << parts[0] << " " << parts[2] << "\n";
-            std::cout << "tree -0 " << act << " " << parent << "\n";
-            std::cout << " ---> " << full_parents_list[act] << "\n\n";
-        }
+//        if (cnt < 20) {
+//            std::cout << "tree -> " << parts[0] << " " << parts[2] << "\n";
+//            std::cout << "tree -0 " << act << " " << parent << "\n";
+//            std::cout << " ---> " << full_parents_list[act] << "\n\n";
+//        }
         if (parts[0] == parts[2]) {
             std::cout << "tree equal -> " << parts[0] << "\n";
         }
@@ -78,26 +78,23 @@ void Taxonomy::read_tree(const std::string &tree_filepath,
     for (const auto &it: reversed_lookup_table) {
         relevant_taxids.push(it.first);
     }
-    std::cout << "init size relevant_taxids = " << relevant_taxids.size() << "\n";
 
     uint64_t num_nodes = 0;
+    uint64_t num_taxid_failed = 0;
     while (relevant_taxids.size()) {
         TaxId taxid = relevant_taxids.front();
-
-        if (taxid == 1) {
-            std::cout << " check 1 -> " << full_parents_list[taxid] << "\n";
-        }
 
         relevant_taxids.pop();
         if (normalized_tax_it.count(taxid)) {
             continue;
         }
         if (! full_parents_list.count(taxid)) {
-            std::cout << "WARNING taxid " << taxid << " cannot be found in the taxonomic tree\n";
-//            todo add logs
+            logger->warn("Taxid {} cannot be found in the taxonomic tree.", taxid);
+            num_taxid_failed += 1;
             continue;
         }
         normalized_tax_it[taxid] = num_nodes++;
+        index_to_label.push_back(reversed_lookup_table[taxid]);
         if (taxid == full_parents_list[taxid]) {
             root_node = normalized_tax_it[taxid];
             std::cout << "root_node = " << root_node << "\n";
@@ -108,7 +105,9 @@ void Taxonomy::read_tree(const std::string &tree_filepath,
             lookup_table[reversed_lookup_table[taxid]] = normalized_tax_it[taxid];
         }
     }
-    std::cout << "num_nodes = " << num_nodes << "\n";
+    if (num_taxid_failed) {
+        logger->warn("Number taxids succeeded {}, failed {}.", num_nodes, num_taxid_failed);
+    }
 
     tree.resize(num_nodes);
     for (const auto &it: normalized_tax_it) {
@@ -126,7 +125,8 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
     linearization_idx.resize(tree.size());
     dfs_linearization(root_node, tree, tree_linearization);
 
-    uint num_rmq_rows = log (tree_linearization.size()) + 2;
+
+    uint num_rmq_rows = log2(tree_linearization.size()) + 2;
 //    rmq_data = std::make_unique<std::vector<TaxNormalizedId>>(num_rmq_rows);
     rmq_data.resize(num_rmq_rows); // = new std::unique_ptr<std::vector<TaxNormalizedId>>[num_rmq_rows];
     for (uint64_t i = 0; i < num_rmq_rows; ++i) {
@@ -173,14 +173,10 @@ void Taxonomy::rmq_preprocessing(const ChildrenList &tree) {
         }
 //        std::cout << "\n";
     }
-
-    std::cout << "num_rmq_rows=" << num_rmq_rows << "\n";
-//    exit(0);
 }
 
 void Taxonomy::get_input_accessions(const std::string &fasta_fai,
                                     tsl::hopscotch_set<AccessionVersion> &input_accessions) {
-    std::cout << "in get_input_accessions\n";
     std::ifstream f(fasta_fai);
     std::string line;
 
@@ -189,14 +185,9 @@ void Taxonomy::get_input_accessions(const std::string &fasta_fai,
         std::string fasta_header = utils::split_string(line, "\t")[0];
         std::string accession_version = utils::split_string(fasta_header, "|")[3];
         input_accessions.insert(accession_version);
-//        if (cnt < 10) {
-//            std::cout << "found accession = " << accession_version << "\n";
-//        }
         cnt += 1;
     }
     f.close();
-
-    std::cout << "finished get_input_accessions (cnt=" << cnt << ")\n";
 }
 
 void Taxonomy::parse_lookup_table(const std::string &lookup_table_filepath,
@@ -264,8 +255,6 @@ Taxonomy::Taxonomy(const std::string &tree_filepath,
     rmq_preprocessing(tree);
     logger->trace("Finished rmq preprocessing after '{}' sec", timer.elapsed());
 
-    std::cout << "\n\n\n";
-
 //    for (uint node = 0; node < tree.size(); ++node) {
 //        std::cout << node << " -> ";
 //        for (uint i = 0; i < tree[node].size(); ++i) {
@@ -281,9 +270,7 @@ TaxNormalizedId Taxonomy::find_lca(const std::vector<TaxNormalizedId> &labels) {
 //        std::cout << it << " ";
 //    }
 //    std::cout << "\n";
-    if (labels[0] == 6437 && labels[1] == 3511) {
-        std::cout << "on in" << std::endl;
-    }
+
     uint64_t left_idx = linearization_idx[labels[0]];
     uint64_t right_idx = linearization_idx[labels[0]];
     for (const auto &label: labels) {
@@ -296,45 +283,19 @@ TaxNormalizedId Taxonomy::find_lca(const std::vector<TaxNormalizedId> &labels) {
     }
     assert(left_idx >= 0);
     assert(right_idx >= 0);
-    if (labels[0] == 6437 && labels[1] == 3511) {
-        std::cout << "## rmq.size=" << rmq_data.size() << "\n";
-        for (uint64_t row = 0; row < rmq_data.size(); ++row) {
-            std::cout << "\t## rmq["<<row<<"].size=" << rmq_data[row].size() << "\n";
-            for (uint i = 0; i < rmq_data[row].size(); ++i) {
-                if (rmq_data[row][i] > normalized_tax_it.size()) {
-                    std::cout << "rmq_data[" << row << "][" << i
-                              << "] = " << rmq_data[row][i] << std::endl;
-                    exit(1);
-                }
-            }
-        }
-        std::cout << "rmq_data.size=" << rmq_data.size();
-        std::cout << "rmq_data[12].size=" << rmq_data[12].size();
-        std::cout << "rmq val = " << rmq_data[12][14487] << "\n";
-        std::cout << "left_idx=" << left_idx << " right_idx=" << right_idx <<  std::endl;
-    }
+
 //    std::cout << "left_idx=" << left_idx << " right_idx=" << right_idx << "\n";
     uint64_t log_dist = precalc_log[right_idx - left_idx];
     assert(log_dist < rmq_data.size());
-    if (labels[0] == 6437 && labels[1] == 3511) {
-        std::cout << "log_dist=" << log_dist << std::endl;
-    }
+
     assert(left_idx < rmq_data[log_dist].size());
     uint64_t left_lca = rmq_data[log_dist][left_idx];
 
-    if (labels[0] == 6437 && labels[1] == 3511) {
-        std::cout << "right_idx - precalc_pow2[log_dist] + 1=" << right_idx - precalc_pow2[log_dist] + 1 << std::endl;
-    }
+
     assert(right_idx - precalc_pow2[log_dist] + 1 < rmq_data[log_dist].size());
     uint64_t right_lca = rmq_data[log_dist][right_idx - precalc_pow2[log_dist] + 1];
 //    std::cout << "left_lca=" << left_lca << " right_lca=" << right_lca << "\n";
 
-
-    if (labels[0] == 6437 && labels[1] == 3511) {
-        std::cout << "off in left_lca=" << left_lca << " right_lca=" << right_lca <<  std::endl;
-        std::cout << "node_depth[left_lca]=" << node_depth[left_lca] << std::endl;
-        std::cout << "node_depth[right_lca]=" << node_depth[right_lca] << std::endl;
-    }
 
     if (node_depth[left_lca] > node_depth[right_lca]) {
         return left_lca;
@@ -345,12 +306,14 @@ TaxNormalizedId Taxonomy::find_lca(const std::vector<TaxNormalizedId> &labels) {
 
 bool Taxonomy::find_lca(const std::vector<AccessionVersion> &raw_labels,
                                    TaxNormalizedId &lca) {
+    num_external_lca_calls += 1;
     std::vector<TaxNormalizedId> labels;
     for (const auto &label: raw_labels) {
         std::string accession_version = utils::split_string(label, "|")[3];
-        std::cout << "accession_version=" << accession_version << " label =" << label << "\n";
+//        std::cout << "accession_version=" << accession_version << " label =" << label << "\n";
         if (! lookup_table.count(accession_version)) {
             logger->warn("Accession version {} cannot be found in the lookup_table.", accession_version);
+            num_external_lca_calls_failed += 1;
             return false;
         }
         labels.push_back(lookup_table[accession_version]);
@@ -365,7 +328,7 @@ TaxNormalizedId Taxonomy::find_lca(const TaxNormalizedId &label1, const TaxNorma
 
 void Taxonomy::update_kmers_lca(const std::vector<KmerId> &indices,
                                 const TaxNormalizedId &lca) {
-    std:: cout << "here update_row_indices :\n";
+//    std:: cout << "here update_row_indices :\n";
 //    for (auto i: indices) {
 //        std::cout << i << " ";
 //    }
@@ -375,35 +338,25 @@ void Taxonomy::update_kmers_lca(const std::vector<KmerId> &indices,
 //    }
 //
 //    TaxNormalizedId lca = find_lca(labels);
-    std::cout << "\n lca =" << lca << "\n";
+//    std::cout << "\n lca =" << lca << "\n";
 
-    if(lca == 3511) {
-        std::cout << "on" << std::endl;
-    }
+
 
     for (const auto &kmer: indices) {
         if (taxonomic_map.count(kmer)) {
-//            if(lca == 3511) {
-//                std::cout << "kmer=" << kmer << std::endl;
-//                std::cout << " old taxonomic_map[kmer]=" << taxonomic_map[kmer] << std::endl;
-//            }
             taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
-//            std::cout << " upd (" << kmer << ") -> " << taxonomic_map[kmer] << "\n";
         } else {
-//            if(lca == 3511) {
-//                std::cout << "kmer=" << kmer << " no old " << std::endl;
-//            }
             taxonomic_map[kmer] = lca;
-//            std::cout << " fst (" << kmer << ") -> " << taxonomic_map[kmer] << "\n";
         }
-    }
-    if(lca == 3511) {
-        std::cout << "off" << std::endl;
     }
 
 }
 
 void Taxonomy::export_to_file(const std::string &filepath) {
+    if (num_external_lca_calls_failed) {
+        logger->warn("Total number external LCA calls: {} from which nonexistent label: {}",
+                     num_external_lca_calls, num_external_lca_calls_failed);
+    }
     Timer timer;
     logger->trace("Exporting metagraph taxonomic data");
 
@@ -431,7 +384,27 @@ void Taxonomy::export_to_file(const std::string &filepath) {
 //    }
 //    f << "\n";
 
-    serialize_number_vector_raw(f, rmq_data[0]);
+    uint64_t num_nodes = index_to_label.size();
+    std::vector<bool> visited_node(num_nodes);
+    std::vector<TaxNormalizedId> node_parent(num_nodes);
+    const std::vector<TaxNormalizedId> &linearization = rmq_data[0];
+
+    visited_node[linearization[0]] = true;
+    node_parent[linearization[0]] = linearization[0];
+    for (uint64_t i = 1; i < linearization.size(); ++i) {
+        uint64_t act = linearization[i];
+        uint64_t prv = linearization[i - 1];
+        assert(act >= 0);
+        assert(act < visited_node.size());
+        if (visited_node[act]) {
+            // Previous node was one child.
+            continue;
+        }
+        node_parent[act] = prv;
+        visited_node[act] = true;
+    }
+
+    serialize_number_vector_raw(f, node_parent);
 //    uint64_t num_nodes = index_to_label.size();
 //    for (uint64_t i = 0; i < 2 * num_nodes - 1; ++i) {
 //        f << rmq_data[0][i] << " ";

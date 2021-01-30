@@ -22,6 +22,8 @@ class Taxonomy {
 
   private:
     TaxNormalizedId root_node;
+    uint64_t num_external_lca_calls;
+    uint64_t num_external_lca_calls_failed;
 
 //   TODO what is this rmq. https://stackoverflow.com/questions/15488470/syntax-for-dynamically-allocating-a-2d-array-of-smart-pointers
     std::vector<std::vector<TaxNormalizedId>> rmq_data;
