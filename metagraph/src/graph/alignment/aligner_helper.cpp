@@ -738,6 +738,23 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     score_t cur_score;
     size_t best_overlap = overlap + 1;
 
+    size_t k = graph.get_k();
+    auto end_gap_penalty = [&config](size_t length) -> score_t {
+        return config.gap_opening_penalty + (length - 1) * config.gap_extension_penalty;
+    };
+
+    auto update_best_overlap = [&](size_t i) {
+        if (second_suffix.get_query().size() >= config.min_seed_length) {
+            cur_score = first_prefix.get_score() + second_suffix.get_score() + end_gap_penalty(k);
+            if (cur_score > best_score) {
+                best_first_prefix = first_prefix;
+                best_second_suffix = second_suffix;
+                best_score = cur_score;
+                best_overlap = i;
+            }
+        }
+    };
+
     // initialize: trim overlap from the left of second
     for (size_t i = 0; i < overlap; ++i) {
         assert(!second_suffix.eof());
@@ -757,15 +774,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         assert(!second_suffix.eof() || i + 1 == overlap);
     }
 
-    if (second_suffix.get_query().size() >= config.min_seed_length) {
-        cur_score = first_prefix.get_score() + second_suffix.get_score();
-        if (cur_score > best_score) {
-            best_first_prefix = first_prefix;
-            best_second_suffix = second_suffix;
-            best_score = cur_score;
-            best_overlap = 0;
-        }
-    }
+    update_best_overlap(0);
 
     // iteratively shift the splice point
     auto node_it = first.begin();
@@ -778,13 +787,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                 && first_prefix.get_node_end_it() > node_it) {
             ++first_prefix;
             assert(Alignment(first_prefix).is_valid(graph, &config));
-            cur_score = first_prefix.get_score() + second_suffix.get_score();
-            if (cur_score > best_score || (cur_score >= best_score && best_overlap == i)) {
-                best_first_prefix = first_prefix;
-                best_second_suffix = second_suffix;
-                best_score = cur_score;
-                best_overlap = i;
-            }
+            update_best_overlap(i);
         }
 
         if (first_prefix.eof() || first_prefix.get_node_end_it() == node_it)
@@ -822,15 +825,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         if (first_prefix.get_query().size() < config.min_seed_length)
             break;
 
-        if (second_suffix.get_query().size() >= config.min_seed_length) {
-            cur_score = first_prefix.get_score() + second_suffix.get_score();
-            if (cur_score > best_score) {
-                best_first_prefix = first_prefix;
-                best_second_suffix = second_suffix;
-                best_score = cur_score;
-                best_overlap = i;
-            }
-        }
+        update_best_overlap(i);
     }
 
     assert(first_prefix.get_query().data() + first_prefix.get_query().size()
