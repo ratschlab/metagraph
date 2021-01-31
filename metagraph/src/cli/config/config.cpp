@@ -1040,7 +1040,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
-            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomic tree (nodes.dmp) corresponding to the input data []\n");
+            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomic tree (\"nodes.dmp\") corresponding to the input data []\n");
             fprintf(stderr, "\t   --lookup-table [STR] \tpath to the lookup table (\"*.accession2taxid\") corresponding to the input data []\n");
             fprintf(stderr, "\t   --header-delimiter [STR] \tpath to the fasta headers file (\"*.fasta.fai\") corresponding to the input files []\n");
             fprintf(stderr, "\n");

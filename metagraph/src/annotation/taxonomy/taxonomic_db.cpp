@@ -44,8 +44,8 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
     tsl::hopscotch_map<TaxId, TaxId> full_parents_list;
     while (getline(f, line) ) {
         std::vector<std::string> parts = utils::split_string(line, "\t");
-        uint64_t act = static_cast<uint64_t>(std::stoll(parts[0]));
-        uint64_t parent = static_cast<uint64_t>(std::stoll(parts[2]));
+        uint64_t act = static_cast<uint64_t>(std::stoull(parts[0]));
+        uint64_t parent = static_cast<uint64_t>(std::stoull(parts[2]));
 
         assert(!full_parents_list.count(act));
         full_parents_list[act] = parent;
@@ -146,7 +146,7 @@ void TaxonomyDB::get_input_accessions(const std::string &fasta_headers_filepath,
     f.close();
 }
 
-// TODO improve this by parsing ".gz" directly (or https://github.com/pmenzel/taxonomy-tools)
+// TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
                                    const tsl::hopscotch_set<AccessionVersion> &input_accessions,
                                    tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table) {
@@ -156,7 +156,8 @@ void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
         std::vector<std::string> parts = utils::split_string(line, "\t");
         assert(parts.size() == 4);
         if(input_accessions.count(parts[1])) {
-            reversed_lookup_table[std::stoull(parts[2])] = parts[1];
+            TaxId act = static_cast<TaxId>(std::stoull(parts[2]));
+            reversed_lookup_table[act] = parts[1];
         }
     }
     f.close();
