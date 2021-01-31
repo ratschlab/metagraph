@@ -264,201 +264,6 @@ void Alignment<NodeType>::append(Alignment&& other) {
     query_end_ = other.query_end_;
 }
 
-
-template <typename NodeType>
-AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
-    assert(cigar_it_ < cigar_rend_);
-
-    switch (*cigar_it_) {
-        case Cigar::MATCH:
-        case Cigar::MISMATCH: {
-            assert(end_it_ > begin_it_);
-            assert(ref_end_it_ > ref_begin_it_);
-            assert(node_it_ > alignment_->begin());
-            score_ -= config_->get_row(*(end_it_ - 1))[*(ref_end_it_ - 1)];
-            --end_it_;
-            --ref_end_it_;
-
-            // if we're at the first node of the alignment, then traverse
-            // backwards to reconstruct a path
-            if (node_it_ - 1 == alignment_->begin()) {
-                auto last_node = prefix_node_ ? prefix_node_ : alignment_->front();
-                assert(last_node);
-                prefix_node_ = DeBruijnGraph::npos;
-                graph_->adjacent_incoming_nodes(last_node, [&](auto prev) {
-                    // TODO: what if there are multiple?
-                    if (!prefix_node_)
-                        prefix_node_ = prev;
-                });
-                ++offset_;
-            } else {
-                --node_it_;
-            }
-        } break;
-        case Cigar::INSERTION: {
-            assert(end_it_ > begin_it_);
-            if ((--(cigar_it_.base())).offset()) {
-                score_ -= config_->gap_extension_penalty;
-            } else {
-                score_ -= config_->gap_opening_penalty;
-            }
-
-            --end_it_;
-        } break;
-        case Cigar::DELETION: {
-            assert((--(cigar_it_.base())).get_it() >= alignment_->get_cigar().begin());
-            assert(ref_end_it_ > ref_begin_it_);
-            assert(node_it_ > alignment_->begin());
-            if ((--(cigar_it_.base())).offset()) {
-                score_ -= config_->gap_extension_penalty;
-            } else {
-                score_ -= config_->gap_opening_penalty;
-            }
-
-            --ref_end_it_;
-
-            // if we're at the first node of the alignment, then traverse
-            // backwards to reconstruct a path
-            if (node_it_ - 1 == alignment_->begin()) {
-                auto last_node = prefix_node_ ? prefix_node_ : alignment_->front();
-                assert(last_node);
-                prefix_node_ = DeBruijnGraph::npos;
-                graph_->adjacent_incoming_nodes(last_node, [&](auto prev) {
-                    // TODO: what if there are multiple?
-                    if (!prefix_node_)
-                        prefix_node_ = prev;
-                });
-                ++offset_;
-
-            } else {
-                --node_it_;
-            }
-        } break;
-        case Cigar::MISSING: {
-            --node_it_;
-            assert(!*node_it_);
-        } break;
-        case Cigar::CLIPPED: { assert(false); }
-    }
-
-    ++cigar_it_;
-    ++trim_;
-
-    assert(cigar_rbegin_ <= cigar_it_);
-    assert(cigar_it_ <= cigar_rend_);
-
-    return *this;
-}
-
-template <typename NodeType>
-AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
-    throw std::runtime_error("not implemented yet");
-    return *this;
-}
-
-template <typename NodeType>
-AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
-    assert(cigar_it_ < cigar_end_);
-    switch (*cigar_it_) {
-        case Cigar::MATCH:
-        case Cigar::MISMATCH: {
-            assert(begin_it_ < end_it_);
-            assert(ref_begin_it_ < ref_end_it_);
-            score_ -= config_->get_row(*begin_it_)[*ref_begin_it_];
-            ++begin_it_;
-            ++ref_begin_it_;
-            ++node_it_;
-        } break;
-        case Cigar::INSERTION: {
-            assert(begin_it_ < end_it_);
-            if (cigar_it_.count_left() == 1) {
-                score_ -= config_->gap_opening_penalty;
-            } else {
-                score_ -= config_->gap_extension_penalty;
-            }
-
-            ++begin_it_;
-        } break;
-        case Cigar::DELETION: {
-            assert(ref_begin_it_ < ref_end_it_);
-            if (cigar_it_.count_left() == 1) {
-                score_ -= config_->gap_opening_penalty;
-            } else {
-                score_ -= config_->gap_extension_penalty;
-            }
-
-            ++ref_begin_it_;
-            ++node_it_;
-        } break;
-        case Cigar::MISSING: {
-            assert(!*node_it_);
-            ++node_it_;
-        } break;
-        case Cigar::CLIPPED: { assert(false); }
-    }
-
-    ++cigar_it_;
-    ++trim_;
-
-    assert(cigar_begin_ <= cigar_it_);
-    assert(cigar_it_ <= cigar_end_);
-
-    return *this;
-}
-
-template <typename NodeType>
-AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
-    assert(cigar_it_.get_it() >= alignment_->get_cigar().begin());
-
-    --cigar_it_;
-
-    switch (*cigar_it_) {
-        case Cigar::MATCH:
-        case Cigar::MISMATCH: {
-            assert(begin_it_ >= alignment_->get_query().data());
-            assert(ref_begin_it_ >= alignment_->get_sequence().data());
-            --begin_it_;
-            --ref_begin_it_;
-            --node_it_;
-            score_ += config_->get_row(*begin_it_)[*ref_begin_it_];
-        } break;
-        case Cigar::INSERTION: {
-            assert(begin_it_ >= alignment_->get_query().data());
-            if (cigar_it_.count_left() == 1) {
-                score_ += config_->gap_opening_penalty;
-            } else {
-                score_ += config_->gap_extension_penalty;
-            }
-
-            --begin_it_;
-        } break;
-        case Cigar::DELETION: {
-            assert(cigar_it_.get_it() >= alignment_->get_cigar().begin());
-            assert(ref_begin_it_ >= alignment_->get_sequence().data());
-            if (cigar_it_.count_left() == 1) {
-                score_ += config_->gap_opening_penalty;
-            } else {
-                score_ += config_->gap_extension_penalty;
-            }
-
-            --ref_begin_it_;
-            --node_it_;
-        } break;
-        case Cigar::MISSING: {
-            --node_it_;
-            assert(!*node_it_);
-        } break;
-        case Cigar::CLIPPED: { assert(false); }
-    }
-
-    --trim_;
-
-    assert(cigar_begin_ <= cigar_it_);
-    assert(cigar_it_ <= cigar_end_);
-
-    return *this;
-}
-
 template <typename NodeType>
 Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix) {
     const auto &data = alignment_prefix.data();
@@ -475,7 +280,7 @@ Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix
     if (prefix_node) {
         nodes_.assign(&prefix_node, &prefix_node + 1);
     } else {
-        nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it());
+        nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it().base());
     }
 
     cigar_ = data.get_cigar();
@@ -547,6 +352,7 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
         ++it;
     }
 
+    assert(node_it == alignment_suffix.get_node_begin_it());
     nodes_.assign(node_it, node_end_it);
 
     extend_query_begin(data.get_query().data());
@@ -639,7 +445,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
             std::vector<NodeType> forward_path;
             forward_path.reserve(k);
-            graph.traverse(*(first_prefix.get_node_end_it() - 1),
+            graph.traverse(*first_prefix.get_node_end_it(),
                            second_suffix_seq.data(), second_suffix_seq.data() + k,
                            [&](NodeType next) { forward_path.push_back(next); },
                            [&]() { return forward_path.size() >= k; });
@@ -699,7 +505,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     update_best_overlap(0);
 
     // iteratively shift the splice point
-    auto node_it = first.begin();
+    auto node_it = first.rend();
     for (size_t i = 1; i <= overlap; ++i) {
         assert(first_prefix.get_query().data() + first_prefix.get_query().size()
             == second_suffix.get_query().data());
@@ -1480,8 +1286,6 @@ QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
 
 
 template class Alignment<>;
-template class AlignmentPrefix<>;
-template class AlignmentSuffix<>;
 template struct LocalAlignmentLess<>;
 template class QueryAlignment<>;
 

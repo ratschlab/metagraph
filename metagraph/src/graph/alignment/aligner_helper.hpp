@@ -479,9 +479,13 @@ class Alignment {
 
     typedef typename std::vector<NodeType>::iterator iterator;
     typedef typename std::vector<NodeType>::const_iterator const_iterator;
+    typedef typename std::vector<NodeType>::reverse_iterator reverse_iterator;
+    typedef typename std::vector<NodeType>::const_reverse_iterator const_reverse_iterator;
 
     const_iterator begin() const { return nodes_.cbegin(); }
     const_iterator end() const { return nodes_.cend(); }
+    const_reverse_iterator rbegin() const { return nodes_.crbegin(); }
+    const_reverse_iterator rend() const { return nodes_.crend(); }
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
@@ -650,7 +654,7 @@ class AlignmentPrefix {
             cigar_it_(cigar_rbegin_),
             score_(alignment_->get_score()),
             trim_(0), offset_(0), prefix_node_(DeBruijnGraph::npos),
-            node_it_(alignment_->end()) {
+            node_it_(alignment_->rbegin()) {
         cigar_rbegin_ += alignment_->get_end_clipping();
         cigar_rend_ -= alignment_->get_clipping();
         cigar_it_ = cigar_rbegin_;
@@ -672,7 +676,7 @@ class AlignmentPrefix {
     }
 
     Cigar::Operator get_back_op() const { return *cigar_it_; }
-    typename std::vector<NodeType>::const_iterator get_node_end_it() const { return node_it_; }
+    typename std::vector<NodeType>::const_reverse_iterator get_node_end_it() const { return node_it_; }
 
     bool eof() const {
         return cigar_it_ == cigar_rend_ || (offset_ && !prefix_node_);
@@ -702,7 +706,7 @@ class AlignmentPrefix {
     size_t trim_;
     size_t offset_;
     DeBruijnGraph::node_index prefix_node_;
-    typename std::vector<NodeType>::const_iterator node_it_;
+    typename std::vector<NodeType>::const_reverse_iterator node_it_;
 };
 
 template <typename NodeType>
