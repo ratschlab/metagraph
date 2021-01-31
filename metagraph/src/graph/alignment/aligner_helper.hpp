@@ -500,69 +500,7 @@ class DPTable {
         size_t last_priority_pos;
         size_t start_index;
 
-        void expand_to_cover(size_t begin, size_t end) {
-            assert(best_pos >= start_index);
-            assert(best_pos - start_index < scores.size());
-            assert(last_priority_pos >= start_index);
-            assert(last_priority_pos - start_index < scores.size());
-
-            if (begin >= start_index) {
-                // the current range already covers [begin, end)
-                if (end <= start_index + scores.size() - 8)
-                    return;
-
-                // extend the range to the right to reach end
-                scores.resize(end + 8 - start_index, min_score_);
-                gap_scores.resize(end + 8 - start_index, min_score_);
-                ops.resize(end + 8 - start_index, Cigar::CLIPPED);
-                prev_nodes.resize(end + 8 - start_index, 0);
-                gap_prev_nodes.resize(end + 8 - start_index, 0);
-                gap_count.resize(end + 8 - start_index, 0);
-            } else if (end <= start_index + scores.size() - 8) {
-                // extend the range to the left to reach begin
-                size_t shift = start_index - begin;
-                start_index = begin;
-                scores.insert(scores.begin(), shift, min_score_);
-                gap_scores.insert(gap_scores.begin(), shift, min_score_);
-                ops.insert(ops.begin(), shift, Cigar::CLIPPED);
-                prev_nodes.insert(prev_nodes.begin(), shift, 0);
-                gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
-                gap_count.insert(gap_count.begin(), shift, 0);
-            } else {
-                // extend the range in both directions
-                size_t shift = start_index - begin;
-                start_index = begin;
-                end += 8;
-
-                size_t new_size = end - begin;
-
-                scores.reserve(new_size);
-                gap_scores.reserve(new_size);
-                ops.reserve(new_size);
-                prev_nodes.reserve(new_size);
-                gap_prev_nodes.reserve(new_size);
-                gap_count.reserve(new_size);
-
-                scores.insert(scores.begin(), shift, min_score_);
-                gap_scores.insert(gap_scores.begin(), shift, min_score_);
-                ops.insert(ops.begin(), shift, Cigar::CLIPPED);
-                prev_nodes.insert(prev_nodes.begin(), shift, 0);
-                gap_prev_nodes.insert(gap_prev_nodes.begin(), shift, 0);
-                gap_count.insert(gap_count.begin(), shift, 0);
-
-                scores.resize(new_size, min_score_);
-                gap_scores.resize(new_size, min_score_);
-                ops.resize(new_size, Cigar::CLIPPED);
-                prev_nodes.resize(new_size, 0);
-                gap_prev_nodes.resize(new_size, 0);
-                gap_count.resize(new_size, 0);
-            }
-
-            assert(best_pos >= start_index);
-            assert(best_pos - start_index < scores.size());
-            assert(last_priority_pos >= start_index);
-            assert(last_priority_pos - start_index < scores.size());
-        }
+        void expand_to_cover(size_t begin, size_t end);
 
         const score_t& best_score() const { return scores.at(best_pos - start_index); }
         const score_t& last_priority_value() const { return scores.at(last_priority_pos - start_index); }
