@@ -73,7 +73,6 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
             continue;
         }
         normalized_taxid[taxid] = num_nodes++;
-        node_to_acc_version.push_back(reversed_lookup_table.at(taxid));
         if (taxid == full_parents_list[taxid]) {
             root_node = normalized_taxid[taxid];
             continue;
@@ -82,6 +81,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         // Check if taxid is a leaf and used in fasta header.
         if (reversed_lookup_table.count(taxid)) {
             lookup_table[reversed_lookup_table.at(taxid)] = normalized_taxid.at(taxid);
+            node_to_acc_version.push_back(reversed_lookup_table.at(taxid));
         }
     }
     if (num_taxid_failed) {
