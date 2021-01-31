@@ -395,8 +395,9 @@ int annotate_graph(Config *config) {
                     : files[i]);
         }
     }
-
-    taxonomy->export_to_file(config->outfbase + ".taxo");
+    if (taxonomy != nullptr) {
+        taxonomy->export_to_file(config->outfbase + ".taxo");
+    }
     return 0;
 }
 

@@ -258,6 +258,8 @@ NormalizedTaxId TaxonomyDB::find_lca(const NormalizedTaxId &taxid1, const Normal
 
 void TaxonomyDB::update_taxonomic_map(const std::vector<KmerId> &kmers,
                                       const NormalizedTaxId &lca) {
+    std::mutex taxo_mutex;
+    std::lock_guard<std::mutex> lock(taxo_mutex);
     for (const auto &kmer: kmers) {
         if (taxonomic_map.count(kmer)) {
             taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
