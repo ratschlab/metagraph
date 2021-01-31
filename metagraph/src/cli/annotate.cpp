@@ -367,11 +367,11 @@ int annotate_graph(Config *config) {
 
     const auto graph = load_critical_dbg(config->infbase);
 
-    std::shared_ptr<annot::Taxonomy> taxonomy = nullptr;
+    std::shared_ptr<annot::TaxonomyDB> taxonomy = nullptr;
     if (config->taxonomic_tree.size()) {
-        taxonomy = std::make_shared<annot::Taxonomy>(config->taxonomic_tree,
-                                                     config->lookup_table,
-                                                     config->fasta_header_delimiter);
+        taxonomy = std::make_shared<annot::TaxonomyDB>(config->taxonomic_tree,
+                                                       config->lookup_table,
+                                                       config->fasta_header_delimiter);
     }
 
     if (!config->separately) {
