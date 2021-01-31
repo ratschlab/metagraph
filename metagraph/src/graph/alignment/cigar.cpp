@@ -31,6 +31,10 @@ Cigar::Cigar(const std::string &cigar_str) {
                 cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
                 op_count.clear();
                 break;
+            case 'N':
+                cigar_.emplace_back(Cigar::MISSING, std::stol(op_count));
+                op_count.clear();
+                break;
             default:
                 op_count += c;
         }
@@ -206,6 +210,9 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
 
                 ref_it += op.second;
             } break;
+            case Operator::MISSING: {
+                // do nothing
+            } break;
         }
     }
 
@@ -226,6 +233,24 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     }
 
     return true;
+}
+
+void Cigar::insert(size_t i, Operator op, size_t count) {
+    size_t j = 0;
+    for ( ; j < cigar_.size() && i > cigar_[j].second; ++j) {
+        i -= cigar_[j].second;
+    }
+
+    if (j == cigar_.size()) {
+        cigar_.emplace_back(op, count);
+    } else if (i == 0) {
+        cigar_.insert(cigar_.begin() + j, std::make_pair(op, count));
+    } else {
+        auto to_insert = std::make_pair(cigar_[j].first, cigar_[j].second - i);
+        cigar_[j].second = i;
+        cigar_.insert(cigar_.begin() + j + 1, std::make_pair(op, count));
+        cigar_.insert(cigar_.begin() + j + 2, std::move(to_insert));
+    }
 }
 
 } // namespace align

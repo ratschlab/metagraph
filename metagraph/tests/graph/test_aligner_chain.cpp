@@ -34,8 +34,8 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_swap) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    check_chain(paths, *graph, config, 2);
-    EXPECT_EQ(query, paths[0].get_sequence() + paths[1].get_sequence());
+    check_chain(paths, *graph, config, 1);
+    EXPECT_EQ(query, paths[0].get_sequence());
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
@@ -53,8 +53,8 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_2) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    check_chain(paths, *graph, config, 2);
-    EXPECT_EQ(query, paths[0].get_sequence() + paths[1].get_sequence());
+    check_chain(paths, *graph, config, 1);
+    EXPECT_EQ(query, paths[0].get_sequence());
     check_extend(graph, aligner.get_config(), paths, query);
 }
 

@@ -287,7 +287,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 chain.back(), *it, graph_, config_
             );
 
-            if (first.empty() || second.empty())
+            // the first is empty only when the second is
+            assert(!first.empty() || second.empty());
+
+            // if both are empty, then no trimming was done
+            if (first.empty() && second.empty())
                 continue;
 
 #ifndef NDEBUG
@@ -304,10 +308,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 continue;
 
             best_score->at(it - paths.begin()) = score;
-
             auto next_chain = const_cast<const std::vector<DBGAlignment>&>(chain);
             next_chain.back() = std::move(first);
-            next_chain.push_back(std::move(second));
+
+            if (second.size())
+                next_chain.push_back(std::move(second));
 
             call_alignment_chains(paths, callback, it - paths.begin() + 1,
                                   std::move(next_chain), score, best_score);

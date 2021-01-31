@@ -29,7 +29,8 @@ class Cigar {
         MISMATCH,
         MATCH,
         DELETION,
-        INSERTION
+        INSERTION,
+        MISSING
     };
 
     typedef uint32_t LengthType;
@@ -77,9 +78,11 @@ class Cigar {
     const_iterator end() const { return cigar_.cend(); }
 
     template <typename... Args>
-    void insert(iterator it, Args&&... args) {
+    void insert_op(iterator it, Args&&... args) {
         cigar_.insert(it, std::forward<Args>(args)...);
     }
+
+    void insert(size_t i, Operator op, size_t count);
 
     value_type& front() { return cigar_.front(); }
     value_type& back() { return cigar_.back(); }
@@ -437,7 +440,7 @@ class Alignment {
             return;
         }
 
-        cigar_.insert(
+        cigar_.insert_op(
             cigar_.begin(),
             typename Cigar::value_type { Cigar::CLIPPED, query_begin_ - begin }
         );
@@ -571,7 +574,8 @@ class AlignmentSuffix {
             cigar_it_(cigar_begin_),
             score_(alignment_->get_score()),
             trim_(0),
-            k_(k) {
+            k_(k),
+            node_it_(alignment_->begin()) {
         assert(cigar_begin_ <= cigar_end_);
         assert(cigar_it_ <= cigar_end_);
     }
@@ -594,6 +598,7 @@ class AlignmentSuffix {
         assert(cigar_it_ <= cigar_end_);
         return cigar_it_;
     }
+    typename std::vector<NodeType>::const_iterator get_node_begin_it() const { return node_it_; }
 
     bool eof() const { return cigar_it_ == cigar_end_; }
     bool reof() const { return cigar_it_ == cigar_begin_; }
@@ -616,6 +621,7 @@ class AlignmentSuffix {
     score_t score_;
     size_t trim_;
     size_t k_;
+    typename std::vector<NodeType>::const_iterator node_it_;
 };
 
 template <typename NodeType>
