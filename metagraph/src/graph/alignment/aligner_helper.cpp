@@ -460,7 +460,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
             std::vector<NodeType> reverse_path;
             size_t num_missing_kmers = 0;
-            if (forward_path.size() < k) {
+            if (forward_path.size() < max_forward) {
                 NodeType prev = *second_suffix.get_node_begin_it();
                 size_t max_reverse = std::min(
                     k - forward_path.size(),
@@ -473,14 +473,34 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                         reverse_path.push_back(prev);
                 }
 
-                // otherwise it would have been found in the forward traversal
-                // ATGTGTGAGTGAGT---
-                //            ***ACGCTAGCTAGATC
-                //assert(reverse_path.size() < k - forward_path.size());
                 assert(forward_path.size() + reverse_path.size() <= k);
-                assert(forward_path.size() + reverse_path.size() < k
-                    || forward_path.empty() || reverse_path.empty()
-                    || forward_path.back() == reverse_path.front());
+                if (forward_path.size() + reverse_path.size() == k) {
+                    if (forward_path.back() == reverse_path.back()) {
+                        reverse_path.pop_back();
+                    } else {
+                        assert(forward_path.empty() || reverse_path.empty());
+                        // paths don't intersect
+                        forward_path.clear();
+                        reverse_path.clear();
+                    }
+                }
+
+                // std::cout << first_prefix << "\n" << second_suffix << "\n"
+                //           << max_forward << " " << max_reverse << "\n";
+                // for (NodeType node : forward_path) {
+                //     std::cout << node << " ";
+                // }
+                // std::cout << "\n";
+                // for (NodeType node : reverse_path) {
+                //     std::cout << node << " ";
+                // }
+                // std::cout << "\n\n";
+
+                // // otherwise it would have been found in the forward traversal
+                // // ATGTGTGAGTGAGT---
+                // //            ***ACGCTAGCTAGATC
+                // assert(forward_path.size() + reverse_path.size() < k);
+
 
                 // ATGTGTGAGTGAGT
                 //           ****ACGCTAGCTAGATC
@@ -488,15 +508,17 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                 num_missing_kmers = k - forward_path.size() - reverse_path.size() - 1;
             }
 
-            cur_score = first_prefix.get_score() + second_suffix.get_score()
-                + end_gap_penalty(num_missing_kmers);
-            if (cur_score > best_score) {
-                best_first_prefix = first_prefix;
-                best_second_suffix = second_suffix;
-                best_score = cur_score;
-                best_overlap = i;
-                best_forward_traversal = std::move(forward_path);
-                best_reverse_traversal = std::move(reverse_path);
+            if (forward_path.size() || reverse_path.size()) {
+                cur_score = first_prefix.get_score() + second_suffix.get_score()
+                    + end_gap_penalty(num_missing_kmers);
+                if (cur_score > best_score) {
+                    best_first_prefix = first_prefix;
+                    best_second_suffix = second_suffix;
+                    best_score = cur_score;
+                    best_overlap = i;
+                    best_forward_traversal = std::move(forward_path);
+                    best_reverse_traversal = std::move(reverse_path);
+                }
             }
         }
     };
@@ -507,76 +529,102 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         while (second_suffix.get_front_op() == Cigar::Operator::DELETION) {
             assert(!second_suffix.eof());
             ++second_suffix;
-            assert(Alignment(second_suffix).is_valid(graph, &config));
+            assert(!*second_suffix.get_node_begin_it() || Alignment(second_suffix).is_valid(graph, &config));
         }
         assert(!second_suffix.eof());
         ++second_suffix;
         assert(Alignment(second_suffix).is_valid(graph, &config));
-        while (!second_suffix.eof() && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
+        while (!second_suffix.eof() && (second_suffix.get_front_op() == Cigar::Operator::DELETION
+                                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
             assert(!second_suffix.eof());
             ++second_suffix;
-            assert(Alignment(second_suffix).is_valid(graph, &config));
+            assert(!*second_suffix.get_node_begin_it() || Alignment(second_suffix).is_valid(graph, &config));
         }
         assert(!second_suffix.eof() || i + 1 == overlap);
     }
 
-    update_best_overlap(0);
+    if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it())
+        update_best_overlap(0);
 
     // iteratively shift the splice point
     auto node_it = first.rend();
     for (size_t i = 1; i <= overlap; ++i) {
+        std::cout << "foo\t" << i << " " << overlap << "\n" << first_prefix << "\n" << second_suffix << "\n\n";
         assert(first_prefix.get_query().data() + first_prefix.get_query().size()
             == second_suffix.get_query().data());
 
         while (!first_prefix.eof()
-                && first_prefix.get_back_op() == Cigar::Operator::DELETION
+                && (first_prefix.get_back_op() == Cigar::Operator::DELETION
+                    || first_prefix.get_back_op() == Cigar::Operator::MISSING)
                 && first_prefix.get_node_end_it() > node_it) {
             ++first_prefix;
-            assert(Alignment(first_prefix).is_valid(graph, &config));
-            update_best_overlap(i);
+            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
+                assert(Alignment(first_prefix).is_valid(graph, &config));
+                update_best_overlap(i);
+            }
+            assert(first_prefix.get_query().data() + first_prefix.get_query().size()
+                == second_suffix.get_query().data());
         }
 
         if (first_prefix.eof() || first_prefix.get_node_end_it() == node_it)
             break;
 
         ++first_prefix;
-        assert(Alignment(first_prefix).is_valid(graph, &config));
-        update_best_overlap(i);
-
-        while (!first_prefix.eof()
-                && first_prefix.get_back_op() == Cigar::Operator::DELETION
-                && first_prefix.get_node_end_it() > node_it) {
-            ++first_prefix;
+        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
             assert(Alignment(first_prefix).is_valid(graph, &config));
             update_best_overlap(i);
         }
 
+        while (!first_prefix.eof()
+                && (first_prefix.get_back_op() == Cigar::Operator::DELETION
+                    || first_prefix.get_back_op() == Cigar::Operator::MISSING)
+                && first_prefix.get_node_end_it() > node_it) {
+            ++first_prefix;
+            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
+                assert(Alignment(first_prefix).is_valid(graph, &config));
+                update_best_overlap(i);
+            }
+        }
+
         if (!second_suffix.eof()) {
             while (!second_suffix.reof()
-                    && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
+                    && (second_suffix.get_front_op() == Cigar::Operator::DELETION
+                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
                 --second_suffix;
-                assert(Alignment(second_suffix).is_valid(graph, &config));
-                update_best_overlap(i);
+                if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
+                    assert(Alignment(second_suffix).is_valid(graph, &config));
+                    update_best_overlap(i);
+                }
             }
         }
 
         assert(!second_suffix.reof());
 
         --second_suffix;
-        assert(Alignment(second_suffix).is_valid(graph, &config));
-        update_best_overlap(i);
-
-        while (!second_suffix.reof()
-                && second_suffix.get_front_op() == Cigar::Operator::DELETION) {
-            --second_suffix;
+        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
             assert(Alignment(second_suffix).is_valid(graph, &config));
             update_best_overlap(i);
+        }
+        assert(first_prefix.get_query().data() + first_prefix.get_query().size()
+            == second_suffix.get_query().data());
+
+        while (!second_suffix.reof()
+                && (second_suffix.get_front_op() == Cigar::Operator::DELETION
+                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
+            --second_suffix;
+            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
+                assert(Alignment(second_suffix).is_valid(graph, &config));
+                update_best_overlap(i);
+            }
+            assert(first_prefix.get_query().data() + first_prefix.get_query().size()
+                == second_suffix.get_query().data());
         }
 
         if (first_prefix.get_query().size() < config.min_seed_length)
             break;
 
-        update_best_overlap(i);
+        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it())
+            update_best_overlap(i);
     }
 
     assert(first_prefix.get_query().data() + first_prefix.get_query().size()
@@ -620,33 +668,47 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     size_t num_missing_kmers = k - best_forward_traversal.size() - best_reverse_traversal.size() - 1;
     if (num_missing_kmers) {
-        new_first.score_ += config.gap_opening_penalty + (num_missing_kmers - 1) * config.gap_extension_penalty;
+        std::cout << first << "\n" << second << "\n" << best_first_prefix << "\n" << best_second_suffix << "\n" << num_missing_kmers << "\n";
+        for (auto node : best_forward_traversal) {
+            std::cout << node << " ";
+        }
+        std::cout << "\n";
+        for (auto node : best_reverse_traversal) {
+            std::cout << node << " ";
+        }
+        std::cout << "\n";
 
         size_t insert_pos = 0;
         size_t seq_insert_pos = 0;
         CigarOpIterator it(new_second.get_cigar());
         CigarOpIterator end(new_second.get_cigar(), new_second.get_cigar().end());
-        for (size_t i = 0; i < num_missing_kmers; ++i) {
+        for (size_t i = 0; i < best_forward_traversal.size(); ++i) {
             assert(it != end);
-            while (*it == Cigar::INSERTION) {
+            while (*it == Cigar::INSERTION || *it == Cigar::MISSING) {
                 assert(it != end);
                 ++it;
                 ++insert_pos;
-                ++seq_insert_pos;
+
+                if (*it == Cigar::INSERTION)
+                    ++seq_insert_pos;
             }
 
             assert(it != end);
-            if (*it != Cigar::DELETION)
+            if (*it != Cigar::DELETION && *it != Cigar::MISSING)
                 ++seq_insert_pos;
 
             ++insert_pos;
             ++it;
         }
 
-        new_second.cigar_.insert(insert_pos, Cigar::MISSING, num_missing_kmers);
+        if (it != end) {
+            new_second.cigar_.insert(insert_pos, Cigar::MISSING, num_missing_kmers);
+            new_first.score_ += config.gap_opening_penalty + (num_missing_kmers - 1) * config.gap_extension_penalty;
+        }
     }
 
     new_first.append(std::move(new_second));
+    std::cout << new_first << "\n\n";
     assert(new_first.score_ == best_score);
     return std::make_pair(std::move(new_first), Alignment());
 }

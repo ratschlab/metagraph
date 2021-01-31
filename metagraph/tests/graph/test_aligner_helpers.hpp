@@ -94,29 +94,6 @@ inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
     }
 }
 
-inline void check_chain(const DBGAligner<>::DBGQueryAlignment &paths,
-                        const DeBruijnGraph &graph,
-                        const DBGAlignerConfig &config,
-                        size_t expected_size) {
-    for (const auto &path : paths) {
-        EXPECT_TRUE(path.is_valid(graph, &config)) << path;
-        check_json_dump_load(graph, path, paths.get_query(), paths.get_query(true));
-    }
-
-    if (!std::is_sorted(paths.begin(), paths.end(),
-                        [](const auto &a, const auto &b) {
-                            return a.get_query().end() < b.get_query().begin();
-                        })
-            || paths.size() != expected_size) {
-        for (const auto &path : paths) {
-            TEST_COUT << uintptr_t(path.get_query().data()) << " "
-                      << uintptr_t(path.get_query().data() + path.get_query().size()) << " "
-                      << path << "\n";
-        }
-        ASSERT_EQ(expected_size, paths.size());
-    }
-}
-
 } // namespace
 
 #endif // __TEST_DBG_ALIGNER_HELPERS_HPP__
