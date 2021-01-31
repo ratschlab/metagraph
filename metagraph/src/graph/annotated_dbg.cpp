@@ -10,6 +10,7 @@
 
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/taxonomy/taxonomic_db.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -40,7 +41,8 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
-                    const std::vector<Label> &labels) {
+                    const std::vector<Label> &labels,
+                    std::shared_ptr<annot::TaxonomyDB> taxonomy) {
     assert(check_compatibility());
 
     std::vector<row_index> indices;
@@ -63,7 +65,12 @@ void AnnotatedSequenceGraph
             return;
         }
     }
-
+    if (taxonomy != nullptr) {
+        uint64_t lca = 0;
+        if (taxonomy->find_lca(labels, lca) ) {
+            taxonomy->update_taxonomic_map(indices, lca);
+        }
+    }
     annotator_->add_labels(indices, labels);
 }
 
