@@ -579,6 +579,7 @@ class AlignmentSuffix {
             score_(alignment_->get_score()),
             trim_(0),
             k_(k),
+            added_offset_(0),
             node_it_(alignment_->begin()) {
         assert(cigar_begin_ <= cigar_end_);
         assert(cigar_it_ <= cigar_end_);
@@ -603,6 +604,7 @@ class AlignmentSuffix {
         return cigar_it_;
     }
     typename std::vector<NodeType>::const_iterator get_node_begin_it() const { return node_it_; }
+    size_t get_added_offset() const { return added_offset_; }
 
     bool eof() const { return cigar_it_ == cigar_end_; }
     bool reof() const { return cigar_it_ == cigar_begin_; }
@@ -625,6 +627,7 @@ class AlignmentSuffix {
     score_t score_;
     size_t trim_;
     size_t k_;
+    size_t added_offset_;
     typename std::vector<NodeType>::const_iterator node_it_;
 };
 

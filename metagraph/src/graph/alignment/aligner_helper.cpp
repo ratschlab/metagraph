@@ -328,6 +328,10 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
     assert(begin <= it);
     assert(it <= end);
 
+#ifndef NDEBUG
+    size_t orig_offset = offset_;
+#endif
+
     while (begin < it) {
         if (*begin != Cigar::INSERTION) {
             if (node_it + 1 != node_end_it) {
@@ -340,6 +344,8 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
         }
         ++begin;
     }
+
+    assert(offset_ == orig_offset + alignment_suffix.get_added_offset());
 
     if (offset_ == alignment_suffix.get_k()) {
         *this = Alignment();
@@ -444,25 +450,37 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
             std::string_view second_suffix_seq = second_suffix.get_sequence();
 
             std::vector<NodeType> forward_path;
-            forward_path.reserve(k);
+            size_t max_forward = std::min(k, second_suffix_seq.size());
+            forward_path.reserve(max_forward);
             graph.traverse(*first_prefix.get_node_end_it(),
-                           second_suffix_seq.data(), second_suffix_seq.data() + k,
+                           second_suffix_seq.data(),
+                           second_suffix_seq.data() + max_forward,
                            [&](NodeType next) { forward_path.push_back(next); },
-                           [&]() { return forward_path.size() >= k; });
+                           [&]() { return forward_path.size() >= max_forward; });
 
             std::vector<NodeType> reverse_path;
             size_t num_missing_kmers = 0;
             if (forward_path.size() < k) {
                 NodeType prev = *second_suffix.get_node_begin_it();
-                reverse_path.reserve(k - forward_path.size() - 2);
-                auto end = first_prefix_seq.rbegin() + (k - forward_path.size());
+                size_t max_reverse = std::min(
+                    k - forward_path.size(),
+                    static_cast<size_t>(second_suffix.get_node_begin_it() - first.begin())
+                );
+                reverse_path.reserve(max_reverse);
+                auto end = first_prefix_seq.rbegin() + max_reverse;
                 for (auto it = first_prefix_seq.rbegin(); it != end && prev; ++it) {
                     if ((prev = graph.traverse_back(prev, *it)))
                         reverse_path.push_back(prev);
                 }
 
                 // otherwise it would have been found in the forward traversal
-                assert(reverse_path.size() < k - forward_path.size() - 1);
+                // ATGTGTGAGTGAGT---
+                //            ***ACGCTAGCTAGATC
+                //assert(reverse_path.size() < k - forward_path.size());
+                assert(forward_path.size() + reverse_path.size() <= k);
+                assert(forward_path.size() + reverse_path.size() < k
+                    || forward_path.empty() || reverse_path.empty()
+                    || forward_path.back() == reverse_path.front());
 
                 // ATGTGTGAGTGAGT
                 //           ****ACGCTAGCTAGATC

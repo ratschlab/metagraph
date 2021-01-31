@@ -108,7 +108,11 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
             score_ -= config_->get_row(*begin_it_)[*ref_begin_it_];
             ++begin_it_;
             ++ref_begin_it_;
-            ++node_it_;
+            if (node_it_ + 1 != alignment_->end()) {
+                ++node_it_;
+            } else {
+                ++added_offset_;
+            }
         } break;
         case Cigar::INSERTION: {
             assert(begin_it_ < end_it_);
@@ -129,10 +133,15 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
             }
 
             ++ref_begin_it_;
-            ++node_it_;
+            if (node_it_ + 1 != alignment_->end()) {
+                ++node_it_;
+            } else {
+                ++added_offset_;
+            }
         } break;
         case Cigar::MISSING: {
             assert(!*node_it_);
+            assert(node_it_ + 1 != alignment_->end());
             ++node_it_;
         } break;
         case Cigar::CLIPPED: { assert(false); }
@@ -160,7 +169,12 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             assert(ref_begin_it_ >= alignment_->get_sequence().data());
             --begin_it_;
             --ref_begin_it_;
-            --node_it_;
+            if (added_offset_) {
+                --added_offset_;
+            } else {
+                assert(node_it_ != alignment_->begin());
+                --node_it_;
+            }
             score_ += config_->get_row(*begin_it_)[*ref_begin_it_];
         } break;
         case Cigar::INSERTION: {
@@ -183,10 +197,16 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             }
 
             --ref_begin_it_;
-            --node_it_;
+            if (added_offset_) {
+                --added_offset_;
+            } else {
+                assert(node_it_ != alignment_->begin());
+                --node_it_;
+            }
         } break;
         case Cigar::MISSING: {
             assert(!*node_it_);
+            assert(node_it_ != alignment_->begin());
             --node_it_;
         } break;
         case Cigar::CLIPPED: { assert(false); }
