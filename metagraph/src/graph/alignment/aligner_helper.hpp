@@ -113,9 +113,10 @@ class Cigar {
     // character of the reference sequence after clipping is trimmed
     bool is_valid(std::string_view reference, std::string_view query) const;
 
-    static char opt_to_char(Cigar::Operator op);
+    static char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:
+    static constexpr char op_str_[] = "SX=DIN";
     std::vector<value_type> cigar_;
 
     static OperatorTable initialize_opt_table();
