@@ -72,8 +72,7 @@ class TaxonomyDB {
      */
     void read_tree(const std::string &taxo_tree_filepath,
                    const tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table,
-                   ChildrenList &tree,
-                   NormalizedTaxId &root_node);
+                   ChildrenList &tree, NormalizedTaxId &root_node);
     /**
      * Reads the lookup table
      * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
@@ -90,27 +89,24 @@ class TaxonomyDB {
      */
     void get_input_accessions(const std::string &fasta_headers_filepath,
                               tsl::hopscotch_set<AccessionVersion> &input_accessions);
-    /**
-     * Stores the node depths in "this->node_depth" by doing a dfs over the tree.
-     * @param [input] node - the node that is currently processed.
-     * @param [input] tree -> tree stored as list of children.
-     */
-    void dfs_node_depth(const NormalizedTaxId &node, const ChildrenList &tree);
+
     /**
      * Stores the rmq data in "this->rmq_data" by doing a linearization of the tree.
-     * @param [input] tree -> tree stored as list of children.
-     * @param [input] root_node -> normalized id of the root of the tree.
+     *      Beside 'rmq_data', calculates also 'precalc_log' and 'precalc_pow2'.
+     * @param [input] tree_linearization -> the linearization of the received tree.
      */
-    void rmq_preprocessing(const ChildrenList &tree, const NormalizedTaxId &root_node);
+    void rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization);
+
     /**
-     * Stores the rmq data in "this->rmq_data" by doing a linearization of the tree.
+     * dfs_statistics calculates a tree_linearization, "this->node_depth" and
+     *      'this->node_to_linearization_idx'.
      * @param [input] node - the node that is currently processed.
      * @param [input] tree -> tree stored as list of children.
      * @param [output] tree_linearization -> the linearization of the received tree.
      */
-    void dfs_linearization(const NormalizedTaxId &node,
-                           const ChildrenList &tree,
-                           std::vector<NormalizedTaxId> &tree_linearization);
+    void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
+                        std::vector<NormalizedTaxId> &tree_linearization);
+
     NormalizedTaxId find_lca(const NormalizedTaxId &taxid1, const NormalizedTaxId &taxid2);
     NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
 
@@ -124,6 +120,7 @@ class TaxonomyDB {
     TaxonomyDB(const std::string &taxo_tree_filepath,
                const std::string &lookup_table_filepath,
                const std::string &fasta_headers_filepath);
+
     /**
      * Update the corresponding "this->taxonomic_map" for each received kmer to consider
      * the new data: taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
@@ -132,12 +129,13 @@ class TaxonomyDB {
      */
     void update_taxonomic_map(const std::vector<KmerId> &kmers,
                               const NormalizedTaxId &lca);
+
     /**
      * Exports 'this->taxonomic_map', 'this->index_to_label' and the parent list for the
      * stored taxonomic tree to the given filepath.
      */
     void export_to_file(const std::string &filepath);
-    bool find_lca(const std::vector<AccessionVersion> &accessions,
+    bool find_lca(const std::vector<std::string> &fasta_headers,
                   NormalizedTaxId &lca);
 
   private:
@@ -149,4 +147,4 @@ class TaxonomyDB {
 }
 }
 
-#endif // __TAXONOMIC_HPP__
+#endif // __TAXONOMIC_DB_HPP__
