@@ -103,11 +103,11 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
     score_t gap_diff = config.gap_opening_penalty - config.gap_extension_penalty;
 
     // TODO: If there is a cyclic part of the graph in which the optimal
-    //       alignment involves a deletion, then a score which was previously
+    //       alignment involves an insertion, then a score which was previously
     //       from a insertion may be replaced with a match. This will cause
     //       subsequent insertion scores to be wrong since they're no longer
     //       extensions. The only way to fix this is to store a separate vector
-    //       to keep partial alignments ending in deletions.
+    //       to keep partial alignments ending in insertions.
     //       Until this is fixed, the score checking asserts have been commented out.
 
     std::vector<typename DPTable<NodeType>::const_iterator> out_columns;
@@ -937,7 +937,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
             } break;
             case Cigar::INSERTION: {
                 assert(query_start + next_size <= query_end_);
-                // this assumes that DELETIONS can't happen right after insertions
+                // this assumes that INSERTIONs can't happen right after DELETIONs
                 //edit["from_length"] = 0;
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
@@ -998,7 +998,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
             Json::Value edit;
             size_t length = cigar_it->second - cigar_offset;
             assert(query_start + length < query_end_);
-            // TODO: this assumes that INSERTIONS can't happen right after deletions
+            // TODO: this assumes that INSERTIONs can't happen right after DELETIONs
             //edit["from_length"] = 0;
             edit["to_length"] = Json::Value::UInt64(length);
             edit["sequence"] = std::string(query_start, length);
