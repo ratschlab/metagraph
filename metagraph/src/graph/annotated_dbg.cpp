@@ -25,18 +25,13 @@ typedef std::pair<Label, size_t> StringCountPair;
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
-                         std::unique_ptr<Annotator>&& annotation,
+                         std::shared_ptr<Annotator> annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(std::move(annotation)),
+      : graph_(graph), annotator_(annotation),
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
 }
-
-AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
-                           std::unique_ptr<Annotator>&& annotation,
-                           bool force_fast)
-      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
