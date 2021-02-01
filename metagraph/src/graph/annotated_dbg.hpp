@@ -22,7 +22,7 @@ class AnnotatedSequenceGraph {
     using row_index = Annotator::Index;
 
     AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graphh,
-                           std::unique_ptr<Annotator>&& annotation,
+                           std::shared_ptr<Annotator> annotation,
                            bool force_fast = false);
 
     virtual ~AnnotatedSequenceGraph() {}
@@ -46,6 +46,7 @@ class AnnotatedSequenceGraph {
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
     virtual const Annotator& get_annotation() const { return *annotator_; }
+    std::shared_ptr<Annotator> get_annotation_ptr() const { return annotator_; }
 
     static row_index graph_to_anno_index(node_index kmer_index) {
         assert(kmer_index);
@@ -57,7 +58,7 @@ class AnnotatedSequenceGraph {
 
   protected:
     std::shared_ptr<SequenceGraph> graph_;
-    std::unique_ptr<Annotator> annotator_;
+    std::shared_ptr<Annotator> annotator_;
 
     std::mutex mutex_;
     bool force_fast_;
@@ -67,8 +68,9 @@ class AnnotatedSequenceGraph {
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
-                 std::unique_ptr<Annotator>&& annotation,
-                 bool force_fast = false);
+                 std::shared_ptr<Annotator> annotation,
+                 bool force_fast = false)
+          : AnnotatedSequenceGraph(dbg, annotation, force_fast), dbg_(*dbg) {}
 
     using AnnotatedSequenceGraph::get_labels;
 
