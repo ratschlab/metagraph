@@ -191,6 +191,7 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret[0]['seq_description'], '')
 
 #@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 @parameterized_class(('mode',), input_values=[('canonical',)])
 class TestAPIRawChain(TestAPIBase):
     @classmethod
