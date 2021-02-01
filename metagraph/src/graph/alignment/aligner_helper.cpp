@@ -580,6 +580,18 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                     best_reverse_traversal = std::move(reverse_path);
                 }
             }
+        } else {
+            size_t num_missing_kmers = k - 1;
+            score_t cur_score = first_prefix.get_score() + second_suffix.get_score()
+                + end_gap_penalty(num_missing_kmers);
+            if (cur_score > best_score) {
+                best_first_prefix = first_prefix;
+                best_second_suffix = second_suffix;
+                best_score = cur_score;
+                best_overlap = i;
+                best_forward_traversal = std::move(forward_path);
+                best_reverse_traversal = std::move(reverse_path);
+            }
         }
 
         bool step_first = false;
@@ -615,19 +627,16 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         return {};
     }
 
-    if (best_forward_traversal.empty() && best_reverse_traversal.empty())
-        return {};
-
     Alignment<NodeType> new_first(best_first_prefix);
     Alignment<NodeType> new_second(best_second_suffix);
 
-    // if (best_forward_traversal.empty() && best_reverse_traversal.empty()) {
-    //     new_second.extend_query_begin(second.get_query().data() - second.get_clipping());
+    if (best_forward_traversal.empty() && best_reverse_traversal.empty()) {
+        new_second.extend_query_begin(second.get_query().data() - second.get_clipping());
 
-    //     assert(new_first.get_query_end() == new_second.get_query().data());
+        assert(new_first.get_query_end() == new_second.get_query().data());
 
-    //     return std::make_pair(std::move(new_first), std::move(new_second));
-    // }
+        return std::make_pair(std::move(new_first), std::move(new_second));
+    }
 
     if (new_second.offset_ < k - 1) {
         size_t to_insert = k - 1 - new_second.offset_;

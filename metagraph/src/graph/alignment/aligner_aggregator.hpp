@@ -304,6 +304,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
             score_t score = cur_score - chain.back().get_score()
                 + first.get_score() + second.get_score();
 
+            if (second.size())
+                score += config_.gap_opening_penalty + config_.gap_extension_penalty * (graph_.get_k() - 1);
+
             if (score <= best_score->at(it - paths.begin()))
                 continue;
 
@@ -319,7 +322,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
         } else {
             // select this alignment if it leads to a better score
-            score_t score = cur_score + it->get_score();
+            score_t score = cur_score + it->get_score() + config_.gap_opening_penalty + config_.gap_extension_penalty * (graph_.get_k() - 1);
             if (score > best_score->at(it - paths.begin())) {
                 auto next_chain = const_cast<const std::vector<DBGAlignment>&>(chain);
                 next_chain.push_back(*it);
