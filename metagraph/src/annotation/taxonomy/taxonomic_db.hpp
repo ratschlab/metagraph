@@ -148,7 +148,7 @@ class TaxonomyDB {
                               const NormalizedTaxId &lca);
 
     /**
-     * Exports 'this->taxonomic_map', 'this->index_to_label' and the taxonomic tree (as parent list)
+     * Exports 'this->taxonomic_map', 'this->node_to_acc_version' and the taxonomic tree (as parent list)
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath);

@@ -287,10 +287,11 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     serialize_number_number_map(f, taxonomic_map);
     serialize_string_vector(f, node_to_acc_version);
 
-    uint64_t num_nodes = node_to_acc_version.size();
+    const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
+    // The tree linearization has a size equal to 2 * (#edges) + 1.
+    uint64_t num_nodes = linearization.size() / 2 + 1;
     std::vector<bool> visited_node(num_nodes);
     std::vector<NormalizedTaxId> node_parent(num_nodes);
-    const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
 
     visited_node[linearization[0]] = true;
     node_parent[linearization[0]] = linearization[0];
@@ -306,7 +307,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         node_parent[act] = prv;
         visited_node[act] = true;
     }
-    serialize_number_vector_raw(f, node_parent);
+    serialize_number_vector(f, node_parent);
     f.close();
     logger->trace("Finished exporting metagraph taxonomic data after '{}' sec", timer.elapsed());
 }
