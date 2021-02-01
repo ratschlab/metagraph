@@ -21,6 +21,10 @@ namespace graph {
     }
 }
 
+namespace annot {
+    class TaxoClassifier;
+}
+
 
 namespace cli {
 
@@ -69,6 +73,7 @@ class QueryExecutor {
     const graph::AnnotatedDBG &anno_graph_;
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
+    std::shared_ptr<annot::TaxoClassifier> taxo_classifier_ = nullptr;
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                              const std::function<void(const std::string &)> &callback);

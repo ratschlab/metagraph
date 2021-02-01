@@ -9,7 +9,7 @@
 namespace mtg {
 namespace annot {
 
-
+const double DEFAULT_LCA_COVERAGE_THRESHOLD = 0.66;
 /**
  * TaxoClassifier imports the data from TaxonomicDB and does the taxonomic
  * classification for a given sequence.
@@ -20,6 +20,7 @@ class TaxoClassifier {
     typedef annot::MultiLabelEncoded<std::string> Annotator;
     using KmerId = Annotator::Index;
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
+
 
   private:
     NormalizedTaxId root_node;
@@ -62,7 +63,7 @@ class TaxoClassifier {
       */
     std::string assign_class(const mtg::graph::DeBruijnGraph &graph,
                              const std::string &sequence,
-                             const double &lca_coverage_threshold);
+                             const double &lca_coverage_threshold = DEFAULT_LCA_COVERAGE_THRESHOLD);
 };
 
 }
