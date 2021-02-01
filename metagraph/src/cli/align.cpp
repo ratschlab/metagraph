@@ -1,17 +1,20 @@
 #include "align.hpp"
 
+#include <tsl/ordered_set.h>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 #include "graph/alignment/aligner_methods.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-
-#include <tsl/ordered_set.h>
+#include "load/load_annotated_graph.hpp"
 
 namespace mtg {
 namespace cli {
@@ -84,22 +87,43 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     return aligner_config;
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph, const Config &config) {
-    assert(!config.canonical || graph.is_canonical_mode());
+template <template <class ... Types> class Aligner, class Graph>
+std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &config) {
+    const DeBruijnGraph *dbg;
+    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
+        dbg = &graph.get_graph();
+    } else {
+        dbg = &graph;
+    }
 
-    return build_aligner(graph, initialize_aligner_config(graph.get_k(), config));
+    size_t k = dbg->get_k();
+    assert(!config.canonical || dbg->is_canonical_mode());
+
+    return build_aligner<Aligner, Graph>(graph, initialize_aligner_config(k, config));
 }
 
-std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
-                                           const DBGAlignerConfig &aligner_config) {
-    assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
+template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const Config&);
+template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const Config&);
 
-    size_t k = graph.get_k();
+
+template <template <class ... Types> class Aligner, class Graph>
+std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
+                                           const DBGAlignerConfig &aligner_config) {
+    const DeBruijnGraph *dbg;
+    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
+        dbg = &graph.get_graph();
+    } else {
+        dbg = &graph;
+    }
+
+    size_t k = dbg->get_k();
+
+    assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
     if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+        if (!dynamic_cast<const DBGSuccinct*>(dbg)) {
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(dbg);
             if (!canonical || !dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
                 logger->error("SuffixSeeder can be used only with succinct graph representation");
                 exit(1);
@@ -108,11 +132,11 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
 
         // Use the seeder that seeds to node suffixes
         if (aligner_config.max_seed_length == k) {
-            return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder<>>>>(
+            return std::make_unique<Aligner<SuffixSeeder<ExactSeeder<>>>>(
                 graph, aligner_config
             );
         } else {
-            return std::make_unique<DBGAligner<SuffixSeeder<UniMEMSeeder<>>>>(
+            return std::make_unique<Aligner<SuffixSeeder<UniMEMSeeder<>>>>(
                 graph, aligner_config
             );
         }
@@ -121,13 +145,17 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
         assert(aligner_config.min_seed_length == k);
 
         // seeds are single k-mers
-        return std::make_unique<DBGAligner<>>(graph, aligner_config);
+        return std::make_unique<Aligner<>>(graph, aligner_config);
 
     } else {
         // seeds are maximal matches within unitigs (uni-MEMs)
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
+        return std::make_unique<Aligner<UniMEMSeeder<>>>(graph, aligner_config);
     }
 }
+
+template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const DBGAlignerConfig&);
+template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
+
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
@@ -437,6 +465,12 @@ int align_to_graph(Config *config) {
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
 
+    std::shared_ptr<AnnotatedDBG::Annotator> annotator;
+    if (config->infbase_annotators.size()) {
+        assert(config->infbase_annotators.size() == 1);
+        annotator = initialize_annotated_dbg(graph, *config)->get_annotation_ptr();
+    }
+
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
@@ -478,7 +512,15 @@ int align_to_graph(Config *config) {
                 if (config->canonical && !graph->is_canonical_mode())
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 
-                auto aligner = build_aligner(*aln_graph, aligner_config);
+                std::unique_ptr<IDBGAligner> aligner;
+                std::unique_ptr<AnnotatedDBG> aln_anno_graph;
+                if (annotator) {
+                    aln_anno_graph = std::make_unique<AnnotatedDBG>(aln_graph, annotator);
+                    aligner = build_aligner<LabeledDBGAligner>(*aln_anno_graph,
+                                                               aligner_config);
+                } else {
+                    aligner = build_aligner<DBGAligner>(*aln_graph, aligner_config);
+                }
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                     std::string sout = format_alignment(
