@@ -338,7 +338,9 @@ std::string format_alignment(std::string_view header,
                              const Config &config) {
     std::string sout;
     if (!config.output_json) {
-        IDBGAligner::score_t total_score = 0;
+        IDBGAligner::score_t total_score = paths.size() > 1
+            ? (config.alignment_gap_opening_penalty + config.alignment_gap_extension_penalty * (graph.get_k() - 1)) * (paths.size() - 1)
+            : 0;
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
             sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);

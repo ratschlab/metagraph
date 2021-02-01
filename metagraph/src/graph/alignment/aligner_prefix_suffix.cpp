@@ -129,20 +129,24 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
             ++ref_end_it_;
         } break;
         case Cigar::INSERTION: {
-            if ((++(cigar_it_.base())).offset()) {
+            ++cigar_it_;
+            if (*cigar_it_ == Cigar::INSERTION) {
                 score_ += config_->gap_extension_penalty;
             } else {
                 score_ += config_->gap_opening_penalty;
             }
+            --cigar_it_;
 
             ++end_it_;
         } break;
         case Cigar::DELETION: {
-            if ((++(cigar_it_.base())).offset()) {
+            ++cigar_it_;
+            if (*cigar_it_ == Cigar::DELETION) {
                 score_ += config_->gap_extension_penalty;
             } else {
                 score_ += config_->gap_opening_penalty;
             }
+            --cigar_it_;
 
             if (offset_) {
                 assert(*node_it_ == alignment_->front());

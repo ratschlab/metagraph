@@ -443,6 +443,9 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
             return {};
 
         ++first_prefix;
+
+        if (first_prefix.get_offset())
+            return {};
     }
     for (size_t i = 0; i < overlap; ++i) {
         assert(!first_prefix.eof());
@@ -451,12 +454,16 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         if (static_cast<size_t>(first_zero - node_it) < gap_length)
             return {};
         ++first_prefix;
+        if (first_prefix.get_offset())
+            return {};
         while (first_prefix.get_back_op() == Cigar::Operator::DELETION) {
             assert(!first_prefix.eof());
             ++node_it;
             if (static_cast<size_t>(first_zero - node_it) < gap_length)
                 return {};
             ++first_prefix;
+            if (first_prefix.get_offset())
+                return {};
         }
         assert(!first_prefix.eof() || i + 1 == overlap);
     }
@@ -566,11 +573,10 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     for (size_t i = 0; i <= overlap; ++i) {
         auto [forward_path, reverse_path, max_forward, max_reverse] = get_traversal_steps();
         if (forward_path.size() || reverse_path.size()) {
-            size_t num_missing_kmers = k - forward_path.size() - reverse_path.size() - 1;
-            if (!num_missing_kmers || forward_path.size() != max_forward || max_forward == k) {
-                // overlap works
-                score_t cur_score = first_prefix.get_score() + second_suffix.get_score()
-                    + end_gap_penalty(num_missing_kmers);
+            if (forward_path.size() == k) {
+                assert(reverse_path.empty());
+                assert(forward_path.back() == *second_suffix.get_node_begin_it());
+                score_t cur_score = first_prefix.get_score() + second_suffix.get_score();
                 if (cur_score > best_score) {
                     best_first_prefix = first_prefix;
                     best_second_suffix = second_suffix;
@@ -578,6 +584,22 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                     best_overlap = i;
                     best_forward_traversal = std::move(forward_path);
                     best_reverse_traversal = std::move(reverse_path);
+                }
+            } else {
+                assert(k - 1 >= forward_path.size() + reverse_path.size());
+                size_t num_missing_kmers = k - 1 - forward_path.size() - reverse_path.size();
+                if (!num_missing_kmers || forward_path.size() != max_forward || max_forward == k) {
+                    // overlap works
+                    score_t cur_score = first_prefix.get_score() + second_suffix.get_score()
+                        + end_gap_penalty(num_missing_kmers);
+                    if (cur_score > best_score) {
+                        best_first_prefix = first_prefix;
+                        best_second_suffix = second_suffix;
+                        best_score = cur_score;
+                        best_overlap = i;
+                        best_forward_traversal = std::move(forward_path);
+                        best_reverse_traversal = std::move(reverse_path);
+                    }
                 }
             }
         } else {
@@ -638,6 +660,16 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         return std::make_pair(std::move(new_first), std::move(new_second));
     }
 
+    if (best_forward_traversal.size() == k) {
+        if (new_second.get_clipping())
+            new_second.cigar_.pop_front();
+        new_first.nodes_.insert(new_first.nodes_.end(), best_forward_traversal.begin(), best_forward_traversal.end() - 1);
+        new_first.append(std::move(new_second));
+        assert(new_first.score_ == best_score);
+        assert(Alignment(new_first).is_valid(graph, &config));
+        return std::make_pair(std::move(new_first), Alignment());
+    }
+
     if (new_second.offset_ < k - 1) {
         size_t to_insert = k - 1 - new_second.offset_;
         new_second.nodes_.insert(new_second.nodes_.begin(), to_insert, NodeType());
@@ -660,7 +692,8 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     if (new_second.get_clipping())
         new_second.cigar_.pop_front();
 
-    size_t num_missing_kmers = k - best_forward_traversal.size() - best_reverse_traversal.size() - 1;
+    assert(k - 1 >= best_forward_traversal.size() + best_reverse_traversal.size());
+    size_t num_missing_kmers = k - 1 - best_forward_traversal.size() - best_reverse_traversal.size();
     if (num_missing_kmers) {
         size_t insert_pos = 0;
         size_t seq_insert_pos = 0;
@@ -693,6 +726,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     new_first.append(std::move(new_second));
     assert(new_first.score_ == best_score);
+    assert(Alignment(new_first).is_valid(graph, &config));
     return std::make_pair(std::move(new_first), Alignment());
 }
 
