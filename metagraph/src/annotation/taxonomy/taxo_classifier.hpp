@@ -16,29 +16,24 @@ const double DEFAULT_LCA_COVERAGE_THRESHOLD = 0.66;
  */
 class TaxoClassifier {
   public:
-    typedef std::uint64_t NormalizedTaxId;
+    typedef std::uint64_t TaxId;
     typedef annot::MultiLabelEncoded<std::string> Annotator;
     using KmerId = Annotator::Index;
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
 
   private:
-    NormalizedTaxId root_node;
+    TaxId root_node;
 
     /**
-     * node_parent[node] returns the taxid of the corresponding parent.
+     * node_parent[node] returns the taxid of node's parent.
     */
-    std::vector<NormalizedTaxId> node_parent;
-
-    /**
-     * node_to_acc_version maps normalized taxid to accession version.
-     */
-    std::vector<std::string> node_to_acc_version;
+    tsl::hopscotch_map<TaxId, TaxId> node_parent;
 
     /**
      * taxonomic_map returns the taxid LCA for a given kmer.
      */
-    tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map;
+    tsl::hopscotch_map<KmerId, TaxId> taxonomic_map;
 
     /**
      * Import 'this->taxonomic_map', 'this->node_to_acc_version' and the taxonomic tree (as parent list)
@@ -55,15 +50,15 @@ class TaxoClassifier {
     TaxoClassifier(const std::string &filepath);
 
     /**
-     * Assign a LCA accession version to a given sequence.
+     * Assign a LCA taxid to a given sequence.
      * Consider matches[node] = number of kmers in 'sequence' for which taxonomic_map points to 'node'.
      *          weight[node] = matches[node] / #(kmers in sequence). (Values in [0, 1])
      *          score[node] = sum(weight[node*]) where node* is in node's subtree or on root->node path. (Values in [0, 1])
-     * The assigned LCA accession version is the farthest node to the root with score[node] >= lca_coverage_threshold (unique).
+     * The assigned taxid is the farthest node to the root with score[node] >= lca_coverage_threshold (unique).
       */
-    std::string assign_class(const mtg::graph::DeBruijnGraph &graph,
-                             const std::string &sequence,
-                             const double &lca_coverage_threshold = DEFAULT_LCA_COVERAGE_THRESHOLD);
+    TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,
+                       const std::string &sequence,
+                       const double &lca_coverage_threshold = DEFAULT_LCA_COVERAGE_THRESHOLD);
 };
 
 }
