@@ -48,7 +48,7 @@ class TaxoClassifier {
 
   public:
     /**
-     * TaxoClassifier a TaxoClassifier
+     * Construct a TaxoClassifier
      *
      * @param [input] filepath path to file exported by TaxonomyDB.
      */
@@ -59,7 +59,7 @@ class TaxoClassifier {
      * Consider matches[node] = number of kmers in 'sequence' for which taxonomic_map points to 'node'.
      *          weight[node] = matches[node] / #(kmers in sequence). (Values in [0, 1])
      *          score[node] = sum(weight[node*]) where node* is in node's subtree or on root->node path. (Values in [0, 1])
-     * The assigned LCA accession version is the farthest node to the root with score[node] >= lca_coverage_threshold.
+     * The assigned LCA accession version is the farthest node to the root with score[node] >= lca_coverage_threshold (unique).
       */
     std::string assign_class(const mtg::graph::DeBruijnGraph &graph,
                              const std::string &sequence,
