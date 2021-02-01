@@ -90,7 +90,7 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_3) {
     std::string query      = "TGAGGATCAGCTAGCTTGCTAGC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
     config.chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);

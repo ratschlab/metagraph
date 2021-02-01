@@ -603,9 +603,8 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                 }
             }
         } else {
-            size_t num_missing_kmers = k - 1;
             score_t cur_score = first_prefix.get_score() + second_suffix.get_score()
-                + end_gap_penalty(num_missing_kmers);
+                + end_gap_penalty(k);
             if (cur_score > best_score) {
                 best_first_prefix = first_prefix;
                 best_second_suffix = second_suffix;
