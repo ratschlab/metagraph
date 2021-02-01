@@ -1122,6 +1122,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
+            fprintf(stderr, "Available options for taxonomic classification:\n");
+            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomicDB created by annotation cmd []\n");
             fprintf(stderr, "Available options for --align:\n");
             fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
