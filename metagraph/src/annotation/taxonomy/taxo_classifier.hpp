@@ -36,7 +36,7 @@ class TaxoClassifier {
     tsl::hopscotch_map<KmerId, TaxId> taxonomic_map;
 
     /**
-     * Import 'this->taxonomic_map', 'this->node_to_acc_version' and the taxonomic tree (as parent list)
+     * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
      * from the given filepath (created by TaxonomyDB in annotation cli).
      */
     void import_taxonomy(const std::string &filepath);
@@ -45,15 +45,15 @@ class TaxoClassifier {
     /**
      * Construct a TaxoClassifier
      *
-     * @param [input] filepath path to file exported by TaxonomyDB.
+     * @param [input] filepath to the file exported by TaxonomyDB.
      */
     TaxoClassifier(const std::string &filepath);
 
     /**
      * Assign a LCA taxid to a given sequence.
-     * Consider matches[node] = number of kmers in 'sequence' for which taxonomic_map points to 'node'.
+     * Consider matches[node] = number of kmers in 'sequence' for which the taxonomic_map points to 'node'.
      *          weight[node] = matches[node] / #(kmers in sequence). (Values in [0, 1])
-     *          score[node] = sum(weight[node*]) where node* is in node's subtree or on root->node path. (Values in [0, 1])
+     *          score[node] = sum(weight[node*]) where node* is iterating over node's subtree + node's ancestors (Values in [0, 1])
      * The assigned taxid is the farthest node to the root with score[node] >= lca_coverage_threshold (unique).
       */
     TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,
