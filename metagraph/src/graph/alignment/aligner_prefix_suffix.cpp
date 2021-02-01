@@ -92,7 +92,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
     assert(cigar_rbegin_ <= cigar_it_);
     assert(cigar_it_ <= cigar_rend_);
 
-    assert(Alignment(*this).is_valid(*graph_, config_));
+    assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
 
     return *this;
 }
@@ -177,7 +177,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
     assert(cigar_rbegin_ <= cigar_it_);
     assert(cigar_it_ <= cigar_rend_);
 
-    assert(Alignment(*this).is_valid(*graph_, config_));
+    assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
 
     return *this;
 }
