@@ -42,7 +42,10 @@ void TaxoClassifier::import_taxonomy(const std::string &filepath) {
         logger->error("Can't load serialized 'node_to_acc_version' from file '{}'.", filepath.c_str());
         std::exit(1);
     }
-    node_parent = load_number_vector_raw<NormalizedTaxId>(f);
+    if (!load_number_vector(f, &node_parent)) {
+        logger->error("Can't load serialized 'node_parent' from file '{}'.", filepath.c_str());
+        std::exit(1);
+    }
 
     f.close();
     logger->trace("Finished with importing metagraph taxonomic data after '{}' sec", timer.elapsed());
