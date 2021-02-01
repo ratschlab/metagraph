@@ -863,7 +863,9 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                            const align::DBGAlignerConfig *aligner_config,
                            std::shared_ptr<annot::TaxoClassifier> taxo_classifier) {
     if (taxo_classifier != nullptr) {
-        return taxo_classifier->assign_class(anno_graph.get_graph(), seq) + "\n";
+        return fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
+                           name,
+                           taxo_classifier->assign_class(anno_graph.get_graph(), seq));
     }
 
     if (aligner_config) {
