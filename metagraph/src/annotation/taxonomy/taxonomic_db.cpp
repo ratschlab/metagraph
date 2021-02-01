@@ -290,7 +290,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 
     tsl::hopscotch_map<TaxId, TaxId> node_parents;
 
-    node_parents[linearization[0]] = linearization[0];
+    node_parents[denormalized_taxid[linearization[0]]] = denormalized_taxid[linearization[0]];
     for (uint64_t i = 1; i < linearization.size(); ++i) {
         uint64_t act = linearization[i];
         uint64_t prv = linearization[i - 1];
