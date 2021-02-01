@@ -208,9 +208,6 @@ class DBGAlignerConfig {
 template <typename NodeType>
 class DPTable;
 
-template <typename NodeType>
-class SuffixSeeder;
-
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
