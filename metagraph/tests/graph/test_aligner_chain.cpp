@@ -83,7 +83,7 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_2) {
 }
 
 TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_3) {
-    size_t k = 9;
+    size_t k = 5;
     std::string reference1 = "TGAGGATCAG";
     std::string reference2 =        "CAGCTAGCT";
     std::string reference3 =              "GCTTGCTAGC";
@@ -98,9 +98,9 @@ TYPED_TEST(DBGAlignerChainTest, align_chain_overlap_3) {
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
-    check_chain(paths, *graph, config, 2);
-    ASSERT_EQ(2u, paths.size());
-    EXPECT_EQ(query, paths[0].get_sequence() + paths[1].get_sequence());
+    check_chain(paths, *graph, config, 1);
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ(query, paths[0].get_sequence());
     check_extend(graph, aligner.get_config(), paths, query);
 }
 

@@ -245,6 +245,8 @@ void Cigar::insert(size_t i, Operator op, size_t count) {
         cigar_.emplace_back(op, count);
     } else if (i == 0) {
         cigar_.insert(cigar_.begin() + j, std::make_pair(op, count));
+    } else if (cigar_[j].second == i) {
+        cigar_.insert(cigar_.begin() + j + 1, std::make_pair(op, count));
     } else {
         auto to_insert = std::make_pair(cigar_[j].first, cigar_[j].second - i);
         cigar_[j].second = i;

@@ -412,104 +412,164 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         }
     }
 
-    // Now, find the maximal scoring combination of a prefix of the first alignment
-    // and a suffix of the second alignment such that they do not overlap.
-    // When trimming, DELETION only consumes the reference, so these can be discarded
-
+    size_t k = graph.get_k();
     AlignmentPrefix<NodeType> first_prefix(first, config, graph);
-    AlignmentSuffix<NodeType> second_suffix(second, config, graph.get_k());
-    AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
-    AlignmentSuffix<NodeType> best_second_suffix = second_suffix;
-
-    std::vector<NodeType> best_forward_traversal;
-    std::vector<NodeType> best_reverse_traversal;
+    AlignmentSuffix<NodeType> second_suffix(second, config, k);
 
     size_t overlap = first_prefix.get_query().data() + first_prefix.get_query().size()
         - second_suffix.get_query().data();
 
+    AlignmentPrefix<NodeType> best_first_prefix = first_prefix;
+    AlignmentSuffix<NodeType> best_second_suffix = second_suffix;
+    std::vector<NodeType> best_forward_traversal;
+    std::vector<NodeType> best_reverse_traversal;
     score_t best_score = config.min_cell_score;
-    score_t cur_score;
     size_t best_overlap = overlap + 1;
 
-    size_t k = graph.get_k();
+    // initialize: trim overlap from the right of first
+    auto node_it = first_prefix.get_node_end_it();
+    auto first_zero = std::find(node_it, first.rend(), NodeType());
+    auto next_nonzero = std::find_if(first_zero, first.rend(), [](NodeType a) -> bool { return a; });
+    size_t gap_length = next_nonzero - first_zero;
+
+    if (static_cast<size_t>(first_zero - node_it) < gap_length)
+        return {};
+
+    assert(!first_prefix.eof());
+    while (first_prefix.get_back_op() == Cigar::Operator::DELETION) {
+        assert(!first_prefix.eof());
+        ++node_it;
+        if (static_cast<size_t>(first_zero - node_it) < gap_length)
+            return {};
+
+        ++first_prefix;
+    }
+    for (size_t i = 0; i < overlap; ++i) {
+        assert(!first_prefix.eof());
+        if (first_prefix.get_back_op() != Cigar::MISSING)
+            ++node_it;
+        if (static_cast<size_t>(first_zero - node_it) < gap_length)
+            return {};
+        ++first_prefix;
+        while (first_prefix.get_back_op() == Cigar::Operator::DELETION) {
+            assert(!first_prefix.eof());
+            ++node_it;
+            if (static_cast<size_t>(first_zero - node_it) < gap_length)
+                return {};
+            ++first_prefix;
+        }
+        assert(!first_prefix.eof() || i + 1 == overlap);
+    }
+
+    assert(first_prefix.get_query().data() + first_prefix.get_query().size()
+            == second_suffix.get_query().data());
+
+    auto get_traversal_steps = [&]() {
+        std::string_view first_prefix_seq = first_prefix.get_sequence();
+        std::string_view second_suffix_seq = second_suffix.get_sequence();
+
+        std::vector<NodeType> forward_path;
+        size_t max_forward = std::min(k, second_suffix_seq.size());
+        forward_path.reserve(max_forward);
+        graph.traverse(*first_prefix.get_node_end_it(),
+                       second_suffix_seq.data(),
+                       second_suffix_seq.data() + max_forward,
+                       [&](NodeType next) { forward_path.push_back(next); },
+                       [&]() { return forward_path.size() >= max_forward; });
+
+        size_t max_reverse = 0;
+        std::vector<NodeType> reverse_path;
+        if (forward_path.size() < max_forward && !second_suffix.get_added_offset()) {
+            NodeType prev = *second_suffix.get_node_begin_it();
+            max_reverse = std::min(
+                k - forward_path.size(),
+                static_cast<size_t>(second_suffix.get_node_begin_it() - first.begin())
+            );
+            reverse_path.reserve(max_reverse);
+            auto end = first_prefix_seq.rbegin() + max_reverse;
+            for (auto it = first_prefix_seq.rbegin(); it != end && prev; ++it) {
+                if ((prev = graph.traverse_back(prev, *it)))
+                    reverse_path.push_back(prev);
+            }
+
+            assert(forward_path.size() + reverse_path.size() <= k);
+            if (forward_path.size() + reverse_path.size() == k) {
+                if (forward_path.back() == reverse_path.back()) {
+                    reverse_path.pop_back();
+                } else {
+                    assert(forward_path.empty() || reverse_path.empty());
+                    // paths don't intersect
+                    forward_path.clear();
+                    reverse_path.clear();
+                }
+            }
+        }
+
+        return std::make_tuple(std::move(forward_path),
+                               std::move(reverse_path),
+                               max_forward,
+                               max_reverse);
+    };
+
     auto end_gap_penalty = [&config](size_t length) -> score_t {
         return length ? config.gap_opening_penalty + (length - 1) * config.gap_extension_penalty : 0;
     };
 
-    auto update_best_overlap = [&](size_t i) {
-        if (first_prefix.get_query().size() >= config.min_seed_length
-                && second_suffix.get_query().size() >= config.min_seed_length) {
-            // k = 6
-            // ATGTGTGAGTGAGT---
-            //              *ACGCTAGCTAGATC
-            // forward_path size: 3
-            // reverse_path size: 1
-            // missing k-mer: GTACGC
+    auto step_first_forward = [&]() -> bool {
+        if (first_prefix.reof())
+            return true;
 
-            std::string_view first_prefix_seq = first_prefix.get_sequence();
-            std::string_view second_suffix_seq = second_suffix.get_sequence();
+        while (!first_prefix.reof() && first_prefix.get_back_op() == Cigar::Operator::DELETION) {
+            assert(!first_prefix.reof());
+            --first_prefix;
+            assert(Alignment(first_prefix).is_valid(graph, &config));
+        }
 
-            std::vector<NodeType> forward_path;
-            size_t max_forward = std::min(k, second_suffix_seq.size());
-            forward_path.reserve(max_forward);
-            graph.traverse(*first_prefix.get_node_end_it(),
-                           second_suffix_seq.data(),
-                           second_suffix_seq.data() + max_forward,
-                           [&](NodeType next) { forward_path.push_back(next); },
-                           [&]() { return forward_path.size() >= max_forward; });
+        if (first_prefix.reof())
+            return true;
 
-            std::vector<NodeType> reverse_path;
-            size_t num_missing_kmers = 0;
-            if (forward_path.size() < max_forward) {
-                NodeType prev = *second_suffix.get_node_begin_it();
-                size_t max_reverse = std::min(
-                    k - forward_path.size(),
-                    static_cast<size_t>(second_suffix.get_node_begin_it() - first.begin())
-                );
-                reverse_path.reserve(max_reverse);
-                auto end = first_prefix_seq.rbegin() + max_reverse;
-                for (auto it = first_prefix_seq.rbegin(); it != end && prev; ++it) {
-                    if ((prev = graph.traverse_back(prev, *it)))
-                        reverse_path.push_back(prev);
-                }
+        --first_prefix;
+        assert(Alignment(first_prefix).is_valid(graph, &config));
 
-                assert(forward_path.size() + reverse_path.size() <= k);
-                if (forward_path.size() + reverse_path.size() == k) {
-                    if (forward_path.back() == reverse_path.back()) {
-                        reverse_path.pop_back();
-                    } else {
-                        assert(forward_path.empty() || reverse_path.empty());
-                        // paths don't intersect
-                        forward_path.clear();
-                        reverse_path.clear();
-                    }
-                }
+        if (first_prefix.reof())
+            return true;
 
-                // std::cout << first_prefix << "\n" << second_suffix << "\n"
-                //           << max_forward << " " << max_reverse << "\n";
-                // for (NodeType node : forward_path) {
-                //     std::cout << node << " ";
-                // }
-                // std::cout << "\n";
-                // for (NodeType node : reverse_path) {
-                //     std::cout << node << " ";
-                // }
-                // std::cout << "\n\n";
+        while (!first_prefix.reof() && first_prefix.get_back_op() == Cigar::Operator::DELETION) {
+            assert(!first_prefix.reof());
+            --first_prefix;
+            assert(Alignment(first_prefix).is_valid(graph, &config));
+        }
 
-                // // otherwise it would have been found in the forward traversal
-                // // ATGTGTGAGTGAGT---
-                // //            ***ACGCTAGCTAGATC
-                // assert(forward_path.size() + reverse_path.size() < k);
+        return first_prefix.reof();
+    };
 
+    auto step_second_forward = [&]() -> bool {
+        assert(!second_suffix.eof());
+        while (second_suffix.get_front_op() == Cigar::Operator::DELETION) {
+            assert(!second_suffix.eof());
+            ++second_suffix;
+            assert(Alignment(second_suffix).is_valid(graph, &config));
+        }
+        assert(!second_suffix.eof());
+        ++second_suffix;
+        assert(Alignment(second_suffix).is_valid(graph, &config));
+        while (!second_suffix.eof() && (second_suffix.get_front_op() == Cigar::Operator::DELETION
+                                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
+            assert(!second_suffix.eof());
+            ++second_suffix;
+            assert(Alignment(second_suffix).is_valid(graph, &config));
+        }
 
-                // ATGTGTGAGTGAGT
-                //           ****ACGCTAGCTAGATC
+        return second_suffix.eof();
+    };
 
-                num_missing_kmers = k - forward_path.size() - reverse_path.size() - 1;
-            }
-
-            if (forward_path.size() || reverse_path.size()) {
-                cur_score = first_prefix.get_score() + second_suffix.get_score()
+    for (size_t i = 0; i <= overlap; ++i) {
+        auto [forward_path, reverse_path, max_forward, max_reverse] = get_traversal_steps();
+        if (forward_path.size() || reverse_path.size()) {
+            size_t num_missing_kmers = k - forward_path.size() - reverse_path.size() - 1;
+            if (!num_missing_kmers || forward_path.size() != max_forward || max_forward == k) {
+                // overlap works
+                score_t cur_score = first_prefix.get_score() + second_suffix.get_score()
                     + end_gap_penalty(num_missing_kmers);
                 if (cur_score > best_score) {
                     best_first_prefix = first_prefix;
@@ -521,114 +581,28 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                 }
             }
         }
-    };
 
-    // initialize: trim overlap from the left of second
-    for (size_t i = 0; i < overlap; ++i) {
-        assert(!second_suffix.eof());
-        while (second_suffix.get_front_op() == Cigar::Operator::DELETION) {
-            assert(!second_suffix.eof());
-            ++second_suffix;
-            assert(!*second_suffix.get_node_begin_it() || Alignment(second_suffix).is_valid(graph, &config));
-        }
-        assert(!second_suffix.eof());
-        ++second_suffix;
-        assert(Alignment(second_suffix).is_valid(graph, &config));
-        while (!second_suffix.eof() && (second_suffix.get_front_op() == Cigar::Operator::DELETION
-                                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
-            assert(!second_suffix.eof());
-            ++second_suffix;
-            assert(!*second_suffix.get_node_begin_it() || Alignment(second_suffix).is_valid(graph, &config));
-        }
-        assert(!second_suffix.eof() || i + 1 == overlap);
-    }
-
-    if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it())
-        update_best_overlap(0);
-
-    // iteratively shift the splice point
-    auto node_it = first.rend();
-    for (size_t i = 1; i <= overlap; ++i) {
-        std::cout << "foo\t" << i << " " << overlap << "\n" << first_prefix << "\n" << second_suffix << "\n\n";
-        assert(first_prefix.get_query().data() + first_prefix.get_query().size()
-            == second_suffix.get_query().data());
-
-        while (!first_prefix.eof()
-                && (first_prefix.get_back_op() == Cigar::Operator::DELETION
-                    || first_prefix.get_back_op() == Cigar::Operator::MISSING)
-                && first_prefix.get_node_end_it() > node_it) {
-            ++first_prefix;
-            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-                assert(Alignment(first_prefix).is_valid(graph, &config));
-                update_best_overlap(i);
-            }
-            assert(first_prefix.get_query().data() + first_prefix.get_query().size()
-                == second_suffix.get_query().data());
+        bool step_first = false;
+        bool step_second = false;
+        for (size_t j = 0; j < forward_path.size(); ++j) {
+            step_first = step_first_forward();
+            step_second = step_second_forward();
+            if (step_first || step_second)
+                break;
         }
 
-        if (first_prefix.eof() || first_prefix.get_node_end_it() == node_it)
+        if (step_first || step_second)
             break;
 
-        ++first_prefix;
-        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-            assert(Alignment(first_prefix).is_valid(graph, &config));
-            update_best_overlap(i);
-        }
+        step_first = step_first_forward();
+        step_second = step_second_forward();
 
-        while (!first_prefix.eof()
-                && (first_prefix.get_back_op() == Cigar::Operator::DELETION
-                    || first_prefix.get_back_op() == Cigar::Operator::MISSING)
-                && first_prefix.get_node_end_it() > node_it) {
-            ++first_prefix;
-            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-                assert(Alignment(first_prefix).is_valid(graph, &config));
-                update_best_overlap(i);
-            }
-        }
-
-        if (!second_suffix.eof()) {
-            while (!second_suffix.reof()
-                    && (second_suffix.get_front_op() == Cigar::Operator::DELETION
-                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
-                --second_suffix;
-                if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-                    assert(Alignment(second_suffix).is_valid(graph, &config));
-                    update_best_overlap(i);
-                }
-            }
-        }
-
-        assert(!second_suffix.reof());
-
-        --second_suffix;
-        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-            assert(Alignment(second_suffix).is_valid(graph, &config));
-            update_best_overlap(i);
-        }
-        assert(first_prefix.get_query().data() + first_prefix.get_query().size()
-            == second_suffix.get_query().data());
-
-        while (!second_suffix.reof()
-                && (second_suffix.get_front_op() == Cigar::Operator::DELETION
-                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
-            --second_suffix;
-            if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it()) {
-                assert(Alignment(second_suffix).is_valid(graph, &config));
-                update_best_overlap(i);
-            }
-            assert(first_prefix.get_query().data() + first_prefix.get_query().size()
-                == second_suffix.get_query().data());
-        }
-
-        if (first_prefix.get_query().size() < config.min_seed_length)
+        if (step_first || step_second)
             break;
 
-        if (*first_prefix.get_node_end_it() && *second_suffix.get_node_begin_it())
-            update_best_overlap(i);
-    }
-
-    assert(first_prefix.get_query().data() + first_prefix.get_query().size()
+        assert(first_prefix.get_query().data() + first_prefix.get_query().size()
             == second_suffix.get_query().data());
+    }
 
     if (best_overlap > overlap)
         return {};
@@ -641,43 +615,44 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         return {};
     }
 
+    if (best_forward_traversal.empty() && best_reverse_traversal.empty())
+        return {};
+
     Alignment<NodeType> new_first(best_first_prefix);
     Alignment<NodeType> new_second(best_second_suffix);
 
-    if (best_forward_traversal.empty() && best_reverse_traversal.empty()) {
-        new_second.extend_query_begin(second.get_query().data() - second.get_clipping());
+    // if (best_forward_traversal.empty() && best_reverse_traversal.empty()) {
+    //     new_second.extend_query_begin(second.get_query().data() - second.get_clipping());
 
-        assert(new_first.get_query_end() == new_second.get_query().data());
+    //     assert(new_first.get_query_end() == new_second.get_query().data());
 
-        return std::make_pair(std::move(new_first), std::move(new_second));
-    }
+    //     return std::make_pair(std::move(new_first), std::move(new_second));
+    // }
 
     if (new_second.offset_ < k - 1) {
-        new_second.nodes_.insert(new_second.nodes_.begin(), k - 1 - new_second.offset_, NodeType());
+        size_t to_insert = k - 1 - new_second.offset_;
+        new_second.nodes_.insert(new_second.nodes_.begin(), to_insert, NodeType());
         new_second.offset_ = k - 1;
+
+        size_t to_insert_front = std::min(to_insert, best_forward_traversal.size());
+        std::copy(best_forward_traversal.begin(), best_forward_traversal.begin() + to_insert_front,
+                  new_second.nodes_.begin());
+
+        if (to_insert > to_insert_front) {
+            size_t to_insert_back = std::min(to_insert - to_insert_front,
+                                             best_reverse_traversal.size());
+            assert(to_insert - to_insert_back >= to_insert_front);
+            std::copy(best_reverse_traversal.rbegin(),
+                      best_reverse_traversal.rbegin() + to_insert_back,
+                      new_second.nodes_.begin() + to_insert - to_insert_back);
+        }
     }
-
-    std::copy(best_forward_traversal.begin(), best_forward_traversal.end(),
-              new_second.nodes_.begin());
-
-    std::copy(best_reverse_traversal.rbegin(), best_reverse_traversal.rend(),
-              new_second.nodes_.begin() + k - 1 - best_reverse_traversal.size());
 
     if (new_second.get_clipping())
         new_second.cigar_.pop_front();
 
     size_t num_missing_kmers = k - best_forward_traversal.size() - best_reverse_traversal.size() - 1;
     if (num_missing_kmers) {
-        std::cout << first << "\n" << second << "\n" << best_first_prefix << "\n" << best_second_suffix << "\n" << num_missing_kmers << "\n";
-        for (auto node : best_forward_traversal) {
-            std::cout << node << " ";
-        }
-        std::cout << "\n";
-        for (auto node : best_reverse_traversal) {
-            std::cout << node << " ";
-        }
-        std::cout << "\n";
-
         size_t insert_pos = 0;
         size_t seq_insert_pos = 0;
         CigarOpIterator it(new_second.get_cigar());
@@ -708,7 +683,6 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
     }
 
     new_first.append(std::move(new_second));
-    std::cout << new_first << "\n\n";
     assert(new_first.score_ == best_score);
     return std::make_pair(std::move(new_first), Alignment());
 }
