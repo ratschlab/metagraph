@@ -33,10 +33,10 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList 
         }
     }
     node_depth[node] = depth + 1;
+    assert(tree_linearization.size());
 }
 
 void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
-                           const tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table,
                            ChildrenList &tree, NormalizedTaxId &root_node) {
     std::ifstream f(taxo_tree_filepath);
     std::string line;
@@ -53,11 +53,10 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
     f.close();
 
     std::queue<TaxId> relevant_taxids;
-    for (const auto &it: reversed_lookup_table) {
-        relevant_taxids.push(it.first);
+    for (const auto &it: lookup_table) {
+        relevant_taxids.push(it.second);
     }
 
-    tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
     uint64_t num_nodes = 0;
     // num_taxid_failed used for logging only.
     uint64_t num_taxid_failed = 0;
@@ -73,16 +72,12 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
             continue;
         }
         normalized_taxid[taxid] = num_nodes++;
+        denormalized_taxid.push_back(taxid);
         if (taxid == full_parents_list[taxid]) {
             root_node = normalized_taxid[taxid];
             continue;
         }
         relevant_taxids.push(full_parents_list[taxid]);
-        // Check if taxid is a leaf and used in fasta header.
-        if (reversed_lookup_table.count(taxid)) {
-            lookup_table[reversed_lookup_table.at(taxid)] = normalized_taxid.at(taxid);
-            node_to_acc_version.push_back(reversed_lookup_table.at(taxid));
-        }
     }
     if (num_taxid_failed) {
         logger->warn("Number taxids succeeded {}, failed {}.", num_nodes, num_taxid_failed);
@@ -97,6 +92,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         tree[normalized_taxid[full_parents_list[taxid]]].push_back(
                 normalized_taxid[taxid]);
     }
+    assert(tree.size());
 }
 
 void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization) {
@@ -143,21 +139,20 @@ void TaxonomyDB::get_input_accessions(const std::string &fasta_headers_filepath,
         std::string accession_version = utils::split_string(fasta_header, "|")[3];
         input_accessions.insert(accession_version);
     }
+    assert(input_accessions.size());
     f.close();
 }
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
-                                   const tsl::hopscotch_set<AccessionVersion> &input_accessions,
-                                   tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table) {
+                                   const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
     std::ifstream f(lookup_table_filepath);
     std::string line;
     while (getline(f, line) ) {
         std::vector<std::string> parts = utils::split_string(line, "\t");
-        assert(parts.size() == 4);
         if(input_accessions.count(parts[1])) {
             TaxId act = static_cast<TaxId>(std::stoull(parts[2]));
-            reversed_lookup_table[act] = parts[1];
+            lookup_table[parts[1]] = act;
         }
     }
     f.close();
@@ -179,6 +174,7 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
         logger->error("Can't open fasta headers file '{}'.", fasta_headers_filepath);
         std::exit(1);
     }
+
     Timer timer;
     logger->trace("Parsing fasta headers...");
     tsl::hopscotch_set<AccessionVersion> input_accessions;
@@ -187,15 +183,14 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
 
     timer.reset();
     logger->trace("Parsing lookup table..");
-    tsl::hopscotch_map<TaxId, AccessionVersion> reversed_lookup_table;
-    read_lookup_table(lookup_table_filepath, input_accessions, reversed_lookup_table);
+    read_lookup_table(lookup_table_filepath, input_accessions);
     logger->trace("Finished parsing tookup table in '{}' sec", timer.elapsed());
 
     timer.reset();
     logger->trace("Parsing taxonomic tree..");
     TaxonomyDB::ChildrenList tree;
     NormalizedTaxId root_node;
-    read_tree(taxo_tree_filepath, reversed_lookup_table, tree, root_node);
+    read_tree(taxo_tree_filepath, tree, root_node);
     logger->trace("Finished parsing taxonomic tree in '{}' sec", timer.elapsed());
 
     timer.reset();
@@ -246,7 +241,7 @@ bool TaxonomyDB::find_lca(const std::vector<std::string> &fasta_headers,
             num_external_lca_calls_failed += 1;
             return false;
         }
-        taxids.push_back(lookup_table[accession_version]);
+        taxids.push_back(normalized_taxid[lookup_table[accession_version]]);
     }
     lca = find_lca(taxids);
     return true;
@@ -284,30 +279,31 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         std::exit(1);
     }
 
+    // Denormalize taxids in taxonomic map.
+    for (auto &it: taxonomic_map) {
+        taxonomic_map[it.first] = denormalized_taxid[it.second];
+    }
+    assert(taxonomic_map.size());
     serialize_number_number_map(f, taxonomic_map);
-    serialize_string_vector(f, node_to_acc_version);
 
     const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
-    // The tree linearization has a size equal to 2 * (#edges) + 1.
-    uint64_t num_nodes = linearization.size() / 2 + 1;
-    std::vector<bool> visited_node(num_nodes);
-    std::vector<NormalizedTaxId> node_parent(num_nodes);
 
-    visited_node[linearization[0]] = true;
-    node_parent[linearization[0]] = linearization[0];
+    tsl::hopscotch_map<TaxId, TaxId> node_parents;
+
+    node_parents[linearization[0]] = linearization[0];
     for (uint64_t i = 1; i < linearization.size(); ++i) {
         uint64_t act = linearization[i];
         uint64_t prv = linearization[i - 1];
 
-        if (visited_node[act]) {
+        if (node_parents.count(denormalized_taxid[act])) {
             // Prv is act's child.
             continue;
         }
         // Prv is act's parent.
-        node_parent[act] = prv;
-        visited_node[act] = true;
+        node_parents[denormalized_taxid[act]] = denormalized_taxid[prv];
     }
-    serialize_number_vector(f, node_parent);
+    assert(node_parents.size());
+    serialize_number_number_map(f, node_parents);
     f.close();
     logger->trace("Finished exporting metagraph taxonomic data after '{}' sec", timer.elapsed());
 }

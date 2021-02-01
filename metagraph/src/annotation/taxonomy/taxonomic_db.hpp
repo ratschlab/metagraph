@@ -32,7 +32,7 @@ class TaxonomyDB {
     std::vector<uint64_t> node_depth;
 
     /**
-     * rmq_data[0] contains the taxo tree linearization
+     * rmq_data[0] contains the taxonomic tree linearization
      *          (e.g. for root 1 and edges={1-2; 1-3}, the linearization is "1 2 1 3 1")
      * rmq_data[l][x] returns the node with the maximal depth among positions [x, x+2^l-1]
      * in the linearization.
@@ -47,14 +47,9 @@ class TaxonomyDB {
     std::vector<uint64_t> node_to_linearization_idx;
 
     /**
-     * lookup_table maps accession version to normalized taxid.
+     * lookup_table maps accession version to taxid.
      */
-    tsl::hopscotch_map<AccessionVersion, NormalizedTaxId> lookup_table;
-
-    /**
-     * node_to_acc_version maps normalized taxid to accession version.
-     */
-    std::vector<AccessionVersion> node_to_acc_version;
+    tsl::hopscotch_map<AccessionVersion, TaxId> lookup_table;
 
     /**
      * precalc_log2 is a table for faster compute of log2.
@@ -72,33 +67,35 @@ class TaxonomyDB {
     tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map;
 
     /**
+     * Maps taxid to its normalized index. Used for optimizing the runtime performance.
+     */
+    tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
+    std::vector<TaxId> denormalized_taxid;
+
+    /**
      * Reads and returns the taxonomic tree
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
-     * @param [input] reversed_lookup_table maps taxid (before normalizing) to accession version.
      * @param [output] tree -> tree stored as list of children.
      * @param [output] root_node -> normalized id of the root of the tree.
      */
     void read_tree(const std::string &taxo_tree_filepath,
-                   const tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table,
                    ChildrenList &tree, NormalizedTaxId &root_node);
 
     /**
-     * Reads the lookup table and returns the reversed lookup table for the relevant accession versions.
+     * Reads and returns the lookup table corresponding to the received accession versions.
      *
      * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
-     * @param [input] input_accessions set containing all the accession version in the input.
-     * @param [output] reversed_lookup_table maps taxid (before normalizing) to accession version.
+     * @param [input] input_accessions contains all the accession version in the input.
      */
     void read_lookup_table(const std::string &lookup_table_filepath,
-                           const tsl::hopscotch_set<AccessionVersion> &input_accessions,
-                           tsl::hopscotch_map<TaxId, AccessionVersion> &reversed_lookup_table);
+                           const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
      * Reads the fasta headers and returns all the relevant accession versions.
      *
      * @param [input] fasta_headers_filepath path to a ".fasta.fai" file.
-     * @param [output] input_accessions set containing all the accession version in the fasta input.
+     * @param [output] input_accessions contains all the accession version in the fasta input.
      */
     void get_input_accessions(const std::string &fasta_headers_filepath,
                               tsl::hopscotch_set<AccessionVersion> &input_accessions);
@@ -148,7 +145,7 @@ class TaxonomyDB {
                               const NormalizedTaxId &lca);
 
     /**
-     * Exports 'this->taxonomic_map', 'this->node_to_acc_version' and the taxonomic tree (as parent list)
+     * Exports 'this->taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath);
