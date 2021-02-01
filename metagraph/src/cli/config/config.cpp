@@ -16,7 +16,7 @@ namespace mtg {
 namespace cli {
 
 const size_t Config::kDefaultIndexSuffixLen
-    = 20 / std::log2(kmer::KmerExtractorBOSS::alphabet.size() - 1);
+    = 20 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
