@@ -78,7 +78,39 @@ void CanonicalDBG
     std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
                         sequence.end());
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    std::vector<node_index> rev_path;
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
+        const auto &boss = dbg_succ->get_boss();
+
+        rev_path.resize(rev_seq.size() - graph_.get_k() + 1);
+        auto it = path.rbegin();
+        auto jt = rev_path.begin();
+        boss.map_to_edges(rev_seq,
+            [&](auto rc_index) {
+                assert(it < path.rend());
+                assert(jt < rev_path.end());
+                *jt = dbg_succ->boss_to_kmer_index(rc_index);
+                ++jt;
+                ++it;
+            },
+            []() { return false; },
+            [&]() {
+                assert(it < path.rend());
+                if (*it) {
+                    ++it;
+                    ++jt;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        );
+
+        assert(it == std::make_reverse_iterator(first_not_found));
+        assert(jt == rev_path.end());
+    } else {
+        rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    }
 
     auto it = rev_path.rbegin();
     for (auto jt = first_not_found; jt != path.end(); ++jt) {
