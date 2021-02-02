@@ -101,19 +101,33 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         }
     };
 
+    size_t last_seed_size = this->config_.min_seed_length;
     for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k(),
                                                 this->query_.size() - i });
-            dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
-                std::string_view(this->query_.data() + i, max_seed_length),
-                [&](node_index alt_node, size_t seed_length) {
-                    call_suffix_seed(i, alt_node, seed_length);
-                },
-                this->config_.min_seed_length,
-                this->config_.max_num_seeds_per_locus
-            );
+            bool found = false;
+            if (max_seed_length >= last_seed_size) {
+                dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
+                    std::string_view(this->query_.data() + i, max_seed_length),
+                    [&](node_index alt_node, size_t seed_length) {
+                        found = true;
+                        last_seed_size = seed_length;
+                        call_suffix_seed(i, alt_node, seed_length);
+                    },
+                    last_seed_size,
+                    this->config_.max_num_seeds_per_locus
+                );
+            }
+
+            if (!found) {
+                last_seed_size = std::max(last_seed_size - 1,
+                                          this->config_.min_seed_length);
+            }
+        } else {
+            last_seed_size = std::max(this->graph_.get_k() - 1,
+                                      this->config_.min_seed_length);
         }
     }
 }
