@@ -178,7 +178,7 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_fwd_rev_comp_json_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -196,7 +196,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
+        self.assertEqual('nodes (k): 16461', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --align-min-exact-match 0.0 --align-local {reads}'.format(
@@ -215,7 +215,7 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_edit_distance_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
+        construct_command = '{exe} build --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/genome.MT',
@@ -233,7 +233,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
+        self.assertEqual('nodes (k): 16461', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --align-min-exact-match 0.0 --align-local {reads}'.format(
