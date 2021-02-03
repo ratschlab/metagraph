@@ -338,55 +338,58 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 canonical ? canonical->get_graph() : graph
             );
 
+            size_t num_sentinels = rev_seq.find_last_of(boss::BOSS::kSentinel) + 1;
+            assert(offset_ >= num_sentinels);
+
+            if (canonical && nodes_.back() != canonical->get_base_node(nodes_.back())) {
+                // reverse complement of a sink dummy k-mer, no point in traversing
+                assert(num_sentinels == 1);
+                *this = Alignment();
+                return;
+            }
+
+            // the node is present in the underlying graph, so use
+            // lower-level methods
+            const auto &boss = dbg_succ.get_boss();
+            auto edge = dbg_succ.kmer_to_boss_index(nodes_.back());
+            auto edge_label = boss.get_W(edge) % boss.alph_size;
+
+            size_t num_first_steps = canonical ? std::min(offset_, num_sentinels) : offset_;
+
             // TODO: This picks the node which is found by always traversing
             // the last outgoing edge. Is there a better way to pick a node?
-            if (!canonical || nodes_.back() == canonical->get_base_node(nodes_.back())) {
-                // the node is present in the underlying graph, so use
-                // lower-level methods
-                const auto &boss = dbg_succ.get_boss();
-                auto edge = dbg_succ.kmer_to_boss_index(nodes_.back());
-                auto edge_label = boss.get_W(edge) % boss.alph_size;
-
-                // TODO: for efficiency, the last outgoing edge is taken at each step.
-                // This is valid for canonical graphs since the reverse complement of
-                // the found non-dummy k-mer is guaranteed to exist, but this node may
-                // not exist in a non-canonical graph.
-                for (size_t i = 0; i < offset_; ++i) {
-                    edge = boss.fwd(edge, edge_label);
-                    edge_label = boss.get_W(edge) % boss.alph_size;
-                    if (edge_label == boss::BOSS::kSentinelCode) {
-                        // reverse complement not found
-                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
-                        *this = Alignment();
-                        return;
-                    }
-
-                    nodes_.push_back(dbg_succ.boss_to_kmer_index(edge));
-                    assert(nodes_.back());
-                    rev_seq.push_back(boss.decode(edge_label));
+            for (size_t i = 0; i < num_first_steps; ++i) {
+                edge = boss.fwd(edge, edge_label);
+                edge_label = boss.get_W(edge) % boss.alph_size;
+                if (edge_label == boss::BOSS::kSentinelCode) {
+                    // reverse complement not found
+                    assert(offset_ > num_sentinels);
+                    *this = Alignment();
+                    return;
                 }
-            } else {
-                // the node is a reverse-complement, so need to use CanonicalDBG
-                // to traverse
-                for (size_t i = 0; i < offset_; ++i) {
-                    NodeType next_node = 0;
-                    char last_char;
-                    graph.call_outgoing_kmers(nodes_.back(), [&](NodeType next, char c) {
-                        if (c == boss::BOSS::kSentinel)
-                            return;
 
-                        next_node = next;
-                        last_char = c;
-                    });
+                nodes_.push_back(dbg_succ.boss_to_kmer_index(edge));
+                assert(nodes_.back());
+                rev_seq.push_back(boss.decode(edge_label));
+            }
 
-                    if (!next_node) {
-                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
-                        *this = Alignment();
+            for (size_t i = num_first_steps; i < offset_; ++i) {
+                NodeType next_node = 0;
+                char last_char;
+                canonical->call_outgoing_kmers(nodes_.back(), [&](NodeType next, char c) {
+                    if (c == boss::BOSS::kSentinel)
                         return;
-                    } else {
-                        nodes_.push_back(next_node);
-                        rev_seq.push_back(last_char);
-                    }
+
+                    next_node = next;
+                    last_char = c;
+                });
+
+                if (!next_node) {
+                    *this = Alignment();
+                    return;
+                } else {
+                    nodes_.push_back(next_node);
+                    rev_seq.push_back(last_char);
                 }
             }
 
