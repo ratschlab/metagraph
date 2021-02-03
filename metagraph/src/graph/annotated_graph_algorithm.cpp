@@ -250,5 +250,101 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
     }, anno_graph.get_graph().max_index() + 1);
 }
 
+
+struct HullPathContext {
+    std::string last_kmer;
+    node_index last_node;
+    size_t depth; // not equal to path.size() if the path is cut off
+    size_t fork_count;
+};
+
+void call_hull_sequences(const DeBruijnGraph &graph,
+                         node_index node,
+                         const std::function<void(std::string_view, const std::vector<node_index>&)> &callback,
+                         const std::function<bool(std::string_view,
+                                                  const std::vector<node_index>&,
+                                                  size_t /* depth */,
+                                                  size_t /* fork count */)> &halt) {
+    // DFS from branching points
+    std::string kmer = graph.get_node_sequence(node);
+    assert(kmer != std::string(graph.get_k(), '$'));
+    kmer.erase(kmer.begin());
+    kmer.push_back('$');
+    std::vector<HullPathContext> paths_to_extend;
+    graph.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+        if (c == '$')
+            return;
+
+        kmer.back() = c;
+        assert(graph.kmer_to_node(kmer) == next_node);
+        if (!halt(kmer, { next_node }, 1, 0)) {
+            paths_to_extend.emplace_back(HullPathContext{
+                .last_kmer = kmer,
+                .last_node = next_node,
+                .depth = 1,
+                .fork_count = 0
+            });
+        }
+    });
+
+    while (paths_to_extend.size()) {
+        HullPathContext hull_path = std::move(paths_to_extend.back());
+        paths_to_extend.pop_back();
+
+        std::string &seq = hull_path.last_kmer;
+        std::vector<node_index> path = { hull_path.last_node };
+        size_t depth = hull_path.depth;
+        size_t fork_count = hull_path.fork_count;
+
+        assert(path.size() == seq.length() - graph.get_k() + 1);
+
+        bool extend = true;
+        while (extend && graph.has_single_outgoing(path.back())) {
+            graph.call_outgoing_kmers(path.back(), [&](auto node, char c) {
+                if (c == '$')
+                    return;
+
+                path.push_back(node);
+                seq.push_back(c);
+            });
+            depth++;
+            extend = !halt(seq, path, depth, fork_count);
+        }
+
+        assert(path.size() == seq.length() - graph.get_k() + 1);
+        assert(path == map_sequence_to_nodes(graph, seq));
+
+        callback(seq, path);
+
+        if (!extend)
+            continue;
+
+        // a fork or a sink has been reached before the path has reached max depth
+        assert(!graph.has_single_outgoing(path.back()));
+
+        node = path.back();
+        path.resize(0);
+        seq.erase(seq.begin(), seq.end() - graph.get_k() + 1);
+        seq.push_back('$');
+
+        // schedule further traversals
+        graph.call_outgoing_kmers(node, [&](node_index next_node, char c) {
+            if (c == '$')
+                return;
+
+            seq.back() = c;
+            assert(graph.kmer_to_node(seq) == next_node);
+            if (!halt(seq, { next_node }, depth + 1, fork_count + 1)) {
+                paths_to_extend.emplace_back(HullPathContext{
+                    .last_kmer = seq,
+                    .last_node = next_node,
+                    .depth = depth + 1,
+                    .fork_count = fork_count + 1
+                });
+            }
+        });
+    }
+}
+
 } // namespace graph
 } // namespace mtg

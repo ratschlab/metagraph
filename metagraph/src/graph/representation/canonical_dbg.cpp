@@ -63,9 +63,7 @@ void CanonicalDBG
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
     std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
-    auto first_not_found = graph_.is_canonical_mode()
-        ? path.end()
-        : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
+    auto first_not_found = std::find(path.begin(), path.end(), DeBruijnGraph::npos);
 
     for (auto jt = path.begin(); jt != first_not_found; ++jt) {
         if (terminate())
@@ -80,7 +78,39 @@ void CanonicalDBG
     std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
                         sequence.end());
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    std::vector<node_index> rev_path;
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
+        const auto &boss = dbg_succ->get_boss();
+
+        rev_path.resize(rev_seq.size() - graph_.get_k() + 1);
+        auto it = path.rbegin();
+        auto jt = rev_path.begin();
+        boss.map_to_edges(rev_seq,
+            [&](auto rc_index) {
+                assert(it < path.rend());
+                assert(jt < rev_path.end());
+                *jt = dbg_succ->boss_to_kmer_index(rc_index);
+                ++jt;
+                ++it;
+            },
+            []() { return false; },
+            [&]() {
+                assert(it < path.rend());
+                if (*it) {
+                    ++it;
+                    ++jt;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        );
+
+        assert(it == std::make_reverse_iterator(first_not_found));
+        assert(jt == rev_path.end());
+    } else {
+        rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    }
 
     auto it = rev_path.rbegin();
     for (auto jt = first_not_found; jt != path.end(); ++jt) {
@@ -103,13 +133,9 @@ void CanonicalDBG
 void CanonicalDBG::map_to_nodes(std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    if (graph_.is_canonical_mode()) {
-        graph_.map_to_nodes(sequence, callback, terminate);
-    } else {
-        map_to_nodes_sequentially(sequence, [&](node_index i) {
-            callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
-        }, terminate);
-    }
+    map_to_nodes_sequentially(sequence, [&](node_index i) {
+        callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
+    }, terminate);
 }
 
 void CanonicalDBG::append_next_rc_nodes(node_index node,
@@ -200,7 +226,7 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left)
+        if (max_num_edges_left)
             append_next_rc_nodes(node, children);
 
         child_node_cache_.Put(node, children);
@@ -306,7 +332,7 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left)
+        if (max_num_edges_left)
             append_prev_rc_nodes(node, parents);
 
         parent_node_cache_.Put(node, parents);
@@ -384,7 +410,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
-        if (next != DeBruijnGraph::npos || graph_.is_canonical_mode())
+        if (next != DeBruijnGraph::npos)
             return next;
 
         std::string rev_seq = get_node_sequence(node).substr(1) + next_char;
@@ -402,7 +428,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
         return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
-        if (prev != DeBruijnGraph::npos || graph_.is_canonical_mode())
+        if (prev != DeBruijnGraph::npos)
             return prev;
 
         std::string rev_seq = std::string(1, prev_char)

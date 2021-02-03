@@ -270,19 +270,9 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
     );
 }
 
-void DBGSuccinct
-::call_nodes_with_suffix_matching_longest_prefix(
-            std::string_view str,
-            std::function<void(node_index, uint64_t /* match length */)> callback,
-            size_t min_match_length,
-            size_t max_num_allowed_matches) const {
-    if (!max_num_allowed_matches)
-        return;
-
+std::tuple<boss::BOSS::edge_index, boss::BOSS::edge_index, size_t>
+DBGSuccinct::get_range_with_suffix_matching_longest_prefix(std::string_view str) const {
     assert(str.size() <= get_k());
-
-    if (str.size() < min_match_length)
-        return;
 
     auto encoded = boss_graph_->encode(str);
 
@@ -290,7 +280,7 @@ void DBGSuccinct
     if (std::find(encoded.begin(),
                   encoded.end(),
                   boss_graph_->alph_size) != encoded.end()) {
-        return;
+        return {};
     }
 
     auto index_range = boss_graph_->index_range(
@@ -299,18 +289,34 @@ void DBGSuccinct
     );
 
     if (std::get<0>(index_range) == 0 || std::get<1>(index_range) == 0)
-        return;
+        return {};
 
     if (std::get<2>(index_range) == encoded.begin()) {
-        callback(std::get<0>(index_range), 0);
-        return;
+        return {};
     }
+
+    return { std::get<0>(index_range),
+             std::get<1>(index_range),
+             std::get<2>(index_range) - encoded.begin() };
+}
+
+void DBGSuccinct
+::call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view str,
+            std::function<void(node_index, uint64_t /* match length */)> callback,
+            size_t min_match_length,
+            size_t max_num_allowed_matches) const {
+    if (!max_num_allowed_matches || str.size() < min_match_length)
+        return;
+
+    auto index_range = get_range_with_suffix_matching_longest_prefix(str);
 
     // since we can only match up to get_k() - 1 in BOSS, check for this
     // case and simply pick the appropriate BOSS edge
-    if (encoded.size() == get_k() && std::get<2>(index_range) + 1 == encoded.end()) {
+    if (str.size() == get_k() && std::get<2>(index_range) + 1 == get_k()) {
         assert(std::get<0>(index_range) == std::get<1>(index_range));
-        auto edge = boss_graph_->pick_edge(std::get<1>(index_range), encoded.back());
+        auto edge = boss_graph_->pick_edge(std::get<1>(index_range),
+                                           boss_graph_->encode(str.back()));
         if (edge) {
             auto kmer_index = boss_to_kmer_index(edge);
             if (kmer_index != npos) {
@@ -322,7 +328,7 @@ void DBGSuccinct
         }
     }
 
-    uint64_t match_size = std::get<2>(index_range) - encoded.begin();
+    uint64_t match_size = std::get<2>(index_range);
     if (match_size < min_match_length)
         return;
 

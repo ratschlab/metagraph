@@ -78,6 +78,50 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
+std::vector<BRWT::Row> BRWT::has_column(const std::vector<Row> &row_ids, Column column) const {
+    assert(column < num_columns());
+
+    auto num_nonzero_rows = nonzero_rows_->num_set_bits();
+
+    // check if the column is empty
+    if (!num_nonzero_rows)
+        return {};
+
+    std::vector<Row> result;
+    result.reserve(std::min(row_ids.size(), (size_t)num_nonzero_rows));
+
+    // check whether it is a leaf
+    if (!child_nodes_.size()) {
+        // return the overlap with the index column
+        for (Row i : row_ids) {
+            if ((*nonzero_rows_)[i])
+                result.push_back(i);
+        }
+        return result;
+    }
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        // check index
+        if (uint64_t rank = nonzero_rows_->conditional_rank1(row_ids[i])) {
+            // map index from parent's to children's coordinate system
+            result.push_back(rank - 1);
+        }
+    }
+
+    auto child_node = assignments_.group(column);
+    auto rows = child_nodes_[child_node]->has_column(result, assignments_.rank(column));
+
+    // check if we need to update the row indexes
+    if (num_nonzero_rows == nonzero_rows_->size())
+        return rows;
+
+    // shift indexes
+    for (size_t i = 0; i < rows.size(); ++i) {
+        rows[i] = nonzero_rows_->select1(rows[i] + 1);
+    }
+    return rows;
+}
+
 std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
     std::vector<Column> slice;
     // expect at least one relation per row

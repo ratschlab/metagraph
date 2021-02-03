@@ -10,7 +10,8 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
@@ -157,105 +158,6 @@ struct HullPathContext {
     size_t depth; // not equal to path.size() if the path is cut off
     size_t fork_count;
 };
-
-// Expand the query graph by traversing around its nodes which are forks in the
-// full graph.
-// |continue_traversal| is given a node and the distrance traversed so far and
-// returns whether traversal should continue.
-template <class ContigCallback>
-void call_hull_sequences(const DeBruijnGraph &full_dbg,
-                         std::string kmer,
-                         const ContigCallback &callback,
-                         const std::function<bool(std::string_view seq,
-                                                  node_index last_node,
-                                                  size_t depth,
-                                                  size_t fork_count)> &continue_traversal) {
-    // DFS from branching points
-    node_index node = full_dbg.kmer_to_node(kmer);
-    if (!node)
-        return;
-
-    kmer.erase(kmer.begin());
-    kmer.push_back('$');
-    std::vector<HullPathContext> paths_to_extend;
-    full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
-        if (c == '$')
-            return;
-
-        kmer.back() = c;
-        assert(full_dbg.kmer_to_node(kmer) == next_node);
-        if (continue_traversal(kmer, next_node, 1, 0)) {
-            paths_to_extend.emplace_back(HullPathContext{
-                .last_kmer = kmer,
-                .last_node = next_node,
-                .depth = 1,
-                .fork_count = 0
-            });
-        } else {
-            callback(kmer, std::vector<node_index>{ next_node });
-        }
-    });
-
-    while (paths_to_extend.size()) {
-        HullPathContext hull_path = std::move(paths_to_extend.back());
-        paths_to_extend.pop_back();
-
-        std::string &seq = hull_path.last_kmer;
-        std::vector<node_index> path = { hull_path.last_node };
-        size_t depth = hull_path.depth;
-        size_t fork_count = hull_path.fork_count;
-
-        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
-
-        bool extend = true;
-        while (extend && full_dbg.has_single_outgoing(path.back())) {
-            full_dbg.call_outgoing_kmers(path.back(), [&](auto node, char c) {
-                if (c == '$')
-                    return;
-
-                path.push_back(node);
-                seq.push_back(c);
-            });
-            depth++;
-            extend = continue_traversal(seq, path.back(), depth, fork_count);
-        }
-
-        assert(path.size() == seq.length() - full_dbg.get_k() + 1);
-        assert(path == map_sequence_to_nodes(full_dbg, seq));
-
-        callback(seq, path);
-
-        if (!extend)
-            continue;
-
-        // a fork or a sink has been reached before the path has reached max depth
-        assert(!full_dbg.has_single_outgoing(path.back()));
-
-        node = path.back();
-        path.resize(0);
-        seq.erase(seq.begin(), seq.end() - full_dbg.get_k() + 1);
-        seq.push_back('$');
-
-        // schedule further traversals
-        full_dbg.call_outgoing_kmers(node, [&](node_index next_node, char c) {
-            if (c == '$')
-                return;
-
-            seq.back() = c;
-            assert(full_dbg.kmer_to_node(seq) == next_node);
-            if (continue_traversal(seq, next_node, depth + 1, fork_count + 1)) {
-                paths_to_extend.emplace_back(HullPathContext{
-                    .last_kmer = seq,
-                    .last_node = next_node,
-                    .depth = depth + 1,
-                    .fork_count = fork_count + 1
-                });
-            } else {
-                callback(seq, std::vector<node_index>{ next_node });
-            }
-        });
-    }
-}
 
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
@@ -426,7 +328,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         const auto &[contig, path] = (*contigs)[i];
         std::vector<std::pair<std::string, std::vector<node_index>>> added_paths;
         // TODO: combine these two callbacks into one?
-        auto callback = [&](const std::string &sequence,
+        auto callback = [&](std::string_view sequence,
                             const std::vector<node_index> &path) {
             added_paths.emplace_back(sequence, path);
             if (full_dbg.is_canonical_mode()) {
@@ -436,17 +338,25 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                 );
             }
         };
-        auto continue_traversal = [&](std::string_view seq,
-                                      node_index last_node,
-                                      size_t depth,
-                                      size_t fork_count) {
-            if (fork_count > max_hull_forks || depth >= max_hull_depth)
-                return false;
+
+        auto halt = [&](std::string_view seq,
+                        const std::vector<node_index> &path,
+                        size_t depth,
+                        size_t fork_count) {
+            if (fork_count > max_hull_forks || depth >= max_hull_depth) {
+                if (path.size() == 1)
+                    callback(seq, path);
+
+                return true;
+            }
 
             // if the last node is already in the graph, cut off traversal
             // since this node will be covered in another traversal
             if (batch_graph.find(seq.substr(seq.length() - batch_graph.get_k()))) {
-                return false;
+                if (path.size() == 1)
+                    callback(seq, path);
+
+                return true;
             }
 
             // when a node which has already been accessed is visited,
@@ -457,14 +367,18 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
             #pragma omp critical
             {
                 auto [it, inserted]
-                    = distance_traversed_until_node.emplace(last_node, depth);
+                    = distance_traversed_until_node.emplace(path.back(), depth);
 
                 extend = inserted || depth < it->second;
 
                 if (!inserted && depth < it->second)
                     it.value() = depth;
             }
-            return extend;
+
+            if (!extend && path.size() == 1)
+                callback(seq, path);
+
+            return !extend;
         };
 
         for (size_t j = 0; j < path.size(); ++j) {
@@ -472,11 +386,17 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                 // If a node is unmatched, start expansion from all the nodes
                 // adjacent to it.
                 std::string kmer = contig.substr(j, full_dbg.get_k());
+                std::string prev_kmer = std::string(1, '$') + kmer;
+                prev_kmer.pop_back();
+
                 // forward expansion from the incoming nodes
-                batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
-                    [&](node_index next) {
-                        call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
-                                            callback, continue_traversal);
+                batch_graph.call_incoming_kmers(batch_graph.kmer_to_node(kmer),
+                    [&](node_index prev_node, char c) {
+                        prev_kmer[0] = c;
+                        assert(batch_graph.kmer_to_node(prev_kmer) == prev_node);
+                        prev_node = full_dbg.kmer_to_node(prev_kmer);
+                        if (prev_node)
+                            call_hull_sequences(full_dbg, prev_node, callback, halt);
                     }
                 );
                 if (batch_graph.is_canonical_mode()) {
@@ -484,10 +404,15 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                     // to (outgoing from rev-comp), so the following code invokes
                     // backward expansion.
                     reverse_complement(kmer);
-                    batch_graph.adjacent_incoming_nodes(batch_graph.kmer_to_node(kmer),
-                        [&](node_index next) {
-                            call_hull_sequences(full_dbg, batch_graph.get_node_sequence(next),
-                                                callback, continue_traversal);
+                    prev_kmer = std::string(1, '$') + kmer;
+                    prev_kmer.pop_back();
+                    batch_graph.call_incoming_kmers(batch_graph.kmer_to_node(kmer),
+                        [&](node_index prev_node, char c) {
+                            prev_kmer[0] = c;
+                            assert(batch_graph.kmer_to_node(prev_kmer) == prev_node);
+                            prev_node = full_dbg.kmer_to_node(prev_kmer);
+                            if (prev_node)
+                                call_hull_sequences(full_dbg, prev_node, callback, halt);
                         }
                     );
                 }
@@ -496,15 +421,24 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
             }
         }
 
-        std::string last_kmer = contig.substr(contig.length() - full_dbg.get_k(), full_dbg.get_k());
-        if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
-            call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+        if (path.back()) {
+            std::string last_kmer = contig.substr(contig.length() - full_dbg.get_k(), full_dbg.get_k());
+            node_index last_node = batch_graph.kmer_to_node(last_kmer);
+            if (!batch_graph.outdegree(last_node)) {
+                assert(full_dbg.kmer_to_node(last_kmer) == path.back());
+                call_hull_sequences(full_dbg, path.back(), callback, halt);
+            }
+        }
 
         if (batch_graph.is_canonical_mode()) {
-            last_kmer = contig.substr(0, full_dbg.get_k());
+            std::string last_kmer = contig.substr(0, full_dbg.get_k());
             reverse_complement(last_kmer);
-            if (!batch_graph.outdegree(batch_graph.kmer_to_node(last_kmer)))
-                call_hull_sequences(full_dbg, last_kmer, callback, continue_traversal);
+            node_index last_node = batch_graph.kmer_to_node(last_kmer);
+            if (!batch_graph.outdegree(last_node)) {
+                last_node = full_dbg.kmer_to_node(last_kmer);
+                if (last_node)
+                    call_hull_sequences(full_dbg, last_node, callback, halt);
+            }
         }
 
         #pragma omp critical
@@ -825,10 +759,11 @@ int query_graph(Config *config) {
 }
 
 void align_sequence(std::string &name, std::string &seq,
-                    const DeBruijnGraph &graph,
+                    const AnnotatedDBG &anno_graph,
                     const align::DBGAlignerConfig &aligner_config) {
+    const auto &graph = anno_graph.get_graph();
     auto alignments
-        = build_aligner(graph, aligner_config)->align(seq);
+        = build_aligner<align::LabeledDBGAligner>(anno_graph, aligner_config)->align(seq);
 
     if (alignments.size()) {
         if (aligner_config.chain_alignments && alignments.size() > 1) {
@@ -878,7 +813,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                            const Config &config,
                            const align::DBGAlignerConfig *aligner_config) {
     if (aligner_config) {
-        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
+        align_sequence(name, seq, anno_graph, *aligner_config);
     }
 
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
@@ -945,7 +880,7 @@ void QueryExecutor
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 align_sequence(seq_batch[i].first, seq_batch[i].second,
-                               anno_graph_.get_graph(), *aligner_config_);
+                               anno_graph_, *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();
