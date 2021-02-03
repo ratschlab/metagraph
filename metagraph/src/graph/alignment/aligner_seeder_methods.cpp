@@ -136,9 +136,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     );
 
     this->BaseSeeder::call_seeds([&](Seed&& seed) {
-        suffix_seeds[seed.get_query().data() - this->query_.data()].emplace_back(
-            std::move(seed)
-        );
+        suffix_seeds[seed.get_clipping()].emplace_back(std::move(seed));
     });
 
     auto push_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
@@ -164,7 +162,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             min_seed_length[i] = this->graph_.get_k();
             last_seed_size = this->graph_.get_k();
         } else {
-            --last_seed_size;
+            last_seed_size = std::max(last_seed_size - 1, this->config_.min_seed_length);
             min_seed_length[i] = std::max(min_seed_length[i], last_seed_size);
         }
     }
