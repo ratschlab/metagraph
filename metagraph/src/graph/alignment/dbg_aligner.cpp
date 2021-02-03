@@ -133,19 +133,19 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_best_direction(DBGQueryAlignment &paths,
-                       const ISeeder<node_index> &seeder,
-                       const ISeeder<node_index> &seeder_rc,
-                       IExtender<node_index>&& extender,
-                       IExtender<node_index>&& extender_rc) const {
+                       const ISeeder<node_index> &forward_seeder,
+                       const ISeeder<node_index> &reverse_seeder,
+                       IExtender<node_index>&& forward_extender,
+                       IExtender<node_index>&& reverse_extender) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(forward, seeder, std::move(extender),
+        align_core(forward, forward_seeder, std::move(forward_extender),
                    alignment_callback, get_min_path_score);
 
-        align_core(reverse, seeder_rc, std::move(extender_rc),
+        align_core(reverse, reverse_seeder, std::move(reverse_extender),
                    alignment_callback, get_min_path_score);
 
     });
@@ -156,7 +156,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(DBGQueryAlignment &paths,
                         const ISeeder<node_index> &forward_seeder,
                         IExtender<node_index>&& forward_extender,
-                        const AlignCoreGenerator &rev_comp_core_generator) const {
+                        IExtender<node_index>&& reverse_extender,
+                        const SeederGenerator &seeder_generator) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
@@ -217,9 +218,9 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 #endif
 
         // Then use the reverse complements of the forward alignments as seeds
-        rev_comp_core_generator(reverse, forward_seeder, std::move(reverse_seeds),
-                                [&](const auto &seeder_rc, auto&& extender_rc) {
-            align_core(reverse, seeder_rc, std::move(extender_rc),
+        seeder_generator(forward_seeder, std::move(reverse_seeds),
+                         [&](const auto &reverse_seeder) {
+            align_core(reverse, reverse_seeder, std::move(reverse_extender),
                 [&](DBGAlignment&& path) {
                     // If the path originated from a backwards alignment (forward
                     // alignment of a reverse complement) and did not skip the first
