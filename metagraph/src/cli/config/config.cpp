@@ -15,6 +15,10 @@
 namespace mtg {
 namespace cli {
 
+using mtg::graph::boss::BOSS;
+using mtg::graph::DeBruijnGraph;
+
+
 const size_t Config::kDefaultIndexSuffixLen
     = 20 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
@@ -594,10 +598,6 @@ Config::Config(int argc, char *argv[]) {
         exit(-1);
     }
 }
-
-
-using mtg::graph::boss::BOSS;
-using mtg::graph::DeBruijnGraph;
 
 
 std::string Config::state_to_string(BOSS::State state) {

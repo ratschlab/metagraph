@@ -199,7 +199,7 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
         return;
 
     if (mode_ == PRIMARY)
-        throw std::runtime_error("extension of primary succinct graphs is not implemented");
+        logger->warn("extending a primary succinct graph");
 
     std::vector<uint64_t> boss_edges_inserted;
     boss_edges_inserted.reserve((sequence.size() - get_k() + 1) * 2);

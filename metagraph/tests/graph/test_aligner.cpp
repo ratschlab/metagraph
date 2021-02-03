@@ -1454,7 +1454,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     std::string query =     "AAAAGTTTTCGAGGCCAA";
     //                            X
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DBGMode::CANONICAL);
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
