@@ -263,26 +263,25 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     last_seed_size = min_seed_length[0];
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
-        if (pos_seeds.empty())
-            continue;
-
-        if (!pos_seeds[0].get_offset()) {
-            assert(pos_seeds.size() == 1);
-            callback(std::move(pos_seeds[0]));
-            last_seed_size = std::max(this->graph_.get_k() - 1,
-                                      this->config_.min_seed_length);
-        } else if (pos_seeds.size()) {
-            size_t seed_length = this->graph_.get_k() - pos_seeds[0].get_offset();
-            if (seed_length >= last_seed_size) {
-                last_seed_size = seed_length;
-                if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
-                    for (auto&& seed : pos_seeds) {
-                        callback(std::move(seed));
-                    }
-                }
-            } else {
-                last_seed_size = std::max(last_seed_size - 1,
+        if (pos_seeds.size()) {
+            if (!pos_seeds[0].get_offset()) {
+                assert(pos_seeds.size() == 1);
+                callback(std::move(pos_seeds[0]));
+                last_seed_size = std::max(this->graph_.get_k() - 1,
                                           this->config_.min_seed_length);
+            } else {
+                size_t seed_length = this->graph_.get_k() - pos_seeds[0].get_offset();
+                if (seed_length >= last_seed_size) {
+                    last_seed_size = seed_length;
+                    if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
+                        for (auto&& seed : pos_seeds) {
+                            callback(std::move(seed));
+                        }
+                    }
+                } else {
+                    last_seed_size = std::max(last_seed_size - 1,
+                                              this->config_.min_seed_length);
+                }
             }
         } else {
             last_seed_size = std::max(last_seed_size - 1,
