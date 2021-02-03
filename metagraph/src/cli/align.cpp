@@ -420,8 +420,11 @@ int align_to_graph(Config *config) {
     auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
     // This speeds up mapping, and allows for node suffix matching
-    if (dbg)
+    bool dbg_unmasked = false;
+    if (dbg && config->alignment_min_seed_length < graph->get_k()) {
+        dbg_unmasked = dbg->get_mask();
         dbg->reset_mask();
+    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
@@ -461,6 +464,11 @@ int align_to_graph(Config *config) {
     std::shared_ptr<AnnotatedDBG::Annotator> annotator;
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
+        if (dbg_unmasked) {
+            logger->error("Annotations for graph constructed for masked DBGSuccinct. "
+                          "Please rebuild without --mask-dummy flag.");
+            exit(1);
+        }
         annotator = initialize_annotated_dbg(graph, *config)->get_annotation_ptr();
     }
 
