@@ -184,22 +184,23 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             if (graph_.is_canonical_mode()) {
                 assert(!is_reverse_complement);
 
-                auto build_rev_comp_alignment_core = [&](std::string_view reverse,
-                                                         const auto &forward_seeder,
-                                                         auto&& rev_comp_seeds,
-                                                         const auto &callback) {
-                    LabeledSeeder<ManualSeeder<node_index>> seeder_rc(
+                std::string_view reverse = paths.get_query(true);
+
+                auto build_rev_comp_seeder = [&](const auto &forward_seeder,
+                                                 auto&& rev_comp_seeds,
+                                                 const auto &callback) {
+                    callback(LabeledSeeder<ManualSeeder<node_index>>(
                         dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
                         std::move(rev_comp_seeds)
-                    );
-                    callback(seeder_rc, build_extender(reverse, seeder_rc));
+                    ));
                 };
 
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
                 aligner_core_.align_both_directions(paths, seeder, std::move(extender),
-                                                    build_rev_comp_alignment_core);
+                                                    build_extender(reverse, seeder),
+                                                    build_rev_comp_seeder);
             } else if (config_.forward_and_reverse_complement) {
                 assert(!is_reverse_complement);
 
