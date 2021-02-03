@@ -116,11 +116,9 @@ auto ILabeledDBGAligner
         ++i;
     }
 
-    if (std::all_of(target_columns.begin(), target_columns.end(),
-                    [](const auto &a) { return a.empty(); })) {
-        for (size_t i = 0; i < target_columns.size(); ++i) {
+    for (size_t i = 0; i < target_columns.size(); ++i) {
+        if (target_columns[i].empty())
             target_columns[i][kNTarget] = sdsl::bit_vector(query_nodes[i].size(), true);
-        }
     }
 
     return std::make_pair(std::move(query_nodes), std::move(target_columns));
@@ -173,11 +171,13 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     assert(path.size() == 1);
     size_t k = this->graph_.get_k();
 
+    const char *endpoint = path.get_query_end() + path.get_offset();
+    assert(endpoint > this->query.data());
+
     // align as usual if a label can't be found via extension
-    if (path.get_clipping() + k - path.get_offset() > this->query.size())
+    if (endpoint > this->query.data() + this->query.size())
         return;
 
-    const char *endpoint = path.get_query_end() + path.get_offset();
     std::string_view subquery(this->query.data(), endpoint - this->query.data());
 
     alt_seed_ = path;
