@@ -66,7 +66,12 @@ class DBGAligner : public ISeedAndExtendAligner {
     typedef IDBGAligner::AlignmentCallback AlignmentCallback;
 
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config), aligner_core_(graph_, config_) {}
+          : graph_(graph), config_(config) {
+        assert(config_.num_alternative_paths);
+        if (!config_.check_config_scores()) {
+            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+        }
+    }
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const override final;
@@ -76,7 +81,6 @@ class DBGAligner : public ISeedAndExtendAligner {
   protected:
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
-    SeedAndExtendAlignerCore<AlignmentCompare> aligner_core_;
 };
 
 template <class AlignmentCompare>
@@ -98,12 +102,7 @@ class SeedAndExtendAlignerCore {
                                const SeederCallback&)> SeederGenerator;
 
     SeedAndExtendAlignerCore(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {
-        assert(config_.num_alternative_paths);
-        if (!config_.check_config_scores()) {
-            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
-        }
-    }
+          : graph_(graph), config_(config) {}
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
@@ -159,6 +158,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
+        SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
@@ -182,9 +182,9 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
-            aligner_core_.align_both_directions(paths, seeder, std::move(extender),
-                                                Extender(graph_, config_, reverse),
-                                                build_rev_comp_seeder);
+            aligner_core.align_both_directions(paths, seeder, std::move(extender),
+                                               Extender(graph_, config_, reverse),
+                                               build_rev_comp_seeder);
         } else if (config_.forward_and_reverse_complement) {
             assert(!is_reverse_complement);
             std::string_view reverse = paths.get_query(true);
@@ -192,12 +192,12 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
                              map_sequence_to_nodes(graph_, reverse), config_);
 
-            aligner_core_.align_best_direction(paths, seeder, seeder_rc,
-                                               std::move(extender),
-                                               Extender(graph_, config_, reverse));
+            aligner_core.align_best_direction(paths, seeder, seeder_rc,
+                                              std::move(extender),
+                                              Extender(graph_, config_, reverse));
         } else {
-            aligner_core_.align_one_direction(paths, is_reverse_complement, seeder,
-                                              std::move(extender));
+            aligner_core.align_one_direction(paths, is_reverse_complement, seeder,
+                                             std::move(extender));
         }
 
         callback(header, std::move(paths));
