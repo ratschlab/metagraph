@@ -144,6 +144,9 @@ class IExtender {
     typedef typename DBGAlignment::node_index node_index;
     typedef typename DBGAlignment::score_t score_t;
     typedef std::function<void(DBGAlignment&&, NodeType)> ExtensionCallback;
+    typedef std::function<void(NodeType,
+                               size_t /* query idx begin */,
+                               size_t /* query idx end */)> ExploredNodeCallback;
 
     virtual ~IExtender() {}
 
@@ -152,6 +155,8 @@ class IExtender {
                score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &seed) = 0;
+
+    virtual void call_explored_nodes(const ExploredNodeCallback &callback) const = 0;
 
   protected:
     virtual void reset() = 0;
@@ -166,6 +171,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
+    typedef typename IExtender<NodeType>::ExploredNodeCallback ExploredNodeCallback;
 
     typedef std::tuple<NodeType, score_t, bool /* converged */> ColumnRef;
     typedef boost::container::priority_deque<ColumnRef,
@@ -185,6 +191,13 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual void initialize(const DBGAlignment &path) override;
 
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
+
+    virtual void call_explored_nodes(const ExploredNodeCallback &callback) const override {
+        for (const auto &pair : dp_table) {
+            const auto &[node, column] = pair;
+            callback(node, column.start_index, column.start_index + column.scores.size() - 8);
+        }
+    }
 
   protected:
     const DeBruijnGraph &graph_;
@@ -208,7 +221,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                  size_t begin = 0,
                  size_t end = std::numeric_limits<size_t>::max());
 
-    virtual bool add_seed(size_t clipping);
+    virtual bool add_seed();
 
     virtual const DBGAlignment& get_seed() const override { return *path_; }
 

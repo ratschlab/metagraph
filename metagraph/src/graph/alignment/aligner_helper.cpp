@@ -788,10 +788,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
     } else {
         assert(nodes_.size() == 1);
         // extract target sequence prefix
-        std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
-            + sequence_;
+        sequence_ = graph.get_node_sequence(nodes_[0]).substr(0, offset_) + sequence_;
 
-        if (rev_seq[0] == boss::BOSS::kSentinel) {
+        if (sequence_[0] == boss::BOSS::kSentinel) {
             // If the alignment starts from a source k-mer, then traverse forwards
             // until a non-dummy k-mer is hit and check if its reverse complement exists.
 
@@ -804,99 +803,94 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 canonical ? canonical->get_graph() : graph
             );
 
+            size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
+            assert(offset_ >= num_sentinels);
+
+            if (canonical && nodes_[0] != canonical->get_base_node(nodes_[0])) {
+                // reverse complement of a sink dummy k-mer, no point in traversing
+                assert(num_sentinels == 1);
+                *this = Alignment();
+                return;
+            }
+
+            size_t num_first_steps = canonical ? std::min(offset_, num_sentinels) : offset_;
+
+            // the node is present in the underlying graph, so use
+            // lower-level methods
+            const auto &boss = dbg_succ.get_boss();
+            boss::BOSS::edge_index edge = dbg_succ.kmer_to_boss_index(nodes_[0]);
+            boss::BOSS::TAlphabet edge_label = boss.get_W(edge) % boss.alph_size;
+
             // TODO: This picks the node which is found by always traversing
             // the last outgoing edge. Is there a better way to pick a node?
-            if (!canonical || nodes_.back() == canonical->get_base_node(nodes_.back())) {
-                // the node is present in the underlying graph, so use
-                // lower-level methods
-                const auto &boss = dbg_succ.get_boss();
-                auto edge = dbg_succ.kmer_to_boss_index(nodes_.back());
-                auto edge_label = boss.get_W(edge) % boss.alph_size;
-
-                // TODO: for efficiency, the last outgoing edge is taken at each step.
-                // This is valid for canonical graphs since the reverse complement of
-                // the found non-dummy k-mer is guaranteed to exist, but this node may
-                // not exist in a non-canonical graph.
-                for (size_t i = 0; i < offset_; ++i) {
-                    edge = boss.fwd(edge, edge_label);
-                    edge_label = boss.get_W(edge) % boss.alph_size;
-                    if (edge_label == boss::BOSS::kSentinelCode) {
-                        // reverse complement not found
-                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
-                        *this = Alignment();
-                        return;
-                    }
-
-                    nodes_.push_back(dbg_succ.boss_to_kmer_index(edge));
-                    assert(nodes_.back());
-                    rev_seq.push_back(boss.decode(edge_label));
+            for (size_t i = 0; i < num_first_steps; ++i) {
+                edge = boss.fwd(edge, edge_label);
+                edge_label = boss.get_W(edge) % boss.alph_size;
+                if (edge_label == boss::BOSS::kSentinelCode) {
+                    // reverse complement not found
+                    assert(offset_ > num_sentinels);
+                    *this = Alignment();
+                    return;
                 }
-            } else {
-                // the node is a reverse-complement, so need to use CanonicalDBG
-                // to traverse
-                for (size_t i = 0; i < offset_; ++i) {
-                    NodeType next_node = 0;
-                    char last_char;
-                    graph.call_outgoing_kmers(nodes_.back(), [&](NodeType next, char c) {
-                        if (c == boss::BOSS::kSentinel)
-                            return;
 
-                        next_node = next;
-                        last_char = c;
-                    });
+                nodes_[0] = dbg_succ.boss_to_kmer_index(edge);
+                assert(nodes_[0]);
+                sequence_.push_back(boss.decode(edge_label));
+                assert(graph.get_node_sequence(nodes_[0])
+                    == sequence_.substr(sequence_.size() - graph.get_k()));
+            }
 
-                    if (!next_node) {
-                        assert(rev_seq.find_last_of(boss::BOSS::kSentinel) + 1 < offset_);
-                        *this = Alignment();
+            for (size_t i = num_first_steps; i < offset_; ++i) {
+                NodeType next_node = 0;
+                char last_char;
+                canonical->call_outgoing_kmers(nodes_[0], [&](NodeType next, char c) {
+                    if (c == boss::BOSS::kSentinel)
                         return;
-                    } else {
-                        nodes_.push_back(next_node);
-                        rev_seq.push_back(last_char);
-                    }
+
+                    next_node = next;
+                    last_char = c;
+                });
+
+                if (!next_node) {
+                    *this = Alignment();
+                    return;
+                } else {
+                    nodes_[0] = next_node;
+                    sequence_.push_back(last_char);
+                    assert(graph.get_node_sequence(nodes_[0])
+                        == sequence_.substr(sequence_.size() - graph.get_k()));
                 }
             }
 
-            assert(nodes_.size() == offset_ + 1);
-            nodes_.assign(nodes_.begin() + offset_, nodes_.end());
-            rev_seq.assign(rev_seq.begin() + offset_, rev_seq.end());
+            assert(sequence_.size() == dbg_succ.get_k() + offset_);
+            sequence_ = sequence_.substr(offset_);
 
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-            std::vector<NodeType> rev_nodes = nodes_;
-            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            reverse_complement_seq_path(graph, sequence_, nodes_);
 
-            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                             DeBruijnGraph::npos) == rev_nodes.end());
+            assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
+                    == nodes_.end());
 
-            assert(rev_seq.size() > offset_);
-            sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
-            nodes_.assign(rev_nodes.begin(), rev_nodes.end());
+            sequence_.assign(sequence_.data() + offset_, graph.get_k() - offset_);
 
         } else {
             assert(nodes_.size() == 1);
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-            std::vector<NodeType> rev_nodes = nodes_;
-            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            reverse_complement_seq_path(graph, sequence_, nodes_);
 
-            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                             DeBruijnGraph::npos) == rev_nodes.end());
+            assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
+                    == nodes_.end());
 
             // trim off ending from reverse complement (corresponding to the added prefix)
-            size_t trim_left = offset_;
-            while (trim_left && rev_nodes.size() > 1) {
-                rev_nodes.pop_back();
-                rev_seq.pop_back();
-                --trim_left;
-            }
-
-            for (size_t i = 0; i < trim_left; ++i) {
+            for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
-                graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
+                graph.adjacent_incoming_nodes(nodes_[0], [&](NodeType prev) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
                     // do we pick? Currently we pick the first one
                     if (indegree == 1)
-                        rev_nodes[0] = prev;
+                        nodes_[0] = prev;
                 });
 
                 if (!indegree) {
@@ -904,15 +898,15 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                     return;
                 }
 
-                rev_seq.pop_back();
+                sequence_.pop_back();
+                assert(graph.get_node_sequence(nodes_[0]).substr(i + 1)
+                    == sequence_.substr(sequence_.size() - graph.get_k() + i + 1));
             }
 
-            nodes_ = rev_nodes;
-            sequence_ = rev_seq;
-            offset_ = trim_left;
-            assert(!trim_left
-                    || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+            assert(sequence_.size() == graph.get_k() - offset_);
         }
+
+        assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
     std::reverse(cigar_.begin(), cigar_.end());

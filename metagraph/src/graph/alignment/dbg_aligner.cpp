@@ -46,6 +46,30 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     });
 
     for (auto &seed : seeds) {
+        bool inserted = false;
+        std::pair<size_t, size_t> idx_range {
+            seed.get_clipping(),
+            seed.get_clipping() + seed.get_query().size()
+        };
+        for (node_index node : seed) {
+            auto emplace = visited_nodes_.emplace(node, idx_range);
+            auto &range = emplace.first.value();
+            if (emplace.second) {
+                inserted = true;
+            } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                range.first = std::min(range.first, idx_range.first);
+                range.second = std::max(range.second, idx_range.second);
+                inserted = true;
+            }
+        }
+
+        if (!inserted) {
+#ifndef NDEBUG
+            mtg::common::logger->trace("Skipping seed: {}", seed);
+#endif
+            continue;
+        }
+
 #ifndef NDEBUG
         mtg::common::logger->trace("Seed: {}", seed);
 #endif
@@ -112,6 +136,15 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         }, min_path_score);
 
         // if !extended, then the seed was not extended because of early cutoff
+
+        extender.call_explored_nodes([&](node_index node, size_t begin, size_t end) {
+            auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+            auto &range = emplace.first.value();
+            if (!emplace.second) {
+                range.first = std::min(range.first, begin);
+                range.second = std::max(range.second, end);
+            }
+        });
     }
 }
 
@@ -133,19 +166,19 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_best_direction(DBGQueryAlignment &paths,
-                       const ISeeder<node_index> &seeder,
-                       const ISeeder<node_index> &seeder_rc,
-                       IExtender<node_index>&& extender,
-                       IExtender<node_index>&& extender_rc) const {
+                       const ISeeder<node_index> &forward_seeder,
+                       const ISeeder<node_index> &reverse_seeder,
+                       IExtender<node_index>&& forward_extender,
+                       IExtender<node_index>&& reverse_extender) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(forward, seeder, std::move(extender),
+        align_core(forward, forward_seeder, std::move(forward_extender),
                    alignment_callback, get_min_path_score);
 
-        align_core(reverse, seeder_rc, std::move(extender_rc),
+        align_core(reverse, reverse_seeder, std::move(reverse_extender),
                    alignment_callback, get_min_path_score);
 
     });
@@ -156,7 +189,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(DBGQueryAlignment &paths,
                         const ISeeder<node_index> &forward_seeder,
                         IExtender<node_index>&& forward_extender,
-                        const AlignCoreGenerator &rev_comp_core_generator) const {
+                        IExtender<node_index>&& reverse_extender,
+                        const SeederGenerator &seeder_generator) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
@@ -217,9 +251,9 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 #endif
 
         // Then use the reverse complements of the forward alignments as seeds
-        rev_comp_core_generator(reverse, forward_seeder, std::move(reverse_seeds),
-                                [&](const auto &seeder_rc, auto&& extender_rc) {
-            align_core(reverse, seeder_rc, std::move(extender_rc),
+        seeder_generator(forward_seeder, std::move(reverse_seeds),
+                         [&](const auto &reverse_seeder) {
+            align_core(reverse, reverse_seeder, std::move(reverse_extender),
                 [&](DBGAlignment&& path) {
                     // If the path originated from a backwards alignment (forward
                     // alignment of a reverse complement) and did not skip the first
@@ -236,6 +270,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                                 "Backwards alignment cannot be reversed, returning");
 #endif
                         }
+
+                        // for (node_index node : forward_path) {
+                        //     visited_nodes_.emplace(node);
+                        // }
                     }
 
                     assert(path.is_valid(graph_, &config_));
