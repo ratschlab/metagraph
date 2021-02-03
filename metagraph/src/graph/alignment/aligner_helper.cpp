@@ -315,27 +315,29 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
     query_begin_ = alignment_suffix.get_query().data();
     sequence_ = alignment_suffix.get_sequence();
 
-    auto node_it = data.begin();
-    const auto node_end_it = data.end();
+    CigarOpIterator end(
+        data.get_cigar(),
+        data.get_cigar().end() - static_cast<bool>(data.get_end_clipping())
+    );
 
+#ifndef NDEBUG
     CigarOpIterator begin(data.get_cigar(), data.get_clipping());
     assert(begin <= alignment_suffix.get_op_it());
-    CigarOpIterator end(data.get_cigar(),
-                        data.get_cigar().end() - static_cast<bool>(data.get_end_clipping()));
     assert(begin <= end);
     assert(alignment_suffix.get_op_it() <= end);
+#endif
 
     auto it = alignment_suffix.get_op_it();
     assert(begin <= it);
     assert(it <= end);
 
 #ifndef NDEBUG
+    auto node_it = data.begin();
     size_t orig_offset = offset_;
-#endif
 
     while (begin < it) {
         if (*begin != Cigar::INSERTION) {
-            if (node_it + 1 != node_end_it) {
+            if (node_it + 1 != data.end()) {
                 ++node_it;
                 if (offset_)
                     --offset_;
@@ -347,6 +349,8 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
     }
 
     assert(offset_ == orig_offset + alignment_suffix.get_added_offset());
+    assert(node_it == alignment_suffix.get_node_begin_it());
+#endif
 
     if (offset_ == alignment_suffix.get_k()) {
         *this = Alignment();
@@ -359,8 +363,7 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
         ++it;
     }
 
-    assert(node_it == alignment_suffix.get_node_begin_it());
-    nodes_.assign(node_it, node_end_it);
+    nodes_.assign(alignment_suffix.get_node_begin_it(), data.end());
 
     extend_query_begin(data.get_query().data());
 }
