@@ -48,13 +48,13 @@ class DBGSuccinctIndexed : public DBGSuccinct {
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
-            const std::vector<std::string> &sequences = {},
+            std::vector<std::string> sequences = {},
             DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
-                  const std::vector<std::string> &sequences = {},
+                  std::vector<std::string> sequences = {},
                   DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC);
 
 template <class Graph>
