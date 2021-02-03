@@ -171,12 +171,11 @@ std::pair<typename DPTable<NodeType>::iterator, bool> DefaultColumnExtender<Node
 }
 
 template <typename NodeType>
-bool DefaultColumnExtender<NodeType>
-::add_seed(size_t clipping) {
+bool DefaultColumnExtender<NodeType>::add_seed() {
     assert(path_->get_cigar().back().first == Cigar::MATCH
         || path_->get_cigar().back().first == Cigar::MISMATCH);
 
-    return dp_table.add_seed(*path_, config_, size, 0, clipping);
+    return dp_table.add_seed(*path_, config_, size, 0);
 }
 
 template <typename NodeType>
@@ -597,23 +596,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     if (path.get_score() + match_score_begin[1] < min_path_score)
         return;
 
-    size_t query_clipping = path.get_clipping() + path.get_query().size() - 1;
-
-    if (dp_table.size()
-            && query_clipping >= dp_table.get_query_offset()
-            && std::all_of(path.begin(), path.end(),
-                           [&](auto i) { return dp_table.find(i) != dp_table.end(); })) {
-        auto find = dp_table.find(path.back());
-        size_t shift = find->second.start_index;
-        if (query_clipping - dp_table.get_query_offset() >= shift
-                && find->second.scores[query_clipping - dp_table.get_query_offset() - shift]
-                   >= path.get_score()) {
-            return;
-        }
-    }
-
     reset();
-    if (!add_seed(query_clipping))
+    if (!add_seed())
         return;
 
     start_score = dp_table.find(start_node)->second.best_score();

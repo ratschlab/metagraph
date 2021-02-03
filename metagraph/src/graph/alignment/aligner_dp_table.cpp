@@ -11,9 +11,7 @@ template <typename NodeType>
 bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
                                  const DBGAlignerConfig &config,
                                  size_t size,
-                                 size_t start_pos,
-                                 size_t query_offset) {
-    query_offset_ = query_offset;
+                                 size_t start_pos) {
     char start_char = *(seed.get_query_end() - 1);
     score_t last_char_score = config.get_row(start_char)[seed.get_sequence().back()];
 

@@ -46,6 +46,30 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     });
 
     for (auto &seed : seeds) {
+        bool inserted = false;
+        std::pair<size_t, size_t> idx_range {
+            seed.get_clipping(),
+            seed.get_clipping() + seed.get_query().size()
+        };
+        for (node_index node : seed) {
+            auto emplace = visited_nodes_.emplace(node, idx_range);
+            auto &range = emplace.first.value();
+            if (emplace.second) {
+                inserted = true;
+            } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                range.first = std::min(range.first, idx_range.first);
+                range.second = std::max(range.second, idx_range.second);
+                inserted = true;
+            }
+        }
+
+        if (!inserted) {
+#ifndef NDEBUG
+            mtg::common::logger->trace("Skipping seed: {}", seed);
+#endif
+            continue;
+        }
+
 #ifndef NDEBUG
         mtg::common::logger->trace("Seed: {}", seed);
 #endif
@@ -112,6 +136,15 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         }, min_path_score);
 
         // if !extended, then the seed was not extended because of early cutoff
+
+        extender.call_explored_nodes([&](node_index node, size_t begin, size_t end) {
+            auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+            auto &range = emplace.first.value();
+            if (!emplace.second) {
+                range.first = std::min(range.first, begin);
+                range.second = std::max(range.second, end);
+            }
+        });
     }
 }
 
@@ -237,6 +270,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                                 "Backwards alignment cannot be reversed, returning");
 #endif
                         }
+
+                        // for (node_index node : forward_path) {
+                        //     visited_nodes_.emplace(node);
+                        // }
                     }
 
                     assert(path.is_valid(graph_, &config_));

@@ -547,8 +547,7 @@ class DPTable {
     bool add_seed(const Alignment<NodeType> &seed,
                   const DBGAlignerConfig &config,
                   size_t size,
-                  size_t start_pos,
-                  size_t query_offset = 0);
+                  size_t start_pos);
 
     typedef tsl::hopscotch_map<NodeType, Column> Storage;
 
@@ -609,13 +608,11 @@ class DPTable {
     }
 
     const Storage& data() const { return dp_table_; }
-    size_t get_query_offset() const { return query_offset_; }
     NodeType get_start_node() const { return start_node_; }
 
   private:
     Storage dp_table_;
     NodeType start_node_;
-    size_t query_offset_ = 0;
     size_t num_bytes_ = 0;
 };
 
