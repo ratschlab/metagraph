@@ -435,13 +435,6 @@ int align_to_graph(Config *config) {
             config->alignment_length = graph->get_k();
         }
 
-        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
-                && config->alignment_length != graph->get_k()) {
-            logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct without --canonical flag");
-            exit(1);
-        }
-
         logger->trace("Map sequences against the de Bruijn graph with k={}",
                       graph->get_k());
         logger->trace("Length of mapped k-mers: {}", config->alignment_length);
