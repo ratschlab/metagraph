@@ -726,6 +726,8 @@ std::string Config::graphmode_to_string(DeBruijnGraph::Mode mode) {
             return "canonical";
         case DeBruijnGraph::PRIMARY:
             return "primary";
+        default:
+            throw std::runtime_error("Never happens");
     }
 }
 

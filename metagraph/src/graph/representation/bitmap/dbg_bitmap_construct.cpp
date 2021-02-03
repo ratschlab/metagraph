@@ -54,6 +54,8 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
                 return DeBruijnGraph::PRIMARY;
             case KmerCollector::BOTH:
                 return DeBruijnGraph::CANONICAL;
+            default:
+                throw std::runtime_error("Never happens");
         }
     }
 
