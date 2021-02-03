@@ -566,8 +566,7 @@ class AlignmentSuffix {
             config_(&config),
             begin_it_(alignment_->get_query().data()),
             end_it_(alignment_->get_query_end()),
-            ref_begin_it_(alignment_->get_sequence().data()),
-            ref_end_it_(ref_begin_it_ + alignment_->get_sequence().size()),
+            ref_(alignment_->get_sequence()),
             cigar_begin_(alignment_->get_cigar(), alignment_->get_clipping()),
             cigar_end_(alignment_->get_cigar(),
                        alignment_->get_cigar().end()
@@ -590,9 +589,7 @@ class AlignmentSuffix {
         return std::string_view(begin_it_, end_it_ - begin_it_);
     }
 
-    std::string_view get_sequence() const {
-        return std::string_view(ref_begin_it_, ref_end_it_ - ref_begin_it_);
-    }
+    std::string_view get_sequence() const { return ref_; }
 
     Cigar::Operator get_front_op() const { return *cigar_it_; }
     const CigarOpIterator& get_op_it() const {
@@ -616,8 +613,7 @@ class AlignmentSuffix {
     const DBGAlignerConfig *config_;
     const char *begin_it_;
     const char *end_it_;
-    const char *ref_begin_it_;
-    const char *ref_end_it_;
+    std::string_view ref_;
     CigarOpIterator cigar_begin_;
     CigarOpIterator cigar_end_;
     CigarOpIterator cigar_it_;
@@ -647,8 +643,7 @@ class AlignmentPrefix {
             config_(&config),
             begin_it_(alignment_->get_query().data()),
             end_it_(alignment_->get_query_end()),
-            ref_begin_it_(alignment_->get_sequence().data()),
-            ref_end_it_(ref_begin_it_ + alignment_->get_sequence().size()),
+            ref_(alignment_->get_sequence()),
             cigar_rbegin_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar(), alignment_->get_cigar().end()))),
             cigar_rend_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar()))),
             cigar_it_(cigar_rbegin_),
@@ -671,10 +666,7 @@ class AlignmentPrefix {
         return std::string_view(begin_it_, end_it_ - begin_it_);
     }
 
-    std::string_view get_sequence() const {
-        return std::string_view(ref_begin_it_, ref_end_it_ - ref_begin_it_);
-    }
-
+    std::string_view get_sequence() const { return ref_; }
     Cigar::Operator get_back_op() const { return *cigar_it_; }
     typename std::vector<NodeType>::const_reverse_iterator get_node_end_it() const { return node_it_; }
 
@@ -697,8 +689,7 @@ class AlignmentPrefix {
     const DBGAlignerConfig *config_;
     const char *begin_it_;
     const char *end_it_;
-    const char *ref_begin_it_;
-    const char *ref_end_it_;
+    std::string_view ref_;
     std::reverse_iterator<CigarOpIterator> cigar_rbegin_;
     std::reverse_iterator<CigarOpIterator> cigar_rend_;
     std::reverse_iterator<CigarOpIterator> cigar_it_;
