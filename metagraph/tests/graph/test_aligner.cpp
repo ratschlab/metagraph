@@ -1590,4 +1590,30 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
     }
 }
 
+TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
+    size_t k = 31;
+    std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
+    std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
+
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    dbg_succ->add_sequence(reference);
+    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ, true);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_seed_length = 13;
+
+    for (size_t max_seed_length : { k, k + 100 }) {
+        config.max_seed_length = max_seed_length;
+        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        auto paths = aligner.align(query);
+        ASSERT_EQ(1ull, paths.size());
+        auto path = paths[0];
+        EXPECT_TRUE(path.is_valid(*graph, &config));
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+    }
+}
+
 } // namespace
