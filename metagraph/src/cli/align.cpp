@@ -426,12 +426,6 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
-
-    // This speeds up mapping, and allows for node suffix matching
-    if (dbg)
-        dbg->reset_mask();
-
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -453,7 +447,7 @@ int align_to_graph(Config *config) {
 
             map_sequences_in_file(file,
                                   *graph,
-                                  dbg,
+                                  std::dynamic_pointer_cast<DBGSuccinct>(graph),
                                   *config,
                                   timer,
                                   &thread_pool,
