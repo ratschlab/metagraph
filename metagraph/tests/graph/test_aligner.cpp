@@ -1311,6 +1311,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
+
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
     size_t k = 6;
     std::vector<std::string> seqs;
@@ -1347,6 +1349,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
         }
     }
 }
+
+#endif
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
