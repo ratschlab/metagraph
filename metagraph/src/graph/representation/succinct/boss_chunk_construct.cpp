@@ -259,9 +259,9 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
 
     size_t k = kmer_collector.get_k() - 1;
     size_t num_threads = kmer_collector.num_threads();
-    bool both_strands_mode = kmer_collector.is_both_strands_mode();
+    bool both_strands = kmer_collector.get_mode() != KmerCollector::Mode::BASIC;
 
-    if (both_strands_mode) {
+    if (both_strands) {
         add_reverse_complements(k, num_threads, &kmers);
     }
 
@@ -349,7 +349,7 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
     });
 
     BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(),
-                       k, both_strands_mode, *kmers_out,
+                       k, both_strands, *kmers_out,
                        bits_per_count, swap_dir);
 
     kmer_collector.clear();
@@ -646,7 +646,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
                        const std::vector<std::string> &dummy_sink_names,
                        std::filesystem::path dir,
                        size_t k,
-                       bool both_strands_mode,
+                       bool both_strands,
                        uint8_t bits_per_count,
                        std::filesystem::path swap_dir,
                        size_t num_threads);
@@ -674,7 +674,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
     const uint64_t buffer_size = kmer_collector.buffer_size();
-    bool both_strands_mode = kmer_collector.is_both_strands_mode();
+    bool both_strands = kmer_collector.get_mode() != KmerCollector::Mode::BASIC;
 
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.files_to_merge();
@@ -711,7 +711,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
                       std::filesystem::file_size(real_F_W[j]));
     }
 
-    if (both_strands_mode) {
+    if (both_strands) {
         // compute reverse complements k-mers and update the blocks #real_F_W
         add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
     }
@@ -725,7 +725,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
 
     // merge all the original k-mers with the dummy k-mers and generate a BOSS table
     return build_boss<T>(real_names, dummy_source_names, dummy_sink_names,
-                         dir, k, both_strands_mode, bits_per_count, swap_dir, num_threads);
+                         dir, k, both_strands, bits_per_count, swap_dir, num_threads);
 }
 
 template <typename KMER>
@@ -802,7 +802,7 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
                              const std::string &real_name,
                              const std::vector<std::string> &dummy_names,
                              size_t k,
-                             bool both_strands_mode,
+                             bool both_strands,
                              uint8_t bits_per_count,
                              std::filesystem::path swap_dir) {
     using T_INT = get_int_t<T>;
@@ -857,7 +857,7 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
     });
 
     return BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
-                       k, both_strands_mode,
+                       k, both_strands,
                        reinterpret_container<T>(*kmers_out),
                        bits_per_count, swap_dir);
 }
@@ -868,7 +868,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
                        const std::vector<std::string> &dummy_sink_names,
                        std::filesystem::path dir,
                        size_t k,
-                       bool both_strands_mode,
+                       bool both_strands,
                        uint8_t bits_per_count,
                        std::filesystem::path swap_dir,
                        size_t num_threads) {
@@ -896,7 +896,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         }
 
         return build_boss_chunk<T>(true, real_name, dummy_names,
-                                   k, both_strands_mode, bits_per_count, swap_dir);
+                                   k, both_strands, bits_per_count, swap_dir);
     }
 
     // For k >= 2, BOSS chunks can be built independently, in parallel.
@@ -912,7 +912,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         dummy_names.push_back(dummy_source_names[i][0]);
     }
     BOSS::Chunk chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
-                                            k, both_strands_mode, bits_per_count, swap_dir);
+                                            k, both_strands, bits_per_count, swap_dir);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -923,7 +923,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         }
         BOSS::Chunk next = build_boss_chunk<T>(false, // not the first chunk
                                                real_names[F], dummy_names,
-                                               k, both_strands_mode, bits_per_count, swap_dir);
+                                               k, both_strands, bits_per_count, swap_dir);
         logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
         #pragma omp ordered
         chunk.extend(next);
@@ -949,7 +949,7 @@ template <typename KmerCollector>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
   public:
     BOSSChunkConstructor(size_t k,
-                         bool both_strands_mode,
+                         bool both_strands,
                          uint8_t bits_per_count,
                          const std::string &filter_suffix,
                          size_t num_threads,
@@ -958,13 +958,16 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          size_t disk_cap_bytes)
         : swap_dir_(swap_dir),
           kmer_collector_(k + 1,
-                          both_strands_mode,
+                          both_strands
+                            ? (filter_suffix.empty()
+                                ? KmerCollector::Mode::CANONICAL_ONLY
+                                : KmerCollector::Mode::BOTH)
+                            : KmerCollector::Mode::BASIC,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
                           memory_preallocated,
                           swap_dir,
-                          disk_cap_bytes,
-                          both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
+                          disk_cap_bytes),
           bits_per_count_(bits_per_count) {
         if (filter_suffix.size()
                 && filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
@@ -999,7 +1002,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             result = BOSS::Chunk(kmer_collector_.alphabet_size(),
                                  kmer_collector_.get_k() - 1,
-                                 kmer_collector_.is_both_strands_mode(),
+                                 kmer_collector_.get_mode() != KmerCollector::Mode::BASIC,
                                  reinterpret_container<T>(kmer_ints),
                                  bits_per_count_,
                                  swap_dir_);
@@ -1042,7 +1045,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 template <template <typename, class> class KmerContainer, typename... Args>
 static std::unique_ptr<IBOSSChunkConstructor>
 initialize_boss_chunk_constructor(size_t k,
-                                  bool canonical_mode,
+                                  bool both_strands,
                                   uint8_t bits_per_count,
                                   const std::string &filter_suffix,
                                   const Args& ...args) {
@@ -1053,7 +1056,7 @@ initialize_boss_chunk_constructor(size_t k,
         exit(1);
     }
 
-#define ARGS k, canonical_mode, bits_per_count, filter_suffix, args...
+#define ARGS k, both_strands, bits_per_count, filter_suffix, args...
 
     // collect real k-mers in tight layout only if suffix is empty
     if (filter_suffix.empty()) {
@@ -1125,7 +1128,7 @@ using KmerMultsetDiskVector32
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor::initialize(size_t k,
-                                  bool canonical_mode,
+                                  bool both_strands,
                                   uint8_t bits_per_count,
                                   const std::string &filter_suffix,
                                   size_t num_threads,
@@ -1133,7 +1136,7 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &swap_dir,
                                   size_t disk_cap_bytes) {
-#define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
+#define OTHER_ARGS k, both_strands, bits_per_count, filter_suffix, \
                    num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     switch (container_type) {

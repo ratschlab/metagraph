@@ -115,8 +115,8 @@ Config::Config(int argc, char *argv[]) {
             count_width = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
             forward_and_reverse = true;
-        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
-            canonical = true;
+        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--mode")) {
+            graph_mode = string_to_graphmode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
             complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
@@ -429,7 +429,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
 #if _PROTEIN_GRAPH
-    if (canonical || forward_and_reverse) {
+    if (graph_mode != DeBruijnGraph::BASIC || forward_and_reverse) {
         std::cerr << "Error: reverse complement not defined for protein alphabets"
                   << std::endl;
         print_usage_and_exit = true;
@@ -597,6 +597,7 @@ Config::Config(int argc, char *argv[]) {
 
 
 using mtg::graph::boss::BOSS;
+using mtg::graph::DeBruijnGraph;
 
 
 std::string Config::state_to_string(BOSS::State state) {
@@ -717,6 +718,34 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
     }
 }
 
+std::string Config::graphmode_to_string(DeBruijnGraph::Mode mode) {
+    switch (mode) {
+        case DeBruijnGraph::BASIC:
+            return "basic";
+        case DeBruijnGraph::CANONICAL:
+            return "canonical";
+        case DeBruijnGraph::PRIMARY:
+            return "primary";
+    }
+}
+
+DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
+    if (string == "basic") {
+        return DeBruijnGraph::BASIC;
+
+    } else if (string == "canonical") {
+        return DeBruijnGraph::CANONICAL;
+
+    } else if (string == "primary") {
+        return DeBruijnGraph::PRIMARY;
+
+    } else {
+        std::cerr << "Error: unknown graph mode" << std::endl;
+        exit(1);
+    }
+}
+
+
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
 
@@ -789,7 +818,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
@@ -850,10 +879,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 #endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-#if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\t\ttreat the input graph as a canonical graph [off]\n");
-            fprintf(stderr, "\t   --primary-kmers\t\tindicate that the input graph has only primary k-mers [off]\n");
-#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
@@ -917,7 +942,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --no-postprocessing \tdo not erase redundant dummy edges after concatenation [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");

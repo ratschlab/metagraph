@@ -12,9 +12,9 @@ namespace graph {
 class DBGHashFast : public DeBruijnGraph {
   public:
     DBGHashFast(size_t k,
-                bool canonical_mode = false,
+                Mode mode = BASIC,
                 bool packed_serialization = false) {
-        hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
+        hash_dbg_ = initialize_graph(k, mode, packed_serialization);
     }
 
     // Insert sequence to graph and invoke callback |on_insertion| for each new
@@ -99,7 +99,7 @@ class DBGHashFast : public DeBruijnGraph {
     }
 
     size_t get_k() const { return hash_dbg_->get_k(); }
-    bool is_canonical_mode() const { return hash_dbg_->is_canonical_mode(); }
+    Mode get_mode() const { return hash_dbg_->get_mode(); }
 
     uint64_t num_nodes() const { return hash_dbg_->num_nodes(); }
     uint64_t max_index() const { return hash_dbg_->max_index(); }
@@ -135,7 +135,7 @@ class DBGHashFast : public DeBruijnGraph {
 
   private:
     static std::unique_ptr<DBGHashFastInterface>
-    initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);
+    initialize_graph(size_t k, Mode mode, bool packed_serialization);
 
     std::unique_ptr<DBGHashFastInterface> hash_dbg_;
 };

@@ -54,7 +54,7 @@ void parse_sequences(const std::string &file,
                 [&](std::string_view, uint32_t count) {
                     count_hist[count] += (1 + config.forward_and_reverse);
                 },
-                !config.canonical && !config.forward_and_reverse
+                config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse
             );
 
             if (count_hist.size()) {
@@ -93,7 +93,7 @@ void parse_sequences(const std::string &file,
                     call_weighted_sequence(sequence, count);
                 }
             },
-            !config.canonical && !config.forward_and_reverse, min_count, max_count
+            config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse, min_count, max_count
         );
 
     } else if (file_format(file) == "FASTA"

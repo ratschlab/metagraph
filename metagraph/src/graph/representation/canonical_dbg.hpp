@@ -108,7 +108,7 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_.get_k(); }
 
-    virtual bool is_canonical_mode() const override { return true; }
+    virtual Mode get_mode() const override { return CANONICAL; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
@@ -134,9 +134,7 @@ class CanonicalDBG : public DeBruijnGraph {
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
-        return !graph_.is_canonical_mode()
-            ? (node > offset_ ? node - offset_ : node)
-            : std::min(node, reverse_complement(node));
+        return node > offset_ ? node - offset_ : node;
     }
 
   private:

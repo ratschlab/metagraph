@@ -11,9 +11,9 @@ namespace mtg {
 namespace graph {
 
 // Assume all k-mers present
-DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
+DBGBitmap::DBGBitmap(size_t k, Mode mode)
       : k_(k),
-        canonical_mode_(canonical_mode),
+        mode_(mode),
         seq_encoder_(),
         kmers_((1llu << (k * seq_encoder_.bits_per_char)) + 1, true),
         complete_(true) {
@@ -37,7 +37,7 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ != BASIC)) {
         if (terminate())
             return;
 
@@ -291,7 +291,7 @@ void DBGBitmap::serialize(std::ostream &out) const {
 
     serialize_number(out, k_);
     kmers_.serialize(out);
-    serialize_number(out, canonical_mode_);
+    serialize_number(out, static_cast<int>(mode_));
 }
 
 void DBGBitmap::serialize(const std::string &filename) const {
@@ -325,13 +325,7 @@ bool DBGBitmap::load(std::istream &in) {
 
         complete_ = (kmers_.size() == kmers_.num_set_bits());
 
-        try {
-            canonical_mode_ = load_number(in);
-            if (in.eof())
-                canonical_mode_ = false;
-        } catch (...) {
-            canonical_mode_ = false;
-        }
+        mode_ = static_cast<Mode>(load_number(in));
 
         return true;
     } catch (...) {
@@ -352,7 +346,7 @@ DBGBitmap::sequence_to_kmers(std::string_view sequence, bool to_canonical) const
 
 bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
-            || is_canonical_mode() != other.is_canonical_mode()
+            || get_mode() != other.get_mode()
             || num_nodes() != other.num_nodes())
         return false;
 
@@ -365,7 +359,7 @@ bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
     if (!verbose) {
         return k_ == other.k_
-                && canonical_mode_ == other.canonical_mode_
+                && mode_ == other.mode_
                 && kmers_ == other.kmers_;
     }
 
@@ -374,9 +368,9 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
         return false;
     }
 
-    if (canonical_mode_ != other.canonical_mode_) {
-        std::cerr << "canonical: " << canonical_mode_
-                  << " != " << other.canonical_mode_ << std::endl;
+    if (mode_ != other.mode_) {
+        std::cerr << "mode: " << static_cast<int>(mode_)
+                  << " != " << static_cast<int>(other.mode_) << std::endl;
         return false;
     }
 

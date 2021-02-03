@@ -444,7 +444,7 @@ void Alignment<NodeType>::trim_offset() {
 template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                                              std::string_view query_rev_comp) {
-    assert(graph.is_canonical_mode());
+    assert(graph.get_mode() == DeBruijnGraph::CANONICAL);
 
     if (empty())
         return;

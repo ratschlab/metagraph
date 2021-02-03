@@ -341,7 +341,7 @@ bool DBGHashString::load(const std::string &filename) {
 bool DBGHashString::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || num_nodes() != other.num_nodes()
-            || is_canonical_mode() != other.is_canonical_mode())
+            || get_mode() != other.get_mode())
         return false;
 
     if (!dynamic_cast<const DBGHashString*>(&other))
@@ -353,7 +353,7 @@ bool DBGHashString::operator==(const DeBruijnGraph &other) const {
 
     assert(k_ == other_hash.k_);
     assert(kmers_.size() == other_hash.kmers_.size());
-    assert(is_canonical_mode() == other_hash.is_canonical_mode());
+    assert(get_mode() == other_hash.get_mode());
 
     return kmers_ == other_hash.kmers_;
 }

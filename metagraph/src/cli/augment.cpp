@@ -71,10 +71,10 @@ int augment_graph(Config *config) {
 
     logger->trace("Start graph augmentation");
 
-    if (graph->is_canonical_mode())
+    if (graph->get_mode() != graph::DeBruijnGraph::BASIC)
         config->forward_and_reverse = false;
 
-    config->canonical = graph->is_canonical_mode();
+    config->graph_mode = graph->get_mode();
 
     std::function<void(uint64_t)> on_node_insert = [](uint64_t) {};
     if (inserted_nodes)
@@ -102,7 +102,7 @@ int augment_graph(Config *config) {
 
         assert(node_weights->is_compatible(*graph));
 
-        if (graph->is_canonical_mode())
+        if (graph->get_mode() != graph::DeBruijnGraph::BASIC)
             config->forward_and_reverse = true;
 
         for (const auto &file : files) {

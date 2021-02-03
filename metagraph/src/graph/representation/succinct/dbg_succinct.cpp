@@ -27,18 +27,18 @@ using mtg::common::logger;
 typedef DBGSuccinct::node_index node_index;
 
 
-DBGSuccinct::DBGSuccinct(size_t k, bool canonical_mode)
+DBGSuccinct::DBGSuccinct(size_t k, Mode mode)
       : boss_graph_(std::make_unique<BOSS>(k - 1)),
-        canonical_mode_(canonical_mode) {
+        mode_(mode) {
     if (k < 2) {
         logger->error("For succinct graph, k must be at least 2");
         exit(1);
     }
 }
 
-DBGSuccinct::DBGSuccinct(BOSS *boss_graph, bool canonical_mode)
+DBGSuccinct::DBGSuccinct(BOSS *boss_graph, Mode mode)
       : boss_graph_(boss_graph),
-        canonical_mode_(canonical_mode) {}
+        mode_(mode) {}
 
 size_t DBGSuccinct::get_k() const {
     return boss_graph_->get_k() + 1;
@@ -198,14 +198,16 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
     if (sequence.size() < get_k())
         return;
 
+    if (mode_ == PRIMARY)
+        throw std::runtime_error("extension of primary succinct graphs is not implemented");
+
     std::vector<uint64_t> boss_edges_inserted;
-    boss_edges_inserted.reserve((sequence.size() - get_k() + 1)
-                                        * (1 + canonical_mode_));
+    boss_edges_inserted.reserve((sequence.size() - get_k() + 1) * 2);
 
     // insert forward sequence
     boss_graph_->add_sequence(sequence, true, &boss_edges_inserted);
 
-    if (canonical_mode_) {
+    if (mode_ == CANONICAL) {
         // insert reverse complement sequence as well,
         // to have all canonical k-mers in graph
         std::string rev_compl(sequence.begin(), sequence.end());
@@ -413,7 +415,7 @@ void DBGSuccinct::map_to_nodes(std::string_view sequence,
 
     auto is_missing = get_missing_kmer_skipper(bloom_filter_.get(), sequence);
 
-    if (canonical_mode_) {
+    if (mode_ == CANONICAL) {
         std::string sequence_rev_compl(sequence.begin(), sequence.end());
         reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
 
@@ -672,9 +674,9 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
             return false;
 
         try {
-            canonical_mode_ = load_number(instream);
+            mode_ = static_cast<Mode>(load_number(instream));
         } catch (...) {
-            canonical_mode_ = false;
+            mode_ = BASIC;
         }
 
         if (!boss_graph_->load_suffix_ranges(instream))
@@ -728,7 +730,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
         std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
         if (!bloom_filter_)
-            bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), canonical_mode_);
+            bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), mode_ != BASIC);
 
         if (!bloom_filter_->load(bloom_instream)) {
             std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
@@ -737,10 +739,10 @@ bool DBGSuccinct::load(const std::string &filename) {
 
         assert(bloom_filter_);
 
-        if (bloom_filter_->is_canonical_mode() != is_canonical_mode()) {
-            std::cerr << "Error: Bloom filter and graph in opposite canonical modes" << std::endl
+        if (bloom_filter_->is_canonical_mode() != (get_mode() != BASIC)) {
+            std::cerr << "Error: Bloom filter and graph in incompatible modes" << std::endl
                       << "Bloom filter: " << (bloom_filter_->is_canonical_mode() ? "not " : "") << "canonical" << std::endl
-                      << "Graph: " << (is_canonical_mode() ? "not " : "") << "canonical" << std::endl;
+                      << "Graph: " << static_cast<int>(get_mode()) << std::endl;
             return false;
         }
 
@@ -768,7 +770,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
         const auto out_filename = prefix + kExtension;
         std::ofstream outstream(out_filename, std::ios::binary);
         boss_graph_->serialize(outstream);
-        serialize_number(outstream, canonical_mode_);
+        serialize_number(outstream, static_cast<int>(mode_));
 
         boss_graph_->serialize_suffix_ranges(outstream);
 
@@ -917,7 +919,7 @@ void DBGSuccinct
                                    uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
-        canonical_mode_,
+        mode_ != BASIC,
         BloomFilter::optim_size(false_positive_rate, num_nodes()),
         num_nodes(),
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
@@ -931,7 +933,7 @@ void DBGSuccinct
                 callback(sequence);
             },
             get_num_threads(),
-            canonical_mode_
+            mode_ != BASIC
         );
     });
 }
@@ -941,7 +943,7 @@ void DBGSuccinct
                           uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
-        canonical_mode_,
+        mode_ != BASIC,
         bits_per_kmer * num_nodes(),
         num_nodes(),
         max_num_hash_functions
@@ -955,7 +957,7 @@ void DBGSuccinct
                 callback(sequence);
             },
             get_num_threads(),
-            canonical_mode_
+            mode_ != BASIC
         );
     });
 }
@@ -963,7 +965,7 @@ void DBGSuccinct
 bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || num_nodes() != other.num_nodes()
-            || is_canonical_mode() != other.is_canonical_mode())
+            || get_mode() != other.get_mode())
         return false;
 
     if (dynamic_cast<const DBGSuccinct*>(&other)) {

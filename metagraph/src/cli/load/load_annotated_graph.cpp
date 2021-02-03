@@ -22,8 +22,7 @@ using mtg::common::logger;
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    // TODO: check and wrap into canonical only if the graph is primary
-    if (config.canonical && !graph->is_canonical_mode())
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
         graph = std::make_shared<CanonicalDBG>(graph);
 
     uint64_t max_index = graph->max_index();

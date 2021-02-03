@@ -101,7 +101,7 @@ int clean_graph(Config *config) {
                 [&](auto i) { return weights[i] >= config->min_count
                                     && weights[i] <= config->max_count; },
                 true,
-                graph->is_canonical_mode()
+                graph->get_mode()
             );
             graph->add_extension(node_weights);
 
@@ -135,16 +135,17 @@ int clean_graph(Config *config) {
                                           *node_weights,
                                           config->min_unitig_median_kmer_abundance))
                     callback(unitig, path);
-            }, num_threads, config->min_tip_size, graph->is_canonical_mode());
+            }, num_threads, config->min_tip_size, graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
 
         } else if (config->unitigs || config->min_tip_size > 1) {
             graph->call_unitigs(callback,
                                 num_threads,
                                 config->min_tip_size,
-                                graph->is_canonical_mode());
+                                graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
 
         } else {
-            graph->call_sequences(callback, num_threads, graph->is_canonical_mode());
+            graph->call_sequences(callback, num_threads,
+                                  graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
         }
     };
 
@@ -271,14 +272,14 @@ int clean_graph(Config *config) {
 
             graph::MaskedDeBruijnGraph graph_slice(graph,
                 [&](auto i) { return weights[i] >= min_count && weights[i] < max_count; },
-                false,
-                graph->is_canonical_mode()
+                true,
+                graph->get_mode()
             );
 
             // the outer for loop is parallelized, so don't start another thread
             // pool here
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
-                graph_slice.call_sequences(dump_sequence, 1, graph_slice.is_canonical_mode());
+                graph_slice.call_sequences(dump_sequence, 1, graph_slice.get_mode() == graph::DeBruijnGraph::CANONICAL);
             });
         }
     }

@@ -53,7 +53,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences,
             DBGMode mode) {
-    auto graph = std::make_shared<Graph>(k, mode == DBGMode::CANONICAL);
+    auto graph = std::make_shared<Graph>(k, mode == DBGMode::CANONICAL
+                                            ? DeBruijnGraph::CANONICAL
+                                            : DeBruijnGraph::BASIC);
 
     uint64_t max_index = graph->max_index();
 
@@ -109,7 +111,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGBitmap>(uint64_t k,
                        const std::vector<std::string> &sequences,
                        DBGMode mode) {
-    DBGBitmapConstructor constructor(k, mode == DBGMode::CANONICAL);
+    DBGBitmapConstructor constructor(k, mode == DBGMode::CANONICAL
+                                        ? DeBruijnGraph::CANONICAL
+                                        : DeBruijnGraph::BASIC);
     for (const auto &sequence : sequences) {
         constructor.add_sequence(std::string(sequence));
     }
@@ -130,7 +134,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinct>(uint64_t k,
                          const std::vector<std::string> &sequences,
                          DBGMode mode) {
-    auto graph = std::make_shared<DBGSuccinct>(k, mode == DBGMode::CANONICAL);
+    auto graph = std::make_shared<DBGSuccinct>(k, mode == DBGMode::CANONICAL
+                                                    ? DeBruijnGraph::CANONICAL
+                                                    : DeBruijnGraph::BASIC);
 
     uint64_t max_index = graph->max_index();
 
@@ -313,7 +319,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGBitmap>(uint64_t k,
                              const std::vector<std::string> &sequences,
                              DBGMode mode) {
-    DBGBitmapConstructor constructor(k, mode == DBGMode::CANONICAL);
+    DBGBitmapConstructor constructor(k, mode == DBGMode::CANONICAL
+                                        ? DeBruijnGraph::CANONICAL
+                                        : DeBruijnGraph::BASIC);
     constructor.add_sequences(std::vector<std::string>(sequences));
     auto graph = std::make_shared<DBGBitmap>(&constructor);
 
@@ -331,10 +339,14 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinct>(uint64_t k,
                                const std::vector<std::string> &sequences,
                                DBGMode mode) {
-    BOSSConstructor constructor(k - 1, mode == DBGMode::CANONICAL);
+    BOSSConstructor constructor(k - 1, mode == DBGMode::CANONICAL
+                                        ? DeBruijnGraph::CANONICAL
+                                        : DeBruijnGraph::BASIC);
     EXPECT_EQ(k - 1, constructor.get_k());
     constructor.add_sequences(std::vector<std::string>(sequences));
-    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), mode == DBGMode::CANONICAL);
+    auto graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), mode == DBGMode::CANONICAL
+                                                                        ? DeBruijnGraph::CANONICAL
+                                                                        : DeBruijnGraph::BASIC);
     graph->mask_dummy_kmers(1, false);
     EXPECT_EQ(k, graph->get_k());
 

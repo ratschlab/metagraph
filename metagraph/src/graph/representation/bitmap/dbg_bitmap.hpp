@@ -25,7 +25,7 @@ class DBGBitmap : public DeBruijnGraph {
 
   public:
     // Initialize complete graph
-    explicit DBGBitmap(size_t k, bool canonical_mode = false);
+    explicit DBGBitmap(size_t k, Mode mode = BASIC);
 
     // Initialize graph from builder
     explicit DBGBitmap(DBGBitmapConstructor *builder);
@@ -77,7 +77,7 @@ class DBGBitmap : public DeBruijnGraph {
     std::string get_node_sequence(node_index node) const;
 
     inline size_t get_k() const { return k_; }
-    inline bool is_canonical_mode() const { return canonical_mode_; }
+    inline Mode get_mode() const { return mode_; }
 
     uint64_t num_nodes() const;
 
@@ -118,7 +118,7 @@ class DBGBitmap : public DeBruijnGraph {
     node_index to_node(const Kmer &kmer) const;
 
     size_t k_;
-    bool canonical_mode_;
+    Mode mode_;
     mtg::kmer::KmerExtractor2Bit seq_encoder_;
 
     bit_vector_smart kmers_;

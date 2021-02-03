@@ -73,7 +73,7 @@ void print_stats(const graph::DeBruijnGraph &graph) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
-    std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
+    std::cout << "canonical mode: " << Config::graphmode_to_string(graph.get_mode()) << std::endl;
 
     if (auto weights = graph.get_extension<graph::NodeWeights>()) {
         double sum_weights = 0;

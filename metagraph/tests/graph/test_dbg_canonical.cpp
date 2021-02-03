@@ -61,7 +61,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, SerializeEmpty) {
 
     EXPECT_EQ(0u, graph.num_nodes());
     EXPECT_EQ(20u, graph.get_k());
-    EXPECT_TRUE(graph.is_canonical_mode());
+    EXPECT_EQ(DeBruijnGraph::CANONICAL, graph.get_mode());
 
     EXPECT_FALSE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));

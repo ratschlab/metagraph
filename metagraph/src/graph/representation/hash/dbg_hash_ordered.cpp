@@ -31,7 +31,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                                        std::uint64_t>;
   public:
     explicit DBGHashOrderedImpl(size_t k,
-                                bool canonical_mode,
+                                Mode mode,
                                 bool packed_serialization);
 
     void add_sequence(std::string_view sequence,
@@ -88,7 +88,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     std::string get_node_sequence(node_index node) const;
 
     size_t get_k() const { return k_; }
-    bool is_canonical_mode() const { return canonical_mode_; }
+    Mode get_mode() const { return mode_; }
 
     uint64_t num_nodes() const { return kmers_.size(); }
 
@@ -114,7 +114,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     const Kmer& get_kmer(node_index node) const;
 
     size_t k_;
-    bool canonical_mode_;
+    Mode mode_;
 
     KmerIndex kmers_;
     KmerExtractor2Bit seq_encoder_;
@@ -126,10 +126,10 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
 template <typename KMER>
 DBGHashOrderedImpl<KMER>::DBGHashOrderedImpl(size_t k,
-                                             bool canonical_mode,
+                                             Mode mode,
                                              bool packed_serialization)
       : k_(k),
-        canonical_mode_(canonical_mode),
+        mode_(mode),
         packed_serialization_(packed_serialization) {}
 
 template <typename KMER>
@@ -146,7 +146,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     node_index prev_pos = kmers_.size();
 #endif
 
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == DeBruijnGraph::PRIMARY)) {
         skipped.push_back(skip() || !is_valid);
         if (skipped.back())
             continue;
@@ -170,7 +170,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
         }
     }
 
-    if (!canonical_mode_)
+    if (mode_ != DeBruijnGraph::CANONICAL)
         return;
 
     std::string rev_comp(sequence.begin(), sequence.end());
@@ -228,7 +228,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
     node_index prev_index = n_nodes;
 #endif
 
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ != DeBruijnGraph::BASIC)) {
         if (terminate())
             return;
 
@@ -498,7 +498,7 @@ void DBGHashOrderedImpl<KMER>::serialize(std::ostream &out) const {
         kmers_.serialize(serializer);
     }
 
-    serialize_number(out, canonical_mode_);
+    serialize_number(out, static_cast<int>(mode_));
 }
 
 template <typename KMER>
@@ -539,7 +539,7 @@ bool DBGHashOrderedImpl<KMER>::load(std::istream &in) {
             kmers_ = KmerIndex::deserialize(deserializer, true);
         }
 
-        canonical_mode_ = load_number(in);
+        mode_ = static_cast<Mode>(load_number(in));
 
         return in.good();
 
@@ -558,7 +558,7 @@ bool DBGHashOrderedImpl<KMER>::load(const std::string &filename) {
 template <typename KMER>
 bool DBGHashOrderedImpl<KMER>::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
-            || is_canonical_mode() != other.is_canonical_mode()
+            || get_mode() != other.get_mode()
             || num_nodes() != other.num_nodes())
         return false;
 
@@ -571,7 +571,7 @@ bool DBGHashOrderedImpl<KMER>::operator==(const DeBruijnGraph &other) const {
         return true;
 
     assert(k_ == other_hash.k_);
-    assert(canonical_mode_ == other_hash.canonical_mode_);
+    assert(mode_ == other_hash.mode_);
     assert(kmers_.size() == other_hash.kmers_.size());
 
     return kmers_ == other_hash.kmers_;
@@ -598,7 +598,7 @@ const KMER& DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
 
 std::unique_ptr<DBGHashOrdered::DBGHashOrderedInterface>
 DBGHashOrdered::initialize_graph(size_t k,
-                                 bool canonical_mode,
+                                 Mode mode,
                                  bool packed_serialization) {
     if (k < 1 || k > 256 / KmerExtractor2Bit::bits_per_char) {
         logger->error("For hash graph, k must be between 1 and {}",
@@ -608,23 +608,23 @@ DBGHashOrdered::initialize_graph(size_t k,
 
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer64>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer128>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     } else {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer256>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     }
 }
 
 DBGHashOrdered::DBGHashOrdered(size_t k,
-                               bool canonical_mode,
+                               Mode mode,
                                bool packed_serialization) {
-    hash_dbg_ = initialize_graph(k, canonical_mode, packed_serialization);
+    hash_dbg_ = initialize_graph(k, mode, packed_serialization);
 }
 
 bool DBGHashOrdered::load(std::istream &in) {
@@ -636,8 +636,8 @@ bool DBGHashOrdered::load(std::istream &in) {
         auto k = load_number(in);
         in.seekg(pos, in.beg);
 
-        // the actual value of |canonical| will be set in load
-        hash_dbg_ = initialize_graph(k, false, false);
+        // the actual value of |mode| will be set in load
+        hash_dbg_ = initialize_graph(k, BASIC, false);
         return hash_dbg_->load(in) && in.good();
     } catch (...) {
         return false;
