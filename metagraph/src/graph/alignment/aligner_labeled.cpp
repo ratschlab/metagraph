@@ -171,7 +171,14 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 
     // the path is a suffix match
     assert(path.size() == 1);
-    std::string_view subquery(this->query.data(), path.get_clipping() + this->graph_.get_k());
+    size_t k = this->graph_.get_k();
+
+    // align as usual if a label can't be found via extension
+    if (path.get_clipping() + k - path.get_offset() > this->query.size())
+        return;
+
+    const char *endpoint = path.get_query_end() + path.get_offset();
+    std::string_view subquery(this->query.data(), endpoint - this->query.data());
 
     alt_seed_ = path;
     DefaultColumnExtender<> path_extender(this->graph_, this->config_, subquery);
@@ -179,7 +186,8 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 
     bool extended = false;
     path_extender([&](DBGAlignment&& rest, NodeType start_node) {
-        if (start_node && !extended && !rest.get_clipping() && !rest.get_end_clipping()) {
+        if (start_node && !extended && !rest.get_clipping()
+                && alt_seed_.get_sequence().size() + rest.get_sequence().size() == k) {
             extended = true;
             seed_extension_ = DBGAlignment(rest);
             alt_seed_.append(std::move(rest));
