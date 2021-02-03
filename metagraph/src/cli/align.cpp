@@ -494,8 +494,7 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&](SeqBatch batch, uint64_t size) {
-                auto aln_graph = graph;
+            auto process_batch = [&,aln_graph=graph](SeqBatch batch, uint64_t size) mutable {
                 if (config->canonical && !graph->is_canonical_mode())
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 

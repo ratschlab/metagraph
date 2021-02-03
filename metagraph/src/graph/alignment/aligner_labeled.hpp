@@ -168,6 +168,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         assert(this_query == query);
 
         assert(config_.num_alternative_paths);
+        assert(target_columns[num_queries].size());
 
         for (const auto &[target_column, signature] : target_columns[num_queries]) {
             Seeder seeder = build_seeder(
