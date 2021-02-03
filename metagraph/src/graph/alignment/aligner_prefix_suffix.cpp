@@ -12,11 +12,10 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
     switch (*cigar_it_) {
         case Cigar::MATCH:
         case Cigar::MISMATCH: {
-            assert(end_it_ > begin_it_);
+            assert(query_.size());
             assert(ref_.size());
             assert(node_it_ != alignment_->rend());
-            --end_it_;
-            score_ -= config_->get_row(*end_it_)[ref_.back()];
+            score_ -= config_->get_row(query_.back())[ref_.back()];
 
             // if we're at the first node of the alignment, then traverse
             // backwards to reconstruct a path
@@ -36,17 +35,18 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
                 ++node_it_;
             }
 
+            query_.remove_suffix(1);
             ref_.remove_suffix(1);
         } break;
         case Cigar::INSERTION: {
-            assert(end_it_ > begin_it_);
+            assert(query_.size());
             if ((--(cigar_it_.base())).offset()) {
                 score_ -= config_->gap_extension_penalty;
             } else {
                 score_ -= config_->gap_opening_penalty;
             }
 
-            --end_it_;
+            query_.remove_suffix(1);
         } break;
         case Cigar::DELETION: {
             assert((--(cigar_it_.base())).get_it() >= alignment_->get_cigar().begin());
@@ -83,7 +83,6 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator++() {
         case Cigar::MISSING: {
             assert(node_it_ != alignment_->rend());
             assert(!*node_it_);
-            ++node_it_;
         } break;
         case Cigar::CLIPPED: { assert(false); }
     }
@@ -108,9 +107,9 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
     switch (*cigar_it_) {
         case Cigar::MATCH:
         case Cigar::MISMATCH: {
-            ref_ = { ref_.data(), ref_.size() + 1};
-            score_ += config_->get_row(*end_it_)[ref_.back()];
-            ++end_it_;
+            ref_ = { ref_.data(), ref_.size() + 1 };
+            query_ = { query_.data(), query_.size() + 1 };
+            score_ += config_->get_row(query_.back())[ref_.back()];
 
             if (offset_) {
                 assert(*node_it_ == alignment_->front());
@@ -139,7 +138,7 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
             }
             --cigar_it_;
 
-            ++end_it_;
+            query_ = { query_.data(), query_.size() + 1 };
         } break;
         case Cigar::DELETION: {
             ++cigar_it_;
@@ -166,12 +165,14 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
                 if (!offset_)
                     prefix_node_ = DeBruijnGraph::npos;
             } else {
+                assert(node_it_ != alignment_->rbegin());
                 --node_it_;
             }
 
         } break;
         case Cigar::MISSING: {
-            --end_it_;
+            assert(node_it_ != alignment_->rend());
+            assert(!*node_it_);
         } break;
         case Cigar::CLIPPED: { assert(false); }
     }
@@ -187,16 +188,61 @@ AlignmentPrefix<NodeType>& AlignmentPrefix<NodeType>::operator--() {
 }
 
 template <typename NodeType>
+void AlignmentPrefix<NodeType>::shift_path_ptr_left() {
+    while (!reof() && (*cigar_it_ == Cigar::DELETION || *cigar_it_ == Cigar::MISSING)) {
+        operator--();
+        assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
+    }
+}
+
+template <typename NodeType>
+void AlignmentPrefix<NodeType>::extend_query(size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        assert(!reof());
+        shift_path_ptr_left();
+
+        assert(!reof());
+        operator--();
+        assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
+
+        shift_path_ptr_left();
+    }
+}
+
+template <typename NodeType>
+void AlignmentSuffix<NodeType>::shift_path_ptr_right() {
+    while (!eof() && (*cigar_it_ == Cigar::DELETION || *cigar_it_ == Cigar::MISSING)) {
+        operator++();
+        assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
+    }
+}
+
+template <typename NodeType>
+void AlignmentSuffix<NodeType>::remove_query(size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        assert(!eof());
+        shift_path_ptr_right();
+
+        assert(!eof());
+        operator++();
+        assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
+
+        shift_path_ptr_right();
+    }
+}
+
+
+template <typename NodeType>
 AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
     assert(cigar_it_ != cigar_end_);
 
     switch (*cigar_it_) {
         case Cigar::MATCH:
         case Cigar::MISMATCH: {
-            assert(begin_it_ < end_it_);
+            assert(query_.size());
             assert(ref_.size());
-            score_ -= config_->get_row(*begin_it_)[ref_[0]];
-            ++begin_it_;
+            score_ -= config_->get_row(query_[0])[ref_[0]];
+            query_.remove_prefix(1);
             ref_.remove_prefix(1);
             if (node_it_ + 1 != alignment_->end()) {
                 ++node_it_;
@@ -205,14 +251,14 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
             }
         } break;
         case Cigar::INSERTION: {
-            assert(begin_it_ < end_it_);
+            assert(query_.size());
             if (cigar_it_.count_left() == 1) {
                 score_ -= config_->gap_opening_penalty;
             } else {
                 score_ -= config_->gap_extension_penalty;
             }
 
-            ++begin_it_;
+            query_.remove_prefix(1);
         } break;
         case Cigar::DELETION: {
             assert(ref_.size());
@@ -230,9 +276,8 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
             }
         } break;
         case Cigar::MISSING: {
+            assert(node_it_ != alignment_->end());
             assert(!*node_it_);
-            assert(node_it_ + 1 != alignment_->end());
-            ++node_it_;
         } break;
         case Cigar::CLIPPED: { assert(false); }
     }
@@ -242,6 +287,8 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator++() {
 
     assert(cigar_begin_ <= cigar_it_);
     assert(cigar_it_ <= cigar_end_);
+
+    assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
 
     return *this;
 }
@@ -255,27 +302,27 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
     switch (*cigar_it_) {
         case Cigar::MATCH:
         case Cigar::MISMATCH: {
-            assert(begin_it_ >= alignment_->get_query().data());
+            assert(query_.data() > alignment_->get_query().data());
             assert(ref_.data() > alignment_->get_sequence().data());
-            --begin_it_;
-            ref_ = { ref_.data() - 1, ref_.size() + 1};
+            query_ = { query_.data() - 1, query_.size() + 1 };
+            ref_ = { ref_.data() - 1, ref_.size() + 1 };
             if (added_offset_) {
                 --added_offset_;
             } else {
                 assert(node_it_ != alignment_->begin());
                 --node_it_;
             }
-            score_ += config_->get_row(*begin_it_)[ref_[0]];
+            score_ += config_->get_row(query_[0])[ref_[0]];
         } break;
         case Cigar::INSERTION: {
-            assert(begin_it_ >= alignment_->get_query().data());
+            assert(query_.data() > alignment_->get_query().data());
             if (cigar_it_.count_left() == 1) {
                 score_ += config_->gap_opening_penalty;
             } else {
                 score_ += config_->gap_extension_penalty;
             }
 
-            --begin_it_;
+            query_ = { query_.data() - 1, query_.size() + 1 };
         } break;
         case Cigar::DELETION: {
             assert(cigar_it_.get_it() >= alignment_->get_cigar().begin());
@@ -286,7 +333,7 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
                 score_ += config_->gap_extension_penalty;
             }
 
-            ref_ = { ref_.data() - 1, ref_.size() + 1};
+            ref_ = { ref_.data() - 1, ref_.size() + 1 };
             if (added_offset_) {
                 --added_offset_;
             } else {
@@ -295,9 +342,8 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
             }
         } break;
         case Cigar::MISSING: {
+            assert(node_it_ != alignment_->end());
             assert(!*node_it_);
-            assert(node_it_ != alignment_->begin());
-            --node_it_;
         } break;
         case Cigar::CLIPPED: { assert(false); }
     }
@@ -306,6 +352,8 @@ AlignmentSuffix<NodeType>& AlignmentSuffix<NodeType>::operator--() {
 
     assert(cigar_begin_ <= cigar_it_);
     assert(cigar_it_ <= cigar_end_);
+
+    assert(Alignment<NodeType>(*this).is_valid(*graph_, config_));
 
     return *this;
 }

@@ -74,9 +74,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
     // alignment chaining
     bool updated = false;
+    AlignmentSuffix suffix(alignment, config_, graph_);
+    std::string_view aln_query = alignment.get_query();
+
     if (!alignment.get_orientation()) {
-        AlignmentSuffix suffix(alignment, config_, graph_.get_k());
-        const std::string_view aln_query = alignment.get_query();
         auto start = best_score_.begin() + (aln_query.data() - query_.data());
         auto end = start + aln_query.size();
         for (auto it = start; it != end; ++it) {
@@ -85,13 +86,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 updated = true;
             }
             ++suffix;
-            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::DELETION) {
-                ++suffix;
-            }
+            suffix.shift_path_ptr_right();
         }
     } else {
-        AlignmentSuffix suffix(alignment, config_, graph_.get_k());
-        const std::string_view aln_query = alignment.get_query();
         auto start = best_score_.rbegin() + (aln_query.data() - rc_query_.data());
         auto end = start + aln_query.size();
         for (auto it = start; it != end; ++it) {
@@ -100,9 +97,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
                 updated = true;
             }
             ++suffix;
-            while (!suffix.eof() && suffix.get_front_op() == Cigar::Operator::DELETION) {
-                ++suffix;
-            }
+            suffix.shift_path_ptr_right();
         }
     }
 

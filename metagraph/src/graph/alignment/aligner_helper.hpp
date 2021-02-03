@@ -561,11 +561,11 @@ class AlignmentSuffix {
 
     AlignmentSuffix(const Alignment<NodeType> &alignment,
                     const DBGAlignerConfig &config,
-                    size_t k)
+                    const DeBruijnGraph &graph)
           : alignment_(&alignment),
+            graph_(&graph),
             config_(&config),
-            begin_it_(alignment_->get_query().data()),
-            end_it_(alignment_->get_query_end()),
+            query_(alignment_->get_query()),
             ref_(alignment_->get_sequence()),
             cigar_begin_(alignment_->get_cigar(), alignment_->get_clipping()),
             cigar_end_(alignment_->get_cigar(),
@@ -574,7 +574,6 @@ class AlignmentSuffix {
             cigar_it_(cigar_begin_),
             score_(alignment_->get_score()),
             trim_(0),
-            k_(k),
             added_offset_(0),
             node_it_(alignment_->begin()) {
         assert(cigar_begin_ <= cigar_end_);
@@ -585,9 +584,7 @@ class AlignmentSuffix {
     AlignmentSuffix& operator--();
 
     score_t get_score() const { return score_; }
-    std::string_view get_query() const {
-        return std::string_view(begin_it_, end_it_ - begin_it_);
-    }
+    std::string_view get_query() const { return query_; }
 
     std::string_view get_sequence() const { return ref_; }
 
@@ -606,20 +603,25 @@ class AlignmentSuffix {
     const Alignment<NodeType>& data() const { return *alignment_; }
 
     size_t get_trim() const { return trim_; }
-    size_t get_k() const { return k_; }
+
+    const DeBruijnGraph& get_graph() const { return *graph_; }
+
+    void remove_query(size_t n);
+
+    // step through all DELETION operations while pointing to the same query character
+    void shift_path_ptr_right();
 
   private:
     const Alignment<NodeType> *alignment_;
+    const DeBruijnGraph *graph_;
     const DBGAlignerConfig *config_;
-    const char *begin_it_;
-    const char *end_it_;
+    std::string_view query_;
     std::string_view ref_;
     CigarOpIterator cigar_begin_;
     CigarOpIterator cigar_end_;
     CigarOpIterator cigar_it_;
     score_t score_;
     size_t trim_;
-    size_t k_;
     size_t added_offset_;
     typename std::vector<NodeType>::const_iterator node_it_;
 };
@@ -641,11 +643,13 @@ class AlignmentPrefix {
           : alignment_(&alignment),
             graph_(&graph),
             config_(&config),
-            begin_it_(alignment_->get_query().data()),
-            end_it_(alignment_->get_query_end()),
+            query_(alignment_->get_query()),
             ref_(alignment_->get_sequence()),
-            cigar_rbegin_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar(), alignment_->get_cigar().end()))),
-            cigar_rend_(std::make_reverse_iterator(CigarOpIterator(alignment_->get_cigar()))),
+            cigar_rbegin_(std::make_reverse_iterator(
+                CigarOpIterator(alignment_->get_cigar(),
+                                alignment_->get_cigar().end()))),
+            cigar_rend_(std::make_reverse_iterator(
+                CigarOpIterator(alignment_->get_cigar()))),
             cigar_it_(cigar_rbegin_),
             score_(alignment_->get_score()),
             trim_(0), offset_(0), prefix_node_(DeBruijnGraph::npos),
@@ -662,13 +666,13 @@ class AlignmentPrefix {
     AlignmentPrefix& operator--();
 
     score_t get_score() const { return score_; }
-    std::string_view get_query() const {
-        return std::string_view(begin_it_, end_it_ - begin_it_);
-    }
+    std::string_view get_query() const { return query_; }
 
     std::string_view get_sequence() const { return ref_; }
     Cigar::Operator get_back_op() const { return *cigar_it_; }
-    typename std::vector<NodeType>::const_reverse_iterator get_node_end_it() const { return node_it_; }
+    typename std::vector<NodeType>::const_reverse_iterator get_node_end_it() const {
+        return node_it_;
+    }
 
     bool eof() const {
         return cigar_it_ == cigar_rend_ || (offset_ && !prefix_node_);
@@ -683,12 +687,16 @@ class AlignmentPrefix {
 
     const DeBruijnGraph& get_graph() const { return *graph_; }
 
+    void extend_query(size_t n);
+
+    // step through all DELETION operations while pointing to the same query character
+    void shift_path_ptr_left();
+
   private:
     const Alignment<NodeType> *alignment_;
     const DeBruijnGraph *graph_;
     const DBGAlignerConfig *config_;
-    const char *begin_it_;
-    const char *end_it_;
+    std::string_view query_;
     std::string_view ref_;
     std::reverse_iterator<CigarOpIterator> cigar_rbegin_;
     std::reverse_iterator<CigarOpIterator> cigar_rend_;

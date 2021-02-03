@@ -352,7 +352,7 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
     assert(node_it == alignment_suffix.get_node_begin_it());
 #endif
 
-    if (offset_ == alignment_suffix.get_k()) {
+    if (offset_ == alignment_suffix.get_graph().get_k()) {
         *this = Alignment();
         return;
     }
@@ -418,7 +418,7 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
 
     size_t k = graph.get_k();
     AlignmentPrefix<NodeType> first_prefix(first, config, graph);
-    AlignmentSuffix<NodeType> second_suffix(second, config, k);
+    AlignmentSuffix<NodeType> second_suffix(second, config, graph);
 
     size_t overlap = first_prefix.get_query().data() + first_prefix.get_query().size()
         - second_suffix.get_query().data();
@@ -526,54 +526,6 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
         return length ? config.gap_opening_penalty + (length - 1) * config.gap_extension_penalty : 0;
     };
 
-    auto step_first_forward = [&]() -> bool {
-        if (first_prefix.reof())
-            return true;
-
-        while (!first_prefix.reof() && first_prefix.get_back_op() == Cigar::Operator::DELETION) {
-            assert(!first_prefix.reof());
-            --first_prefix;
-            assert(Alignment(first_prefix).is_valid(graph, &config));
-        }
-
-        if (first_prefix.reof())
-            return true;
-
-        --first_prefix;
-        assert(Alignment(first_prefix).is_valid(graph, &config));
-
-        if (first_prefix.reof())
-            return true;
-
-        while (!first_prefix.reof() && first_prefix.get_back_op() == Cigar::Operator::DELETION) {
-            assert(!first_prefix.reof());
-            --first_prefix;
-            assert(Alignment(first_prefix).is_valid(graph, &config));
-        }
-
-        return first_prefix.reof();
-    };
-
-    auto step_second_forward = [&]() -> bool {
-        assert(!second_suffix.eof());
-        while (second_suffix.get_front_op() == Cigar::Operator::DELETION) {
-            assert(!second_suffix.eof());
-            ++second_suffix;
-            assert(Alignment(second_suffix).is_valid(graph, &config));
-        }
-        assert(!second_suffix.eof());
-        ++second_suffix;
-        assert(Alignment(second_suffix).is_valid(graph, &config));
-        while (!second_suffix.eof() && (second_suffix.get_front_op() == Cigar::Operator::DELETION
-                                        || second_suffix.get_front_op() == Cigar::Operator::MISSING)) {
-            assert(!second_suffix.eof());
-            ++second_suffix;
-            assert(Alignment(second_suffix).is_valid(graph, &config));
-        }
-
-        return second_suffix.eof();
-    };
-
     for (size_t i = 0; i <= overlap; ++i) {
         auto [forward_path, reverse_path, max_forward, max_reverse] = get_traversal_steps();
         if (forward_path.size() || reverse_path.size()) {
@@ -618,6 +570,22 @@ std::pair<Alignment<NodeType>, Alignment<NodeType>> Alignment<NodeType>
                 best_reverse_traversal = std::move(reverse_path);
             }
         }
+
+        auto step_first_forward = [&]() -> bool {
+            if (first_prefix.reof())
+                return true;
+
+            first_prefix.extend_query(1);
+            return first_prefix.reof();
+        };
+
+        auto step_second_forward = [&]() -> bool {
+            if (second_suffix.eof())
+                return true;
+
+            second_suffix.remove_query(1);
+            return second_suffix.eof();
+        };
 
         bool step_first = false;
         bool step_second = false;
