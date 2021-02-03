@@ -43,7 +43,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     generate_reads([&](const std::string &read) {
         kmer_extractor.sequence_to_kmers(read, k, suffix,
                                          reinterpret_cast<Vector<KMER> *>(&buffer),
-                                         mode != Mode::BASIC);
+                                         mode == Mode::CANONICAL_ONLY);
         if (mode == Mode::BOTH) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());
@@ -91,7 +91,7 @@ void count_kmers(std::function<void(CallStringCount)> generate_reads,
     generate_reads([&](const std::string &read, uint64_t count) {
         count = std::min(count, kmers->max_count());
 
-        kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer, mode != Mode::BASIC);
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &buffer, mode == Mode::CANONICAL_ONLY);
         if (mode == Mode::BOTH) {
             auto rev_read = read;
             reverse_complement(rev_read.begin(), rev_read.end());

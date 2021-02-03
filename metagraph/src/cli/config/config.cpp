@@ -115,7 +115,7 @@ Config::Config(int argc, char *argv[]) {
             count_width = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
             forward_and_reverse = true;
-        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--mode")) {
+        } else if (!strcmp(argv[i], "--mode")) {
             graph_mode = string_to_graphmode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
             complete = true;
