@@ -77,17 +77,18 @@ class LabeledDBGAligner : public ILabeledDBGAligner {
     typedef IDBGAligner::AlignmentCallback AlignmentCallback;
 
     template <typename... Args>
-    LabeledDBGAligner(Args&&... args)
-          : ILabeledDBGAligner(std::forward<Args>(args)...),
-            aligner_core_(graph_, config_) {}
+    LabeledDBGAligner(Args&&... args) : ILabeledDBGAligner(std::forward<Args>(args)...) {
+        assert(config_.num_alternative_paths);
+        if (!config_.check_config_scores()) {
+            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+        }
+    }
 
     virtual void align_batch(const QueryGenerator &generate_query,
                              const AlignmentCallback &callback) const override final;
 
   protected:
     typedef LabeledSeeder<BaseSeeder> Seeder;
-
-    SeedAndExtendAlignerCore<AlignmentCompare> aligner_core_;
 
     Extender build_extender(std::string_view query,
                             const ISeeder<node_index> &seeder) const;
@@ -163,6 +164,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                        std::string_view query,
                        bool is_reverse_complement) {
         const auto &[query_nodes, target_columns] = mapped_batch;
+        SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
@@ -198,9 +200,9 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
-                aligner_core_.align_both_directions(paths, seeder, std::move(extender),
-                                                    build_extender(reverse, seeder),
-                                                    build_rev_comp_seeder);
+                aligner_core.align_both_directions(paths, seeder, std::move(extender),
+                                                   build_extender(reverse, seeder),
+                                                   build_rev_comp_seeder);
             } else if (config_.forward_and_reverse_complement) {
                 assert(!is_reverse_complement);
 
@@ -212,12 +214,12 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                 map_sequence_to_nodes(graph_, reverse),
                                                 signature);
 
-                aligner_core_.align_best_direction(paths, seeder, seeder_rc,
-                                                   std::move(extender),
-                                                   build_extender(reverse, seeder_rc));
+                aligner_core.align_best_direction(paths, seeder, seeder_rc,
+                                                  std::move(extender),
+                                                  build_extender(reverse, seeder_rc));
             } else {
-                aligner_core_.align_one_direction(paths, is_reverse_complement,
-                                                  seeder, std::move(extender));
+                aligner_core.align_one_direction(paths, is_reverse_complement,
+                                                 seeder, std::move(extender));
             }
 
             callback(header, std::move(paths));
