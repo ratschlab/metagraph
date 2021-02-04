@@ -606,6 +606,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         auto find = dp_table.find(path.back());
         size_t shift = find->second.start_index;
         if (query_clipping - dp_table.get_query_offset() >= shift
+                && query_clipping - dp_table.get_query_offset() - shift < find->second.scores.size()
                 && find->second.scores[query_clipping - dp_table.get_query_offset() - shift]
                    >= path.get_score()) {
             return;
