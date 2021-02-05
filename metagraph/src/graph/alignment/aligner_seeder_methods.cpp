@@ -139,6 +139,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         suffix_seeds[seed.get_clipping()].emplace_back(std::move(seed));
     });
 
+    // when a seed is found, append it to the seed vector
     auto push_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         std::string_view seed_seq(this->query_.data() + i, seed_length);
         DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
@@ -156,6 +157,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         this->config_.min_seed_length
     );
 
+    // precompute min seed lengths based on exact k-mer matches
     size_t last_seed_size = this->config_.min_seed_length;
     for (size_t i = 0; i < this->query_nodes_.size(); ++i) {
         if (this->query_nodes_[i]) {
@@ -167,6 +169,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         }
     }
 
+    // find sub-k matches in the forward orientation
     last_seed_size = min_seed_length[0];
     for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
@@ -200,18 +203,21 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
     if (canonical) {
+        // find sub-k matches in the reverse complement
         std::string query_rc(this->query_);
         reverse_complement(query_rc.begin(), query_rc.end());
 
+        // matching is done query prefix -> node suffix, so the query index of
+        // a match to the reverse complement is not known beforehand
         // e.g.,
         // k = 6;
         // rev: rev_end_pos = 8
         //     j
-        //     ****--
+        //     ****--      <-- start position in forward depends on match length
         // GCTAGCATCTGAGAGGGGA fwd
         // TCCCCTCTCAGATGCTAGC rc
         //          --****
-        //            i
+        //            i    <-- match returned from call
         for (size_t i = 0; i + this->config_.min_seed_length <= query_rc.size(); ++i) {
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
@@ -260,6 +266,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         }
     }
 
+    // once all seeds are aggregated, run callback
     last_seed_size = min_seed_length[0];
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
