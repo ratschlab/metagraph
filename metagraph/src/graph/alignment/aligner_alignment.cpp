@@ -459,7 +459,10 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
     int64_t rank = 1;
     const char *query_start = query_.data();
+
+#ifndef NDEBUG
     const char *query_end = query_.data() + query_.size();
+#endif
 
     size_t cur_pos = rank == 1 ? offset_ : 0;
 
