@@ -1,6 +1,9 @@
-#include "aligner_helper.hpp"
+#include "aligner_dp_table.hpp"
 
 #include <tsl/hopscotch_set.h>
+
+#include "aligner_alignment.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg {
 namespace graph {

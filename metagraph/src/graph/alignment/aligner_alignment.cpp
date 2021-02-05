@@ -1,7 +1,10 @@
-#include "aligner_helper.hpp"
+#include "aligner_alignment.hpp"
 
+#include "aligner_dp_table.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/logger.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 namespace mtg {

@@ -1,0 +1,275 @@
+#ifndef __ALIGNER_ALIGNMENT_HPP__
+#define __ALIGNER_ALIGNMENT_HPP__
+
+#include <cassert>
+#include <memory>
+#include <ostream>
+#include <string>
+#include <vector>
+
+#include <json/json.h>
+
+#include "aligner_cigar.hpp"
+#include "aligner_config.hpp"
+
+
+namespace mtg {
+namespace graph {
+
+class DeBruijnGraph;
+
+namespace align {
+
+template <typename NodeType>
+class DPTable;
+
+// Note: this object stores pointers to the query sequence, so it is the user's
+//       responsibility to ensure that the query sequence is not destroyed when
+//       calling this class' methods
+template <typename NodeType = uint64_t>
+class Alignment {
+  public:
+    typedef NodeType node_index;
+    typedef DBGAlignerConfig::score_t score_t;
+
+    // Used for constructing seeds
+    Alignment(std::string_view query = {},
+              std::vector<NodeType>&& nodes = {},
+              score_t score = 0,
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0)
+          : Alignment(query,
+                      std::move(nodes),
+                      std::string(query),
+                      score,
+                      Cigar(Cigar::MATCH, query.size()),
+                      clipping,
+                      orientation,
+                      offset) {
+        assert(nodes.empty() || clipping || is_exact_match());
+    }
+
+    Alignment(std::string_view query,
+              std::vector<NodeType>&& nodes,
+              std::string&& sequence,
+              score_t score,
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0);
+
+    // TODO: construct multiple alignments from the same starting point
+    Alignment(const DPTable<NodeType> &dp_table,
+              const DBGAlignerConfig &config,
+              std::string_view query_view,
+              typename DPTable<NodeType>::const_iterator column,
+              size_t start_pos,
+              size_t offset,
+              NodeType *start_node,
+              const Alignment &seed);
+
+    void append(Alignment&& other);
+
+    size_t size() const { return nodes_.size(); }
+    bool empty() const { return nodes_.empty(); }
+    const std::vector<NodeType>& get_nodes() const { return nodes_; }
+    const NodeType& operator[](size_t i) const { return nodes_[i]; }
+    const NodeType& front() const { return nodes_.front(); }
+    const NodeType& back() const { return nodes_.back(); }
+
+    score_t get_score() const { return score_; }
+    uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
+
+    std::string_view get_query() const {
+        return std::string_view(query_begin_, query_end_ - query_begin_);
+    }
+    const char* get_query_end() const { return query_end_; }
+
+    void set_query_begin(const char *begin) {
+        assert((query_end_ - query_begin_) + begin >= begin);
+        query_end_ = (query_end_ - query_begin_) + begin;
+        query_begin_ = begin;
+    }
+
+    void extend_query_begin(const char *begin) {
+        size_t clipping = get_clipping();
+        assert(begin <= query_begin_ - clipping);
+        if (begin == query_begin_ - clipping)
+            return;
+
+        if (clipping) {
+            cigar_.front().second += query_begin_ - clipping - begin;
+            return;
+        }
+
+        cigar_.insert(
+            cigar_.begin(),
+            typename Cigar::value_type { Cigar::CLIPPED, query_begin_ - begin }
+        );
+    }
+
+    void extend_query_end(const char *end) {
+        size_t end_clipping = get_end_clipping();
+        assert(end >= query_end_ + end_clipping);
+        if (end == query_end_ + end_clipping)
+            return;
+
+        cigar_.append(Cigar::CLIPPED, end - query_end_ - end_clipping);
+    }
+
+    void trim_clipping() {
+        if (get_clipping())
+            cigar_.pop_front();
+    }
+
+    void trim_end_clipping() {
+        if (get_end_clipping())
+            cigar_.pop_back();
+    }
+
+    void trim_offset();
+
+    void reverse_complement(const DeBruijnGraph &graph,
+                            std::string_view query_rev_comp);
+
+    const std::string& get_sequence() const { return sequence_; }
+    const Cigar& get_cigar() const { return cigar_; }
+    bool get_orientation() const { return orientation_; }
+    size_t get_offset() const { return offset_; }
+    Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
+    Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
+
+    typedef typename std::vector<NodeType>::iterator iterator;
+    typedef typename std::vector<NodeType>::const_iterator const_iterator;
+
+    const_iterator begin() const { return nodes_.cbegin(); }
+    const_iterator end() const { return nodes_.cend(); }
+
+    bool operator==(const Alignment &other) const {
+        return orientation_ == other.orientation_
+            && score_ == other.score_
+            && sequence_ == other.sequence_
+            && std::equal(query_begin_, query_end_, other.query_begin_, other.query_end_)
+            && cigar_ == other.cigar_;
+    }
+
+    bool operator!=(const Alignment &other) const { return !(*this == other); }
+
+    bool is_exact_match() const {
+        return cigar_.size() == 1
+            && cigar_.front().first == Cigar::MATCH
+            && query_begin_ + cigar_.front().second == query_end_;
+    }
+
+    Json::Value to_json(std::string_view query,
+                        const DeBruijnGraph &graph,
+                        bool is_secondary = false,
+                        std::string_view name = {},
+                        std::string_view label = {}) const;
+
+    std::shared_ptr<const std::string>
+    load_from_json(const Json::Value &alignment,
+                   const DeBruijnGraph &graph);
+
+    bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
+
+  private:
+    Alignment(std::string_view query,
+              std::vector<NodeType>&& nodes = {},
+              std::string&& sequence = "",
+              score_t score = 0,
+              Cigar&& cigar = Cigar(),
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0)
+          : query_begin_(query.data()),
+            query_end_(query.data() + query.size()),
+            nodes_(std::move(nodes)),
+            sequence_(std::move(sequence)),
+            score_(score),
+            cigar_(Cigar::CLIPPED, clipping),
+            orientation_(orientation),
+            offset_(offset) { cigar_.append(std::move(cigar)); }
+
+    Json::Value path_json(size_t node_size, std::string_view label = {}) const;
+
+    const char* query_begin_;
+    const char* query_end_;
+    std::vector<NodeType> nodes_;
+    std::string sequence_;
+    score_t score_;
+    Cigar cigar_;
+    bool orientation_;
+    size_t offset_;
+};
+
+template <typename NodeType>
+std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment) {
+    out << (alignment.get_orientation() ? "-" : "+") << "\t"
+        << alignment.get_sequence() << "\t"
+        << alignment.get_score() << "\t"
+        << alignment.get_num_matches() << "\t"
+        << alignment.get_cigar().to_string() << "\t"
+        << alignment.get_offset();
+
+    return out;
+}
+
+template <typename NodeType = uint64_t>
+struct LocalAlignmentLess {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+        return std::make_pair(-a.get_score(), a.get_query().size())
+                > std::make_pair(-b.get_score(), b.get_query().size());
+    }
+};
+
+
+template <typename NodeType = uint64_t>
+class QueryAlignment {
+  public:
+    typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
+
+    QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+
+    size_t size() const { return alignments_.size(); }
+    bool empty() const { return alignments_.empty(); }
+
+    template <typename... Args>
+    void emplace_back(Args&&... args) {
+        alignments_.emplace_back(std::forward<Args>(args)...);
+
+        // sanity checks
+        assert(alignments_.back().get_orientation()
+            || alignments_.back().get_query().data() >= query_->c_str());
+        assert(alignments_.back().get_orientation()
+            || alignments_.back().get_query_end() <= query_->c_str() + query_->size());
+        assert(!alignments_.back().get_orientation()
+            || alignments_.back().get_query().data() >= query_rc_->c_str());
+        assert(!alignments_.back().get_orientation()
+            || alignments_.back().get_query_end() <= query_rc_->c_str() + query_rc_->size());
+    }
+
+    void pop_back() { alignments_.pop_back(); }
+    void clear() { alignments_.clear(); }
+
+    const std::string& get_query(bool reverse_complement = false) const {
+        return !reverse_complement ? *query_ : *query_rc_;
+    }
+
+    const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
+    const_iterator begin() const { return alignments_.cbegin(); }
+    const_iterator end() const { return alignments_.cend(); }
+    const_iterator cbegin() const { return alignments_.cbegin(); }
+    const_iterator cend() const { return alignments_.cend(); }
+
+  private:
+    std::shared_ptr<std::string> query_;
+    std::shared_ptr<std::string> query_rc_;
+    std::vector<Alignment<NodeType>> alignments_;
+};
+
+} // namespace align
+} // namespace graph
+} // namespace mtg
+
+#endif  // __ALIGNER_ALIGNMENT_HPP__

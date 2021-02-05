@@ -4,7 +4,7 @@
 #include <cassert>
 #include <functional>
 
-#include "aligner_helper.hpp"
+#include "aligner_alignment.hpp"
 #include "aligner_methods.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 

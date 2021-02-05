@@ -1,5 +1,6 @@
-#include "aligner_helper.hpp"
+#include "aligner_config.hpp"
 
+#include "aligner_cigar.hpp"
 #include "kmer/alphabets.hpp"
 
 
