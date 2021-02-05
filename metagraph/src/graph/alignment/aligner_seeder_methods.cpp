@@ -230,7 +230,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             if (max_seed_length < this->config_.min_seed_length)
                 continue;
 
-            auto index_range = dbg_succ_.get_range_with_suffix_matching_longest_prefix(
+            auto index_range = dbg_succ_.get_boss().index_range(
                 { query_rc.data() + i, max_seed_length }
             );
 
