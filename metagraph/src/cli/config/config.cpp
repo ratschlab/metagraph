@@ -610,10 +610,8 @@ std::string Config::state_to_string(BOSS::State state) {
             return "small";
         case BOSS::State::FAST:
             return "fast";
-        default:
-            assert(false);
-            return "Never happens";
     }
+    throw std::runtime_error("Never happens");
 }
 
 BOSS::State Config::string_to_state(const std::string &string) {
@@ -656,10 +654,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
-        default:
-            assert(false);
-            return "Never happens";
     }
+    throw std::runtime_error("Never happens");
 }
 
 Config::AnnotationType Config::string_to_annotype(const std::string &string) {
@@ -726,9 +722,8 @@ std::string Config::graphmode_to_string(DeBruijnGraph::Mode mode) {
             return "canonical";
         case DeBruijnGraph::PRIMARY:
             return "primary";
-        default:
-            throw std::runtime_error("Never happens");
     }
+    throw std::runtime_error("Never happens");
 }
 
 DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
