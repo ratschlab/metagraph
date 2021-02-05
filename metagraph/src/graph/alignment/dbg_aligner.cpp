@@ -51,7 +51,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 #endif
         score_t min_path_score = get_min_path_score(seed);
 
-        if (seed.get_query_end() == query.data() + query.size()) {
+        if (seed.get_query().data() + seed.get_query().size()
+                == query.data() + query.size()) {
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(graph_, &config_));

@@ -8,6 +8,7 @@
 #include "aligner_alignment.hpp"
 #include "aligner_dp_table.hpp"
 #include "common/aligned_vector.hpp"
+#include "common/utils/template_utils.hpp"
 #include "common/vectors/bitmap.hpp"
 
 
@@ -185,7 +186,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     operator()(ExtensionCallback callback,
                score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
-    virtual void initialize(const DBGAlignment &path) override;
+    virtual void initialize(const DBGAlignment &seed) override;
 
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
 
@@ -243,8 +244,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     // the initial seed
     const DBGAlignment *path_;
 
-    // starting position of the alignment
-    const char *align_start;
+    std::string_view extend_window_;
 
     // max size of a column
     size_t size;
