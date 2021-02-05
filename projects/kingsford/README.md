@@ -8,7 +8,7 @@ bsub -J "build_single[1-2652]%500" \
         "file=\"\$(sed -n \${LSB_JOBINDEX}p ~/metagenome/data/kingsford/kingsford_list_kmc.txt)\"; \
         /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA build -v \
             -k 20 \
-            --canonical \
+            --mode canonical \
             --count-kmers \
             --mem-cap-gb 8 \
             -p 1 \
@@ -37,7 +37,7 @@ bsub -J "kingsford_build" \
     "find ~/metagenome/data/kingsford/single_graphs/ -name \"*.fasta.gz\" \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph build -v \
             -k 20 \
-            --canonical \
+            --mode canonical \
             --mem-cap-gb 80 \
             -p 36 \
             -o ~/metagenome/data/kingsford/kingsford_canonical \
@@ -60,6 +60,7 @@ bsub -J "kingsford_build" \
      -n 36 -R "rusage[mem=1500] span[hosts=1]" \
     "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph build -v \
             -k 20 \
+            --mode primary \
             --mem-cap-gb 40 \
             -p 36 \
             -o ~/metagenome/data/kingsford/kingsford_primary \
@@ -80,7 +81,7 @@ for list in x*; do
         "cat ${list} \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph annotate -v \
                 -i ~/metagenome/data/kingsford/kingsford_primary.dbg \
-                --canonical \
+                --mode canonical \
                 --count-kmers \
                 --parallel 15 \
                 --anno-filename \
