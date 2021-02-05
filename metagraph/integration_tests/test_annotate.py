@@ -55,7 +55,7 @@ class TestAnnotate(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 46960', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -89,7 +89,7 @@ class TestAnnotate(unittest.TestCase):
     def test_simple_all_graphs_canonical(self, graph_repr):
 
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
+                --graph {repr} --mode canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             repr=graph_repr,
@@ -109,7 +109,7 @@ class TestAnnotate(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 91584', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -164,7 +164,7 @@ class TestAnnotate(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -219,7 +219,7 @@ class TestAnnotate(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -281,7 +281,7 @@ class TestAnnotate(unittest.TestCase):
         """
 
         construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --graph {repr} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --mode canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             repr=graph_repr,
@@ -301,7 +301,7 @@ class TestAnnotate(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation

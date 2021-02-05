@@ -51,7 +51,7 @@ class TestCleanWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
@@ -86,7 +86,7 @@ class TestCleanWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
@@ -113,7 +113,7 @@ class TestCleanWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
@@ -148,7 +148,7 @@ class TestCleanWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
@@ -163,7 +163,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
     def test_no_cleaning_contigs(self, representation):
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
+                --graph {repr} -k 31 --mode canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/graph',
@@ -182,7 +182,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 2.4635', params_str[4])
 
@@ -198,7 +198,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         reconstruct_command = '{exe} build --mask-dummy \
-                --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
+                --graph {repr} -k 31 --mode canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/graph_clean',
@@ -217,7 +217,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 2.4635', params_str[4])
 
@@ -226,7 +226,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
     def test_no_cleaning_contigs_2bit_counts(self, representation):
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} -k 31 --canonical --count-kmers --count-width 2 -o {outfile} {input}'.format(
+                --graph {repr} -k 31 --mode canonical --count-kmers --count-width 2 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/graph',
@@ -245,7 +245,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
 
@@ -261,7 +261,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         reconstruct_command = '{exe} build --mask-dummy \
-                --graph {repr} -k 31 --canonical --count-kmers -o {outfile} {input}'.format(
+                --graph {repr} -k 31 --mode canonical --count-kmers -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             outfile=self.tempdir.name + '/graph_clean',
@@ -280,7 +280,7 @@ class TestCleanWeightedCanonical(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
 

@@ -74,7 +74,7 @@ class TestAnnotate(unittest.TestCase):
     def test_assemble_gfa(self, gfa_test):
         k = 20
         construct_command = '{exe} build -p {num_threads} --mask-dummy \
-                --canonical -k {k} -o {outfile} {input}'.format(
+                --mode canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             k=k,

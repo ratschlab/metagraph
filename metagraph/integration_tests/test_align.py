@@ -50,7 +50,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -88,7 +88,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -126,7 +126,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -159,7 +159,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -197,7 +197,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -234,7 +234,7 @@ class TestDNAAlign(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
