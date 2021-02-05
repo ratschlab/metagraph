@@ -80,41 +80,30 @@ class Alignment {
     score_t get_score() const { return score_; }
     uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
 
-    std::string_view get_query() const {
-        return std::string_view(query_begin_, query_end_ - query_begin_);
-    }
-    const char* get_query_end() const { return query_end_; }
+    std::string_view get_query() const { return query_; }
 
-    void set_query_begin(const char *begin) {
-        assert((query_end_ - query_begin_) + begin >= begin);
-        query_end_ = (query_end_ - query_begin_) + begin;
-        query_begin_ = begin;
-    }
+    void set_query_begin(const char *begin) { query_ = { begin, query_.size() }; }
 
     void extend_query_begin(const char *begin) {
         size_t clipping = get_clipping();
-        assert(begin <= query_begin_ - clipping);
-        if (begin == query_begin_ - clipping)
+        const char *full_query_begin = query_.data() - clipping;
+        assert(begin <= full_query_begin);
+        if (begin == full_query_begin)
             return;
 
         if (clipping) {
-            cigar_.front().second += query_begin_ - clipping - begin;
-            return;
+            cigar_.front().second += full_query_begin - begin;
+        } else {
+            cigar_.insert(cigar_.begin(),
+                          std::make_pair(Cigar::CLIPPED, full_query_begin - begin));
         }
-
-        cigar_.insert(
-            cigar_.begin(),
-            typename Cigar::value_type { Cigar::CLIPPED, query_begin_ - begin }
-        );
     }
 
     void extend_query_end(const char *end) {
-        size_t end_clipping = get_end_clipping();
-        assert(end >= query_end_ + end_clipping);
-        if (end == query_end_ + end_clipping)
-            return;
-
-        cigar_.append(Cigar::CLIPPED, end - query_end_ - end_clipping);
+        const char *full_query_end = query_.data() + query_.size() + get_end_clipping();
+        assert(end >= full_query_end);
+        if (end > full_query_end)
+            cigar_.append(Cigar::CLIPPED, end - full_query_end);
     }
 
     void trim_clipping() {
@@ -149,7 +138,7 @@ class Alignment {
         return orientation_ == other.orientation_
             && score_ == other.score_
             && sequence_ == other.sequence_
-            && std::equal(query_begin_, query_end_, other.query_begin_, other.query_end_)
+            && query_ == other.query_
             && cigar_ == other.cigar_;
     }
 
@@ -157,8 +146,7 @@ class Alignment {
 
     bool is_exact_match() const {
         return cigar_.size() == 1
-            && cigar_.front().first == Cigar::MATCH
-            && query_begin_ + cigar_.front().second == query_end_;
+            && cigar_.front() == Cigar::value_type(Cigar::MATCH, query_.size());
     }
 
     Json::Value to_json(std::string_view query,
@@ -182,8 +170,7 @@ class Alignment {
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0)
-          : query_begin_(query.data()),
-            query_end_(query.data() + query.size()),
+          : query_(query),
             nodes_(std::move(nodes)),
             sequence_(std::move(sequence)),
             score_(score),
@@ -193,8 +180,7 @@ class Alignment {
 
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
-    const char* query_begin_;
-    const char* query_end_;
+    std::string_view query_;
     std::vector<NodeType> nodes_;
     std::string sequence_;
     score_t score_;
@@ -238,15 +224,13 @@ class QueryAlignment {
     void emplace_back(Args&&... args) {
         alignments_.emplace_back(std::forward<Args>(args)...);
 
-        // sanity checks
-        assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query().data() >= query_->c_str());
-        assert(alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= query_->c_str() + query_->size());
-        assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query().data() >= query_rc_->c_str());
-        assert(!alignments_.back().get_orientation()
-            || alignments_.back().get_query_end() <= query_rc_->c_str() + query_rc_->size());
+#ifndef NDEBUG
+        const auto &added = alignments_.back();
+        const std::string &this_query = get_query(added.get_orientation());
+        assert(added.get_query().data() >= this_query.c_str());
+        assert(added.get_query().data() + added.get_query().size()
+                    <= this_query.c_str() + this_query.size());
+#endif
     }
 
     void pop_back() { alignments_.pop_back(); }

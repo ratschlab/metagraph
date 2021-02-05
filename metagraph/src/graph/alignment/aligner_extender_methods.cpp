@@ -182,11 +182,12 @@ bool DefaultColumnExtender<NodeType>
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     // this extender only works if at least one character has been matched
-    assert(path.get_query_end() > path.get_query().data());
-    assert(path.get_query_end() > query.data());
-    assert(query.data() + query.size() > path.get_query_end());
+    assert(path.get_query().size());
+    assert(query.data() <= path.get_query().data());
 
-    align_start = path.get_query_end();
+    align_start = path.get_query().data() + path.get_query().size();
+    assert(query.data() + query.size() >= align_start);
+
     size = query.data() + query.size() - align_start + 1;
     match_score_begin = partial_sums_.data() + (align_start - 1 - query.data());
 
