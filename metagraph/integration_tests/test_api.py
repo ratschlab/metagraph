@@ -25,8 +25,7 @@ class TestAPIBase(TestingBase):
 
         cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct',
                          canonical=canonical, primary=primary)
-        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column',
-                            primary=primary)
+        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
@@ -34,7 +33,8 @@ class TestAPIBase(TestingBase):
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
         wait_time_sec = 1
-        print("Waiting {} sec for the server (PID {}) to start up".format(wait_time_sec, cls.server_process.pid), flush=True)
+        print("Waiting {} sec for the server (PID {}) to start up".format(
+            wait_time_sec, cls.server_process.pid), flush=True)
         time.sleep(wait_time_sec)
 
     @classmethod

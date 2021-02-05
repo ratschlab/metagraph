@@ -40,7 +40,7 @@ class TestingBase(unittest.TestCase):
             exe=METAGRAPH,
             k=k,
             repr=repr,
-            canonical='--canonical' if canonical else '',
+            canonical='--mode canonical' if canonical or primary else '',
             outfile=output,
             input=input
         )
@@ -63,7 +63,7 @@ class TestingBase(unittest.TestCase):
                                  stderr=PIPE)
             assert res.returncode == 0
 
-            construct_command = '{exe} build \
+            construct_command = '{exe} build --mode primary \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 k=k,
@@ -77,11 +77,10 @@ class TestingBase(unittest.TestCase):
             assert res.returncode == 0
 
 
-    def _annotate_graph(self, input, graph_path, output, anno_repr, primary=False):
-        annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
+    def _annotate_graph(self, input, graph_path, output, anno_repr):
+        annotate_command = '{exe} annotate --anno-header -i {graph} \
                 --anno-type {anno_repr} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            fwd_and_rev='--canonical' if primary else '',
             graph=graph_path,
             anno_repr=anno_repr,
             outfile=output,
