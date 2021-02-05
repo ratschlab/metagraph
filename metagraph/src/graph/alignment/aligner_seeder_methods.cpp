@@ -132,6 +132,9 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 
 template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
+    // this method assumes that seeds from the BaseSeeder are exact match only
+    static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
+
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
     );
