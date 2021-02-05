@@ -276,10 +276,13 @@ void DBGSuccinct
             std::function<void(node_index, uint64_t /* match length */)> callback,
             size_t min_match_length,
             size_t max_num_allowed_matches) const {
+    assert(str.size() <= get_k());
     if (!max_num_allowed_matches || str.size() < min_match_length)
         return;
 
-    auto index_range = boss_graph_->index_range(str);
+    auto index_range = boss_graph_->index_range({
+        str.data(), std::min(str.size(), get_k() - 1)
+    });
 
     // since we can only match up to get_k() - 1 in BOSS, check for this
     // case and simply pick the appropriate BOSS edge
