@@ -4,7 +4,7 @@
 
 #include <priority_deque.hpp>
 
-#include "aligner_helper.hpp"
+#include "aligner_alignment.hpp"
 
 namespace mtg {
 namespace graph {

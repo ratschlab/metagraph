@@ -6,7 +6,7 @@
 #include "gtest/gtest.h"
 
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_helper.hpp"
+#include "graph/alignment/aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 

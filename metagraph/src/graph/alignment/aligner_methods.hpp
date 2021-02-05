@@ -5,7 +5,8 @@
 
 #include <priority_deque.hpp>
 
-#include "aligner_helper.hpp"
+#include "aligner_alignment.hpp"
+#include "aligner_dp_table.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/bitmap.hpp"
 
@@ -17,7 +18,7 @@ class DBGSuccinct;
 
 namespace align {
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class ISeeder {
   public:
     typedef Alignment<NodeType> Seed;
@@ -27,7 +28,7 @@ class ISeeder {
     virtual void call_seeds(std::function<void(Seed&&)> callback) const = 0;
 };
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class ManualSeeder : public ISeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -47,7 +48,7 @@ class ManualSeeder : public ISeeder<NodeType> {
     std::vector<Seed> seeds_;
 };
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class ExactSeeder : public ISeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -73,7 +74,7 @@ class ExactSeeder : public ISeeder<NodeType> {
     size_t num_matching_;
 };
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class MEMSeeder : public ExactSeeder<NodeType> {
   public:
     typedef typename ISeeder<NodeType>::Seed Seed;
@@ -88,7 +89,7 @@ class MEMSeeder : public ExactSeeder<NodeType> {
     virtual const bitmap& get_mem_terminator() const = 0;
 };
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -137,7 +138,7 @@ class SuffixSeeder : public BaseSeeder {
 };
 
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class IExtender {
   public:
     typedef Alignment<NodeType> DBGAlignment;
@@ -159,7 +160,7 @@ class IExtender {
 };
 
 
-template <typename NodeType = typename DeBruijnGraph::node_index>
+template <typename NodeType = uint64_t>
 class DefaultColumnExtender : public IExtender<NodeType> {
   public:
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;

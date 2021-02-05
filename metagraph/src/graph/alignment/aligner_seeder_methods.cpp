@@ -3,6 +3,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 namespace mtg {
