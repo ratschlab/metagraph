@@ -80,6 +80,17 @@ int transform_graph(Config *config) {
         return 0;
     }
 
+    if (config->clear_dummy) {
+        logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
+        timer.reset();
+
+        // remove redundant dummy edges and mark all other dummy edges
+        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
+
+        logger->trace("The tree of source dummy edges traversed in {} sec", timer.elapsed());
+        timer.reset();
+    }
+
     if (config->node_suffix_length
             && config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
         size_t suffix_length = std::min((size_t)config->node_suffix_length,
@@ -103,17 +114,6 @@ int transform_graph(Config *config) {
         timer.reset();
     }
 
-    if (config->clear_dummy) {
-        logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
-        timer.reset();
-
-        // remove redundant dummy edges and mark all other dummy edges
-        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
-
-        logger->trace("The tree of source dummy edges traversed in {} sec", timer.elapsed());
-        timer.reset();
-    }
-
     if (config->to_adj_list) {
         logger->trace("Converting graph to adjacency list...");
 
@@ -131,7 +131,8 @@ int transform_graph(Config *config) {
     if (config->graph_mode == graph::DeBruijnGraph::PRIMARY
             && dbg_succ->get_mode() == graph::DeBruijnGraph::BASIC) {
         logger->info("Changing graph mode from basic to primary");
-        logger->warn("This doesn't rebuild the graph. Use with caution!");
+        logger->warn("This doesn't rebuild the graph. Apply with caution,"
+                     " only to graphs that were constructed as primary!");
         config->state = dbg_succ->get_state();
         graph::boss::BOSS* boss = dbg_succ->release_boss();
         dbg_succ.reset(new graph::DBGSuccinct(boss, graph::DeBruijnGraph::PRIMARY));
