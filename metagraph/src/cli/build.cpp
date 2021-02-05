@@ -377,9 +377,8 @@ int concatenate_graph_chunks(Config *config) {
     std::unique_ptr<DeBruijnGraph> graph;
     switch (config->graph_type) {
         case Config::GraphType::SUCCINCT: {
-            auto dbg_succ = std::make_unique<DBGSuccinct>(
-                    boss::BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose()),
-                    config->graph_mode);
+            boss::BOSS *boss = boss::BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
+            auto dbg_succ = std::make_unique<DBGSuccinct>(boss, config->graph_mode);
 
             logger->trace("Chunks concatenated in {} sec", timer.elapsed());
 
