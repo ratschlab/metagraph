@@ -180,23 +180,29 @@ bool DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
+void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     // this extender only works if at least one character has been matched
-    assert(path.get_query().size());
-    assert(query.data() <= path.get_query().data());
+    assert(seed.get_query().size());
+    assert(query.data() <= seed.get_query().data());
 
-    align_start = path.get_query().data() + path.get_query().size();
-    assert(query.data() + query.size() >= align_start);
+    const char *query_end = query.data() + query.size();
+    const char *seed_end = seed.get_query().data() + seed.get_query().size();
+    assert(query_end >= seed_end);
 
-    size = query.data() + query.size() - align_start + 1;
-    match_score_begin = partial_sums_.data() + (align_start - 1 - query.data());
+    // size includes the last character of the seed since the upper-left corner
+    // of the score matrix is the seed score
+    size = query_end - seed_end + 1;
 
-    assert(config_.match_score(std::string_view(align_start - 1, size))
-        == *match_score_begin);
+    // extend_window_ doesn't include this last character
+    extend_window_ = { seed_end, size - 1 };
+
+    match_score_begin = partial_sums_.data() + (seed_end - 1 - query.data());
     assert(config_.get_row(query.back())[query.back()] == match_score_begin[size - 1]);
+    assert(config_.match_score(std::string_view(extend_window_.data() - 1, size))
+        == *match_score_begin);
 
-    start_node = path.back();
-    this->path_ = &path;
+    start_node = seed.back();
+    this->path_ = &seed;
 }
 
 template <typename NodeType>
@@ -750,13 +756,8 @@ void DefaultColumnExtender<NodeType>::extend_main(ExtensionCallback callback,
         logger->trace("best alignment does not end with a MATCH");
 
     // get all alignments
-    dp_table.extract_alignments(graph_,
-                                config_,
-                                std::string_view(align_start, size - 1),
-                                callback,
-                                min_path_score,
-                                get_seed(),
-                                &start_node);
+    dp_table.extract_alignments(graph_, config_, extend_window_, callback,
+                                min_path_score, get_seed(), &start_node);
 }
 
 template <typename NodeType>
