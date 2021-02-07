@@ -166,6 +166,39 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     const uint64_t *pred_begin,
                                     const uint64_t *pred_end)>;
 
+auto read_next_block(sdsl::int_vector_buffer<>::iterator &succ_it,
+                     sdsl::int_vector_buffer<1>::iterator &pred_boundary_it,
+                     sdsl::int_vector_buffer<>::iterator &pred_it,
+                     uint64_t block_size) {
+    std::vector<uint64_t> succ_chunk(block_size);
+    for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
+        succ_chunk[i] = *succ_it;
+    }
+
+    // read predecessor offsets
+    std::vector<uint64_t> pred_chunk_idx(block_size + 1);
+    pred_chunk_idx[0] = 0;
+    for (uint64_t i = 1; i <= block_size; ++i) {
+        // find where the last predecessor for the node ends
+        pred_chunk_idx[i] = pred_chunk_idx[i - 1];
+        while (*pred_boundary_it == 0) {
+            ++pred_chunk_idx[i];
+            ++pred_boundary_it;
+        }
+        ++pred_boundary_it;
+    }
+
+    // read all predecessors for the block
+    std::vector<uint64_t> pred_chunk(pred_chunk_idx.back());
+    for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
+        pred_chunk[i] = *pred_it;
+    }
+
+    return std::make_tuple(std::move(succ_chunk),
+                           std::move(pred_chunk),
+                           std::move(pred_chunk_idx));
+}
+
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
  * BLOCK_SIZE rows at a time and invokes #call_ones for each set bit.
@@ -202,40 +235,6 @@ void traverse_anno_chunked(
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
 
-    auto read_next_block = [&](uint64_t block_size) {
-        std::vector<uint64_t> succ_chunk(block_size);
-        for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
-            succ_chunk[i] = *succ_it;
-        }
-
-        // read predecessor offsets
-        std::vector<uint64_t> pred_chunk_idx(block_size + 1);
-        pred_chunk_idx[0] = 0;
-        for (uint64_t i = 1; i <= block_size; ++i) {
-            // find where the last predecessor for the node ends
-            pred_chunk_idx[i] = pred_chunk_idx[i - 1];
-            while (*pred_boundary_it == 0) {
-                ++pred_chunk_idx[i];
-                ++pred_boundary_it;
-            }
-            ++pred_boundary_it;
-        }
-
-        // read all predecessors for the block
-        std::vector<uint64_t> pred_chunk(pred_chunk_idx.back());
-        for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
-            pred_chunk[i] = *pred_it;
-        }
-
-        return std::make_tuple(std::move(succ_chunk),
-                               std::move(pred_chunk),
-                               std::move(pred_chunk_idx));
-    };
-
-    ThreadPool async_reader(1, 1);
-    // start reading the first block
-    auto block = async_reader.enqueue(read_next_block, std::min(BLOCK_SIZE, num_rows));
-
     ProgressBar progress_bar(num_rows, "Compute diffs",
                              std::cerr, !common::get_verbose());
 
@@ -244,16 +243,14 @@ void traverse_anno_chunked(
 
         before_chunk(block_size);
 
+        // get the current block
         std::vector<uint64_t> succ_chunk;
         std::vector<uint64_t> pred_chunk_idx;
         std::vector<uint64_t> pred_chunk;
-        // get the current block
-        std::tie(succ_chunk, pred_chunk, pred_chunk_idx) = std::move(block.get());
-        // already start reading next block
-        block = async_reader.enqueue(read_next_block,
-            std::min(BLOCK_SIZE, num_rows - (chunk + block_size))
-        );
+        std::tie(succ_chunk, pred_chunk, pred_chunk_idx)
+            = read_next_block(succ_it, pred_boundary_it, pred_it, block_size);
 
+        assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
