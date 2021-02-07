@@ -169,18 +169,23 @@ using CallOnes = std::function<void(const bit_vector &source_col,
 auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
                      sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
                      sdsl::int_vector_buffer<>::iterator *pred_it_p,
-                     uint64_t block_size) {
+                     uint64_t block_size,
+                     std::array<std::vector<uint64_t>, 3> *out) {
     auto &succ_it = *succ_it_p;
     auto &pred_boundary_it = *pred_boundary_it_p;
     auto &pred_it = *pred_it_p;
 
-    std::vector<uint64_t> succ_chunk(block_size);
+    std::vector<uint64_t> &succ_chunk = out->at(0);
+    std::vector<uint64_t> &pred_chunk_idx = out->at(1);
+    std::vector<uint64_t> &pred_chunk = out->at(2);
+
+    succ_chunk.resize(block_size);
     for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
         succ_chunk[i] = *succ_it;
     }
 
     // read predecessor offsets
-    std::vector<uint64_t> pred_chunk_idx(block_size + 1);
+    pred_chunk_idx.resize(block_size + 1);
     pred_chunk_idx[0] = 0;
     for (uint64_t i = 1; i <= block_size; ++i) {
         // find where the last predecessor for the node ends
@@ -193,14 +198,10 @@ auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
     }
 
     // read all predecessors for the block
-    std::vector<uint64_t> pred_chunk(pred_chunk_idx.back());
+    pred_chunk.resize(pred_chunk_idx.back());
     for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
         pred_chunk[i] = *pred_it;
     }
-
-    return std::make_tuple(std::move(succ_chunk),
-                           std::move(pred_chunk),
-                           std::move(pred_chunk_idx));
 }
 
 /**
@@ -243,14 +244,14 @@ void traverse_anno_chunked(
     // start reading the first block
     uint64_t block_size = std::min(BLOCK_SIZE, num_rows);
     uint64_t next_block_size;
-    auto block = async_reader.enqueue(read_next_block,
-                                      &succ_it, &pred_boundary_it, &pred_it, block_size);
+    std::array<std::vector<uint64_t>, 3> context;
+    std::array<std::vector<uint64_t>, 3> context_other;
+    async_reader.enqueue(read_next_block,
+                         &succ_it, &pred_boundary_it, &pred_it, block_size,
+                         &context_other);
 
     ProgressBar progress_bar(num_rows, "Compute diffs",
                              std::cerr, !common::get_verbose());
-    std::vector<uint64_t> succ_chunk;
-    std::vector<uint64_t> pred_chunk_idx;
-    std::vector<uint64_t> pred_chunk;
 
     #pragma omp parallel num_threads(num_threads)
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
@@ -260,13 +261,18 @@ void traverse_anno_chunked(
 
             before_chunk(block_size);
 
-            // get the current block
-            std::tie(succ_chunk, pred_chunk, pred_chunk_idx) = std::move(block.get());
-            // start reading the next block
-            block = async_reader.enqueue(read_next_block,
-                                         &succ_it, &pred_boundary_it, &pred_it, next_block_size);
+            // finish reading this block
+            async_reader.join();
+            std::swap(context, context_other);
+            // start reading next block
+            async_reader.enqueue(read_next_block,
+                                 &succ_it, &pred_boundary_it, &pred_it, next_block_size,
+                                 &context_other);
         }
         #pragma omp barrier
+        std::vector<uint64_t> &succ_chunk = context[0];
+        std::vector<uint64_t> &pred_chunk_idx = context[1];
+        std::vector<uint64_t> &pred_chunk = context[2];
 
         assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
