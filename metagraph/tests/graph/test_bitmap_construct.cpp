@@ -159,7 +159,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
             constructor->add_sequences(std::vector<std::string>(input_data));
             DBGBitmap reference(constructor.get());
 
-            for (size_t suffix_len = 0; suffix_len <= k && suffix_len <= 4u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len <= std::min(k, (size_t)2); ++suffix_len) {
                 std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
@@ -170,7 +170,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                         constructor->add_sequence(std::string(seq));
                     }
 
-                    std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                    DBGBitmap::Chunk chunk = constructor->build_chunk();
 
                     chunk_filenames.push_back(
                         utils::join_strings({ test_data_dir + "/chunks_to_merge", suffix }, ".")
@@ -180,7 +180,7 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                     std::filesystem::remove(chunk_filenames.back());
 
                     std::ofstream out(chunk_filenames.back(), std::ios::binary);
-                    chunk->serialize(out);
+                    chunk.serialize(out);
                 }
 
                 ASSERT_TRUE(chunk_filenames.size());
@@ -238,18 +238,6 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
         2, &result, {}, 100'000
     );
@@ -260,6 +248,20 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
         2, &result, { 1, }, 100'000
     );
     EXPECT_EQ(2u, result.data().size());
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, {}, 100'000
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, { 1, }, 100'000
+    );
+    #if _DNA_GRAPH
+        ASSERT_EQ(2u, result.data().size());
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
@@ -298,12 +300,11 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, 0
     );
-    // #if _DNA4_GRAPH
-        // B->A in 2Bit mode
+    #if _DNA_GRAPH
         ASSERT_EQ(2u, result.data().size());
-    // #else
-    //     ASSERT_EQ(3u, result.data().size());
-    // #endif
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
@@ -328,16 +329,14 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
         std::vector<std::string> files;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
@@ -386,16 +385,14 @@ TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
         std::vector<std::string> files;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
@@ -447,17 +444,15 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
         uint64_t chunk_size = 0;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
-            chunk_size += chunk->num_set_bits();
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
+            chunk_size += chunk.num_set_bits();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
@@ -510,17 +505,15 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         uint64_t chunk_size = 0;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
-            chunk_size += chunk->num_set_bits();
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
+            chunk_size += chunk.num_set_bits();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{

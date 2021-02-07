@@ -46,7 +46,7 @@ class SortedSetDiskBase {
     SortedSetDiskBase(size_t num_threads,
                       size_t reserved_num_elements,
                       const std::filesystem::path &tmp_dir,
-                      size_t max_disk_space_bytes,
+                      size_t disk_cap_bytes,
                       size_t merge_count);
 
     virtual ~SortedSetDiskBase() {
@@ -71,11 +71,9 @@ class SortedSetDiskBase {
     std::vector<std::string> files_to_merge();
 
     /**
-     * Clears the set, preparing it to be re-used for another merge. Creating a new
-     * sorted set may be expensive when #data_ is large. In these cases, prefer calling
-     * #clear and re-using the buffer.
+     * Clears the set and the buffer.
      */
-    void clear(const std::filesystem::path &tmp_path = "/tmp/");
+    void clear();
 
     /**
      * Insert already sorted data into the set. This data is written directly to a
@@ -166,11 +164,13 @@ class SortedSetDiskBase {
 
     size_t reserved_num_elements_;
 
-    size_t max_disk_space_bytes_;
+    size_t disk_cap_bytes_;
 
     size_t merge_count_;
 
     std::string chunk_file_prefix_;
+
+    size_t num_blocks_;
 
     /**
      * True if the data merging thread was started, and data started flowing into the #merge_queue_.
@@ -203,10 +203,15 @@ class SortedSetDiskBase {
     }
 
     static void merge_l1(const std::string &chunk_file_prefix,
-                         uint32_t chunk_count,
-                         size_t merge_count,
+                         uint32_t chunk_begin,
+                         uint32_t chunk_end,
                          std::atomic<uint32_t> *l1_chunk_count,
-                         std::atomic<size_t> *total_size);
+                         std::atomic<size_t> *total_size,
+                         size_t blocks_per_chunk);
+
+    static std::string merge_blocks(const std::string &chunk_file_prefix,
+                                    uint32_t chunk,
+                                    size_t num_blocks);
 
     static void merge_all(const std::string &out_file,
                           const std::vector<std::string> &to_merge);

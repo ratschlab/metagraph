@@ -95,7 +95,7 @@ int build_graph(Config *config) {
             suffixes = kmer::KmerExtractorBOSS::generate_suffixes(config->suffix_len);
         }
 
-        std::unique_ptr<boss::BOSS::Chunk> graph_data;
+        boss::BOSS::Chunk graph_data;
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
@@ -121,36 +121,35 @@ int build_graph(Config *config) {
 
             push_sequences(files, *config, timer, constructor.get());
 
-            boss::BOSS::Chunk *next_chunk = constructor->build_chunk();
+            boss::BOSS::Chunk next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
-                          next_chunk->size() - 1, timer.elapsed());
+                          next_chunk.size() - 1, timer.elapsed());
 
             if (config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
                 timer.reset();
-                next_chunk->serialize(config->outfbase + "." + suffix);
+                next_chunk.serialize(config->outfbase + "." + suffix);
                 logger->info("Serialization done in {} sec", timer.elapsed());
                 return 0;
             }
 
-            if (graph_data) {
-                graph_data->extend(*next_chunk);
-                delete next_chunk;
+            if (graph_data.size()) {
+                graph_data.extend(next_chunk);
             } else {
-                graph_data.reset(next_chunk);
+                graph_data = std::move(next_chunk);
             }
         }
 
-        assert(graph_data);
+        assert(graph_data.size());
 
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
-            graph_data->initialize_boss(boss_graph.get(), &kmer_counts);
+            graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
             graph->add_extension(std::make_shared<NodeWeights>(std::move(kmer_counts)));
             assert(graph->get_extension<NodeWeights>()->is_compatible(*graph));
         } else {
-            graph_data->initialize_boss(boss_graph.get());
+            graph_data.initialize_boss(boss_graph.get());
             graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
         }
 
@@ -197,9 +196,9 @@ int build_graph(Config *config) {
                 graph.reset(bitmap_graph);
 
             } else {
-                std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                DBGBitmap::Chunk chunk = constructor->build_chunk();
                 logger->trace("Graph chunk with {} k-mers was built in {} sec",
-                              chunk->num_set_bits(), timer.elapsed());
+                              chunk.num_set_bits(), timer.elapsed());
 
                 logger->trace("Serialize the graph chunk for suffix '{}'...", suffix);
 
@@ -208,7 +207,7 @@ int build_graph(Config *config) {
                         + DBGBitmap::kChunkFileExtension
                 );
                 std::ofstream out(chunk_filenames.back(), std::ios::binary);
-                chunk->serialize(out);
+                chunk.serialize(out);
                 logger->trace("Serialization done in {} sec", timer.elapsed());
             }
 

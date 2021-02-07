@@ -83,19 +83,6 @@ Cigar::OperatorTable Cigar::initialize_opt_table() {
 
 Cigar::OperatorTable Cigar::char_to_op = Cigar::initialize_opt_table();
 
-char Cigar::opt_to_char(Cigar::Operator op) {
-    switch (op) {
-        case Cigar::MATCH: return '=';
-        case Cigar::MISMATCH: return 'X';
-        case Cigar::INSERTION: return 'I';
-        case Cigar::DELETION: return 'D';
-        case Cigar::CLIPPED: return 'S';
-    }
-
-    assert(false);
-    return '\0';
-}
-
 std::string Cigar::to_string() const {
     std::string cigar_string;
 
@@ -125,8 +112,7 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
-bool Cigar::is_valid(const std::string_view reference,
-                     const std::string_view query) const {
+bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
 
@@ -182,9 +168,9 @@ bool Cigar::is_valid(const std::string_view reference,
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Operator::DELETION: {
-                if (i && cigar_[i - 1].first == Operator::INSERTION) {
-                    std::cerr << "DELETION after INSERTION" << std::endl
+            case Operator::INSERTION: {
+                if (i && cigar_[i - 1].first == Operator::DELETION) {
+                    std::cerr << "INSERTION after DELETION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -201,9 +187,9 @@ bool Cigar::is_valid(const std::string_view reference,
 
                 alt_it += op.second;
             } break;
-            case Operator::INSERTION: {
-                if (i && cigar_[i - 1].first == Operator::DELETION) {
-                    std::cerr << "INSERTION after DELETION" << std::endl
+            case Operator::DELETION: {
+                if (i && cigar_[i - 1].first == Operator::INSERTION) {
+                    std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

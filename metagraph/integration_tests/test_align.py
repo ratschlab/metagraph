@@ -10,6 +10,8 @@ import os
 """Test graph construction and alignment"""
 
 METAGRAPH = './metagraph'
+DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -21,14 +23,13 @@ graph_file_extension = {'succinct': '.dbg',
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
-class TestAlign(unittest.TestCase):
+@unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
+class TestDNAAlign(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_all_graphs(self, representation):
-
-        self.maxDiff = None
 
         construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
@@ -51,7 +52,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -68,8 +69,6 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_banded_all_graphs(self, representation):
 
-        self.maxDiff = None
-
         construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -91,7 +90,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -129,7 +128,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -141,7 +140,6 @@ class TestAlign(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_fwd_rev_comp_all_graphs(self, representation):
 
-        self.maxDiff = None
         construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
@@ -163,7 +161,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align --align-both-strands -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -201,7 +199,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -238,7 +236,7 @@ class TestAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --discovery-fraction 0.0 {reads}'.format(
+        stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -250,6 +248,17 @@ class TestAlign(unittest.TestCase):
         ref_align_str = open(TEST_DATA_DIR + '/genome_MT1.align.edit.json', 'r').readlines()
         for [a, b] in zip(params_str, ref_align_str):
             self.assertEqual(a, b)
+
+
+@unittest.skipUnless(PROTEIN_MODE, "These alignment tests are only for the Protein alphabet")
+class TestProteinAlign(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = TemporaryDirectory()
+
+    # TODO: test alignment for protein sequences
+    # @parameterized.expand(GRAPH_TYPES)
+    # def test_simple_align_all_graphs(self, representation):
+    #     pass
 
 
 if __name__ == '__main__':

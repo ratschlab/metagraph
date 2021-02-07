@@ -9,6 +9,8 @@
 
 namespace {
 
+#if ! _PROTEIN_GRAPH
+
 using namespace mtg;
 using namespace mtg::test;
 
@@ -572,94 +574,9 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
     }
 }
 
-TYPED_TEST(CanonicalDBGTest, CallUnitigsRegular) {
-    for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= 10; ++k) {
-            for (const std::vector<std::string> &sequences
-                    : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                        std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                        std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                        std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                        std::vector<std::string>({ "AAACT", "AAATG" }),
-                        std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-                auto graph = CanonicalDBG(build_graph_batch<TypeParam>(k, sequences),
-                                          false, /* primary */
-                                          2 /* cache_size */);
-
-                // in stable graphs the order of input sequences
-                // does not change the order of k-mers and their indexes
-                auto stable_graph = build_graph_iterative<DBGSuccinct>(k, [&](const auto callback) {
-                    for (const auto &seq : sequences) {
-                        callback(seq);
-                        std::string rev_seq(seq);
-                        reverse_complement(rev_seq.begin(), rev_seq.end());
-                        callback(rev_seq);
-                    }
-                });
-
-                std::mutex seq_mutex;
-                auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
-                    k,
-                    [&](const auto &callback) {
-                        graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
-                            std::unique_lock<std::mutex> lock(seq_mutex);
-                            callback(sequence);
-                        }, num_threads);
-                    }
-                );
-
-                EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
-            }
-        }
-    }
-}
-
-TYPED_TEST(CanonicalDBGTest, CallUnitigsRegularCanonical) {
-    for (size_t num_threads : { 1, 4 }) {
-        for (size_t k = 2; k <= 10; ++k) {
-            for (const std::vector<std::string> &sequences
-                    : { std::vector<std::string>({ "AAACACTAG", "AACGACATG" }),
-                        std::vector<std::string>({ "AGACACTGA", "GACTACGTA", "ACTAACGTA" }),
-                        std::vector<std::string>({ "AGACACAGT", "GACTTGCAG", "ACTAGTCAG" }),
-                        std::vector<std::string>({ "AAACTCGTAGC", "AAATGCGTAGC" }),
-                        std::vector<std::string>({ "AAACT", "AAATG" }),
-                        std::vector<std::string>({ "ATGCAGTACTCAG", "ATGCAGTAGTCAG", "GGGGGGGGGGGGG" }) }) {
-
-                auto graph = CanonicalDBG(build_graph_batch<TypeParam>(
-                                              k, sequences, DBGMode::CANONICAL
-                                          ),
-                                          false, /* primary */
-                                          2 /* cache_size */);
-
-                // in stable graphs the order of input sequences
-                // does not change the order of k-mers and their indexes
-                auto stable_graph = build_graph_iterative<DBGSuccinct>(k, [&](const auto callback) {
-                    for (const auto &seq : sequences) {
-                        callback(seq);
-                        std::string rev_seq(seq);
-                        reverse_complement(rev_seq.begin(), rev_seq.end());
-                        callback(rev_seq);
-                    }
-                });
-
-                std::mutex seq_mutex;
-                auto reconstructed_stable_graph = build_graph_iterative<DBGSuccinct>(
-                    k,
-                    [&](const auto &callback) {
-                        graph.call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
-                            std::unique_lock<std::mutex> lock(seq_mutex);
-                            callback(sequence);
-                        }, num_threads);
-                    }
-                );
-
-                EXPECT_EQ(*stable_graph, *reconstructed_stable_graph);
-            }
-        }
-    }
+TYPED_TEST(CanonicalDBGTest, WrapCanonicalGraphFail) {
+    EXPECT_THROW(CanonicalDBG(build_graph_batch<TypeParam>(3, {}, DBGMode::CANONICAL)),
+                 std::runtime_error);
 }
 
 // TODO: A different combination of forward and reverse complement k-mers may be
@@ -1249,5 +1166,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
         }
     }
 }
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

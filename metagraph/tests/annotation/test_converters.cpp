@@ -156,7 +156,7 @@ std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string>
 }
 
 TEST(RowDiff, succ) {
-    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ/";
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ";
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     const std::string succ_file = graph_fname + ".succ";
     const std::string pred_file = graph_fname + ".pred";
@@ -236,7 +236,7 @@ TEST(RowDiff, succ) {
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
-    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty/";
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_empty";
     std::filesystem::remove_all(dst_dir);
     std::filesystem::create_directories(dst_dir);
 
@@ -263,7 +263,7 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
-    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_same_labels/";
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_same_labels";
     const std::string graph_fname
             = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     const std::string annot_fname
@@ -312,7 +312,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
 }
 
 TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
-    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_multi_col/";
+    const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_multi_col";
     const std::string graph_fname
             = dst_dir/(std::string("graph") + graph::DBGSuccinct::kExtension);
 

@@ -86,9 +86,9 @@ TYPED_TEST(DeBruijnGraphTest, Traversals) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, Traversals2) {
-    for (size_t k = 2; k <= 20; ++k) {
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
         auto graph = build_graph<TypeParam>(k, {
-            std::string(100, 'A') + std::string(100, 'C') + std::string(100, 'G')
+            std::string(2 * k, 'A') + std::string(2 * k, 'C') + std::string(2 * k, 'G')
         });
 
         auto it = graph->kmer_to_node(std::string(k, 'A'));
@@ -370,10 +370,10 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
-    for (size_t k = 2; k <= 20; ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
-                                               + std::string(100, 'C')
-                                               + std::string(100, 'G') });
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A')
+                                               + std::string(2 * k, 'C')
+                                               + std::string(2 * k, 'G') });
 
         std::vector<DeBruijnGraph::node_index> adjacent_nodes;
 
@@ -439,10 +439,10 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
 }
 
 TYPED_TEST(DeBruijnGraphTest, RankIncomingEdge) {
-    for (size_t k = 2; k <= 20; ++k) {
-        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
-                                               + std::string(100, 'C')
-                                               + std::string(100, 'G') });
+    for (size_t k = 2; k <= max_test_k<TypeParam>(); ++k) {
+        auto graph = build_graph<TypeParam>(k, { std::string(2 * k, 'A')
+                                               + std::string(2 * k, 'C')
+                                               + std::string(2 * k, 'G') });
 
         EXPECT_EQ(0u, incoming_edge_rank(*graph,
                                          graph->kmer_to_node(std::string(k, 'A')),

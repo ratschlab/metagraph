@@ -23,17 +23,31 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
         suffixes.push_back(".count");
 
     for (const std::string &suffix : suffixes) {
-        std::string concat_command = "cat ";
-        for (uint32_t i = 1; i < files.size(); ++i) {
-            concat_command += files[i] + suffix + " ";
-        }
-        concat_command += " >> " + files[0] + suffix;
+        if (files.size() > 1) {
+            std::string concat_command = "cat ";
+            for (uint32_t i = 1; i < files.size(); ++i) {
+                concat_command += files[i] + suffix + " ";
+            }
+            concat_command += " >> " + files[0] + suffix;
 
-        if (std::system(concat_command.c_str()))
-            throw std::runtime_error("Error while cat-ing files: " + concat_command);
+            if (std::system(concat_command.c_str()))
+                throw std::runtime_error("Error while cat-ing files: " + concat_command);
+        }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const std::string &f : files) {
+            std::filesystem::remove(f + suffix);
+        }
+    }
+}
+
+void remove_chunks(const std::vector<std::string> &files) {
+    for (const std::string &f : files) {
+        std::vector<std::string> suffixes = { "", ".up" };
+        if (std::filesystem::exists(f + ".count"))
+            suffixes.push_back(".count");
+
+        for (const std::string &suffix : suffixes) {
             std::filesystem::remove(f + suffix);
         }
     }

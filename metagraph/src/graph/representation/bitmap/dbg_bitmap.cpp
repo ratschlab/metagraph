@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <fstream>
-#include <cmath>
 
 #include "common/serialization.hpp"
 #include "dbg_bitmap_construct.hpp"
@@ -16,14 +15,13 @@ DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
       : k_(k),
         canonical_mode_(canonical_mode),
         seq_encoder_(),
-        kmers_(std::pow(static_cast<long double>(seq_encoder_.alphabet.size()), k_) + 1, true),
+        kmers_((1llu << (k * seq_encoder_.bits_per_char)) + 1, true),
         complete_(true) {
-    assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
-    if (k * std::log2(alphabet().size()) >= 64) {
+    if (k * seq_encoder_.bits_per_char >= 64) {
         std::cerr << "ERROR: Too large k!"
                   << " Maximum allowed k with this alphabet is "
-                  << static_cast<int>(64. / std::log2(alphabet().size())) - 1 << std::endl;
+                  << 63 / seq_encoder_.bits_per_char << std::endl;
         exit(1);
     }
 }
@@ -245,7 +243,8 @@ void DBGBitmap::adjacent_incoming_nodes(node_index node,
 }
 
 DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
-    auto index = kmer.data() + 1;
+    uint64_t index = kmer.data() + 1;
+
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
 

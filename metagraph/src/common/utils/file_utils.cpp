@@ -19,6 +19,7 @@ namespace utils {
 using mtg::common::logger;
 
 std::vector<std::string> TMP_DIRS;
+std::mutex TMP_DIRS_MUTEX;
 
 void cleanup_tmp_dir_on_signal(int sig) {
     logger->trace("Got signal {}. Exiting...", sig);
@@ -26,15 +27,17 @@ void cleanup_tmp_dir_on_signal(int sig) {
     std::exit(sig);
 }
 
-void cleanup_tmp_dir_on_exit() {
-    for (const std::string &tmp_dir : TMP_DIRS) {
-        logger->trace("Cleaning up temporary directory {}", tmp_dir);
-        try {
-            std::filesystem::remove_all(tmp_dir);
-        } catch (...) {
-            logger->error("Failed cleaning up temporary directory {}", tmp_dir);
-        }
+void cleanup_temp_dir_nolock(const std::filesystem::path &tmp_dir) {
+    logger->trace("Cleaning up temporary directory {}", tmp_dir);
+    try {
+        std::filesystem::remove_all(tmp_dir);
+    } catch (...) {
+        logger->error("Failed to clean up temporary directory {}", tmp_dir);
     }
+}
+
+void cleanup_tmp_dir_on_exit() {
+    std::for_each(TMP_DIRS.begin(), TMP_DIRS.end(), cleanup_temp_dir_nolock);
 }
 
 std::filesystem::path create_temp_dir(std::filesystem::path path,
@@ -48,6 +51,8 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
         exit(1);
     }
 
+    std::lock_guard<std::mutex> lock(TMP_DIRS_MUTEX);
+
     if (TMP_DIRS.empty()) {
         if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
             logger->error("Couldn't reset the signal handler for SIGINT");
@@ -59,12 +64,19 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
 
     logger->trace("Registered temporary directory {}", tmp_dir_str);
 
-    static std::mutex mu;
-    std::lock_guard<std::mutex> lock(mu);
-
     TMP_DIRS.push_back(tmp_dir_str);
 
     return tmp_dir_str;
+}
+
+void remove_temp_dir(std::filesystem::path dir_name) {
+    {
+        std::lock_guard<std::mutex> lock(TMP_DIRS_MUTEX);
+        auto it = std::find(TMP_DIRS.begin(), TMP_DIRS.end(), dir_name);
+        assert(it != TMP_DIRS.end());
+        TMP_DIRS.erase(it);
+    }
+    cleanup_temp_dir_nolock(dir_name);
 }
 
 

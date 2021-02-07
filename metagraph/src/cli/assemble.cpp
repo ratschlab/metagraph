@@ -1,7 +1,5 @@
 #include "assemble.hpp"
 
-#include <fmt/format.h>
-
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "seq_io/sequence_io.hpp"
