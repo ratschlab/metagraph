@@ -9,7 +9,6 @@
 #include "common/file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
-#include "common/unix_tools.hpp"
 #include "graph/annotated_dbg.hpp"
 
 constexpr uint64_t BLOCK_SIZE = 1 << 25;
@@ -259,23 +258,13 @@ void traverse_anno_chunked(
                          &succ_it, &pred_boundary_it, &pred_it, next_block_size,
                          &context_other);
 
-    ProgressBar progress_bar(num_rows, "Compute diffs",
-                             std::cerr, !common::get_verbose());
-
-    double time_before = 0;
-    double time_read = 0;
-    double time_mid = 0;
-    double time_after = 0;
-    Timer timer;
+    ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
 
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        timer.reset();
         uint64_t block_size = next_block_size;
         next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
 
         before_chunk(block_size);
-        time_before += timer.elapsed();
-        timer.reset();
 
         // finish reading this block
         async_reader.join();
@@ -288,9 +277,6 @@ void traverse_anno_chunked(
         async_reader.enqueue(read_next_block,
                              &succ_it, &pred_boundary_it, &pred_it, next_block_size,
                              &context_other);
-
-        time_read += timer.elapsed();
-        timer.reset();
 
         assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
@@ -310,15 +296,10 @@ void traverse_anno_chunked(
                 );
             }
         }
-        time_mid += timer.elapsed();
-        timer.reset();
 
         after_chunk(chunk);
 
         progress_bar += succ_chunk.size();
-        time_after += timer.elapsed();
-        logger->info("Before: {} sec,   read: {} sec,   mid: {} sec,   after: {} sec",
-                     time_before, time_read, time_mid, time_after);
     }
     assert(pred_boundary_it == pred_boundary.end());
 }
