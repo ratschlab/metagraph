@@ -166,10 +166,14 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     const uint64_t *pred_begin,
                                     const uint64_t *pred_end)>;
 
-auto read_next_block(sdsl::int_vector_buffer<>::iterator &succ_it,
-                     sdsl::int_vector_buffer<1>::iterator &pred_boundary_it,
-                     sdsl::int_vector_buffer<>::iterator &pred_it,
+auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
+                     sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
+                     sdsl::int_vector_buffer<>::iterator *pred_it_p,
                      uint64_t block_size) {
+    auto &succ_it = *succ_it_p;
+    auto &pred_boundary_it = *pred_boundary_it_p;
+    auto &pred_it = *pred_it_p;
+
     std::vector<uint64_t> succ_chunk(block_size);
     for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
         succ_chunk[i] = *succ_it;
@@ -235,11 +239,17 @@ void traverse_anno_chunked(
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
 
+    ThreadPool async_reader(1, 1);
+    // start reading the first block
+    uint64_t block_size = std::min(BLOCK_SIZE, num_rows);
+    auto block = async_reader.enqueue(read_next_block,
+                                      &succ_it, &pred_boundary_it, &pred_it, block_size);
+
     ProgressBar progress_bar(num_rows, "Compute diffs",
                              std::cerr, !common::get_verbose());
 
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        uint64_t block_size = std::min(BLOCK_SIZE, num_rows - chunk);
+        uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
 
         before_chunk(block_size);
 
@@ -247,8 +257,10 @@ void traverse_anno_chunked(
         std::vector<uint64_t> succ_chunk;
         std::vector<uint64_t> pred_chunk_idx;
         std::vector<uint64_t> pred_chunk;
-        std::tie(succ_chunk, pred_chunk, pred_chunk_idx)
-            = read_next_block(succ_it, pred_boundary_it, pred_it, block_size);
+        std::tie(succ_chunk, pred_chunk, pred_chunk_idx) = std::move(block.get());
+        // start reading the next block
+        block = async_reader.enqueue(read_next_block,
+                                     &succ_it, &pred_boundary_it, &pred_it, next_block_size);
 
         assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
@@ -271,6 +283,8 @@ void traverse_anno_chunked(
         after_chunk(chunk);
 
         progress_bar += succ_chunk.size();
+
+        block_size = next_block_size;
     }
     assert(pred_boundary_it == pred_boundary.end());
 }
