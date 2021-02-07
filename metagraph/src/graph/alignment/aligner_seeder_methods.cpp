@@ -150,23 +150,8 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         size_t i = seed.get_clipping();
         assert(i + seed.size() <= min_seed_length.size());
 
-        for (size_t j = 0; j < seed.size(); ++j) {
-            min_seed_length[i + j] = this->graph_.get_k();
-        }
-
-        if (i + seed.size() < min_seed_length.size())
-            min_seed_length[i + seed.size()] = this->graph_.get_k();
-
         suffix_seeds[i].emplace_back(std::move(seed));
     });
-
-    for (size_t i = 0; i < min_seed_length.size(); ++i) {
-        assert(i >= this->query_nodes_.size()
-            || !this->query_nodes_[i]
-            || min_seed_length[i] == this->graph_.get_k());
-        if (i && min_seed_length[i] == this->config_.min_seed_length)
-            min_seed_length[i] = std::max(min_seed_length[i - 1] - 1, min_seed_length[i]);
-    }
 
     // when a seed is found, append it to the seed vector
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
@@ -189,6 +174,11 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     // size_t last_seed_size = min_seed_length[0];
     for (size_t i = 0; i < min_seed_length.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
+            if (i) {
+                min_seed_length[i] = std::max(min_seed_length[i - 1] - 1,
+                                              min_seed_length[i]);
+            }
+
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
@@ -202,12 +192,15 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
                     min_seed_length[i]
                 );
 
-                size_t s = min_seed_length[i];
-                for (size_t j = i + 1; j < min_seed_length.size() && s > min_seed_length[j]; ++j) {
-                    assert(suffix_seeds[j].empty());
-                    min_seed_length[j] = s--;
+                if (i + 1 < min_seed_length.size()) {
+                    min_seed_length[i + 1] = std::max(min_seed_length[i + 1],
+                                                      min_seed_length[i]);
                 }
             }
+        } else {
+            min_seed_length[i] = this->graph_.get_k();
+            if (i + 1 < min_seed_length.size())
+                min_seed_length[i + 1] = this->graph_.get_k();
         }
     }
 
@@ -265,15 +258,21 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
             // clear out shorter seeds
             size_t s = seed_length;
-            for (size_t m = j + 1; m < min_seed_length.size() && s > min_seed_length[m]; ++m) {
-                assert(suffix_seeds[m].empty() || min_seed_length[m] == this->graph_.get_k() - suffix_seeds[m][0].get_offset());
+            for (size_t m = j + 1;
+                    m < min_seed_length.size() && s > min_seed_length[m];
+                    ++m) {
+                assert(suffix_seeds[m].empty()
+                    || min_seed_length[m] == this->graph_.get_k()
+                                                - suffix_seeds[m][0].get_offset());
                 min_seed_length[m] = s--;
                 suffix_seeds[m].clear();
             }
 
             // e.g., match: $$$ATG, want ATG$$$
             suffix_to_prefix(dbg_succ_, index_range, [&](node_index prefix_node) {
-                append_suffix_seed(j, canonical->reverse_complement(prefix_node), seed_length);
+                append_suffix_seed(
+                    j, canonical->reverse_complement(prefix_node), seed_length
+                );
             });
         }
     }
