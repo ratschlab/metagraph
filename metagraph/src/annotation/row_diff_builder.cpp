@@ -270,7 +270,7 @@ void traverse_anno_chunked(
 
         // finish reading this block
         async_reader.join();
-        std::swap(context, context_other);
+        context.swap(context_other);
         std::vector<uint64_t> &succ_chunk = context[0];
         std::vector<uint64_t> &pred_chunk_idx = context[1];
         std::vector<uint64_t> &pred_chunk = context[2];
