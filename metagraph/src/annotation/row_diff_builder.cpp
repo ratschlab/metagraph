@@ -242,42 +242,38 @@ void traverse_anno_chunked(
 
     ThreadPool async_reader(1, 1);
     // start reading the first block
-    uint64_t block_size = std::min(BLOCK_SIZE, num_rows);
-    uint64_t next_block_size;
+    uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
     std::array<std::vector<uint64_t>, 3> context;
     std::array<std::vector<uint64_t>, 3> context_other;
     async_reader.enqueue(read_next_block,
-                         &succ_it, &pred_boundary_it, &pred_it, block_size,
+                         &succ_it, &pred_boundary_it, &pred_it, next_block_size,
                          &context_other);
 
     ProgressBar progress_bar(num_rows, "Compute diffs",
                              std::cerr, !common::get_verbose());
 
-    #pragma omp parallel num_threads(num_threads)
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        #pragma omp master
-        {
-            next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
+        uint64_t block_size = next_block_size;
+        next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
 
-            before_chunk(block_size);
+        before_chunk(block_size);
 
-            // finish reading this block
-            async_reader.join();
-            std::swap(context, context_other);
-            // start reading next block
-            async_reader.enqueue(read_next_block,
-                                 &succ_it, &pred_boundary_it, &pred_it, next_block_size,
-                                 &context_other);
-        }
-        #pragma omp barrier
+        // finish reading this block
+        async_reader.join();
+        std::swap(context, context_other);
         std::vector<uint64_t> &succ_chunk = context[0];
         std::vector<uint64_t> &pred_chunk_idx = context[1];
         std::vector<uint64_t> &pred_chunk = context[2];
 
+        // start reading next block
+        async_reader.enqueue(read_next_block,
+                             &succ_it, &pred_boundary_it, &pred_it, next_block_size,
+                             &context_other);
+
         assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
-        #pragma omp for schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const bit_vector &source_col
@@ -293,14 +289,9 @@ void traverse_anno_chunked(
             }
         }
 
-        #pragma omp master
-        {
-            after_chunk(chunk);
+        after_chunk(chunk);
 
-            progress_bar += succ_chunk.size();
-
-            block_size = next_block_size;
-        }
+        progress_bar += succ_chunk.size();
     }
     assert(pred_boundary_it == pred_boundary.end());
 }
