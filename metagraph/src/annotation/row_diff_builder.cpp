@@ -184,14 +184,9 @@ void read_next_block(const std::string &pred_succ_fprefix,
         #pragma omp section
         {
             succ_chunk.resize(block_size);
-            #pragma omp parallel num_threads(10)
-            {
-                sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, 1024 * 1024);
-
-                #pragma omp for schedule(static)
-                for (uint64_t i = 0; i < block_size; ++i) {
-                    succ_chunk[i] = succ[*succ_idx + i];
-                }
+            sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, BLOCK_SIZE);
+            for (uint64_t i = 0; i < block_size; ++i) {
+                succ_chunk[i] = succ[*succ_idx + i];
             }
         }
 
@@ -212,14 +207,9 @@ void read_next_block(const std::string &pred_succ_fprefix,
 
             // read all predecessors for the block
             pred_chunk.resize(pred_chunk_idx.back());
-            #pragma omp parallel num_threads(10)
-            {
-                sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, 1024 * 1024);
-
-                #pragma omp for schedule(static)
-                for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
-                    pred_chunk[i] = pred[*pred_idx + i];
-                }
+            sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, BLOCK_SIZE);
+            for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
+                pred_chunk[i] = pred[*pred_idx + i];
             }
         }
     }
@@ -249,7 +239,7 @@ void traverse_anno_chunked(
     const uint32_t num_threads = get_num_threads();
 
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
-                                             std::ios::in, 1024 * 1024);
+                                             std::ios::in, BLOCK_SIZE);
 
     uint64_t succ_idx = 0;
     auto pred_boundary_it = pred_boundary.begin();
