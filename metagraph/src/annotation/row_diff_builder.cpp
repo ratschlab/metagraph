@@ -167,14 +167,13 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     const uint64_t *pred_begin,
                                     const uint64_t *pred_end)>;
 
-void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
+void read_next_block(const std::string &pred_succ_fprefix,
+                     uint64_t *succ_idx,
                      sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
-                     sdsl::int_vector_buffer<>::iterator *pred_it_p,
+                     uint64_t *pred_idx,
                      uint64_t block_size,
                      std::array<std::vector<uint64_t>, 3> *out) {
-    auto &succ_it = *succ_it_p;
     auto &pred_boundary_it = *pred_boundary_it_p;
-    auto &pred_it = *pred_it_p;
 
     std::vector<uint64_t> &succ_chunk = out->at(0);
     std::vector<uint64_t> &pred_chunk_idx = out->at(1);
@@ -185,8 +184,14 @@ void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
         #pragma omp section
         {
             succ_chunk.resize(block_size);
-            for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
-                succ_chunk[i] = *succ_it;
+            #pragma omp parallel num_threads(10)
+            {
+                sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, 1024 * 1024);
+
+                #pragma omp for schedule(static)
+                for (uint64_t i = 0; i < block_size; ++i) {
+                    succ_chunk[i] = succ[*succ_idx + i];
+                }
             }
         }
 
@@ -207,8 +212,14 @@ void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
 
             // read all predecessors for the block
             pred_chunk.resize(pred_chunk_idx.back());
-            for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
-                pred_chunk[i] = *pred_it;
+            #pragma omp parallel num_threads(10)
+            {
+                sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, 1024 * 1024);
+
+                #pragma omp for schedule(static)
+                for (uint64_t i = 0; i < pred_chunk.size(); ++i) {
+                    pred_chunk[i] = pred[*pred_idx + i];
+                }
             }
         }
     }
@@ -237,18 +248,12 @@ void traverse_anno_chunked(
 
     const uint32_t num_threads = get_num_threads();
 
-    sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, 1024 * 1024);
-    sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, 1024 * 1024);
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
                                              std::ios::in, 1024 * 1024);
 
-    assert(succ.size() == num_rows);
-    assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
-                   == pred.size());
-
-    auto succ_it = succ.begin();
+    uint64_t succ_idx = 0;
     auto pred_boundary_it = pred_boundary.begin();
-    auto pred_it = pred.begin();
+    uint64_t pred_idx = 0;
 
     ThreadPool async_reader(1, 1);
     // start reading the first block
@@ -256,7 +261,8 @@ void traverse_anno_chunked(
     std::array<std::vector<uint64_t>, 3> context;
     std::array<std::vector<uint64_t>, 3> context_other;
     async_reader.enqueue(read_next_block,
-                         &succ_it, &pred_boundary_it, &pred_it, next_block_size,
+                         pred_succ_fprefix,
+                         &succ_idx, &pred_boundary_it, &pred_idx, next_block_size,
                          &context_other);
 
     ProgressBar progress_bar(num_rows, "Compute diffs",
@@ -286,7 +292,8 @@ void traverse_anno_chunked(
 
         // start reading next block
         async_reader.enqueue(read_next_block,
-                             &succ_it, &pred_boundary_it, &pred_it, next_block_size,
+                             pred_succ_fprefix,
+                             &succ_idx, &pred_boundary_it, &pred_idx, next_block_size,
                              &context_other);
 
         time_read += timer.elapsed();
