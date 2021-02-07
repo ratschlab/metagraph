@@ -391,7 +391,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     }
 
-    ThreadPool async_writer(1, 10);
+    ThreadPool async_writer(1, 1);
     sdsl::int_vector_buffer row_reduction;
     const bool new_reduction_vector = !std::filesystem::exists(row_reduction_fname);
     if (compute_row_reduction) {
@@ -414,6 +414,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     // total number of set bits in the original rows
     std::vector<uint32_t> row_nbits_block;
+    std::vector<uint32_t> row_nbits_block_other;
 
     traverse_anno_chunked(
             anchor.size(), pred_succ_fprefix, sources,
@@ -459,15 +460,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     return;
 
                 __atomic_thread_fence(__ATOMIC_ACQUIRE);
-                std::vector<uint32_t> nbits_block;
-                nbits_block.swap(row_nbits_block);
 
-                async_writer.enqueue([&,block_begin,to_write{std::move(nbits_block)}]() {
-                    for (size_t i = 0; i < to_write.size(); ++i) {
+                async_writer.join();
+                row_nbits_block_other.swap(row_nbits_block);
+
+                async_writer.enqueue([&,block_begin]() {
+                    for (size_t i = 0; i < row_nbits_block_other.size(); ++i) {
                         if (new_reduction_vector) {
-                            row_reduction.push_back(to_write[i]);
+                            row_reduction.push_back(row_nbits_block_other[i]);
                         } else {
-                            row_reduction[block_begin + i] += to_write[i];
+                            row_reduction[block_begin + i] += row_nbits_block_other[i];
                         }
                     }
                 });
