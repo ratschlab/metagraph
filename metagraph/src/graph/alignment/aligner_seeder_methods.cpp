@@ -150,6 +150,12 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         size_t i = seed.get_clipping();
         assert(i + seed.size() <= min_seed_length.size());
 
+        for (size_t j = 0; j < seed.size(); ++j)
+            min_seed_length[i + j] = this->graph_.get_k();
+
+        if (i + seed.size() < min_seed_length.size())
+            min_seed_length[i + seed.size()] = this->graph_.get_k();
+
         suffix_seeds[i].emplace_back(std::move(seed));
     });
 
@@ -197,10 +203,6 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
                                                       min_seed_length[i]);
                 }
             }
-        } else {
-            min_seed_length[i] = this->graph_.get_k();
-            if (i + 1 < min_seed_length.size())
-                min_seed_length[i + 1] = this->graph_.get_k();
         }
     }
 
