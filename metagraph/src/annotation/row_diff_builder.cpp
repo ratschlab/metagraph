@@ -180,28 +180,38 @@ auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
     std::vector<uint64_t> &pred_chunk_idx = out->at(1);
     std::vector<uint64_t> &pred_chunk = out->at(2);
 
-    succ_chunk.resize(block_size);
-    for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
-        succ_chunk[i] = *succ_it;
-    }
-
-    // read predecessor offsets
-    pred_chunk_idx.resize(block_size + 1);
-    pred_chunk_idx[0] = 0;
-    for (uint64_t i = 1; i <= block_size; ++i) {
-        // find where the last predecessor for the node ends
-        pred_chunk_idx[i] = pred_chunk_idx[i - 1];
-        while (*pred_boundary_it == 0) {
-            ++pred_chunk_idx[i];
-            ++pred_boundary_it;
+    #pragma omp parallel num_threads(2)
+    #pragma omp sections
+    {
+        #pragma omp section
+        {
+            succ_chunk.resize(block_size);
+            for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
+                succ_chunk[i] = *succ_it;
+            }
         }
-        ++pred_boundary_it;
-    }
 
-    // read all predecessors for the block
-    pred_chunk.resize(pred_chunk_idx.back());
-    for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
-        pred_chunk[i] = *pred_it;
+        #pragma omp section
+        {
+            // read predecessor offsets
+            pred_chunk_idx.resize(block_size + 1);
+            pred_chunk_idx[0] = 0;
+            for (uint64_t i = 1; i <= block_size; ++i) {
+                // find where the last predecessor for the node ends
+                pred_chunk_idx[i] = pred_chunk_idx[i - 1];
+                while (*pred_boundary_it == 0) {
+                    ++pred_chunk_idx[i];
+                    ++pred_boundary_it;
+                }
+                ++pred_boundary_it;
+            }
+
+            // read all predecessors for the block
+            pred_chunk.resize(pred_chunk_idx.back());
+            for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
+                pred_chunk[i] = *pred_it;
+            }
+        }
     }
 }
 
