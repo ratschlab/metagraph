@@ -139,17 +139,39 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         this->query_.size() - this->config_.min_seed_length + 1
     );
 
-    this->BaseSeeder::call_seeds([&](Seed&& seed) {
-        suffix_seeds[seed.get_clipping()].emplace_back(std::move(seed));
-    });
-
     std::vector<size_t> min_seed_length(
         this->query_.size() - this->config_.min_seed_length + 1,
         this->config_.min_seed_length
     );
 
+    this->BaseSeeder::call_seeds([&](Seed&& seed) {
+        assert(seed.get_query().size() >= this->config_.min_seed_length);
+
+        size_t i = seed.get_clipping();
+        assert(i + seed.size() <= min_seed_length.size());
+
+        for (size_t j = 0; j < seed.size(); ++j) {
+            min_seed_length[i + j] = this->graph_.get_k();
+        }
+
+        if (i + seed.size() < min_seed_length.size())
+            min_seed_length[i + seed.size()] = this->graph_.get_k();
+
+        suffix_seeds[i].emplace_back(std::move(seed));
+    });
+
+    for (size_t i = 0; i < min_seed_length.size(); ++i) {
+        assert(i >= this->query_nodes_.size()
+            || !this->query_nodes_[i]
+            || min_seed_length[i] == this->graph_.get_k());
+        if (i && min_seed_length[i] == this->config_.min_seed_length)
+            min_seed_length[i] = std::max(min_seed_length[i - 1] - 1, min_seed_length[i]);
+    }
+
     // when a seed is found, append it to the seed vector
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
+        assert(i < suffix_seeds.size());
+
         std::string_view seed_seq(this->query_.data() + i, seed_length);
         DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
 
@@ -165,21 +187,11 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
 
     // find sub-k matches in the forward orientation
     // size_t last_seed_size = min_seed_length[0];
-    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+    for (size_t i = 0; i < min_seed_length.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
-            assert(!i || suffix_seeds[i - 1].empty()
-                || min_seed_length[i - 1] == this->graph_.get_k()
-                                                - suffix_seeds[i - 1][0].get_offset());
-            if (i) {
-                min_seed_length[i] = std::max(
-                    min_seed_length[i - 1] - suffix_seeds[i - 1].empty(),
-                    this->config_.min_seed_length
-                );
-            }
-
             if (max_seed_length >= min_seed_length[i]) {
                 dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(this->query_.data() + i, max_seed_length),
@@ -189,9 +201,13 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
                     },
                     min_seed_length[i]
                 );
+
+                size_t s = min_seed_length[i];
+                for (size_t j = i + 1; j < min_seed_length.size() && s > min_seed_length[j]; ++j) {
+                    assert(suffix_seeds[j].empty());
+                    min_seed_length[j] = s--;
+                }
             }
-        } else {
-            min_seed_length[i] = this->graph_.get_k();
         }
     }
 
@@ -237,21 +253,20 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             size_t seed_length = std::get<2>(index_range);
             j = query_rc.size() - i - seed_length;
 
-            assert(suffix_seeds[j].empty()
-                || min_seed_length[j]
-                    == this->graph_.get_k() - suffix_seeds[j][0].get_offset());
+            assert(seed_length < this->config_.min_seed_length
+                || j < min_seed_length.size());
 
-            assert(!j || min_seed_length[j]
-                            == min_seed_length[j - 1] - suffix_seeds[j - 1].empty());
-
-            if (seed_length < min_seed_length[j])
+            if (seed_length < this->config_.min_seed_length
+                    || seed_length < min_seed_length[j]) {
                 continue;
+            }
 
             min_seed_length[j] = seed_length;
 
             // clear out shorter seeds
             size_t s = seed_length;
             for (size_t m = j + 1; m < min_seed_length.size() && s > min_seed_length[m]; ++m) {
+                assert(suffix_seeds[m].empty() || min_seed_length[m] == this->graph_.get_k() - suffix_seeds[m][0].get_offset());
                 min_seed_length[m] = s--;
                 suffix_seeds[m].clear();
             }
@@ -266,21 +281,19 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
     // once all seeds are aggregated, run callback
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
-
-        assert(!i || min_seed_length[i]
-                        == min_seed_length[i - 1] - suffix_seeds[i - 1].empty());
-
         if (pos_seeds.empty())
             continue;
 
-        assert(min_seed_length[i] == this->graph_.get_k() - pos_seeds[0].get_offset());
-
         if (!pos_seeds[0].get_offset()) {
+            assert(min_seed_length[i] == this->graph_.get_k());
             assert(pos_seeds.size() == 1);
             callback(std::move(pos_seeds[0]));
-        } else if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
-            for (auto&& seed : pos_seeds) {
-                callback(std::move(seed));
+        } else {
+            assert(min_seed_length[i] == this->graph_.get_k() - pos_seeds[0].get_offset());
+            if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
+                for (auto&& seed : pos_seeds) {
+                    callback(std::move(seed));
+                }
             }
         }
     }
