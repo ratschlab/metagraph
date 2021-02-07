@@ -167,7 +167,7 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     const uint64_t *pred_begin,
                                     const uint64_t *pred_end)>;
 
-auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
+void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
                      sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
                      sdsl::int_vector_buffer<>::iterator *pred_it_p,
                      uint64_t block_size,
@@ -180,8 +180,7 @@ auto read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
     std::vector<uint64_t> &pred_chunk_idx = out->at(1);
     std::vector<uint64_t> &pred_chunk = out->at(2);
 
-    #pragma omp parallel num_threads(2)
-    #pragma omp sections
+    #pragma omp parallel sections num_threads(2)
     {
         #pragma omp section
         {
