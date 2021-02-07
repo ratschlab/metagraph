@@ -167,53 +167,6 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     const uint64_t *pred_begin,
                                     const uint64_t *pred_end)>;
 
-void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
-                     sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
-                     sdsl::int_vector_buffer<>::iterator *pred_it_p,
-                     uint64_t block_size,
-                     std::array<std::vector<uint64_t>, 3> *out) {
-    auto &succ_it = *succ_it_p;
-    auto &pred_boundary_it = *pred_boundary_it_p;
-    auto &pred_it = *pred_it_p;
-
-    std::vector<uint64_t> &succ_chunk = out->at(0);
-    std::vector<uint64_t> &pred_chunk_idx = out->at(1);
-    std::vector<uint64_t> &pred_chunk = out->at(2);
-
-    #pragma omp parallel sections num_threads(2)
-    {
-        #pragma omp section
-        {
-            succ_chunk.resize(block_size);
-            for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
-                succ_chunk[i] = *succ_it;
-            }
-        }
-
-        #pragma omp section
-        {
-            // read predecessor offsets
-            pred_chunk_idx.resize(block_size + 1);
-            pred_chunk_idx[0] = 0;
-            for (uint64_t i = 1; i <= block_size; ++i) {
-                // find where the last predecessor for the node ends
-                pred_chunk_idx[i] = pred_chunk_idx[i - 1];
-                while (*pred_boundary_it == 0) {
-                    ++pred_chunk_idx[i];
-                    ++pred_boundary_it;
-                }
-                ++pred_boundary_it;
-            }
-
-            // read all predecessors for the block
-            pred_chunk.resize(pred_chunk_idx.back());
-            for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
-                pred_chunk[i] = *pred_it;
-            }
-        }
-    }
-}
-
 /**
  * Traverses a group of column compressed annotations (loaded in memory) in chunks of
  * BLOCK_SIZE rows at a time and invokes #call_ones for each set bit.
@@ -246,18 +199,14 @@ void traverse_anno_chunked(
     assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
                    == pred.size());
 
+    std::vector<uint64_t> succ_chunk;
+    std::vector<uint64_t> pred_chunk;
+    std::vector<uint64_t> pred_chunk_idx;
+
     auto succ_it = succ.begin();
     auto pred_boundary_it = pred_boundary.begin();
     auto pred_it = pred.begin();
 
-    ThreadPool async_reader(1, 1);
-    // start reading the first block
-    uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
-    std::array<std::vector<uint64_t>, 3> context;
-    std::array<std::vector<uint64_t>, 3> context_other;
-    async_reader.enqueue(read_next_block,
-                         &succ_it, &pred_boundary_it, &pred_it, next_block_size,
-                         &context_other);
 
     ProgressBar progress_bar(num_rows, "Compute diffs",
                              std::cerr, !common::get_verbose());
@@ -268,34 +217,62 @@ void traverse_anno_chunked(
     double time_after = 0;
     Timer timer;
 
+    #pragma omp parallel num_threads(num_threads)
     for (uint64_t chunk = 0; chunk < num_rows; chunk += BLOCK_SIZE) {
-        timer.reset();
-        uint64_t block_size = next_block_size;
-        next_block_size = std::min(BLOCK_SIZE, num_rows - (chunk + block_size));
-
-        before_chunk(block_size);
-        time_before += timer.elapsed();
+        #pragma omp master
         timer.reset();
 
-        // finish reading this block
-        async_reader.join();
-        context.swap(context_other);
-        std::vector<uint64_t> &succ_chunk = context[0];
-        std::vector<uint64_t> &pred_chunk_idx = context[1];
-        std::vector<uint64_t> &pred_chunk = context[2];
+        uint64_t block_size = std::min(BLOCK_SIZE, num_rows - chunk);
 
-        // start reading next block
-        async_reader.enqueue(read_next_block,
-                             &succ_it, &pred_boundary_it, &pred_it, next_block_size,
-                             &context_other);
+        // read next block
+        #pragma omp sections
+        {
+            #pragma omp section
+            {
+                before_chunk(block_size);
+            }
 
-        time_read += timer.elapsed();
-        timer.reset();
+            #pragma omp section
+            {
+                succ_chunk.resize(block_size);
+                for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
+                    succ_chunk[i] = *succ_it;
+                }
+            }
+
+            #pragma omp section
+            {
+                // read predecessor offsets
+                pred_chunk_idx.resize(block_size + 1);
+                pred_chunk_idx[0] = 0;
+                for (uint64_t i = 1; i <= block_size; ++i) {
+                    // find where the last predecessor for the node ends
+                    pred_chunk_idx[i] = pred_chunk_idx[i - 1];
+                    while (*pred_boundary_it == 0) {
+                        ++pred_chunk_idx[i];
+                        ++pred_boundary_it;
+                    }
+                    ++pred_boundary_it;
+                }
+
+                // read all predecessors for the block
+                pred_chunk.resize(pred_chunk_idx.back());
+                for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
+                    pred_chunk[i] = *pred_it;
+                }
+            }
+        }
+
+        #pragma omp master
+        {
+            time_read += timer.elapsed();
+            timer.reset();
+        }
 
         assert(succ_chunk.size() == block_size);
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp for schedule(dynamic)
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const bit_vector &source_col
@@ -310,15 +287,20 @@ void traverse_anno_chunked(
                 );
             }
         }
-        time_mid += timer.elapsed();
-        timer.reset();
 
-        after_chunk(chunk);
+        #pragma omp master
+        {
+            time_mid += timer.elapsed();
+            timer.reset();
 
-        progress_bar += succ_chunk.size();
-        time_after += timer.elapsed();
-        logger->info("Before: {} sec,   read: {} sec,   mid: {} sec,   after: {} sec",
-                     time_before, time_read, time_mid, time_after);
+            after_chunk(chunk);
+
+            progress_bar += succ_chunk.size();
+            time_after += timer.elapsed();
+            logger->info("Before: {} sec,   read: {} sec,   mid: {} sec,   after: {} sec",
+                         time_before, time_read, time_mid, time_after);
+        }
+        #pragma omp barrier
     }
     assert(pred_boundary_it == pred_boundary.end());
 }
