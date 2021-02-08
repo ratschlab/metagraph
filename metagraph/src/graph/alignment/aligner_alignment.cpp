@@ -1,8 +1,8 @@
 #include "aligner_alignment.hpp"
 
-#include "aligner_dp_table.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
@@ -319,22 +319,32 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // number of sentinel characters (i.e., if some non-sentinel characters
             // from the node prefix are not included).
 
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph);
-            const auto &boss = dbg_succ.get_boss();
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(
+                canonical ? canonical->get_graph() : graph
+            );
 
-#ifndef NDEBUG
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);
-#endif
+
+            if (canonical && nodes_[0] != canonical->get_base_node(nodes_[0])) {
+                // reverse complement of a sink dummy k-mer, no point in traversing
+                assert(num_sentinels == 1);
+                *this = Alignment();
+                return;
+            }
+
+            size_t num_first_steps = canonical ? std::min(offset_, num_sentinels) : offset_;
 
             // the node is present in the underlying graph, so use
             // lower-level methods
+            const auto &boss = dbg_succ.get_boss();
             boss::BOSS::edge_index edge = dbg_succ.kmer_to_boss_index(nodes_[0]);
             boss::BOSS::TAlphabet edge_label = boss.get_W(edge) % boss.alph_size;
 
             // TODO: This picks the node which is found by always traversing
             // the last outgoing edge. Is there a better way to pick a node?
-            for (size_t i = 0; i < offset_; ++i) {
+            for (size_t i = 0; i < num_first_steps; ++i) {
                 edge = boss.fwd(edge, edge_label);
                 edge_label = boss.get_W(edge) % boss.alph_size;
                 if (edge_label == boss::BOSS::kSentinelCode) {
@@ -349,6 +359,28 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                 sequence_.push_back(boss.decode(edge_label));
                 assert(graph.get_node_sequence(nodes_[0])
                     == sequence_.substr(sequence_.size() - graph.get_k()));
+            }
+
+            for (size_t i = num_first_steps; i < offset_; ++i) {
+                NodeType next_node = 0;
+                char last_char;
+                canonical->call_outgoing_kmers(nodes_[0], [&](NodeType next, char c) {
+                    if (c == boss::BOSS::kSentinel)
+                        return;
+
+                    next_node = next;
+                    last_char = c;
+                });
+
+                if (!next_node) {
+                    *this = Alignment();
+                    return;
+                } else {
+                    nodes_[0] = next_node;
+                    sequence_.push_back(last_char);
+                    assert(graph.get_node_sequence(nodes_[0])
+                        == sequence_.substr(sequence_.size() - graph.get_k()));
+                }
             }
 
             assert(sequence_.size() == dbg_succ.get_k() + offset_);

@@ -5,7 +5,8 @@
 #include <functional>
 
 #include "aligner_alignment.hpp"
-#include "aligner_methods.hpp"
+#include "aligner_seeder_methods.hpp"
+#include "aligner_extender_methods.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 

@@ -11,6 +11,7 @@
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
+#include "aligner_dp_table.hpp"
 
 
 namespace mtg {
@@ -19,9 +20,6 @@ namespace graph {
 class DeBruijnGraph;
 
 namespace align {
-
-template <typename NodeType>
-class DPTable;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
