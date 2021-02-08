@@ -280,18 +280,24 @@ void DBGSuccinct
     if (!max_num_allowed_matches || str.size() < min_match_length)
         return;
 
-    auto encoded = boss_graph_->encode({ str.data(), std::min(str.size(), get_k() - 1) });
-    auto [first, last, end] = boss_graph_->index_range(encoded.begin(), encoded.end());
-    size_t match_size = end - encoded.begin();
+    auto encoded = boss_graph_->encode(str);
 
-    if (match_size < min_match_length)
+    if (std::find(encoded.begin(), encoded.end(),
+                  boss_graph_->alph_size) != encoded.end()) {
         return;
+    }
+
+    auto [first, last, end] = boss_graph_->index_range(
+        encoded.begin(),
+        std::min(encoded.begin() + get_k() - 1, encoded.end())
+    );
+    size_t match_size = end - encoded.begin();
 
     // since we can only match up to get_k() - 1 in BOSS, check for this
     // case and simply pick the appropriate BOSS edge
     if (str.size() == get_k() && match_size + 1 == get_k()) {
         assert(first == last);
-        auto edge = boss_graph_->pick_edge(last, boss_graph_->encode(str.back()));
+        auto edge = boss_graph_->pick_edge(last, encoded.back());
         if (edge) {
             auto kmer_index = boss_to_kmer_index(edge);
             if (kmer_index != npos) {
@@ -302,6 +308,9 @@ void DBGSuccinct
             }
         }
     }
+
+    if (match_size < min_match_length)
+        return;
 
     auto rank_first = boss_graph_->rank_last(first);
     auto rank_last = boss_graph_->rank_last(last);
