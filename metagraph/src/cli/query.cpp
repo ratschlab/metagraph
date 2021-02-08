@@ -789,7 +789,9 @@ int query_graph(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
+
     assert(config->infbase_annotators.size() == 1);
+
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
 
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
