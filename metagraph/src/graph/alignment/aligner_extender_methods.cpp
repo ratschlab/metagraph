@@ -1,4 +1,4 @@
-#include "aligner_methods.hpp"
+#include "aligner_extender_methods.hpp"
 
 #ifdef __AVX2__
 #include <immintrin.h>

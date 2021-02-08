@@ -1,6 +1,5 @@
 #include "aligner_alignment.hpp"
 
-#include "aligner_dp_table.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"

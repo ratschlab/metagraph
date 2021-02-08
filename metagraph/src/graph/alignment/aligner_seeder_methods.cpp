@@ -1,4 +1,4 @@
-#include "aligner_methods.hpp"
+#include "aligner_seeder_methods.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
