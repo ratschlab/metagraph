@@ -9,7 +9,6 @@
 
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
-#include "annotation/taxonomy/taxonomic_db.hpp"
 
 
 namespace mtg {
@@ -34,8 +33,7 @@ class AnnotatedSequenceGraph {
 
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
-                                   const std::vector<Label> &labels,
-                                   std::shared_ptr<annot::TaxonomyDB> taxonomy = nullptr);
+                                   const std::vector<Label> &labels);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
