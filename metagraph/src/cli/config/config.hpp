@@ -128,6 +128,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 10.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
+    double lca_coverage_threshold = 0.66;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
@@ -173,6 +174,7 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TAXO_CLASSIFY,
     };
     IdentityType identity = NO_IDENTITY;
 

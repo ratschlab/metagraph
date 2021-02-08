@@ -69,6 +69,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "taxo_class")) {
+        identity = TAXO_CLASSIFY;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -251,6 +253,8 @@ Config::Config(int argc, char *argv[]) {
             files_sequentially = true;
         } else if (!strcmp(argv[i], "--taxonomic-tree")) {
             taxonomic_tree = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--lca-coverage-threshold")) {
+            lca_coverage_threshold = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--lookup-table")) {
             lookup_table = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -784,7 +788,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
-
+            fprintf(stderr, "\ttaxo_class\tgiven a taxonomic tree, classify sequences to LCA taxid\n\n");
             return;
         }
         case BUILD: {
@@ -1122,8 +1126,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "Available options for taxonomic classification:\n");
-            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomicDB created by annotation cmd []\n");
             fprintf(stderr, "Available options for --align:\n");
             fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
@@ -1165,6 +1167,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
+        case TAXO_CLASSIFY: {
+            fprintf(stderr, "Usage: %s taxo_class -i <GRAPH> --taxonomic-tree <TAXONOMIC_DB> FILE1 [[FILE2] ...]\n"
+                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for taxonomic classify:\n");
+            fprintf(stderr, "\t   --lca-coverage-threshold [FLOAT] fraction of covered kmers by the returned LCA's subtree and ancestors [0.66]\n");
+        }
     }
 
     fprintf(stderr, "\n\tGeneral options:\n");
