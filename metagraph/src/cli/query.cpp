@@ -10,7 +10,6 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-#include "annotation/taxonomy/taxo_classifier.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -49,9 +48,6 @@ QueryExecutor::QueryExecutor(const Config &config,
         thread_pool_(thread_pool) {
     if (aligner_config_ && aligner_config_->forward_and_reverse_complement)
         throw std::runtime_error("Error: align_both_strands must be off when querying");
-    if (config.taxonomic_tree.size()) {
-        taxo_classifier_ = std::make_shared<annot::TaxoClassifier>(config.taxonomic_tree);
-    }
 }
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
@@ -860,14 +856,7 @@ void align_sequence(std::string &name, std::string &seq,
 std::string query_sequence(size_t id, std::string name, std::string seq,
                            const AnnotatedDBG &anno_graph,
                            const Config &config,
-                           const align::DBGAlignerConfig *aligner_config,
-                           std::shared_ptr<annot::TaxoClassifier> taxo_classifier) {
-    if (taxo_classifier != nullptr) {
-        return fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
-                           name,
-                           taxo_classifier->assign_class(anno_graph.get_graph(), seq));
-    }
-
+                           const align::DBGAlignerConfig *aligner_config) {
     if (aligner_config) {
         align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
     }
@@ -898,8 +887,7 @@ void QueryExecutor::query_fasta(const string &file,
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](const auto&... args) {
             callback(query_sequence(args..., anno_graph_,
-                                    config_, aligner_config_.get(),
-                                    taxo_classifier_));
+                                    config_, aligner_config_.get()));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -963,8 +951,7 @@ void QueryExecutor
         for (size_t i = 0; i < seq_batch.size(); ++i) {
             callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
                                     *query_graph, config_,
-                                    config_.batch_align ? aligner_config_.get() : NULL,
-                                    taxo_classifier_));
+                                    config_.batch_align ? aligner_config_.get() : NULL));
         }
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
