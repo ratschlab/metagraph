@@ -272,7 +272,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
                 suffix_seeds[m].clear();
             }
 
-            // e.g., match: $$$ATG, want ATG$$$
+            // e.g., match: ***ATG, want ATG***
             suffix_to_prefix(dbg_succ_, std::make_tuple(first, last, seed_length),
                              [&](node_index prefix_node) {
                 append_suffix_seed(
