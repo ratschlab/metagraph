@@ -52,7 +52,7 @@ ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
 }
 
 template <typename NodeType>
-void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     const DeBruijnGraph &graph = this->graph_;
     size_t k = graph.get_k();
 
@@ -65,7 +65,9 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     bool orientation = this->orientation_;
 
     if (this->num_matching_ < config.min_exact_match * query.size())
-        return;
+        return {};
+
+    std::vector<Seed> seeds;
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos) {
@@ -74,14 +76,15 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
             score_t match_score = partial_sum[i + k] - partial_sum[i];
 
             if (match_score > config.min_cell_score) {
-                Seed seed(std::string_view(query.data() + i, k), { query_nodes[i] },
-                          match_score, i, orientation);
-
-                assert(seed.is_valid(graph, &config));
-                callback(std::move(seed));
+                seeds.emplace_back(std::string_view(query.data() + i, k),
+                                   std::vector<NodeType>{ query_nodes[i] },
+                                   match_score, i, orientation);
+                assert(seeds.back().is_valid(graph, &config));
             }
         }
     }
+
+    return seeds;
 }
 
 template <class BOSSEdgeRange>
@@ -131,7 +134,7 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 }
 
 template <class BaseSeeder>
-void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
 
@@ -144,7 +147,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         this->config_.min_seed_length
     );
 
-    this->BaseSeeder::call_seeds([&](Seed&& seed) {
+    for (auto&& seed : this->BaseSeeder::get_seeds()) {
         assert(seed.get_query().size() >= this->config_.min_seed_length);
 
         size_t i = seed.get_clipping();
@@ -157,7 +160,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             min_seed_length[i + seed.size()] = this->graph_.get_k();
 
         suffix_seeds[i].emplace_back(std::move(seed));
-    });
+    }
 
     // when a seed is found, append it to the seed vector
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
@@ -282,7 +285,8 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         }
     }
 
-    // once all seeds are aggregated, run callback
+    // aggregate all seeds
+    std::vector<Seed> output_seeds;
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
         if (pos_seeds.empty())
@@ -291,16 +295,18 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
             assert(pos_seeds.size() == 1);
-            callback(std::move(pos_seeds[0]));
+            output_seeds.emplace_back(std::move(pos_seeds[0]));
         } else {
             assert(min_seed_length[i] == this->graph_.get_k() - pos_seeds[0].get_offset());
             if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
                 for (auto&& seed : pos_seeds) {
-                    callback(std::move(seed));
+                    output_seeds.emplace_back(std::move(seed));
                 }
             }
         }
     }
+
+    return output_seeds;
 }
 
 template <class BaseSeeder>
@@ -313,11 +319,11 @@ const DBGSuccinct& SuffixSeeder<BaseSeeder>
 }
 
 template <typename NodeType>
-void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     size_t k = this->graph_.get_k();
 
     if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
-        return;
+        return {};
 
     std::vector<uint8_t> query_node_flags(this->query_nodes_.size(), 0);
     for (size_t i = 0; i < query_node_flags.size(); ++i) {
@@ -327,6 +333,8 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
             query_node_flags[i] = 2 | get_mem_terminator()[this->query_nodes_[i]];
         }
     }
+
+    std::vector<Seed> seeds;
 
     // find start of MEM
     auto it = query_node_flags.begin();
@@ -365,15 +373,16 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
         if (match_score > this->config_.min_cell_score) {
-            Seed seed(std::string_view(begin_it, mem_length),
-                      { node_begin_it, node_end_it },
-                      match_score, i,this->orientation_);
-            assert(seed.is_valid(this->graph_, &this->config_));
-            callback(std::move(seed));
+            seeds.emplace_back(std::string_view(begin_it, mem_length),
+                               std::vector<NodeType>{ node_begin_it, node_end_it },
+                               match_score, i,this->orientation_);
+            assert(seeds.back().is_valid(this->graph_, &this->config_));
         }
 
         it = next;
     }
+
+    return seeds;
 }
 
 

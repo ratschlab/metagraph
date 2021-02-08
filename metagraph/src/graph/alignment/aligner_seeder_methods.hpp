@@ -19,7 +19,7 @@ class ISeeder {
 
     virtual ~ISeeder() {}
 
-    virtual void call_seeds(std::function<void(Seed&&)> callback) const = 0;
+    virtual std::vector<Seed> get_seeds() const = 0;
 };
 
 template <typename NodeType = uint64_t>
@@ -32,11 +32,7 @@ class ManualSeeder : public ISeeder<NodeType> {
 
     virtual ~ManualSeeder() {}
 
-    void call_seeds(std::function<void(Seed&&)> callback) const override {
-        for (const Seed &seed : seeds_) {
-            callback(Seed(seed));
-        }
-    }
+    std::vector<Seed> get_seeds() const override { return seeds_; }
 
   private:
     std::vector<Seed> seeds_;
@@ -56,7 +52,7 @@ class ExactSeeder : public ISeeder<NodeType> {
 
     virtual ~ExactSeeder() {}
 
-    void call_seeds(std::function<void(Seed&&)> callback) const override;
+    std::vector<Seed> get_seeds() const override;
 
   protected:
     const DeBruijnGraph &graph_;
@@ -78,7 +74,7 @@ class MEMSeeder : public ExactSeeder<NodeType> {
 
     virtual ~MEMSeeder() {}
 
-    void call_seeds(std::function<void(Seed&&)> callback) const override;
+    std::vector<Seed> get_seeds() const override;
 
     virtual const bitmap& get_mem_terminator() const = 0;
 };
@@ -123,7 +119,7 @@ class SuffixSeeder : public BaseSeeder {
 
     virtual ~SuffixSeeder() {}
 
-    void call_seeds(std::function<void(Seed&&)> callback) const override;
+    std::vector<Seed> get_seeds() const override;
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
 
