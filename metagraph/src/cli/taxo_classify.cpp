@@ -24,7 +24,7 @@ void execute_fasta_file(const string &file,
     seq_io::FastaParser fasta_parser(file);
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool.enqueue([&](const auto&... args){
+        thread_pool.enqueue([&](){
             uint64_t taxid = taxo_classifier.assign_class(graph,
                                                           std::string(kseq.seq.s),
                                                           config.lca_coverage_threshold);
