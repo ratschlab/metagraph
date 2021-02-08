@@ -224,21 +224,22 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
         //          --****
         //            i    <-- match returned from call
         for (size_t i = 0; i + this->config_.min_seed_length <= query_rc.size(); ++i) {
+            // initial estimate of the max seed length
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
-            size_t j = query_rc.size() - i - max_seed_length;
-            while (j < query_rc.size() - i - this->config_.min_seed_length + 1
-                    && j < this->query_nodes_.size()
-                    && this->query_nodes_[j]) {
-                ++j;
+
+            // the reverse complement of the sub-k match will fall somewhere in this range
+            size_t j_min = query_rc.size() - i - max_seed_length;
+            size_t j_max = query_rc.size() - i - this->config_.min_seed_length;
+
+            // skip over positions which have better matches
+            while (min_seed_length[j_min] > max_seed_length && j_min <= j_max) {
+                ++j_min;
+                --max_seed_length;
             }
 
-            assert(query_rc.size() > i + j);
-            assert(query_rc.size() - i - j <= max_seed_length);
-            max_seed_length = query_rc.size() - i - j;
-
-            if (max_seed_length < this->config_.min_seed_length)
+            if (j_min > j_max)
                 continue;
 
             auto index_range = dbg_succ_.get_boss().index_range(
@@ -246,7 +247,7 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             );
 
             size_t seed_length = std::get<2>(index_range);
-            j = query_rc.size() - i - seed_length;
+            size_t j = query_rc.size() - i - seed_length;
 
             assert(seed_length < this->config_.min_seed_length
                 || j < min_seed_length.size());
