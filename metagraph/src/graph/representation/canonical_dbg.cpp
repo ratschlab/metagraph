@@ -103,26 +103,22 @@ void CanonicalDBG
     if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         // if it's boss, we can skip k-mers that have been found in the rev-compl
         const auto &boss = dbg_succ->get_boss();
-
-        path.assign(sequence.size() - get_k() + 1, npos);
-
         // the initial forward mapping stopped on this k-mer,
         // hence it's missing and we skip it
-        auto jt = path.begin() + 1;
+        path.push_back(npos);
         auto it = rev_path.rbegin() + 1;
         auto is_missing = get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
                                                    sequence.substr(1));
         boss.map_to_edges(sequence.substr(1),
             [&](boss::BOSS::edge_index edge) {
-                *jt = dbg_succ->boss_to_kmer_index(edge);
-                ++jt;
+                path.push_back(dbg_succ->boss_to_kmer_index(edge));
                 ++it;
             },
             []() { return false; },
             [&]() {
                 if (is_missing() || *it) {
+                    path.push_back(npos);
                     ++it;
-                    ++jt;
                     return true;
                 } else {
                     return false;
@@ -130,7 +126,6 @@ void CanonicalDBG
             }
         );
 
-        assert(jt == path.end());
         assert(it == rev_path.rend());
 
     } else {
