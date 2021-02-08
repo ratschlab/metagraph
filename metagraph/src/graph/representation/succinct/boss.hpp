@@ -459,12 +459,6 @@ class BOSS {
     inline std::tuple<edge_index, edge_index, RandomAccessIt>
     index_range(RandomAccessIt begin, RandomAccessIt end) const;
 
-    /**
-     * A convenience function which encodes the string and calls index_range.
-     */
-    std::tuple<edge_index, edge_index, size_t>
-    inline index_range(std::string_view str) const;
-
     inline bool tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const;
 
     /**
@@ -725,29 +719,6 @@ BOSS::index_range(RandomAccessIt begin, RandomAccessIt end) const {
     }
     assert(succ_last(rl) <= ru);
     return std::make_tuple(succ_last(rl), ru, it);
-}
-
-std::tuple<BOSS::edge_index, BOSS::edge_index, size_t>
-BOSS::index_range(std::string_view str) const {
-    assert(str.size() <= get_k());
-
-    auto encoded = encode(str);
-
-    // nothing to call if the suffix contains invalid characters
-    if (std::find(encoded.begin(), encoded.end(), alph_size) != encoded.end())
-        return {};
-
-    auto range = index_range(encoded.begin(),
-                             std::min(encoded.begin() + get_k(), encoded.end()));
-
-    if (std::get<0>(range) == 0 || std::get<1>(range) == 0)
-        return {};
-
-    if (std::get<2>(range) == encoded.begin()) {
-        return {};
-    }
-
-    return { std::get<0>(range), std::get<1>(range), std::get<2>(range) - encoded.begin() };
 }
 
 template <typename RandomAccessIt>

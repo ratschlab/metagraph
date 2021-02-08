@@ -242,11 +242,12 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             if (j_min > j_max)
                 continue;
 
-            auto index_range = dbg_succ_.get_boss().index_range(
-                { query_rc.data() + i, max_seed_length }
-            );
+            const auto &boss = dbg_succ_.get_boss();
 
-            size_t seed_length = std::get<2>(index_range);
+            auto encoded = boss.encode({ query_rc.data() + i, max_seed_length });
+            auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
+
+            size_t seed_length = end - encoded.begin();
             size_t j = query_rc.size() - i - seed_length;
 
             assert(seed_length < this->config_.min_seed_length
@@ -272,7 +273,8 @@ void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) 
             }
 
             // e.g., match: $$$ATG, want ATG$$$
-            suffix_to_prefix(dbg_succ_, index_range, [&](node_index prefix_node) {
+            suffix_to_prefix(dbg_succ_, std::make_tuple(first, last, seed_length),
+                             [&](node_index prefix_node) {
                 append_suffix_seed(
                     j, canonical->reverse_complement(prefix_node), seed_length
                 );
