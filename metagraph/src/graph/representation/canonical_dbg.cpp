@@ -100,8 +100,10 @@ void CanonicalDBG
     std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
 
     // map the forward
-    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
-        // if it's boss, we can skip k-mers that have been found in the rev-compl
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+    if (dbg_succ && get_k() % 2) {
+        // if it's a boss table with odd k (without palindromic k-mers),
+        // we can skip k-mers that have been found in the rev-compl sequence
         const auto &boss = dbg_succ->get_boss();
         // the initial forward mapping stopped on this k-mer,
         // hence it's missing and we skip it
