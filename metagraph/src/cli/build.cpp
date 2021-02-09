@@ -71,8 +71,12 @@ int build_graph(Config *config) {
 
     Timer timer;
 
-    if (config->graph_mode != DeBruijnGraph::BASIC)
-        config->forward_and_reverse = false;
+    if (config->forward_and_reverse) {
+        logger->error("Building a graph from both strands is probably undesired."
+                      " To represent both strands, consider building in canonical"
+                      " or primary mode.");
+        exit(1);
+    }
 
     if (config->complete) {
         if (config->graph_type != Config::GraphType::BITMAP) {
