@@ -47,15 +47,10 @@ void parse_sequences(const std::string &file,
         auto min_count = config.min_count;
         auto max_count = config.max_count;
 
+        // compute the quantiles to update the thresholds
         if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
             tsl::hopscotch_map<uint64_t, uint64_t> count_hist;
-            read_kmers(
-                file,
-                [&](std::string_view, uint32_t count) {
-                    count_hist[count] += (1 + config.forward_and_reverse);
-                },
-                config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse
-            );
+            read_kmers(file, [&](auto, uint32_t count) { count_hist[count]++; }, false);
 
             if (count_hist.size()) {
                 std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
@@ -93,7 +88,8 @@ void parse_sequences(const std::string &file,
                     call_weighted_sequence(sequence, count);
                 }
             },
-            config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse, min_count, max_count
+            false, // call only those stored in the KMC counters (without rev-compl)
+            min_count, max_count
         );
 
     } else if (file_format(file) == "FASTA"

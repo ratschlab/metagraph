@@ -283,7 +283,8 @@ int build_graph(Config *config) {
             auto node_weights = graph->get_extension<NodeWeights>();
             assert(node_weights->is_compatible(*graph));
 
-            if (graph->get_mode() != DeBruijnGraph::BASIC)
+            // set counts for reverse complement k-mers as well
+            if (graph->get_mode() == DeBruijnGraph::CANONICAL)
                 config->forward_and_reverse = true;
 
             for (const auto &file : files) {
@@ -302,6 +303,9 @@ int build_graph(Config *config) {
                 logger->trace("Extracted all sequences from file '{}' in {} sec",
                               file, timer.elapsed());
             }
+
+            // set back to false
+            config->forward_and_reverse = false;
         }
     }
 
