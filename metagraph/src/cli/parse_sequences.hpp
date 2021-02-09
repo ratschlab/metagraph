@@ -34,6 +34,12 @@ void parse_sequences(const std::string &file,
                      CallWeighted call_weighted_sequence) {
     mtg::common::logger->trace("Parsing '{}'", file);
 
+    if (config->graph_mode == DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
+        mtg::common::logger->error("Primary graphs can only be constructed from"
+                                   " primary contigs");
+        exit(1);
+    }
+
     if (file_format(file) == "VCF") {
         read_vcf_file_critical(file,
                                config.refpath,
@@ -88,7 +94,9 @@ void parse_sequences(const std::string &file,
                     call_weighted_sequence(sequence, count);
                 }
             },
-            false, // call only those stored in the KMC counters (without rev-compl)
+            // For canonical graph the rev-compl sequences will be called automatically anyway.
+            // Also, if forward_and_reverse = true, the rev-compl will be computed in the callback.
+            config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse,
             min_count, max_count
         );
 
