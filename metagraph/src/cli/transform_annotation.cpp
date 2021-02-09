@@ -491,7 +491,7 @@ int transform_annotation(Config *config) {
             const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
             if (!std::filesystem::exists(anchors_file)) {
                 logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                              " transform followed by the anchor optimization.",
+                              " transform followed by anchor optimization.",
                               anchors_file);
                 std::exit(1);
             }

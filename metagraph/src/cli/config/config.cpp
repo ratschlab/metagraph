@@ -550,11 +550,11 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffRowSparse;
         if (to_row_diff && !infbase.size()) {
-            std::cerr << "Specify the location to graph via -i <GRAPH>";
-            std::exit(1);
+            std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
+            print_usage_and_exit = true;
         } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is required only for transform to row_diff";
-            std::exit(1);
+            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+            print_usage_and_exit = true;
         }
     }
 
