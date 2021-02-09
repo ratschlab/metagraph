@@ -301,7 +301,12 @@ void traverse_anno_chunked(
 
         progress_bar += succ_chunk.size();
     }
-    assert(pred_boundary_it == pred_boundary.end());
+
+    if (succ_it != succ.end() || pred_it != pred.end()
+                              || pred_boundary_it != pred_boundary.end()) {
+        logger->error("Buffers were not read to the end, they might be corrupted");
+        exit(1);
+    }
 }
 
 
@@ -404,6 +409,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     // total number of set bits in the original rows
     std::vector<uint32_t> row_nbits_block;
+    // a buffer for writing in worker while populating next row_nbits_block
     std::vector<uint32_t> row_nbits_block_other;
 
     traverse_anno_chunked(
