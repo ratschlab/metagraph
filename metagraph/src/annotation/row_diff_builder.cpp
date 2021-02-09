@@ -409,7 +409,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     // total number of set bits in the original rows
     std::vector<uint32_t> row_nbits_block;
-    // a buffer for writing in worker while populating next row_nbits_block
+    // buffer for writing previous block while populating next row_nbits_block
     std::vector<uint32_t> row_nbits_block_other;
 
     traverse_anno_chunked(
