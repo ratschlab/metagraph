@@ -731,8 +731,9 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, row, bin_rel_wt_sdsl, bin_rel_wt, flat, rbfish,\n"
-                                   "\t\t  brwt, rb_brwt, row_diff, row_diff_brwt, row_diff_sparse )";
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt,\n"
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
+                                   "\t\t  row, flat, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {
