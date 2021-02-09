@@ -255,7 +255,7 @@ bool TaxonomyDB::find_lca(const std::vector<std::string> &fasta_headers,
 }
 
 void TaxonomyDB::export_to_file(const std::string &filepath,
-                                tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map) {
+                                tsl::hopscotch_map<KmerId, NormalizedTaxId> &taxonomic_map) {
     logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
 
     if (num_external_lca_calls_failed) {

@@ -136,7 +136,7 @@ class TaxonomyDB {
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath,
-                        tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map);
+                        tsl::hopscotch_map<KmerId, NormalizedTaxId> &taxonomic_map);
     bool find_lca(const std::vector<std::string> &fasta_headers,
                   NormalizedTaxId &lca);
 
