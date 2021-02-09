@@ -954,9 +954,15 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         : swap_dir_(swap_dir),
           kmer_collector_(k + 1,
                           both_strands
+                            // collect both forward and rev-compl k-mers
                             ? (filter_suffix.empty()
+                                // collect only canonical k-mers, the rev-compl
+                                // k-mers will be reconstructed later
                                 ? KmerCollector::Mode::CANONICAL_ONLY
+                                // can't do the same for chunk, so collect all
+                                // from the beginning
                                 : KmerCollector::Mode::BOTH)
+                            // collect only the k-mers from input
                             : KmerCollector::Mode::BASIC,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,
