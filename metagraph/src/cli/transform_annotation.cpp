@@ -353,10 +353,10 @@ int transform_annotation(Config *config) {
                 = initialize_annotation(files.at(0), *config);
 
         // The entire annotation is loaded in all cases except for transforms
-        // to BRWT with a hierarchical clustering of columns specified (infbase)
+        // to BRWT with a hierarchical clustering of columns specified (linkage_file)
         // or RbBRWT, for which the construction is done with streaming columns
         // from disk.
-        if ((config->anno_type != Config::BRWT || !config->infbase.size())
+        if ((config->anno_type != Config::BRWT || !config->linkage_file.size())
             && config->anno_type != Config::RbBRWT
             && config->anno_type != Config::RowDiff) {
             logger->trace("Loading annotation from disk...");
@@ -418,9 +418,9 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                auto brwt_annotator = config->infbase.size()
+                auto brwt_annotator = config->linkage_file.size()
                     ? convert_to_BRWT<MultiBRWTAnnotator>(
-                        files, config->infbase,
+                        files, config->linkage_file,
                         config->parallel_nodes,
                         get_num_threads(),
                         config->tmp_dir)
@@ -487,15 +487,17 @@ int transform_annotation(Config *config) {
         if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);
         } else {
-            if (config->anchors.empty()) {
-                logger->error(
-                        "Please specify the location of the anchor file via --anchors-file "
-                        "The anchor file is in the same directory as the annotated graph");
+            assert(config->infbase.size());
+            const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+            if (!std::filesystem::exists(anchors_file)) {
+                logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                              " transform followed by the anchor optimization.",
+                              anchors_file);
                 std::exit(1);
             }
             if (config->anno_type == Config::RowDiffBRWT) {
                 std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
-                if (config->infbase.empty()) { // load all columns in memory and compute linkage on the fly
+                if (config->linkage_file.empty()) { // load all columns in memory and compute linkage on the fly
                     logger->trace("Loading annotation from disk...");
                     auto row_diff_anno = std::make_unique<RowDiffColumnAnnotator>();
                     if (!row_diff_anno->merge_load(files))
@@ -513,14 +515,14 @@ int transform_annotation(Config *config) {
                                                      get_num_threads());
                 } else {
                     brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
-                            files, config->infbase, config->parallel_nodes,
+                            files, config->linkage_file, config->parallel_nodes,
                             get_num_threads(), config->tmp_dir);
                 }
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 logger->trace("Serializing to '{}'", config->outfbase);
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
-                        .load_anchor(config->anchors);
+                        .load_anchor(anchors_file);
                 brwt_annotator->serialize(config->outfbase);
 
             } else { // RowDiff<RowSparse>
@@ -532,7 +534,7 @@ int transform_annotation(Config *config) {
                         = convert(*row_diff_anno);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
-                        .load_anchor(config->anchors);
+                        .load_anchor(anchors_file);
                 logger->trace("Serializing to '{}'", config->outfbase);
                 row_sparse->serialize(config->outfbase);
             }
@@ -553,7 +555,7 @@ int transform_annotation(Config *config) {
             file_name = file_name.replace_extension("row_diff_" + old_extension.substr(1));
             std::string out_file = out_dir/(file_name.string() + ".annodbg");
 
-            wrap_in_row_diff(std::move(*annotator), config->infbase, out_file);
+            wrap_in_row_diff(std::move(*annotator), config->linkage_file, out_file);
         }
     } else {
         logger->error(
