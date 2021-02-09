@@ -205,6 +205,8 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
     logger->trace("Starting rmq preprocessing..");
     rmq_preprocessing(tree_linearization);
     logger->trace("Finished rmq preprocessing in '{}' sec", timer.elapsed());
+
+    timer_update_taxonomic_map.reset();
 }
 
 NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) {
@@ -231,8 +233,12 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
 
 bool TaxonomyDB::find_lca(const std::vector<std::string> &fasta_headers,
                           NormalizedTaxId &lca) {
-    if (fasta_headers.size() == 0) {
-        return false;
+    if (fasta_headers.size() <= 1) {
+        if (fasta_headers.size() == 0) {
+            return false;
+        }
+        lca = normalized_taxid[lookup_table[fasta_headers[0]]];
+        return true;
     }
     num_external_lca_calls += 1;
     std::vector<NormalizedTaxId> taxids;
@@ -250,6 +256,8 @@ bool TaxonomyDB::find_lca(const std::vector<std::string> &fasta_headers,
 
 void TaxonomyDB::export_to_file(const std::string &filepath,
                                 tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map) {
+    logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
+
     if (num_external_lca_calls_failed) {
         logger->warn("Total number external LCA calls: {} from which nonexistent accession versions: {}",
                      num_external_lca_calls, num_external_lca_calls_failed);

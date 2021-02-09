@@ -3,6 +3,7 @@
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
+#include "common/unix_tools.hpp"
 
 #include "annotation/representation/base/annotation.hpp"
 
@@ -66,6 +67,8 @@ class TaxonomyDB {
      */
     tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
     std::vector<TaxId> denormalized_taxid;
+
+    Timer timer_update_taxonomic_map;
 
     /**
      * Reads and returns the taxonomic tree
