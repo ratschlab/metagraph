@@ -176,7 +176,7 @@ Requires `N*R/8 + 6*N^2` bytes of RAM, where `N` is the number of columns and `R
 2) Construct Multi-BRWT
 ```bash
 ./metagraph transform_anno -v -p NCORES --anno-type brwt \
-                           -i linkage.txt \
+                           --linkage-file linkage.txt \
                            -o primates \
                            --parallel-nodes V \
                            -p NCORES \

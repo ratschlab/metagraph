@@ -107,7 +107,7 @@ bsub -J "build_brwt_5M" \
     "cat ~/metagenome/data/BIGSI/annotation/columns.txt \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
             --anno-type brwt \
-            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
+            --linkage-file ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
             -o ~/metagenome/data/BIGSI/annotation/annotation_5M \
             -p 96 --parallel-nodes 48 \
             2>&1"
@@ -210,7 +210,7 @@ bsub -J "build_brwt_primary" \
     "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
             --anno-type brwt \
-            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            --linkage-file ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
             -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
             -p 48 --parallel-nodes 48 \
             2>&1"

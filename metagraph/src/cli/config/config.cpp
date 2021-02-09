@@ -327,6 +327,8 @@ Config::Config(int argc, char *argv[]) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
             num_rows_subsampled = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--linkage-file")) {
+            linkage_file = get_value(i++);
         } else if (!strcmp(argv[i], "--arity")) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
@@ -353,8 +355,6 @@ Config::Config(int argc, char *argv[]) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
-        } else if (!strcmp(argv[i], "--anchors-file")) {
-            anchors = get_value(i++);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -545,6 +545,19 @@ Config::Config(int argc, char *argv[]) {
                     && outfbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == TRANSFORM_ANNOTATION) {
+        const bool to_row_diff = anno_type == RowDiff
+                                    || anno_type == RowDiffBRWT
+                                    || anno_type == RowDiffRowSparse;
+        if (to_row_diff && !infbase.size()) {
+            std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
+            print_usage_and_exit = true;
+        } else if (!to_row_diff && infbase.size()) {
+            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+            print_usage_and_exit = true;
+        }
+    }
+
     if (identity == MERGE && fnames.size() < 2)
         print_usage_and_exit = true;
 
@@ -718,7 +731,9 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
 }
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt', 'rb_brwt', 'row_diff')";
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt,\n"
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
+                                   "\t\t  row, flat, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -1034,7 +1049,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "%s\n", annotation_list);
             // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -1048,14 +1063,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                       \t          ... ...........'\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
-            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "%s\n", annotation_list);
+            fprintf(stderr, "\t-i --infile-base [STR] \tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
+            fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --linkage \t\tcluster columns and construct linkage matrix [off]\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \tlinkage matrix specifying brwt tree structure []\n");
+            fprintf(stderr, "\t   --linkage-file [STR]\tlinkage matrix specifying brwt tree structure []\n");
             fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
             fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
             fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
-            fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
