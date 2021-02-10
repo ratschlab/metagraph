@@ -34,7 +34,7 @@ void parse_sequences(const std::string &file,
                      CallWeighted call_weighted_sequence) {
     mtg::common::logger->trace("Parsing '{}'", file);
 
-    if (config->graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
+    if (config.graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
         mtg::common::logger->error("Primary graphs can only be constructed from"
                                    " primary contigs");
         exit(1);

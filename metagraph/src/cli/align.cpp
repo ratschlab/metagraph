@@ -400,8 +400,7 @@ int align_to_graph(Config *config) {
         }
 
         if (config->alignment_length != graph->get_k() && !dbg) {
-            logger->error("Matching k-mers shorter than k only "
-                          "supported for succinct graphs");
+            logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
 
