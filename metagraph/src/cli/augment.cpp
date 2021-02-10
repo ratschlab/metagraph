@@ -71,7 +71,13 @@ int augment_graph(Config *config) {
 
     logger->trace("Start graph augmentation");
 
-    if (graph->get_mode() != graph::DeBruijnGraph::BASIC)
+    if (config->forward_and_reverse
+            && graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
+        logger->error("Can't insert both strands into a primary graph.");
+        exit(1);
+    }
+
+    if (graph->get_mode() == graph::DeBruijnGraph::CANONICAL)
         config->forward_and_reverse = false;
 
     config->graph_mode = graph->get_mode();
@@ -102,7 +108,7 @@ int augment_graph(Config *config) {
 
         assert(node_weights->is_compatible(*graph));
 
-        if (graph->get_mode() != graph::DeBruijnGraph::BASIC)
+        if (graph->get_mode() == graph::DeBruijnGraph::CANONICAL)
             config->forward_and_reverse = true;
 
         for (const auto &file : files) {
