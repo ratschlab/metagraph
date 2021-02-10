@@ -191,12 +191,14 @@ jobs:
       run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
+      if: ${{ matrix.build_static == 'OFF' }}
       run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
       run: cd metagraph/build && make -j 2
 
     - name: run unit tests
+      if: ${{ matrix.build_static == 'OFF' }}
       run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
