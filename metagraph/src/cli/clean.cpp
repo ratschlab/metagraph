@@ -58,6 +58,11 @@ int clean_graph(Config *config) {
         }
     }
 
+    if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
+        logger->warn("Cleaning primary graphs is not recommended."
+                     " Consider building a canonical graph for cleaning instead.");
+    }
+
     if (config->min_count > 1
             || config->max_count < std::numeric_limits<unsigned int>::max()
             || config->min_unitig_median_kmer_abundance != 1
@@ -279,7 +284,8 @@ int clean_graph(Config *config) {
             // the outer for loop is parallelized, so don't start another thread
             // pool here
             dump_contigs_to_fasta(filebase, [&](auto dump_sequence, auto /* num_threads */) {
-                graph_slice.call_sequences(dump_sequence, 1, graph_slice.get_mode() == graph::DeBruijnGraph::CANONICAL);
+                graph_slice.call_sequences(dump_sequence, 1,
+                                           graph_slice.get_mode() == graph::DeBruijnGraph::CANONICAL);
             });
         }
     }

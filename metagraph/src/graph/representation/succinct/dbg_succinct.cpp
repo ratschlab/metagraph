@@ -198,9 +198,6 @@ void DBGSuccinct::add_sequence(std::string_view sequence,
     if (sequence.size() < get_k())
         return;
 
-    if (mode_ == PRIMARY)
-        logger->warn("extending a primary succinct graph");
-
     std::vector<uint64_t> boss_edges_inserted;
     boss_edges_inserted.reserve((sequence.size() - get_k() + 1) * 2);
 
@@ -673,11 +670,7 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
         if (!boss_graph_->load(instream))
             return false;
 
-        try {
-            mode_ = static_cast<Mode>(load_number(instream));
-        } catch (...) {
-            mode_ = BASIC;
-        }
+        mode_ = static_cast<Mode>(load_number(instream));
 
         if (!boss_graph_->load_suffix_ranges(instream))
             logger->warn("No index for node ranges could be loaded");
@@ -730,7 +723,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
         std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
         if (!bloom_filter_)
-            bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), mode_ != BASIC);
+            bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), mode_ == CANONICAL);
 
         if (!bloom_filter_->load(bloom_instream)) {
             std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
@@ -739,7 +732,7 @@ bool DBGSuccinct::load(const std::string &filename) {
 
         assert(bloom_filter_);
 
-        if (bloom_filter_->is_canonical_mode() != (get_mode() != BASIC)) {
+        if (bloom_filter_->is_canonical_mode() != (get_mode() == CANONICAL)) {
             std::cerr << "Error: Bloom filter and graph in incompatible modes" << std::endl
                       << "Bloom filter: " << (bloom_filter_->is_canonical_mode() ? "not " : "") << "canonical" << std::endl
                       << "Graph: " << static_cast<int>(get_mode()) << std::endl;
@@ -919,7 +912,7 @@ void DBGSuccinct
                                    uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
-        mode_ != BASIC,
+        mode_ == CANONICAL,
         BloomFilter::optim_size(false_positive_rate, num_nodes()),
         num_nodes(),
         std::min(max_num_hash_functions, BloomFilter::optim_h(false_positive_rate))
@@ -933,7 +926,7 @@ void DBGSuccinct
                 callback(sequence);
             },
             get_num_threads(),
-            mode_ != BASIC
+            mode_ == CANONICAL
         );
     });
 }
@@ -943,7 +936,7 @@ void DBGSuccinct
                           uint32_t max_num_hash_functions) {
     bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(
         get_k(),
-        mode_ != BASIC,
+        mode_ == CANONICAL,
         bits_per_kmer * num_nodes(),
         num_nodes(),
         max_num_hash_functions
@@ -957,7 +950,7 @@ void DBGSuccinct
                 callback(sequence);
             },
             get_num_threads(),
-            mode_ != BASIC
+            mode_ == CANONICAL
         );
     });
 }

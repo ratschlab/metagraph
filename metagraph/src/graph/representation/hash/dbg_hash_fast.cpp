@@ -255,7 +255,7 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
     auto add_seq = [&](const auto &sequence) {
         bool previous_valid = false;
 
-        for (const auto &kmer_pair : sequence_to_kmers(sequence, mode_ == DeBruijnGraph::PRIMARY)) {
+        for (const auto &kmer_pair : sequence_to_kmers(sequence)) {
             // putting the structured binding in the for statement above crashes gcc 8.2.0
             const auto &[kmer, is_valid] = kmer_pair;
             if (!is_valid) {
@@ -296,7 +296,7 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
 
     add_seq(sequence);
 
-    if (mode_ == DeBruijnGraph::CANONICAL) {
+    if (mode_ == CANONICAL) {
         std::string rev_comp(sequence.begin(), sequence.end());
         reverse_complement(rev_comp.begin(), rev_comp.end());
 
@@ -332,7 +332,7 @@ template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ != DeBruijnGraph::BASIC)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 

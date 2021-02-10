@@ -146,7 +146,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
     node_index prev_pos = kmers_.size();
 #endif
 
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == DeBruijnGraph::PRIMARY)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         skipped.push_back(skip() || !is_valid);
         if (skipped.back())
             continue;
@@ -170,7 +170,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(std::string_view sequence,
         }
     }
 
-    if (mode_ != DeBruijnGraph::CANONICAL)
+    if (mode_ != CANONICAL)
         return;
 
     std::string rev_comp(sequence.begin(), sequence.end());
@@ -228,7 +228,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes(std::string_view sequence,
     node_index prev_index = n_nodes;
 #endif
 
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ != DeBruijnGraph::BASIC)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 

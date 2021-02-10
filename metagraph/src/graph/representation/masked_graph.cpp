@@ -20,12 +20,10 @@ MaskedDeBruijnGraph
     assert(kmers_in_graph_.get());
     assert(kmers_in_graph_->size() == graph->max_index() + 1);
 
-    if (graph_->get_mode() == DeBruijnGraph::PRIMARY
-            && mode_ != DeBruijnGraph::PRIMARY) {
+    if (graph_->get_mode() == PRIMARY && mode_ != PRIMARY) {
         throw std::runtime_error("Any subgraph of a primary graph is primary");
     }
-    if (mode_ == DeBruijnGraph::CANONICAL
-            && graph_->get_mode() != DeBruijnGraph::CANONICAL) {
+    if (graph_->get_mode() != CANONICAL && mode_ == CANONICAL) {
         throw std::runtime_error("Canonical subgraph requires canonical base graph");
     }
 }
@@ -47,7 +45,7 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
     assert(in_subgraph(node));
 
     auto index = graph_->traverse(node, next_char);
-    return index && in_subgraph(index) ? index : DeBruijnGraph::npos;
+    return index && in_subgraph(index) ? index : npos;
 }
 // Traverse the incoming edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
@@ -55,7 +53,7 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
     assert(in_subgraph(node));
 
     auto index = graph_->traverse_back(node, prev_char);
-    return index && in_subgraph(index) ? index : DeBruijnGraph::npos;
+    return index && in_subgraph(index) ? index : npos;
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {

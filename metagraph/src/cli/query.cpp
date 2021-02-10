@@ -575,8 +575,6 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
 
-    bool canonical = full_dbg.get_mode() == DeBruijnGraph::CANONICAL;
-
     size_t sub_k = full_dbg.get_k();
     size_t max_hull_forks = 0;
     size_t max_hull_depth = 0;
@@ -652,7 +650,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                    contigs.emplace_back(contig, std::vector<node_index>{});
                                },
                                get_num_threads(),
-                               canonical);  // pull only primary contigs when building canonical query graph
+                               // pull only primary contigs when building canonical query graph
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
@@ -679,7 +678,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
-                                      &contigs, canonical);
+                                      &contigs, full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
         logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
                       contigs.size() - original_size, timer.elapsed());
@@ -710,17 +709,17 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     timer.reset();
     std::shared_ptr<DeBruijnGraph> graph;
 
-    DeBruijnGraph::Mode graph_mode = canonical ? DeBruijnGraph::CANONICAL
-                                               : DeBruijnGraph::BASIC;
     // restrict nodes to those in the full graph
     if (sub_k < full_dbg.get_k()) {
-        BOSSConstructor constructor(full_dbg.get_k() - 1, canonical, 0, "", num_threads);
+        BOSSConstructor constructor(full_dbg.get_k() - 1,
+                                    full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                                    0, "", num_threads);
         add_to_graph(constructor, contigs, full_dbg.get_k());
 
-        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), graph_mode);
+        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), full_dbg.get_mode());
 
     } else {
-        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), graph_mode);
+        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), full_dbg.get_mode());
         add_to_graph(*graph, contigs, full_dbg.get_k());
     }
 

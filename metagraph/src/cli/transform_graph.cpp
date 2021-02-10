@@ -133,6 +133,7 @@ int transform_graph(Config *config) {
         logger->info("Changing graph mode from basic to primary");
         logger->warn("This doesn't rebuild the graph. Apply with caution,"
                      " only to graphs that were constructed from primary contigs!");
+        // keep the graph state (representation) unchanged
         config->state = dbg_succ->get_state();
         graph::boss::BOSS* boss = dbg_succ->release_boss();
         dbg_succ.reset(new graph::DBGSuccinct(boss, graph::DeBruijnGraph::PRIMARY));

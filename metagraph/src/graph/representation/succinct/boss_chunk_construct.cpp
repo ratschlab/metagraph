@@ -259,9 +259,8 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
 
     size_t k = kmer_collector.get_k() - 1;
     size_t num_threads = kmer_collector.num_threads();
-    bool both_strands = kmer_collector.get_mode() != KmerCollector::Mode::BASIC;
 
-    if (both_strands) {
+    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
         add_reverse_complements(k, num_threads, &kmers);
     }
 
@@ -672,7 +671,6 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
     const uint64_t buffer_size = kmer_collector.buffer_size();
-    bool both_strands = kmer_collector.get_mode() != KmerCollector::Mode::BASIC;
 
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.files_to_merge();
@@ -709,7 +707,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
                       std::filesystem::file_size(real_F_W[j]));
     }
 
-    if (both_strands) {
+    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
         // compute reverse complements k-mers and update the blocks #real_F_W
         add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
     }

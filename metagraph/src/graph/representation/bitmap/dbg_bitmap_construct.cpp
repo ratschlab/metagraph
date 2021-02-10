@@ -50,12 +50,11 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
         switch (kmer_collector_.get_mode()) {
             case KmerCollector::BASIC:
                 return DeBruijnGraph::BASIC;
-            case KmerCollector::CANONICAL_ONLY:
-                return DeBruijnGraph::PRIMARY;
             case KmerCollector::BOTH:
                 return DeBruijnGraph::CANONICAL;
+            default:
+                throw std::runtime_error("Never happens");
         }
-        throw std::runtime_error("Never happens");
     }
 
     DBGBitmap::Chunk build_chunk();
@@ -85,11 +84,9 @@ BitmapChunkConstructor<KmerCollector>
                          size_t num_threads,
                          double memory_preallocated)
       : kmer_collector_(k,
-                        mode == DeBruijnGraph::BASIC
-                            ? KmerCollector::BASIC
-                            : (mode == DeBruijnGraph::CANONICAL
-                                ? KmerCollector::BOTH
-                                : KmerCollector::CANONICAL_ONLY),
+                        mode == DeBruijnGraph::CANONICAL
+                            ? KmerCollector::BOTH
+                            : KmerCollector::BASIC,
                         encode_filter_suffix<KmerExtractor2Bit>(filter_suffix),
                         num_threads,
                         memory_preallocated) {}
