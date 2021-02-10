@@ -180,6 +180,7 @@ jobs:
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DBZIP2_LIBRARY_RELEASE=/usr/local/opt/bzip2/lib/libbz2.a \
               -DBUILD_KMC=${BUILD_KMC} \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
@@ -198,11 +199,23 @@ jobs:
     #- name: run integration tests
     #  run: cd metagraph/build && make check
 
+    - name: rename static binary
+      if: ${{ matrix.build_static == 'ON' }}
+      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
+
+    # for potential release
+    - name: upload static binary
+      if: ${{ matrix.build_static == 'ON' }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: metagraph_${{ matrix.alphabet }}_static_binary_mac_osx
+        path: metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
+
   Release:
     name: Create Release
     if: contains(github.ref, 'tags/v')
     runs-on: ubuntu-latest
-    needs: Linux
+    needs: [Linux, MacOS]
     steps:
       - name: fetch static binary
         uses: actions/download-artifact@v2
@@ -223,7 +236,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           release_name: Release ${{ github.ref }}
-          body: Release of static binaries (experimental).
+          body: Release of binaries (experimental).
           file: 'artifacts/*/metagraph_*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
