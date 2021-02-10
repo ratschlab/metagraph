@@ -1525,28 +1525,19 @@ TEST(DBGAlignerTest, align_dummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TEST(DBGAlignerTest, align_extended_insert_after_match) {
-    size_t k = 27;
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
-    std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
-    auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
-    config.max_seed_length = k;
-    config.min_seed_length = 15;
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+TYPED_TEST(DBGAlignerTest, align_delete_after_seed) {
+    size_t k = 3;
+    std::string reference = "GGCCAGGCC";
+    std::string query =     "GGCGGCC";
 
-    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(1, -1, -1));
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -2;
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
-
-    EXPECT_EQ(47u, path.size());
-    EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ("22=3I2=3X9=3D4=1I1=1X2I3=2I1=1I7=1D1=2D2=1X3=1X6=6S",
-              path.get_cigar().to_string());
-    EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
