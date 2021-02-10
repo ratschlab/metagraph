@@ -10,8 +10,8 @@ jobs:
 
     strategy:
       matrix:
-        alphabet: [DNA]
-        build_type: [Release]
+        alphabet: [DNA, Protein]
+        build_type: [Debug, Release]
         compiler: [g++-8, g++-9, g++-10]
         build_static: [OFF]
         include:
@@ -72,7 +72,7 @@ jobs:
         sudo apt-get install libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
-          # for static builds, add in curl
+          # for static builds, compile curl ourselves
           git clone https://github.com/curl/curl.git
           mkdir curl/_build
           cd curl/_build
@@ -106,23 +106,23 @@ jobs:
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
 
-    # - name: build unit tests
-    #   if: ${{ matrix.build_static == 'OFF' }}
-    #   run: cd metagraph/build && make -j 2 unit_tests
+    - name: build unit tests
+      if: ${{ matrix.build_static == 'OFF' }}
+      run: cd metagraph/build && make -j 2 unit_tests
 
-    # - name: build other
-    #   run: cd metagraph/build && make -j 2
+    - name: build other
+      run: cd metagraph/build && make -j 2
 
-    # - name: run unit tests
-    #   if: ${{ matrix.build_static == 'OFF' }}
-    #   run: |
-    #     export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-    #     cd metagraph/build && ./unit_tests
+    - name: run unit tests
+      if: ${{ matrix.build_static == 'OFF' }}
+      run: |
+        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+        cd metagraph/build && ./unit_tests
 
-    # - name: run integration tests
-    #   run: |
-    #     export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-    #     cd metagraph/build && make check
+    - name: run integration tests
+      run: |
+        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+        cd metagraph/build && make check
 
     - name: rename static binary
       if: ${{ matrix.build_static == 'ON' }}
@@ -148,6 +148,9 @@ jobs:
         build_static: [OFF]
         include:
           - alphabet: DNA
+            build_type: Release
+            build_static: ON
+          - alphabet: Protein
             build_type: Release
             build_static: ON
     steps:
@@ -187,17 +190,17 @@ jobs:
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
 
-    #- name: build unit tests
-    #  run: cd metagraph/build && make -j 2 unit_tests
+    - name: build unit tests
+      run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
       run: cd metagraph/build && make -j 2
 
-    #- name: run unit tests
-    #  run: cd metagraph/build && ./unit_tests
+    - name: run unit tests
+      run: cd metagraph/build && ./unit_tests
 
-    #- name: run integration tests
-    #  run: cd metagraph/build && make check
+    - name: run integration tests
+      run: cd metagraph/build && make check
 
     - name: rename static binary
       if: ${{ matrix.build_static == 'ON' }}
@@ -221,23 +224,15 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           path: artifacts
-      # - name: create release
-      #   id: create_release
-      #   uses: actions/create-release@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-      #   with:
-      #     tag_name: ${{ github.ref }}
-      #     release_name: Release ${{ github.ref }}
-      #     body: some test release with static binaries for linux
-      #     draft: true
-      #     prerelease: true
       - name: create release with static binaries
         uses: svenstaro/upload-release-action@v2
         with:
           release_name: Release ${{ github.ref }}
-          body: Release of binaries (experimental).
-          file: 'artifacts/*/metagraph_*'
+          body: |
+            The binaries are currently provided on an experimental basis.
+            The Linux binaries are statically linked and hence don't require additional libraries to be installed.
+            The Mac OS X binaries dynamically link to libhts, which would need to be available on your system, e.g. using `brew install htslib`). The Mac OS X binaries are currently nor signed nor notarized - you need to explicitely allow the binary to run in the security settings of your system. 
+                      file: 'artifacts/*/metagraph_*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref }}
