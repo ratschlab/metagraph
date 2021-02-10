@@ -46,21 +46,13 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
     size_t get_k() const { return kmer_collector_.get_k(); }
 
-    DeBruijnGraph::Mode get_mode() const {
-        switch (kmer_collector_.get_mode()) {
-            case KmerCollector::BASIC:
-                return DeBruijnGraph::BASIC;
-            case KmerCollector::BOTH:
-                return DeBruijnGraph::CANONICAL;
-            default:
-                throw std::runtime_error("Never happens");
-        }
-    }
+    DeBruijnGraph::Mode get_mode() const { return mode_; }
 
     DBGBitmap::Chunk build_chunk();
 
     sdsl::int_vector<> get_weights(uint8_t bits_per_count);
 
+    DeBruijnGraph::Mode mode_;
     KmerCollector kmer_collector_;
 };
 
@@ -83,7 +75,8 @@ BitmapChunkConstructor<KmerCollector>
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated)
-      : kmer_collector_(k,
+      : mode_(mode),
+        kmer_collector_(k,
                         mode == DeBruijnGraph::CANONICAL
                             ? KmerCollector::BOTH
                             : KmerCollector::BASIC,
