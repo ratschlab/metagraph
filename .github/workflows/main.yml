@@ -39,6 +39,8 @@ jobs:
           - alphabet: Protein
             compiler: g++-9
 
+    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }})
+
     steps:
     - uses: actions/checkout@v1
 
