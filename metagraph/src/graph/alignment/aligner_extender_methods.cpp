@@ -5,6 +5,7 @@
 #endif
 
 #include "common/logger.hpp"
+#include "common/hashers/hash.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 
@@ -76,17 +77,18 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                                  score_t min_path_score) {
+    typedef std::pair<NodeType, size_t> AlignNode;
     typedef AlignedVector<score_t> ScoreVec;
-    typedef AlignedVector<NodeType> PrevVec;
+    typedef AlignedVector<AlignNode> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
     typedef std::tuple<ScoreVec, ScoreVec, ScoreVec, PrevVec, OpVec> Column;
-    tsl::hopscotch_map<NodeType, Column> table;
+    tsl::hopscotch_map<AlignNode, Column, utils::Hash<AlignNode>> table;
 
     constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
-    auto emplace = table.emplace(path_->back(), std::make_tuple(
+    auto emplace = table.emplace(AlignNode{ path_->back(), 0 }, std::make_tuple(
         ScoreVec(size, 0), ScoreVec(size, ninf), ScoreVec(size, ninf),
-        PrevVec(size, DeBruijnGraph::npos), OpVec(size, Cigar::CLIPPED)
+        PrevVec(size, AlignNode{}), OpVec(size, Cigar::CLIPPED)
     ));
 
     Cigar::Operator last_op = path_->get_cigar().back().first;
@@ -117,7 +119,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         E[i] = E[i - 1] + config_.gap_extension_penalty;
         if (E[i] > S[i]) {
             S[i] = E[i];
-            P[i] = path_->back();
+            P[i] = { path_->back(), 0 };
             O[i] = Cigar::INSERTION;
         }
     }
@@ -145,19 +147,20 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         }
     }
 
-    typedef std::pair<score_t, NodeType> ColumnRef;
+    typedef std::pair<score_t, AlignNode> ColumnRef;
     std::priority_queue<ColumnRef, std::vector<ColumnRef>, utils::LessFirst> queue;
-    queue.emplace(0, path_->back());
+    queue.emplace(0, AlignNode{ path_->back(), 0 });
 
     score_t max_score = std::max(min_path_score, path_->get_score());
     size_t max_pos = 0;
-    NodeType best_node = 0;
+    AlignNode best_node;
 
     while (queue.size()) {
         ColumnRef top = queue.top();
         queue.pop();
 
-        NodeType prev = top.second;
+        NodeType prev = top.second.first;
+        size_t depth = top.second.second;
         assert(prev);
 
         bool pushed = false;
@@ -166,79 +169,113 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (c == boss::BOSS::kSentinel)
                 return;
 
-            auto find = table.find(next);
-            if (find == table.end()) {
-                find = table.emplace(next, std::make_tuple(
-                    ScoreVec(size, 0), ScoreVec(size, ninf), ScoreVec(size, ninf),
-                    PrevVec(size, 0), OpVec(size, Cigar::CLIPPED)
-                )).first;
+            AlignNode match_next{ next, depth };
+            AlignNode del_next{ next, depth + 1 };
+            {
+                if (!table.count(match_next)) {
+                    table.emplace(match_next, std::make_tuple(
+                        ScoreVec(size, 0), ScoreVec(size, ninf), ScoreVec(size, ninf),
+                        PrevVec(size, AlignNode{}), OpVec(size, Cigar::CLIPPED)
+                    ));
+                }
+            }
+            {
+                if (!table.count(del_next)) {
+                    table.emplace(del_next, std::make_tuple(
+                        ScoreVec(size, 0), ScoreVec(size, ninf), ScoreVec(size, ninf),
+                        PrevVec(size, AlignNode{}), OpVec(size, Cigar::CLIPPED)
+                    ));
+                }
             }
 
-            auto &[S, E, F, P, O] = find.value();
-            auto prev_find = table.find(prev);
-            assert(prev_find != table.end());
-            auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = prev_find.value();
+            auto &[S, E, F, P, O] = table[match_next];
+            auto &[S_del, E_del, F_del, P_del, O_del] = table[del_next];
+            auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = table[top.second];
 
             score_t max_diff = 0;
             size_t max_pos_local = 0;
 
             for (size_t i = 0; i < F.size(); ++i) {
-                score_t new_val = std::max({ F[i],
+                score_t new_val = std::max({ F_del[i],
                                              F_prev[i] + config_.gap_extension_penalty,
                                              S_prev[i] + config_.gap_opening_penalty });
-                F[i] = new_val;
+                F_del[i] = new_val;
             }
 
-            if (F[0] > S[0]) {
-                max_diff = std::max(max_diff, F[0] - S[0]);
-                S[0] = F[0];
-                P[0] = prev;
-                O[0] = Cigar::DELETION;
+            if (F_del[0] > S_del[0]) {
+                max_diff = std::max(max_diff, F_del[0] - S_del[0]);
+                S_del[0] = F_del[0];
+                P_del[0] = top.second;
+                O_del[0] = Cigar::DELETION;
             }
 
-            score_t max_val = S[0];
+            score_t max_val = std::max(S[0], S_del[0]);
 
             for (size_t i = 1; i < S.size(); ++i) {
                 score_t ins_val = std::max({ E[i],
                                              E[i - 1] + config_.gap_extension_penalty,
                                              S[i - 1] + config_.gap_opening_penalty });
                 E[i] = ins_val;
+                E_del[i] = max(E_del[i], ins_val);
 
                 score_t match_val = S_prev[i - 1] + config_.get_row(c)[extend_window_[i]];
 
                 score_t best_val = std::max({ S[i], E[i], F[i], match_val });
                 if (best_val == S[i]) {
                 } else if (best_val == match_val) {
-                    P[i] = prev;
+                    P[i] = top.second;
                     O[i] = c == extend_window_[i] ? Cigar::MATCH : Cigar::MISMATCH;
                 } else if (best_val == ins_val) {
-                    P[i] = next;
+                    P[i] = match_next;
                     O[i] = Cigar::INSERTION;
                 } else {
-                    P[i] = prev;
+                    P[i] = top.second;
                     O[i] = Cigar::DELETION;
                 }
 
-                max_diff = std::max(max_diff, best_val - S[i]);
+                ins_val = E_del[i];
+                score_t best_del_val = std::max({ S_del[i], E_del[i], F_del[i], match_val });
+                if (best_del_val == S_del[i]) {
+                } else if (best_del_val == match_val) {
+                    P_del[i] = top.second;
+                    O_del[i] = c == extend_window_[i] ? Cigar::MATCH : Cigar::MISMATCH;
+                } else if (best_del_val == ins_val) {
+                    P_del[i] = del_next;
+                    O_del[i] = Cigar::INSERTION;
+                } else {
+                    P_del[i] = top.second;
+                    O_del[i] = Cigar::DELETION;
+                }
+
+                max_diff = std::max({ max_diff, best_val - S[i], best_del_val - S_del[i] });
                 S[i] = best_val;
+                S_del[i] = best_del_val;
 
                 if (best_val > max_val) {
                     max_val = best_val;
                     max_pos_local = i;
+                    if (max_val > max_score) {
+                        max_score = max_val;
+                        max_pos = max_pos_local;
+                        best_node = match_next;
+                    }
                 }
-            }
-
-            if (max_val > max_score) {
-                max_score = max_val;
-                max_pos = max_pos_local;
-                best_node = next;
+                if (best_del_val > max_val) {
+                    max_val = best_del_val;
+                    max_pos_local = i;
+                    if (max_val > max_score) {
+                        max_score = max_val;
+                        max_pos = max_pos_local;
+                        best_node = del_next;
+                    }
+                }
             }
 
             std::string_view check_window = extend_window_;
             check_window.remove_prefix(max_pos + 1);
-            // if (max_diff > 0 && max_val >= max_score - config_.xdrop && S[max_pos] + config_.match_score(check_window) >= max_score) {
-            if (max_diff > 0) {
-                queue.emplace(max_diff, next);
+            if (max_diff > 0 && max_val >= max_score - config_.xdrop && S[max_pos] + config_.match_score(check_window) >= max_score) {
+                queue.emplace(max_diff, match_next);
+                queue.emplace(max_diff, del_next);
                 pushed = true;
             }
         });
@@ -265,7 +302,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     score_t score_track = max_score;
 #endif
 
-    while (best_node) {
+    while (best_node.first || best_node.second) {
         auto &[S, E, F, P, O] = table[best_node];
 
         Cigar::Operator cur_op = O[pos];
@@ -274,7 +311,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         // std::cout << score_track << "\t" << pos << " " << (uint64_t)O[pos] << " " << best_node << " " << P[pos] << " " << S[pos] << "\t" << path.size() << "\t" << cigar.to_string() << "\n";
 
         if (cigar.size() && cigar.back().first != O[pos] && (cigar.back().first == Cigar::INSERTION || cigar.back().first == Cigar::DELETION)) {
-            if (score_track == S[pos]) {
+            // if (score_track == S[pos]) {
                 // indel was replaced
 
                 // score_track -= config_.gap_opening_penalty - config_.gap_extension_penalty;
@@ -287,21 +324,21 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 //         std::cout << "fail\t" << score_track << " " << F[pos] << "\n";
                 //     assert(score_track == F[pos]);
                 // }
-            } else {
+            // } else {
                 score_track -= config_.gap_opening_penalty - config_.gap_extension_penalty;
-                assert(score_track == S[pos]);
-            }
+            // }
 
         }
+        assert(score_track == S[pos]);
 #endif
 
         switch (cur_op) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 cigar.append(cur_op);
-                path.push_back(best_node);
+                path.push_back(best_node.first);
 #ifndef NDEBUG
-                char last_char = graph_.get_node_sequence(best_node).back();
+                char last_char = graph_.get_node_sequence(best_node.first).back();
                 assert((last_char == extend_window_[pos]) == (O[pos] == Cigar::MATCH));
                 score_track -= config_.get_row(extend_window_[pos])[last_char];
 #endif
@@ -317,7 +354,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 --pos;
             } break;
             case Cigar::DELETION: {
-                path.push_back(best_node);
+                path.push_back(best_node.first);
                 cigar.append(O[pos]);
                 best_node = P[pos];
 #ifndef NDEBUG
@@ -325,7 +362,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 #endif
             } break;
             case Cigar::CLIPPED: {
-                best_node = DeBruijnGraph::npos;
+                best_node = AlignNode{};
                 assert(!pos || S[pos] == 0);
             }
         }
