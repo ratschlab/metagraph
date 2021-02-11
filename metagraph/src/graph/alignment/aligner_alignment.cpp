@@ -779,11 +779,10 @@ std::shared_ptr<const std::string> Alignment<NodeType>
     return query_sequence;
 }
 
-template <typename NodeType>
 bool spell_path(const DeBruijnGraph &graph,
-                const std::vector<NodeType> &path,
+                const std::vector<DeBruijnGraph::node_index> &path,
                 std::string &seq,
-                size_t offset = 0) {
+                size_t offset) {
     assert(offset < graph.get_k());
 
     if (path.empty())
@@ -792,7 +791,7 @@ bool spell_path(const DeBruijnGraph &graph,
     if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) {
         std::cerr << "ERROR: path has invalid nodes\n";
 
-        for (NodeType node : path) {
+        for (DeBruijnGraph::node_index node : path) {
             std::cerr << node << " ";
         }
 

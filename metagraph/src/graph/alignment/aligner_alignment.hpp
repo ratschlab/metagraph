@@ -159,7 +159,6 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
-  private:
     Alignment(std::string_view query,
               std::vector<NodeType>&& nodes = {},
               std::string&& sequence = "",
@@ -176,6 +175,7 @@ class Alignment {
             orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
+  private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
     std::string_view query_;
@@ -198,6 +198,11 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
 
     return out;
 }
+
+bool spell_path(const DeBruijnGraph &graph,
+                const std::vector<uint64_t> &path,
+                std::string &seq,
+                size_t offset = 0);
 
 template <typename NodeType = uint64_t>
 struct LocalAlignmentLess {
