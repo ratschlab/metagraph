@@ -1,4 +1,4 @@
-name: Metagraph C++ CI
+name: MetaGraph CI
 
 on: [push]
 
