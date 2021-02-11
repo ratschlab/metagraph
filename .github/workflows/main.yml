@@ -105,6 +105,7 @@ jobs:
       run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
+      if: matrix.build_static == 'OFF'
       run: cd metagraph/build && make -j 2
 
     - name: run unit tests
@@ -183,6 +184,7 @@ jobs:
       run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
+      if: matrix.alphabet == 'DNA'
       run: cd metagraph/build && make -j 2
 
     - name: run unit tests
