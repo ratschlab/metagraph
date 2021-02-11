@@ -32,14 +32,6 @@ jobs:
             cxx: g++-10
             cc: gcc-10
             build_static: ON
-            alphabet: DNA
-
-          - build_type: Release
-            compiler: g++-10
-            cxx: g++-10
-            cc: gcc-10
-            build_static: ON
-            alphabet: Protein
 
         exclude:
           - alphabet: Protein
@@ -150,6 +142,7 @@ jobs:
           - alphabet: Protein
             build_type: Release
             build_static: ON
+
     steps:
     - uses: actions/checkout@v1
 
@@ -227,7 +220,8 @@ jobs:
           body: |
             The binaries are currently provided on an experimental basis.
             The Linux binaries are statically linked and hence don't require additional libraries to be installed.
-            The Mac OS X binaries dynamically link to libhts, which would need to be available on your system, e.g. using `brew install htslib`). The Mac OS X binaries are currently nor signed nor notarized - you need to explicitely allow the binary to run in the security settings of your system. 
+            The Mac OS X binaries dynamically link to libhts, which would need to be available on your system, e.g. using `brew install htslib`).
+            The Mac OS X binaries are currently nor signed nor notarized - you need to explicitely allow the binary to run in the security settings of your system.
           file: 'artifacts/*/metagraph_*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
