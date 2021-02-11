@@ -96,7 +96,9 @@ jobs:
               -DBUILD_STATIC=${{ matrix.build_static }} ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: |
+        cd metagraph/build && make -j 2 metagraph
+        cp metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -115,10 +117,6 @@ jobs:
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && make check
-
-    - name: rename static binary
-      if: matrix.build_static == 'ON'
-      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
 
     # for potential release
     - name: upload static binary
@@ -181,7 +179,9 @@ jobs:
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
-      run: cd metagraph/build && make -j 2 metagraph
+      run: |
+        cd metagraph/build && make -j 2 metagraph
+        cp metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -196,10 +196,6 @@ jobs:
 
     - name: run integration tests
       run: cd metagraph/build && make check
-
-    - name: rename static binary
-      if: matrix.build_static == 'ON'
-      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
 
     # for potential release
     - name: upload static binary
