@@ -164,16 +164,11 @@ jobs:
         mkdir metagraph/build
         cd metagraph/build
 
-        BUILD_KMC="ON"
-        if [ "${{ matrix.build_type }}" = "Release" ]; then
-          BUILD_KMC="OFF"
-        fi
-
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               -DBUILD_STATIC=$(expr "${matrix.build_type}" == "Release") \
               -DBZIP2_LIBRARY_RELEASE=/usr/local/opt/bzip2/lib/libbz2.a \
-              -DBUILD_KMC=${BUILD_KMC} \
+              -DBUILD_KMC=$(expr "${matrix.build_type}" == "Debug") \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
