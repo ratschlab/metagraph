@@ -116,10 +116,13 @@ jobs:
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && make check
 
+    - name: rename static binary
+      if: matrix.build_static == 'ON'
+      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
+
     # for potential release
     - name: upload static binary
       if: matrix.build_static == 'ON'
-      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
       uses: actions/upload-artifact@v2
       with:
         name: metagraph_${{ matrix.alphabet }}_static_binary
@@ -194,10 +197,13 @@ jobs:
     - name: run integration tests
       run: cd metagraph/build && make check
 
+    - name: rename static binary
+      if: matrix.build_static == 'ON'
+      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
+
     # for potential release
     - name: upload static binary
       if: matrix.build_static == 'ON'
-      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
       uses: actions/upload-artifact@v2
       with:
         name: metagraph_${{ matrix.alphabet }}_static_binary_mac_osx
