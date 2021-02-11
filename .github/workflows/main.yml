@@ -100,7 +100,7 @@ jobs:
     - name: build metagraph
       run: |
         cd metagraph/build && make -j 2 metagraph
-        cp metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
+        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_linux_x86
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -179,7 +179,7 @@ jobs:
     - name: build metagraph
       run: |
         cd metagraph/build && make -j 2 metagraph
-        cp metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
+        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_mac_osx
 
     - name: build unit tests
       if: matrix.alphabet == 'DNA'
