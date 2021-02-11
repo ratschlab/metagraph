@@ -440,6 +440,8 @@ add_custom_target(link_target ALL
     "metagraph"
 )
 
+add_dependencies(metagraph link_target)
+
 
 #-------------------
 # Experiments
