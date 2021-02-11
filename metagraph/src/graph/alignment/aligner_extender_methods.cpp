@@ -51,19 +51,19 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     // this extender only works if at least one character has been matched
-    assert(seed.get_query().size());
-    assert(query.data() <= seed.get_query().data());
+    // assert(seed.get_query().size() > 1);
+    // assert(query.data() <= seed.get_query().data());
 
-    const char *query_end = query.data() + query.size();
-    const char *seed_end = seed.get_query().data() + seed.get_query().size();
-    assert(query_end >= seed_end);
+    // const char *query_end = query.data() + query.size();
+    // const char *seed_end = seed.get_query().data() + seed.get_query().size();
+    // assert(query_end >= seed_end);
 
-    // size includes the last character of the seed since the upper-left corner
-    // of the score matrix is the seed score
-    size = query_end - seed_end + 1;
+    // // size includes the last character of the seed since the upper-left corner
+    // // of the score matrix is the seed score
+    // size = query_end - seed_end + 2;
 
-    // extend_window_ doesn't include this last character
-    extend_window_ = { seed_end - 1, size };
+    // // extend_window_ doesn't include this last character
+    // extend_window_ = { seed_end - 1, size + 1 };
 
     // match_score_begin = partial_sums_.data() + (seed_end - 1 - query.data());
     // assert(config_.get_row(query.back())[query.back()] == match_score_begin[size - 1]);
@@ -71,12 +71,13 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     //     == *match_score_begin);
 
     // start_node = seed.back();
-    this->path_ = &seed;
+    path_ = &seed;
 }
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                                  score_t min_path_score) {
+    std::ignore = min_path_score;
     typedef std::pair<NodeType, size_t> AlignNode;
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<AlignNode> PrevVec;
@@ -84,69 +85,30 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     typedef std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, PrevVec, OpVec>> Column;
     tsl::hopscotch_map<NodeType, Column> table;
 
+    const char *align_start = path_->get_query().data() + path_->get_query().size() - 1;
+    size_t size = query.data() + query.size() - align_start + 1;
+    extend_window_ = { align_start, size - 1 };
+    assert(extend_window_[0] == path_->get_query().back());
+
     constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
     Cigar::Operator last_op = path_->get_cigar().back().first;
+    assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
 
     auto &[S, E, F, P, O] = table.emplace(
-        path_->back(),
+        DeBruijnGraph::npos,
         Column{ std::make_tuple(ScoreVec(size, ninf), ScoreVec(size, ninf),
                                 ScoreVec(size, ninf), PrevVec(size, AlignNode{}),
                                 OpVec(size, Cigar::CLIPPED)) }
     ).first.value()[0];
 
-    S[0] = path_->get_score();
+    S[0] = path_->get_score() - config_.get_row(extend_window_[0])[
+        path_->get_sequence().back()
+    ];
 
-    score_t gap_score = path_->get_score() - config_.get_row(path_->get_query().back())[path_->get_sequence().back()]
-                            + 2 * config_.gap_opening_penalty;
-    switch (last_op) {
-        case Cigar::MATCH:
-        case Cigar::MISMATCH: {
-            E[0] = gap_score;
-            F[0] = gap_score;
-        } break;
-        case Cigar::INSERTION: {
-            E[0] = path_->get_score();
-            F[0] = gap_score;
-        } break;
-        case Cigar::DELETION: {
-            E[0] = gap_score;
-            F[0] = path_->get_score();
-        } break;
-        case Cigar::CLIPPED: { assert(false); }
-    }
-
-    for (size_t i = 1; i < size; ++i) {
-        S[i] = E[i - 1] + config_.gap_extension_penalty;
-        E[i] = S[i];
-        P[i] = { path_->back(), 0 };
-        O[i] = Cigar::INSERTION;
-    }
-
-    if (last_op == Cigar::DELETION) {
-        F[1] = path_->get_score() + config_.gap_opening_penalty;
-        S[1] = F[1];
-        O[1] = Cigar::DELETION;
-        for (size_t i = 2; i < size; ++i) {
-            F[i] = F[i - 1] + config_.gap_extension_penalty;
-            if (F[i] > S[i]) {
-                S[i] = F[i];
-                O[i] = Cigar::DELETION;
-            }
-        }
-    } else if (last_op != Cigar::INSERTION) {
-        for (size_t i = 1; i < size; ++i) {
-            F[i] = gap_score + config_.gap_extension_penalty * i;
-            if (F[i] > S[i]) {
-                S[i] = F[i];
-                O[i] = Cigar::DELETION;
-            }
-        }
-    }
-
-    score_t max_score = std::max(min_path_score, path_->get_score());
+    score_t max_score = S[0];
     size_t max_pos = 0;
-    AlignNode best_node{ path_->back(), 0};
+    AlignNode best_node{ DeBruijnGraph::npos, 0};
     std::vector<AlignNode> stack { best_node };
     while (stack.size()) {
         AlignNode prev = std::move(stack.back());
@@ -155,9 +117,18 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         if (prev.second > extend_window_.size() * 2)
             continue;
 
-        graph_.call_outgoing_kmers(prev.first, [&](NodeType next, char c) {
+        std::vector<std::pair<NodeType, char>> outgoing;
+        if (!prev.first) {
+            outgoing.emplace_back(path_->back(), path_->get_sequence().back());
+        } else {
+            graph_.call_outgoing_kmers(prev.first, [&](auto&&... edge) {
+                outgoing.emplace_back(std::move(edge)...);
+            });
+        }
+
+        for (const auto &[next, c] : outgoing) {
             if (c == boss::BOSS::kSentinel)
-                return;
+                continue;
 
             Column &column = table[next];
             size_t depth = column.size();
@@ -170,8 +141,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             auto &[S, E, F, P, O] = column.back();
             auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = table[prev.first][prev.second];
 
-            score_t del_score = std::max(F_prev[0] + config_.gap_extension_penalty,
-                                         S_prev[0] + config_.gap_opening_penalty);
+            score_t del_score = F_prev[0] + config_.gap_extension_penalty;
             S[0] = std::max(del_score, 0);
             if (S[0] == del_score) {
                 P[0] = prev;
@@ -180,23 +150,21 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             F[0] = std::max(del_score, S[0] + config_.gap_opening_penalty);
 
             for (size_t i = 1; i < S.size(); ++i) {
-                score_t ins_val = std::max(E[i - 1] + config_.gap_extension_penalty,
-                                           S[i - 1] + config_.gap_opening_penalty);
-                score_t match_val = S_prev[i - 1] + config_.get_row(c)[extend_window_[i]];
-                score_t del_val = std::max(F_prev[i] + config_.gap_extension_penalty,
-                                           S_prev[i] + config_.gap_opening_penalty);
+                score_t ins_val = E[i - 1] + config_.gap_extension_penalty;
+                score_t match_val = S_prev[i - 1] + config_.get_row(c)[extend_window_[i - 1]];
+                score_t del_val = F_prev[i] + config_.gap_extension_penalty;
 
                 S[i] = std::max({ ins_val, del_val, match_val, 0 });
 
-                if (S[i] == match_val) {
-                    P[i] = prev;
-                    O[i] = c == extend_window_[i] ? Cigar::MATCH : Cigar::MISMATCH;
-                } else if (S[i] == ins_val) {
+                if (S[i] == ins_val) {
                     P[i] = cur;
                     O[i] = Cigar::INSERTION;
                 } else if (S[i] == del_val) {
                     P[i] = prev;
                     O[i] = Cigar::DELETION;
+                } else if (S[i] == match_val) {
+                    P[i] = prev;
+                    O[i] = c == extend_window_[i - 1] ? Cigar::MATCH : Cigar::MISMATCH;
                 }
 
                 if (S[i] > max_score) {
@@ -210,15 +178,12 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             }
 
             auto max_it = std::max_element(S.begin(), S.end());
-            score_t score_sup = *max_it + config_.match_score(
-                extend_window_.substr(max_it - S.begin() + 1)
-            );
-            if (*max_it >= max_score - config_.xdrop && score_sup >= min_path_score)
+            if (*max_it >= max_score - config_.xdrop)
                 stack.emplace_back(cur);
-        });
+        };
     }
 
-    if (!max_pos && best_node.first == path_->back() && !best_node.second)
+    if (max_pos < 2 && best_node.first == path_->back() && !best_node.second)
         return;
 
     // traceback
@@ -267,8 +232,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 path.push_back(best_node.first);
 #ifndef NDEBUG
                 char last_char = graph_.get_node_sequence(best_node.first).back();
-                assert((last_char == extend_window_[pos]) == (O[pos] == Cigar::MATCH));
-                score_track -= config_.get_row(extend_window_[pos])[last_char];
+                assert((last_char == extend_window_[pos - 1]) == (O[pos] == Cigar::MATCH));
+                score_track -= config_.get_row(extend_window_[pos - 1])[last_char];
 #endif
                 best_node = P[pos];
                 --pos;
@@ -298,20 +263,34 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     assert(path.size());
 
-    if (pos)
-        cigar.append(Cigar::CLIPPED, pos);
+    NodeType start_node;
+    score_t score;
+    if (pos > 1) {
+        cigar.append(Cigar::CLIPPED, pos - 1);
+        start_node = path.front();
+        score = max_score;
+    } else {
+        score = max_score - path_->get_score();
+        start_node = path_->back();
+        while (pos < 1) {
+            ++pos;
+            path.pop_back();
+            --cigar.back().second;
+            if (!cigar.back().second)
+                cigar.pop_back();
+        }
+    }
 
     std::reverse(cigar.begin(), cigar.end());
 
     std::reverse(path.begin(), path.end());
-    NodeType start_node = pos ? path.front() : path_->back();
     std::string seq;
     spell_path(graph_, path, seq, graph_.get_k() - 1);
 
-    Alignment<NodeType> extension({ extend_window_.data() + pos + 1, max_pos - pos },
+    Alignment<NodeType> extension({ extend_window_.data() + pos, max_pos - pos },
                                   std::move(path),
                                   std::move(seq),
-                                  max_score - (pos ? 0 : path_->get_score()),
+                                  score,
                                   std::move(cigar),
                                   0,
                                   path_->get_orientation(),
