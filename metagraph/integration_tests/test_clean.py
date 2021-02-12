@@ -89,6 +89,120 @@ class TestCleanWeighted(TestingBase):
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
+    def test_clean_prune_tips_no_counts(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 589774', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
+    def test_clean_prune_tips(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 589774', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('nnz weights: 589774', params_str[3])
+        self.assertEqual('avg weight: 2.49001', params_str[4])
+
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
+    def test_cleaning_threshold_fixed(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-unitigs 3')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 167395', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('nnz weights: 167395', params_str[3])
+        self.assertEqual('avg weight: 5.52732', params_str[4])
+
+    @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
+    def test_cleaning_prune_tips_threshold_fixed(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60 --prune-unitigs 3')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=20, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 167224', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('nnz weights: 167224', params_str[3])
+        self.assertEqual('avg weight: 5.52757', params_str[4])
+
 
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestCleanWeightedCanonical(TestingBase):
@@ -160,6 +274,120 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual('canonical mode: yes', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
+
+    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    def test_clean_prune_tips_no_counts(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 1180802', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
+
+    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    def test_clean_prune_tips(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 1180802', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('nnz weights: 1180802', params_str[3])
+        self.assertEqual('avg weight: 2.46882', params_str[4])
+
+    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    def test_cleaning_threshold_fixed(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-unitigs 3')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 331656', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('nnz weights: 331656', params_str[3])
+        self.assertEqual('avg weight: 5.52505', params_str[4])
+
+    @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
+    def test_cleaning_prune_tips_threshold_fixed(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-tips 60 --prune-unitigs 3')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=31, repr=representation, canonical=True,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 331266', params_str[1])
+        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('nnz weights: 331266', params_str[3])
+        self.assertEqual('avg weight: 5.52757', params_str[4])
 
 
 if __name__ == '__main__':
