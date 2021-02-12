@@ -1356,7 +1356,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto graph = std::make_shared<DBGSuccinct>(k);
         graph->add_sequence(reference);
 
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
         config.min_seed_length = 1;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
@@ -1544,11 +1544,9 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(47u, path.size());
-    EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ("22=3I2=3X9=3D4=1I1=1X2I3=2I1=1I7=1D1=2D2=1X3=1X6=6S",
-              path.get_cigar().to_string());
     EXPECT_TRUE(path.is_valid(*graph, &config));
+    EXPECT_EQ(52u, path.get_score())
+        << path.get_score() << " " << path.get_cigar().to_string();
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
