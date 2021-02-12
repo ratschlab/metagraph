@@ -20,6 +20,7 @@ namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
+namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 
@@ -28,10 +29,10 @@ void build_successor(const std::string &graph_fname,
                      const std::string &outfbase,
                      uint32_t max_length,
                      uint32_t num_threads) {
-    if (std::filesystem::exists(outfbase + ".succ")
-        && std::filesystem::exists(outfbase + ".pred")
-        && std::filesystem::exists(outfbase + ".pred_boundary")
-        && std::filesystem::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
+    if (fs::exists(outfbase + ".succ")
+        && fs::exists(outfbase + ".pred")
+        && fs::exists(outfbase + ".pred_boundary")
+        && fs::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
         logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
         return;
     }
@@ -313,7 +314,7 @@ void traverse_anno_chunked(
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
-                               const std::filesystem::path &dest_dir,
+                               const fs::path &dest_dir,
                                const std::string &row_reduction_fname,
                                uint64_t buf_size,
                                bool compute_row_reduction) {
@@ -346,8 +347,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    const std::filesystem::path tmp_path = utils::create_temp_dir(
-            std::filesystem::path(dest_dir).remove_filename(), "col");
+    const fs::path tmp_path = utils::create_temp_dir(fs::path(dest_dir).remove_filename(), "col");
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -377,7 +377,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         num_chunks[s].assign(sources[s].num_labels(), 1);
 
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
-            std::filesystem::create_directories(tmp_file(s, j, 0).parent_path());
+            fs::create_directories(tmp_file(s, j, 0).parent_path());
             // make sure the first chunk exists even if empty
             dump_chunk_to_disk({}, s, j, 0);
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
@@ -388,7 +388,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     ThreadPool async_writer(1, 1);
     sdsl::int_vector_buffer row_reduction;
-    const bool new_reduction_vector = !std::filesystem::exists(row_reduction_fname);
+    const bool new_reduction_vector = !fs::exists(row_reduction_fname);
     if (compute_row_reduction) {
         if (new_reduction_vector) {
             // create an empty vector
@@ -565,7 +565,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                         // remove merged chunks
                         for (const std::string &chunk_file : to_merge) {
-                            std::filesystem::remove(chunk_file);
+                            fs::remove(chunk_file);
                         }
                     }
                     filenames.swap(new_chunks);
@@ -582,7 +582,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
                 std::move(label_encoders[l_idx]));
 
-        auto fpath = dest_dir/std::filesystem::path(source_files[l_idx])
+        auto fpath = dest_dir/fs::path(source_files[l_idx])
                                 .filename()
                                 .replace_extension()
                                 .replace_extension(RowDiffColumnAnnotator::kExtension);
@@ -634,9 +634,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 }
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const std::filesystem::path &dest_dir,
+                                  const fs::path &dest_dir,
                                   const std::string &row_reduction_extension) {
-    if (std::filesystem::exists(graph_fname + kRowDiffAnchorExt)) {
+    if (fs::exists(graph_fname + kRowDiffAnchorExt)) {
         logger->info("Found optimized anchors {}", graph_fname + kRowDiffAnchorExt);
         return;
     }
@@ -644,7 +644,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     logger->trace("Optimizing anchors");
 
     std::vector<sdsl::int_vector_buffer<>> row_reduction;
-    for (const auto &p : std::filesystem::directory_iterator(dest_dir)) {
+    for (const auto &p : fs::directory_iterator(dest_dir)) {
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
