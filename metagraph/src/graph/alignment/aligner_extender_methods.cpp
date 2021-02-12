@@ -194,7 +194,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 auto &[S_b, E_b, F_b, P_b, O_b] = column[column.size() - 2];
                 if (S == S_b && E == E_b && F == F_b && O == O_b) {
                     for (size_t i = 0; i < S.size(); ++i) {
-                        if (P[i].first == P_b[i].first && P[i].second == P_b[i].second + 1) {
+                        if (P[i].first == P_b[i].first && (P[i].second == P_b[i].second + 1
+                                || (!P[i].first && !P[i].second && !P_b[i].second))) {
                             converged = true;
                         } else {
                             converged = false;
@@ -207,10 +208,10 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             auto max_it = std::max_element(S.begin(), S.end());
 
             // std::cout << *max_it << "\t" << (max_it - S.begin()) << "\t"
+            //           << cur.first << "," << cur.second << ","
             //           << (prev.first != graph_.max_index() + 1 ? graph_.get_node_sequence(prev.first) : std::string(graph_.get_k(), '$')) << "\t"
-                      // << graph_.get_node_sequence(cur.first) << "\t";
-                      // << cur.first << "," << cur.second << "\t"
-                      // << prev.first << "," << prev.second << "\t";
+            //           << prev.first << "," << prev.second << ","
+            //           << graph_.get_node_sequence(cur.first) << "\t";
             // for (size_t i = 0; i < S.size(); ++i) {
             //     std::cout << std::max(S[i],-9) << "," << std::max(E[i],-9) << "," << std::max(F[i],-9) << "\t";
             // }
