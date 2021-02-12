@@ -67,14 +67,12 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual void initialize(const DBGAlignment &seed) override;
 
-    const DPTable<NodeType>& get_dp_table() const { return dp_table; }
-
     virtual void call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const override;
 
   protected:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
-    std::string_view query;
+    std::string_view query_;
 
     typedef std::pair<NodeType, size_t> AlignNode;
     typedef AlignedVector<score_t> ScoreVec;
@@ -83,44 +81,11 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
                                              PrevVec, OpVec>>, bool> Column;
 
-    tsl::hopscotch_map<NodeType, Column> table;
+    tsl::hopscotch_map<NodeType, Column> table_;
 
-    // keep track of which columns to use next
-    ColumnQueue columns_to_update;
+    virtual void reset() override { table_.clear(); }
 
-    DPTable<NodeType> dp_table;
-
-    virtual void reset() override { dp_table.clear(); table.clear(); }
-
-    virtual std::pair<typename DPTable<NodeType>::iterator, bool>
-    emplace_node(NodeType node,
-                 NodeType incoming_node,
-                 char c,
-                 size_t size,
-                 size_t best_pos = 0,
-                 size_t last_priority_pos = 0,
-                 size_t begin = 0,
-                 size_t end = std::numeric_limits<size_t>::max());
-
-    virtual bool add_seed(size_t clipping);
-
-    virtual const DBGAlignment& get_seed() const override { return *path_; }
-
-    virtual void check_and_push(ColumnRef&& next_column);
-
-    void extend_main(ExtensionCallback callback, score_t min_path_score);
-
-    void update_columns(NodeType incoming_node,
-                        const std::deque<std::pair<NodeType, char>> &out_columns,
-                        score_t min_path_score);
-
-    virtual std::deque<std::pair<NodeType, char>>
-    fork_extension(NodeType /* fork after this node */, ExtensionCallback, score_t);
-
-    inline bool ram_limit_reached() const {
-        return static_cast<double>(dp_table.num_bytes()) / 1024 / 1024
-            > config_.max_ram_per_alignment;
-    }
+    virtual const DBGAlignment& get_seed() const override { return *seed_; }
 
   private:
     // compute perfect match scores for all suffixes
@@ -128,27 +93,16 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     std::vector<score_t> partial_sums_;
 
     // a quick lookup table of char pair match/mismatch scores for the current query
-    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score;
-    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op;
+    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
+    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // the initial seed
-    const DBGAlignment *path_;
+    const DBGAlignment *seed_;
 
     std::string_view extend_window_;
 
-    // max size of a column
-    size_t size;
-
     // start of the partial sum table
-    const score_t *match_score_begin;
-    NodeType start_node;
-    score_t start_score;
-    score_t score_cutoff;
-    size_t begin;
-    size_t end;
-    score_t xdrop_cutoff;
-    bool overlapping_range_;
-    size_t max_num_nodes;
+    const score_t *match_score_begin_;
 };
 
 } // namespace align
