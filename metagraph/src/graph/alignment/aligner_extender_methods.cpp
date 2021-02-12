@@ -76,8 +76,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
-    Cigar::Operator last_op = seed_->get_cigar().back().first;
-    assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
+    assert(seed_->get_cigar().back().first == Cigar::MATCH
+        || seed_->get_cigar().back().first == Cigar::MISMATCH);
 
     auto &[S, E, F, P, O] = table_.emplace(
         graph_.max_index() + 1,
