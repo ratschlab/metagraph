@@ -58,8 +58,6 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                                  score_t min_path_score) {
-    // std::cout << "START\t" << *path_ << "\n";
-
     typedef std::pair<NodeType, size_t> AlignNode;
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<AlignNode> PrevVec;
@@ -101,11 +99,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     boost::container::priority_deque<Ref, std::vector<Ref>, utils::LessSecond> best_starts;
     best_starts.emplace(start_node, S[0]);
 
-    // std::vector<AlignNode> stack { best_node };
     std::priority_queue<Ref, std::vector<Ref>, utils::LessSecond> stack;
     stack.emplace(start_node, 0);
 
-    // std::cout << "seed\t" << *path_ << "\n";
     while (stack.size()) {
         AlignNode prev = stack.top().first;
         stack.pop();
@@ -116,8 +112,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
         if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size())
             break;
-
-        // std::cout << "foo\t" << prev.first << " " << prev.second << "\n";
 
         std::vector<std::pair<NodeType, char>> outgoing;
         if (prev.first == graph_.max_index() + 1) {
@@ -171,14 +165,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     || (S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
                         && next == path_->back() && !depth));
 
-                // std::cout << i << " "
-                //           << Cigar::opt_to_char(O[1]) << " "
-                //           << S[1] << " "
-                //           << path_->get_score() << " "
-                //           << Cigar::opt_to_char(path_->get_cigar().back().first) << " "
-                //           << prev.first << "," << prev.second << " "
-                //           << next << "," << depth << " "
-                //           << path_->back() << "\n";
                 assert(i != 1 || O[1] == Cigar::DELETION || O[1] == Cigar::CLIPPED
                     || (prev.first == graph_.max_index() + 1 && !prev.second && S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
                         && next == path_->back() && !depth));
@@ -207,27 +193,14 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             auto max_it = std::max_element(S.begin(), S.end());
 
-            // std::cout << *max_it << "\t" << (max_it - S.begin()) << "\t"
-            //           << cur.first << "," << cur.second << ","
-            //           << (prev.first != graph_.max_index() + 1 ? graph_.get_node_sequence(prev.first) : std::string(graph_.get_k(), '$')) << "\t"
-            //           << prev.first << "," << prev.second << ","
-            //           << graph_.get_node_sequence(cur.first) << "\t";
-            // for (size_t i = 0; i < S.size(); ++i) {
-            //     std::cout << std::max(S[i],-9) << "," << std::max(E[i],-9) << "," << std::max(F[i],-9) << "\t";
-            // }
-            // std::cout << "\n";
-
             score_t score_rest = *max_it + config_.match_score(
                 extend_window_.substr(max_it - S.begin())
             );
 
             score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
 
-            // std::cout << "bar\t" << *max_it << " " << (max_it - S.begin()) << "\n";
-            if (*max_it >= xdrop_cutoff && score_rest >= min_path_score) {
-                // std::cout << "bar\t" << cur.first << "," << cur.second << "\n";
+            if (*max_it >= xdrop_cutoff && score_rest >= min_path_score)
                 stack.emplace(Ref{ cur, *max_it });
-            }
         };
     }
 
@@ -258,47 +231,16 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         while (true) {
             auto &[S, E, F, P, O] = table[best_node.first].first[best_node.second];
 
-            // std::cout << pos << "\t" << Cigar::opt_to_char(O[pos]) << "\t" << best_node.first << "," << best_node.second << "\t";
-            // for (size_t i = 0; i < S.size(); ++i) {
-            //     std::cout << std::max(S[i],-9) << "," << std::max(E[i],-9) << "," << std::max(F[i],-9) << "\t";
-            // }
-            // std::cout << "\n";
-
-            // std::cout << "p\t"
-            //           << pos << "," << max_pos << "\t"
-            //           << best_node.first << "," << best_node.second << "\t"
-            //           << P[pos].first << "," << P[pos].second << "\t"
-            //           << S[pos] << "," << E[pos] << "," << F[pos] << "\t"
-            //           << cigar.to_string() << " "
-            //           << Cigar::opt_to_char(O[pos]) << "\t"
-            //           << path_->back() << "\n";
-
             if (pos == 1 && best_node.first == path_->back() && !best_node.second && O[pos] == path_->get_cigar().back().first) {
                 assert(P[pos].first == graph_.max_index() + 1);
                 assert(!P[pos].second);
                 start_node = path_->back();
                 score -= path_->get_score();
-                // std::cout << "a\t"
-                //           << pos << "," << max_pos << "\t"
-                //           << best_node.first << "," << best_node.second << "\t"
-                //           << P[pos].first << "," << P[pos].second << "\t"
-                //           << S[pos] << "\t"
-                //           << cigar.to_string() << " "
-                //           << Cigar::opt_to_char(O[pos]) << "\t"
-                //           << path_->back() << "\n";
                 break;
             }
 
             if (O[pos] == Cigar::CLIPPED || (pos == 1 && O[pos] != Cigar::DELETION)) {
                 start_node = DeBruijnGraph::npos;
-                // std::cout << "b\t"
-                //           << pos << "," << max_pos << "\t"
-                //           << best_node.first << "," << best_node.second << "\t"
-                //           << P[pos].first << "," << P[pos].second << "\t"
-                //           << S[pos] << "\t"
-                //           << cigar.to_string() << " "
-                //           << Cigar::opt_to_char(O[pos]) << "\t"
-                //           << path_->back() << "\n";
                 break;
             }
 
