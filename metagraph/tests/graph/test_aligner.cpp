@@ -714,7 +714,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
     //                            IIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
