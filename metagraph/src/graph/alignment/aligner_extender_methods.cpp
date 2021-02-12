@@ -64,7 +64,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<AlignNode> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
-    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, PrevVec, OpVec>>, bool> Column;
+    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
+                                             PrevVec, OpVec>>, bool> Column;
 
     tsl::hopscotch_map<NodeType, Column> table;
 
@@ -140,7 +141,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             AlignNode cur{ next, depth };
 
             auto &[S, E, F, P, O] = column.back();
-            auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = table[prev.first].first[prev.second];
+            auto &[S_prev, E_prev, F_prev, P_prev, O_prev]
+                = table[prev.first].first[prev.second];
 
             for (size_t i = 1; i < S.size(); ++i) {
                 E[i] = std::max(E[i - 1] + config_.gap_extension_penalty,
@@ -163,10 +165,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         O[i] = profile_op[c][start + i - 1];
                     }
                 }
-
-                assert(prev.first || prev.second || i != 1
-                    || (S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
-                        && next == path_->back() && !depth));
 
                 assert(i != 1 || O[1] == Cigar::DELETION || O[1] == Cigar::CLIPPED
                     || (prev.first == graph_.max_index() + 1
@@ -235,7 +233,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         while (true) {
             auto &[S, E, F, P, O] = table[best_node.first].first[best_node.second];
 
-            if (pos == 1 && best_node.first == path_->back() && !best_node.second && O[pos] == path_->get_cigar().back().first) {
+            if (pos == 1 && best_node.first == path_->back()
+                    && !best_node.second && O[pos] == path_->get_cigar().back().first) {
                 assert(P[pos].first == graph_.max_index() + 1);
                 assert(!P[pos].second);
                 start_node = path_->back();
@@ -254,7 +253,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     cigar.append(O[pos]);
                     path.push_back(best_node.first);
                     assert((O[pos] == Cigar::MATCH)
-                        == (graph_.get_node_sequence(best_node.first).back() == extend_window_[pos - 1]));
+                        == (graph_.get_node_sequence(best_node.first).back()
+                            == extend_window_[pos - 1]));
                     best_node = P[pos];
                     --pos;
                 } break;
@@ -304,7 +304,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
 
 template <typename NodeType>
-auto DefaultColumnExtender<NodeType>::emplace_node(NodeType, NodeType, char, size_t, size_t, size_t, size_t, size_t)
+auto DefaultColumnExtender<NodeType>::emplace_node(NodeType, NodeType, char,
+                                                   size_t, size_t, size_t,
+                                                   size_t, size_t)
 -> std::pair<typename DPTable<NodeType>::iterator, bool> { return {}; }
 
 template <typename NodeType>
