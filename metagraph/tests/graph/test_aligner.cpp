@@ -1027,6 +1027,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGAGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
     EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
+             || path.get_cigar().to_string() == "45=5I1=2I7=1X39="
              || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
              || path.get_cigar().to_string() == "44=3I1=4I8=1X39="
              || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")

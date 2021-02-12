@@ -4,6 +4,8 @@
 #include <immintrin.h>
 #endif
 
+#include <priority_deque.hpp>
+
 #include "common/logger.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/utils/simd_utils.hpp"
@@ -50,27 +52,6 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
-    // this extender only works if at least one character has been matched
-    // assert(seed.get_query().size() > 1);
-    // assert(query.data() <= seed.get_query().data());
-
-    // const char *query_end = query.data() + query.size();
-    // const char *seed_end = seed.get_query().data() + seed.get_query().size();
-    // assert(query_end >= seed_end);
-
-    // // size includes the last character of the seed since the upper-left corner
-    // // of the score matrix is the seed score
-    // size = query_end - seed_end + 2;
-
-    // // extend_window_ doesn't include this last character
-    // extend_window_ = { seed_end - 1, size + 1 };
-
-    // match_score_begin = partial_sums_.data() + (seed_end - 1 - query.data());
-    // assert(config_.get_row(query.back())[query.back()] == match_score_begin[size - 1]);
-    // assert(config_.match_score(std::string_view(extend_window_.data() - 1, size))
-    //     == *match_score_begin);
-
-    // start_node = seed.back();
     path_ = &seed;
 }
 
@@ -115,7 +96,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     ];
 
     score_t max_score = S[0];
-    size_t max_pos = 0;
     AlignNode best_node{ graph_.max_index() + 1, 0};
 
     // std::vector<AlignNode> stack { best_node };
@@ -203,7 +183,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
                 if (S[i] > max_score) {
                     max_score = S[i];
-                    max_pos = i;
                     best_node = cur;
                     // std::cout << "\ttest\t" << max_score << " " << max_pos << " " << max_score - config_.xdrop << "\n";
                 }
@@ -247,13 +226,16 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         };
     }
 
+    const auto &best_scores = std::get<0>(table[best_node.first].first[best_node.second]);
+    size_t max_pos = std::max_element(best_scores.begin(), best_scores.end())
+        - best_scores.begin();
+
+    assert(best_scores[max_pos] == max_score);
+
     if (max_pos < 2 && best_node.first == path_->back() && !best_node.second) {
         callback(Alignment<NodeType>(), 0);
         return;
     }
-
-    // traceback
-    assert(std::get<0>(table[best_node.first].first[best_node.second])[max_pos] == max_score);
 
     Cigar cigar;
     if (max_pos + 1 < F.size())
