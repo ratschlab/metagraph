@@ -34,7 +34,7 @@ class IExtender {
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
-    virtual void call_visited_nodes(const std::function<void(NodeType)> &callback) const = 0;
+    virtual void call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const = 0;
 
   protected:
     virtual void reset() = 0;
@@ -69,7 +69,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
 
-    virtual void call_visited_nodes(const std::function<void(NodeType)> &callback) const override;
+    virtual void call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const override;
 
   protected:
     const DeBruijnGraph &graph_;

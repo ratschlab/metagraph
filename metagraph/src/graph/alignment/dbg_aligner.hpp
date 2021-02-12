@@ -4,6 +4,8 @@
 #include <cassert>
 #include <functional>
 
+#include <tsl/hopscotch_map.h>
+
 #include "aligner_alignment.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
@@ -146,6 +148,8 @@ class SeedAndExtendAlignerCore {
 
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
+
+    mutable tsl::hopscotch_map<node_index, std::pair<size_t, size_t>> visited_nodes_;
 };
 
 

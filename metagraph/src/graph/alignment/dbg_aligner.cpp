@@ -40,6 +40,30 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
     for (auto &seed : seeder.get_seeds()) {
+        bool inserted = false;
+        std::pair<size_t, size_t> idx_range {
+            seed.get_clipping(),
+            seed.get_clipping() + seed.get_query().size()
+        };
+        for (node_index node : seed) {
+            auto emplace = visited_nodes_.emplace(node, idx_range);
+            auto &range = emplace.first.value();
+            if (emplace.second) {
+                inserted = true;
+            } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                range.first = std::min(range.first, idx_range.first);
+                range.second = std::max(range.second, idx_range.second);
+                inserted = true;
+            }
+        }
+
+        if (!inserted) {
+#ifndef NDEBUG
+            mtg::common::logger->trace("Skipping seed: {}", seed);
+#endif
+            continue;
+        }
+
 #ifndef NDEBUG
         mtg::common::logger->trace("Seed: {}", seed);
 #endif
@@ -107,6 +131,15 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         }, min_path_score);
 
         // if !extended, then the seed was not extended because of early cutoff
+
+        extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+            auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+            auto &range = emplace.first.value();
+            if (!emplace.second) {
+                range.first = std::min(range.first, begin);
+                range.second = std::max(range.second, end);
+            }
+        });
     }
 }
 

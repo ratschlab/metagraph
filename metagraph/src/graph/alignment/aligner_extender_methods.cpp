@@ -278,7 +278,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         std::string seq;
         spell_path(graph_, path, seq, graph_.get_k() - 1);
 
-
         Alignment<NodeType> extension({ extend_window_.data() + pos, max_pos - pos },
                                       std::move(path),
                                       std::move(seq),
@@ -287,7 +286,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                       0,
                                       path_->get_orientation(),
                                       graph_.get_k() - 1);
-        // std::cout << *path_ << " " << extension << "\n";
 
         assert(extension.is_valid(graph_, &config_));
         callback(std::move(extension), start_node);
@@ -296,9 +294,23 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
-::call_visited_nodes(const std::function<void(NodeType)> &callback) const {
-    for (const auto &[node, column] : table) {
-        callback(node);
+::call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const {
+    size_t offset = extend_window_.data() - query.data();
+    for (const auto &[node, columns] : table) {
+        size_t start = query.size();
+        size_t end = 0;
+        for (const auto &column : columns.first) {
+            auto &[S, E, F, P, O] = column;
+            assert(S.size() == extend_window_.size() + 1);
+
+            auto it = std::find_if(S.begin(), S.end(), [](score_t s) { return s > 0; });
+            start = std::min(start, static_cast<size_t>(it - S.begin()) - 1);
+
+            end = std::max(
+                end, static_cast<size_t>(std::max_element(it, S.end()) - S.begin()) - 1
+            );
+        }
+        callback(node, offset + start, offset + end);
     }
 }
 
