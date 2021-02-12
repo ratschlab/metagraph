@@ -1312,6 +1312,26 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
     }
 }
 
+TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
+    size_t k = 31;
+    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAGGTCTTCGCCTGTGTAGATCTCGGTGGTCG";
+    std::string query =     "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTTCCTGGTGGTGTAGATC";
+
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    check_extend(graph, aligner.get_config(), paths, query);
+
+}
+
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
     {
         size_t k = 7;
