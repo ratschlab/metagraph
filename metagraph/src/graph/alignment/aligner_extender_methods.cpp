@@ -288,7 +288,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                       seed_->get_orientation(),
                                       graph_.get_k() - 1);
 
-        assert(extension.is_valid(graph_, &config_));
+        if (!extension.is_valid(graph_, &config_))
+            throw std::runtime_error("Internal error: invalid extension");
+
         callback(std::move(extension), start_node);
     }
 }
