@@ -331,6 +331,36 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual('nnz weights: 1180802', params_str[3])
         self.assertEqual('avg weight: 2.46882', params_str[4])
 
+    @parameterized.expand(GRAPH_TYPES)
+    def test_cleaning_threshold_fixed_both_strands(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
+                          output=self.tempdir.name + '/graph',
+                          k=31, repr=representation,
+                          extra_params="--mask-dummy --count-kmers --fwd-and-reverse")
+
+        # extract all unitigs, not only the primary ones
+        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                                  extra_params='--prune-unitigs 3')
+
+        self._build_graph(input=clean_fasta,
+                          output=self.tempdir.name + '/graph_clean',
+                          k=31, repr=representation,
+                          extra_params="--mask-dummy --count-kmers")
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 31', params_str[0])
+        self.assertEqual('nodes (k): 331452', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('nnz weights: 331452', params_str[3])
+        self.assertEqual('avg weight: 5.52692', params_str[4])
+
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_cleaning_threshold_fixed(self, representation):
 
@@ -355,10 +385,10 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
-        self.assertEqual('nodes (k): 331656', params_str[1])
+        self.assertEqual('nodes (k): 331452', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
-        self.assertEqual('nnz weights: 331656', params_str[3])
-        self.assertEqual('avg weight: 5.52505', params_str[4])
+        self.assertEqual('nnz weights: 331452', params_str[3])
+        self.assertEqual('avg weight: 5.52692', params_str[4])
 
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_cleaning_prune_tips_threshold_fixed(self, representation):
@@ -387,7 +417,7 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual('nodes (k): 331266', params_str[1])
         self.assertEqual('canonical mode: yes', params_str[2])
         self.assertEqual('nnz weights: 331266', params_str[3])
-        self.assertEqual('avg weight: 5.52757', params_str[4])
+        self.assertEqual('avg weight: 5.52728', params_str[4])
 
 
 if __name__ == '__main__':
