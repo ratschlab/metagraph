@@ -169,7 +169,7 @@ jobs:
 
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DBUILD_STATIC=${STATIC} \
+              -DBUILD_STATIC=${BUILD_STATIC} \
               -DBZIP2_LIBRARY_RELEASE=/usr/local/opt/bzip2/lib/libbz2.a \
               -DBUILD_KMC=${BUILD_KMC} \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
