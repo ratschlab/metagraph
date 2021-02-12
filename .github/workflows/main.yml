@@ -126,8 +126,8 @@ jobs:
       if: matrix.build_static == 'ON'
       uses: actions/upload-artifact@v2
       with:
-        name: metagraph_${{ matrix.alphabet }}_static_binary
-        path: metagraph/build/metagraph_${{ matrix.alphabet }}_linux_x86
+        name: metagraph_${{ matrix.alphabet }}_linux_x86
+        path: metagraph/build/
 
 
   MacOS:
@@ -164,17 +164,20 @@ jobs:
         mkdir metagraph/build
         cd metagraph/build
 
+        BUILD_STATIC=$(expr "${{ matrix.build_type }}" == "Release")
+        BUILD_KMC=$(expr "${{ matrix.build_type }}" == "Debug")
+
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DBUILD_STATIC=$(expr "${{ matrix.build_type }}" == "Release") \
+              -DBUILD_STATIC=${STATIC} \
               -DBZIP2_LIBRARY_RELEASE=/usr/local/opt/bzip2/lib/libbz2.a \
-              -DBUILD_KMC=$(expr "${{ matrix.build_type }}" == "Debug") \
+              -DBUILD_KMC=${BUILD_KMC} \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
       run: |
         cd metagraph/build && make -j 2 metagraph
-        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_mac_osx
+        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_macos
 
     - name: build unit tests
       if: matrix.alphabet == 'DNA'
@@ -196,8 +199,8 @@ jobs:
       if: matrix.build_type == 'Release'
       uses: actions/upload-artifact@v2
       with:
-        name: metagraph_${{ matrix.alphabet }}_static_binary_mac_osx
-        path: metagraph/build/metagraph_${{ matrix.alphabet }}_mac_osx
+        name: metagraph_${{ matrix.alphabet }}_macos
+        path: metagraph/build/
 
   Release:
     name: Create Release
