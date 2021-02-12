@@ -43,7 +43,10 @@ class TestCleanWeighted(TestingBase):
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='')  # no cleaning
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
@@ -74,7 +77,10 @@ class TestCleanWeighted(TestingBase):
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='')  # no cleaning
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
@@ -97,20 +103,17 @@ class TestCleanWeighted(TestingBase):
                           k=20, repr=representation,
                           extra_params="--mask-dummy")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=20, repr=representation,
                           extra_params="--mask-dummy")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 589774', params_str[1])
@@ -124,20 +127,17 @@ class TestCleanWeighted(TestingBase):
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 589774', params_str[1])
@@ -153,20 +153,17 @@ class TestCleanWeighted(TestingBase):
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-unitigs 3')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-unitigs 3')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 167395', params_str[1])
@@ -182,20 +179,17 @@ class TestCleanWeighted(TestingBase):
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60 --prune-unitigs 3')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60 --prune-unitigs 3')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=20, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 167224', params_str[1])
@@ -226,8 +220,10 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 2.4635', params_str[4])
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='')  # no cleaning
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
@@ -259,8 +255,10 @@ class TestCleanWeightedCanonical(TestingBase):
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='')  # no cleaning
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
@@ -283,20 +281,17 @@ class TestCleanWeightedCanonical(TestingBase):
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1180802', params_str[1])
@@ -310,20 +305,17 @@ class TestCleanWeightedCanonical(TestingBase):
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1180802', params_str[1])
@@ -340,20 +332,17 @@ class TestCleanWeightedCanonical(TestingBase):
                           extra_params="--mask-dummy --count-kmers --fwd-and-reverse")
 
         # extract all unitigs, not only the primary ones
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-unitigs 3')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-unitigs 3')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=31, repr=representation,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331452', params_str[1])
@@ -369,20 +358,17 @@ class TestCleanWeightedCanonical(TestingBase):
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-unitigs 3')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-unitigs 3')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331452', params_str[1])
@@ -398,20 +384,17 @@ class TestCleanWeightedCanonical(TestingBase):
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        clean_fasta = self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
-                                  extra_params='--prune-tips 60 --prune-unitigs 3')
+        clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
+        self._clean(self.tempdir.name + '/graph' + graph_file_extension[representation],
+                    output=clean_fasta,
+                    extra_params='--prune-tips 60 --prune-unitigs 3')
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
                           k=31, repr=representation, canonical=True,
                           extra_params="--mask-dummy --count-kmers")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph_clean' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331266', params_str[1])
