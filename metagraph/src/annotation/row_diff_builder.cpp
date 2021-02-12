@@ -418,7 +418,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     traverse_anno_chunked(
             anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
-                row_nbits_block.assign(chunk_size, 0);
+                if (compute_row_reduction)
+                    row_nbits_block.assign(chunk_size, 0);
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
@@ -444,7 +445,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 } else if (compute_row_reduction) {
                     // reduction (no bit in row-diff)
-                    __atomic_add_fetch(&row_nbits_block[chunk_idx], -1, __ATOMIC_RELAXED);
+                    __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                 }
 
                 // check non-anchor predecessor nodes and add them if they are zero
@@ -616,14 +617,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
-        std::vector<uint32_t> row_nbits_batch(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
+        row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
             for (const auto &col_ptr : row_diff[l_idx]->get_matrix().diffs().data()) {
-                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                     [&](uint64_t i) {
-                        __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
+                        __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
                     }
                 );
             }
@@ -631,14 +632,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-        async_writer.enqueue([&,chunk,to_minus{std::move(row_nbits_batch)}]() {
-            for (uint64_t i = 0; i < to_minus.size(); ++i) {
-                row_reduction[chunk + i] -= to_minus[i];
+        async_writer.join();
+        row_nbits_block_other.swap(row_nbits_block);
+
+        async_writer.enqueue([&,chunk]() {
+            for (uint64_t i = 0; i < row_nbits_block_other.size(); ++i) {
+                row_reduction[chunk + i] -= row_nbits_block_other[i];
                 // check if the row reduction is negative
                 if (row_reduction[chunk + i] >> (row_reduction.width() - 1))
                     num_larger_rows++;
             }
-            progress_bar += to_minus.size();
+            progress_bar += row_nbits_block_other.size();
         });
     }
 
