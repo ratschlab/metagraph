@@ -55,20 +55,12 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     path_ = &seed;
+    reset();
 }
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                                  score_t min_path_score) {
-    typedef std::pair<NodeType, size_t> AlignNode;
-    typedef AlignedVector<score_t> ScoreVec;
-    typedef AlignedVector<AlignNode> PrevVec;
-    typedef AlignedVector<Cigar::Operator> OpVec;
-    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                                             PrevVec, OpVec>>, bool> Column;
-
-    tsl::hopscotch_map<NodeType, Column> table;
-
     const char *align_start = path_->get_query().data() + path_->get_query().size() - 1;
     size_t start = align_start - query.data();
     size_t size = query.data() + query.size() - align_start + 1;
@@ -299,6 +291,14 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
         assert(extension.is_valid(graph_, &config_));
         callback(std::move(extension), start_node);
+    }
+}
+
+template <typename NodeType>
+void DefaultColumnExtender<NodeType>
+::call_visited_nodes(const std::function<void(NodeType)> &callback) const {
+    for (const auto &[node, column] : table) {
+        callback(node);
     }
 }
 

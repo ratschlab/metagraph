@@ -34,6 +34,8 @@ class IExtender {
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
+    virtual void call_visited_nodes(const std::function<void(NodeType)> &callback) const = 0;
+
   protected:
     virtual void reset() = 0;
     virtual const DBGAlignment& get_seed() const = 0;
@@ -67,17 +69,28 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     const DPTable<NodeType>& get_dp_table() const { return dp_table; }
 
+    virtual void call_visited_nodes(const std::function<void(NodeType)> &callback) const override;
+
   protected:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
     std::string_view query;
+
+    typedef std::pair<NodeType, size_t> AlignNode;
+    typedef AlignedVector<score_t> ScoreVec;
+    typedef AlignedVector<AlignNode> PrevVec;
+    typedef AlignedVector<Cigar::Operator> OpVec;
+    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
+                                             PrevVec, OpVec>>, bool> Column;
+
+    tsl::hopscotch_map<NodeType, Column> table;
 
     // keep track of which columns to use next
     ColumnQueue columns_to_update;
 
     DPTable<NodeType> dp_table;
 
-    virtual void reset() override { dp_table.clear(); }
+    virtual void reset() override { dp_table.clear(); table.clear(); }
 
     virtual std::pair<typename DPTable<NodeType>::iterator, bool>
     emplace_node(NodeType node,
