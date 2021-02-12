@@ -1142,9 +1142,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
-            // also include two buffers (fwd and back) for each column transformed
+            // also include two buffers (fwd and back) for each column transformed,
+            // or only one buffer if it's the first stage where only the number of
+            // bits per row in row-diff is computed
             uint64_t file_size = std::filesystem::file_size(files[i])
-                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * 2;
+                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * (optimize ? 2 : 1);
             if (file_size > mem_bytes) {
                 logger->warn(
                         "Not enough memory to process {}, requires {} MB, skipped",
