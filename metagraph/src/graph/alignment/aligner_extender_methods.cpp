@@ -173,12 +173,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         && !prev.second && S[1] == path_->get_score()
                         && O[1] == path_->get_cigar().back().first
                         && next == path_->back() && !depth));
-
-                if (best_starts.size() < config_.num_alternative_paths) {
-                    best_starts.emplace(cur, S[i]);
-                } else if (S[i] > best_starts.minimum().second) {
-                    best_starts.update(best_starts.begin(), Ref{ cur, S[i] });
-                }
             }
 
             if (depth) {
@@ -197,6 +191,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             }
 
             auto max_it = std::max_element(S.begin(), S.end());
+            if (best_starts.size() < config_.num_alternative_paths) {
+                best_starts.emplace(cur, *max_it);
+            } else if (*max_it > best_starts.minimum().second) {
+                best_starts.update(best_starts.begin(), Ref{ cur, *max_it });
+            }
 
             assert(partial_sums_[start + (max_it - S.begin())]
                 == config_.match_score(extend_window_.substr(max_it - S.begin())));
