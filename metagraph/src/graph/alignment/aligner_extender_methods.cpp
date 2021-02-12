@@ -77,11 +77,13 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                                  score_t min_path_score) {
+    // std::cout << "START\t" << *path_ << "\n";
+
     typedef std::pair<NodeType, size_t> AlignNode;
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<AlignNode> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
-    typedef std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, PrevVec, OpVec>> Column;
+    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec, PrevVec, OpVec>>, bool> Column;
 
     tsl::hopscotch_map<NodeType, Column> table;
 
@@ -100,11 +102,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
 
     auto &[S, E, F, P, O] = table.emplace(
-        DeBruijnGraph::npos,
-        Column{ std::make_tuple(ScoreVec(size, ninf), ScoreVec(size, ninf),
+        graph_.max_index() + 1,
+        Column{ { std::make_tuple(ScoreVec(size, ninf), ScoreVec(size, ninf),
                                 ScoreVec(size, ninf), PrevVec(size, AlignNode{}),
-                                OpVec(size, Cigar::CLIPPED)) }
-    ).first.value()[0];
+                                OpVec(size, Cigar::CLIPPED)) }, false }
+    ).first.value().first[0];
 
     size_t num_columns = 1;
 
@@ -114,7 +116,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     score_t max_score = S[0];
     size_t max_pos = 0;
-    AlignNode best_node{ DeBruijnGraph::npos, 0};
+    AlignNode best_node{ graph_.max_index() + 1, 0};
 
     // std::vector<AlignNode> stack { best_node };
     typedef std::pair<AlignNode, score_t> Ref;
@@ -136,7 +138,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         // std::cout << "foo\t" << prev.first << " " << prev.second << "\n";
 
         std::vector<std::pair<NodeType, char>> outgoing;
-        if (!prev.first) {
+        if (prev.first == graph_.max_index() + 1) {
             outgoing.emplace_back(path_->back(), path_->get_sequence().back());
         } else {
             graph_.call_outgoing_kmers(prev.first, [&](NodeType next, char c) {
@@ -146,7 +148,10 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         }
 
         for (const auto &[next, c] : outgoing) {
-            Column &column = table[next];
+            auto &[column, converged] = table[next];
+            if (converged)
+                continue;
+
             size_t depth = column.size();
             column.emplace_back(ScoreVec(size, ninf), ScoreVec(size, ninf),
                                 ScoreVec(size, ninf), PrevVec(size, AlignNode{}),
@@ -156,7 +161,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             AlignNode cur{ next, depth };
 
             auto &[S, E, F, P, O] = column.back();
-            auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = table[prev.first][prev.second];
+            auto &[S_prev, E_prev, F_prev, P_prev, O_prev] = table[prev.first].first[prev.second];
 
             for (size_t i = 1; i < S.size(); ++i) {
                 E[i] = std::max(E[i - 1] + config_.gap_extension_penalty,
@@ -193,7 +198,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 //           << next << "," << depth << " "
                 //           << path_->back() << "\n";
                 assert(i != 1 || O[1] == Cigar::DELETION || O[1] == Cigar::CLIPPED
-                    || (!prev.first && !prev.second && S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
+                    || (prev.first == graph_.max_index() + 1 && !prev.second && S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
                         && next == path_->back() && !depth));
 
                 if (S[i] > max_score) {
@@ -204,15 +209,41 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 }
             }
 
+            if (depth) {
+                auto &[S_b, E_b, F_b, P_b, O_b] = column[column.size() - 2];
+                if (S == S_b && E == E_b && F == F_b && O == O_b) {
+                    for (size_t i = 0; i < S.size(); ++i) {
+                        if (P[i].first == P_b[i].first && P[i].second == P_b[i].second + 1) {
+                            converged = true;
+                        } else {
+                            converged = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
             auto max_it = std::max_element(S.begin(), S.end());
+
+            // std::cout << *max_it << "\t" << (max_it - S.begin()) << "\t"
+            //           << (prev.first != graph_.max_index() + 1 ? graph_.get_node_sequence(prev.first) : std::string(graph_.get_k(), '$')) << "\t"
+                      // << graph_.get_node_sequence(cur.first) << "\t";
+                      // << cur.first << "," << cur.second << "\t"
+                      // << prev.first << "," << prev.second << "\t";
+            // for (size_t i = 0; i < S.size(); ++i) {
+            //     std::cout << std::max(S[i],-9) << "," << std::max(E[i],-9) << "," << std::max(F[i],-9) << "\t";
+            // }
+            // std::cout << "\n";
 
             score_t score_rest = *max_it + config_.match_score(
                 extend_window_.substr(max_it - S.begin())
             );
 
             // std::cout << "bar\t" << *max_it << " " << (max_it - S.begin()) << "\n";
-            if (*max_it >= max_score - config_.xdrop && score_rest >= min_path_score)
+            if (*max_it >= std::max(0, max_score - config_.xdrop) && score_rest >= min_path_score) {
+                // std::cout << "bar\t" << cur.first << "," << cur.second << "\n";
                 stack.emplace(Ref{ cur, *max_it });
+            }
         };
     }
 
@@ -222,7 +253,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     }
 
     // traceback
-    assert(std::get<0>(table[best_node.first][best_node.second])[max_pos] == max_score);
+    assert(std::get<0>(table[best_node.first].first[best_node.second])[max_pos] == max_score);
 
     Cigar cigar;
     if (max_pos + 1 < F.size())
@@ -234,7 +265,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     score_t score = max_score;
 
     while (true) {
-        auto &[S, E, F, P, O] = table[best_node.first][best_node.second];
+        auto &[S, E, F, P, O] = table[best_node.first].first[best_node.second];
 
         // std::cout << pos << "\t" << Cigar::opt_to_char(O[pos]) << "\t" << best_node.first << "," << best_node.second << "\t";
         // for (size_t i = 0; i < S.size(); ++i) {
@@ -252,7 +283,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         //           << path_->back() << "\n";
 
         if (pos == 1 && best_node.first == path_->back() && !best_node.second && O[pos] == path_->get_cigar().back().first) {
-            assert(!P[pos].first);
+            assert(P[pos].first == graph_.max_index() + 1);
             assert(!P[pos].second);
             start_node = path_->back();
             score -= path_->get_score();
