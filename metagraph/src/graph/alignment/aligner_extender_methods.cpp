@@ -27,7 +27,8 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
                                                        std::string_view query)
       : graph_(graph), config_(config), query(query) {
     assert(config_.check_config_scores());
-    partial_sums_.resize(query.size());
+    partial_sums_.reserve(query.size() + 1);
+    partial_sums_.resize(query.size(), 0);
     std::transform(query.begin(), query.end(),
                    partial_sums_.begin(),
                    [&](char c) { return config_.get_row(c)[c]; });
@@ -35,6 +36,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
     assert(config_.match_score(query) == partial_sums_.front());
     assert(config_.get_row(query.back())[query.back()] == partial_sums_.back());
+    partial_sums_.push_back(0);
 
     for (char c : graph_.alphabet()) {
         auto &profile_score_row = profile_score.emplace(c, query.size() + 8).first.value();
@@ -67,7 +69,10 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     tsl::hopscotch_map<NodeType, Column> table;
 
     const char *align_start = path_->get_query().data() + path_->get_query().size() - 1;
+    size_t start = align_start - query.data();
     size_t size = query.data() + query.size() - align_start + 1;
+    assert(start + size == partial_sums_.size());
+
     extend_window_ = { align_start, size - 1 };
     assert(extend_window_[0] == path_->get_query().back());
 
@@ -89,9 +94,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     size_t num_columns = 1;
 
-    S[0] = path_->get_score() - config_.get_row(extend_window_[0])[
-        path_->get_sequence().back()
-    ];
+    S[0] = path_->get_score() - profile_score[path_->get_sequence().back()][start];
 
     AlignNode start_node{ graph_.max_index() + 1, 0 };
 
@@ -144,7 +147,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                 S[i - 1] + config_.gap_opening_penalty);
                 F[i] = std::max(F_prev[i] + config_.gap_extension_penalty,
                                 S_prev[i] + config_.gap_opening_penalty);
-                score_t match_val = S_prev[i - 1] + config_.get_row(c)[extend_window_[i - 1]];
+                score_t match_val = S_prev[i - 1] + profile_score[c][start + i - 1];
 
                 S[i] = std::max({ E[i], F[i], match_val, 0 });
 
@@ -157,7 +160,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         O[i] = Cigar::DELETION;
                     } else if (S[i] == match_val) {
                         P[i] = prev;
-                        O[i] = c == extend_window_[i - 1] ? Cigar::MATCH : Cigar::MISMATCH;
+                        O[i] = profile_op[c][start + i - 1];
                     }
                 }
 
@@ -166,7 +169,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         && next == path_->back() && !depth));
 
                 assert(i != 1 || O[1] == Cigar::DELETION || O[1] == Cigar::CLIPPED
-                    || (prev.first == graph_.max_index() + 1 && !prev.second && S[1] == path_->get_score() && O[1] == path_->get_cigar().back().first
+                    || (prev.first == graph_.max_index() + 1
+                        && !prev.second && S[1] == path_->get_score()
+                        && O[1] == path_->get_cigar().back().first
                         && next == path_->back() && !depth));
 
                 if (best_starts.size() < config_.num_alternative_paths) {
@@ -193,9 +198,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             auto max_it = std::max_element(S.begin(), S.end());
 
-            score_t score_rest = *max_it + config_.match_score(
-                extend_window_.substr(max_it - S.begin())
-            );
+            assert(partial_sums_[start + (max_it - S.begin())]
+                == config_.match_score(extend_window_.substr(max_it - S.begin())));
+            score_t score_rest = *max_it + partial_sums_[start + (max_it - S.begin())];
 
             score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
 
