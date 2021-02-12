@@ -79,7 +79,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef AlignedVector<AlignNode> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
     typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                                             PrevVec, OpVec>>, bool> Column;
+                                             OpVec, OpVec, OpVec,
+                                             PrevVec, PrevVec>>, bool> Column;
 
     tsl::hopscotch_map<NodeType, Column> table_;
 

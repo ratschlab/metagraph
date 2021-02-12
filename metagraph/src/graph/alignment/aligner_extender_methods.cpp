@@ -71,7 +71,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     assert(extend_window_[0] == seed_->get_query().back());
 
     size_t size_per_column = sizeof(Column) + size * (
-        sizeof(score_t) * 3 + sizeof(AlignNode) + sizeof(Cigar::Operator)
+        sizeof(score_t) * 3 + sizeof(AlignNode) * 2 + sizeof(Cigar::Operator) * 3
     );
 
     constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
@@ -79,11 +79,13 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     assert(seed_->get_cigar().back().first == Cigar::MATCH
         || seed_->get_cigar().back().first == Cigar::MISMATCH);
 
-    auto &[S, E, F, P, O] = table_.emplace(
+    auto &[S, E, F, OS, OE, OF, PS, PF] = table_.emplace(
         graph_.max_index() + 1,
-        Column{ { std::make_tuple(ScoreVec(size, ninf), ScoreVec(size, ninf),
-                                  ScoreVec(size, ninf), PrevVec(size, AlignNode{}),
-                                  OpVec(size, Cigar::CLIPPED)) }, false }
+        Column{ { std::make_tuple(
+            ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
+            OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED),
+            PrevVec(size, AlignNode{}), PrevVec(size, AlignNode{})
+        )}, false }
     ).first.value().first[0];
 
     size_t num_columns = 1;
@@ -103,7 +105,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         AlignNode prev = stack.top().first;
         stack.pop();
 
-        size_t total_size = num_columns * size_per_column + table_.size() * sizeof(NodeType);
+        size_t total_size = num_columns * size_per_column
+            + table_.size() * sizeof(NodeType);
+
         if (total_size > config_.max_ram_per_alignment * 1000000)
             break;
 
@@ -126,60 +130,72 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 continue;
 
             size_t depth = column.size();
-            column.emplace_back(ScoreVec(size, ninf), ScoreVec(size, ninf),
-                                ScoreVec(size, ninf), PrevVec(size, AlignNode{}),
-                                OpVec(size, Cigar::CLIPPED));
+            column.emplace_back(
+                ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
+                OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED),
+                PrevVec(size, AlignNode{}), PrevVec(size, AlignNode{})
+            );
             ++num_columns;
 
             AlignNode cur{ next, depth };
 
-            auto &[S, E, F, P, O] = column.back();
-            auto &[S_prev, E_prev, F_prev, P_prev, O_prev]
+            auto &[S, E, F, OS, OE, OF, PS, PF] = column.back();
+            auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev, PS_prev, PF_prev]
                 = table_[prev.first].first[prev.second];
 
             for (size_t i = 1; i < S.size(); ++i) {
-                E[i] = std::max(E[i - 1] + config_.gap_extension_penalty,
-                                S[i - 1] + config_.gap_opening_penalty);
-                F[i] = std::max(F_prev[i] + config_.gap_extension_penalty,
-                                S_prev[i] + config_.gap_opening_penalty);
-                score_t match_val = S_prev[i - 1] + profile_score_[c][start + i - 1];
+                score_t ins_open   = S[i - 1] + config_.gap_opening_penalty;
+                score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
+                E[i] = std::max(ins_open, ins_extend);
+                OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-                S[i] = std::max({ E[i], F[i], match_val, 0 });
+                score_t del_open   = S_prev[i] + config_.gap_opening_penalty;
+                score_t del_extend = F_prev[i] + config_.gap_extension_penalty;
+                PF[i] = prev;
+                F[i] = std::max(del_open, del_extend);
+                OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+
+                score_t match = S_prev[i - 1] + profile_score_[c][start + i - 1];
+
+                S[i] = std::max({ E[i], F[i], match, 0 });
 
                 if (S[i] > 0) {
                     if (S[i] == E[i]) {
-                        P[i] = cur;
-                        O[i] = Cigar::INSERTION;
+                        PS[i] = cur;
+                        OS[i] = Cigar::INSERTION;
                     } else if (S[i] == F[i]) {
-                        P[i] = prev;
-                        O[i] = Cigar::DELETION;
-                    } else if (S[i] == match_val) {
-                        P[i] = prev;
-                        O[i] = profile_op_[c][start + i - 1];
+                        PS[i] = prev;
+                        OS[i] = Cigar::DELETION;
+                    } else if (S[i] == match) {
+                        PS[i] = prev;
+                        OS[i] = profile_op_[c][start + i - 1];
                     }
                 }
 
-                assert(i != 1 || O[1] == Cigar::DELETION || O[1] == Cigar::CLIPPED
+                // sanity check to ensure that the first operation taken is the
+                // last operation from the seed
+                assert(i != 1 || OS[1] == Cigar::DELETION || OS[1] == Cigar::CLIPPED
                     || (prev.first == graph_.max_index() + 1
                         && !prev.second && S[1] == seed_->get_score()
-                        && O[1] == seed_->get_cigar().back().first
+                        && OS[1] == seed_->get_cigar().back().first
                         && next == seed_->back() && !depth));
             }
 
-            if (depth) {
-                auto &[S_b, E_b, F_b, P_b, O_b] = column[column.size() - 2];
-                if (S == S_b && E == E_b && F == F_b && O == O_b) {
-                    for (size_t i = 0; i < S.size(); ++i) {
-                        if (P[i].first == P_b[i].first && (P[i].second == P_b[i].second + 1
-                                || (!P[i].first && !P[i].second && !P_b[i].second))) {
-                            converged = true;
-                        } else {
-                            converged = false;
-                            break;
-                        }
-                    }
-                }
-            }
+            // TODO
+            // if (depth) {
+            //     auto &[S_b, E_b, F_b, P_b, O_b] = column[column.size() - 2];
+            //     if (S == S_b && E == E_b && F == F_b && O == O_b) {
+            //         for (size_t i = 0; i < S.size(); ++i) {
+            //             if (P[i].first == P_b[i].first && (P[i].second == P_b[i].second + 1
+            //                     || (!P[i].first && !P[i].second && !P_b[i].second))) {
+            //                 converged = true;
+            //             } else {
+            //                 converged = false;
+            //                 break;
+            //             }
+            //         }
+            //     }
+            // }
 
             auto max_it = std::max_element(S.begin(), S.end());
             if (best_starts.size() < config_.num_alternative_paths) {
@@ -203,7 +219,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         auto [best_node, max_score] = best_starts.maximum();
         best_starts.pop_maximum();
 
-        const auto &best_scores = std::get<0>(table_[best_node.first].first[best_node.second]);
+        const auto &best_scores
+            = std::get<0>(table_[best_node.first].first[best_node.second]);
         size_t max_pos = std::max_element(best_scores.begin(), best_scores.end())
             - best_scores.begin();
 
@@ -223,43 +240,65 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         NodeType start_node = 0;
         score_t score = max_score;
 
+        Cigar::Operator last_op
+            = std::get<4>(table_[best_node.first].first[best_node.second])[pos];
+        assert(last_op == Cigar::MATCH);
+
         while (true) {
-            auto &[S, E, F, P, O] = table_[best_node.first].first[best_node.second];
+            const auto &[S, E, F, OS, OE, OF, PS, PF]
+                = table_[best_node.first].first[best_node.second];
 
-            if (pos == 1 && best_node.first == seed_->back()
-                    && !best_node.second && O[pos] == seed_->get_cigar().back().first) {
-                assert(P[pos].first == graph_.max_index() + 1);
-                assert(!P[pos].second);
-                start_node = seed_->back();
-                score -= seed_->get_score();
-                break;
+            const auto &O = (last_op == Cigar::MATCH || last_op == Cigar::MISMATCH)
+                ? OS
+                : (last_op == Cigar::INSERTION ? OE : OF);
+
+            if (last_op == Cigar::MATCH || last_op == Cigar::MISMATCH) {
+                if (pos == 1 && best_node.first == seed_->back()
+                        && !best_node.second
+                        && O[pos] == seed_->get_cigar().back().first) {
+                    assert(P[pos].first == graph_.max_index() + 1);
+                    assert(!P[pos].second);
+                    start_node = seed_->back();
+                    score -= seed_->get_score();
+                    break;
+                } else if (O[pos] == Cigar::CLIPPED) {
+                    start_node = DeBruijnGraph::npos;
+                    break;
+                }
             }
 
-            if (O[pos] == Cigar::CLIPPED || (pos == 1 && O[pos] != Cigar::DELETION)) {
-                start_node = DeBruijnGraph::npos;
-                break;
-            }
-
-            switch (O[pos]) {
+            switch (last_op) {
                 case Cigar::MATCH:
                 case Cigar::MISMATCH: {
-                    cigar.append(O[pos]);
-                    path.push_back(best_node.first);
-                    assert((O[pos] == Cigar::MATCH)
-                        == (graph_.get_node_sequence(best_node.first).back()
-                            == extend_window_[pos - 1]));
-                    best_node = P[pos];
-                    --pos;
+                    last_op = O[pos];
+                    switch (O[pos]) {
+                        case Cigar::MATCH:
+                        case Cigar::MISMATCH: {
+                            cigar.append(O[pos]);
+                            path.push_back(best_node.first);
+                            assert((O[pos] == Cigar::MATCH)
+                                == (graph_.get_node_sequence(best_node.first).back()
+                                    == extend_window_[pos - 1]));
+                            best_node = PS[pos];
+                            --pos;
+                        } break;
+                        case Cigar::INSERTION: { assert(PS[pos] == best_node); } break;
+                        case Cigar::DELETION: {} break;
+                        case Cigar::CLIPPED: { assert(false); }
+                    }
                 } break;
                 case Cigar::INSERTION: {
-                    assert(P[pos] == best_node);
-                    cigar.append(O[pos]);
+                    last_op = O[pos];
+                    assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
+                    cigar.append(Cigar::INSERTION);
                     --pos;
                 } break;
                 case Cigar::DELETION: {
-                path.push_back(best_node.first);
-                    cigar.append(O[pos]);
-                    best_node = P[pos];
+                    last_op = O[pos];
+                    assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
+                    path.push_back(best_node.first);
+                    cigar.append(Cigar::DELETION);
+                    best_node = PF[pos];
                 } break;
                 case Cigar::CLIPPED: { assert(false); }
             }
@@ -309,7 +348,7 @@ void DefaultColumnExtender<NodeType>
         size_t start = query_.size();
         size_t end = 0;
         for (const auto &column : columns.first) {
-            auto &[S, E, F, P, O] = column;
+            const auto &[S, E, F, OS, OE, OF, PS, PF] = column;
             assert(S.size() == extend_window_.size() + 1);
 
             auto it = std::find_if(S.begin(), S.end(), [](score_t s) { return s > 0; });
