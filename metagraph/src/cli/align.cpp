@@ -397,9 +397,7 @@ int align_to_graph(Config *config) {
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
-        }
-
-        if (config->alignment_length != graph->get_k() && !dbg) {
+        } else if (config->alignment_length != graph->get_k() && !dbg) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -420,13 +418,12 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
-
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY
-            && aligner_config.min_seed_length < graph->get_k()) {
-        logger->error("Seeds of length < k not supported with primary graphs");
-        exit(1);
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
     }
+
+    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
