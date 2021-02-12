@@ -102,7 +102,7 @@ class SeedAndExtendAlignerCore {
           : graph_(graph), config_(config) {
         assert(config_.num_alternative_paths);
         if (!config_.check_config_scores()) {
-            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+            throw std::runtime_error("Error: invalid scoring parameters");
         }
     }
 

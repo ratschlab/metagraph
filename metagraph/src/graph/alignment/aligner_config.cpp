@@ -10,10 +10,20 @@ namespace align {
 
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
-    int8_t min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
+    int8_t min_penalty_score = std::numeric_limits<int8_t>::max();
     for (const auto &row : score_matrix_) {
         min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
     }
+
+    if (gap_opening_penalty * 2 >= min_penalty_score) {
+        std::cerr << "|gap_opening_penalty| * 2 should be greater than greatest mismatch penalty: "
+                  << gap_opening_penalty * 2 << " >= " << (score_t)min_penalty_score << std::endl;
+        return false;
+    }
+
+    min_penalty_score = std::min({ min_penalty_score,
+                                   gap_opening_penalty,
+                                   gap_extension_penalty });
 
     assert(min_penalty_score < 0 && "min scores must be negative");
 
