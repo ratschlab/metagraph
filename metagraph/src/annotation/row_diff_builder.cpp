@@ -378,11 +378,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             fs::create_directories(tmp_file(s, j, 0).parent_path());
-            // make sure the first chunk exists even if empty
-            dump_chunk_to_disk({}, s, j, 0);
             uint64_t original_nbits = sources[s].get_matrix().data()[j]->num_set_bits();
             set_rows_bwd[s][j].reserve(std::min(buf_size, original_nbits));
-            set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
+
+            if (!compute_row_reduction) {
+                // make sure the first chunk exists even if empty
+                dump_chunk_to_disk({}, s, j, 0);
+                set_rows_fwd[s][j].reserve(std::min(buf_size, original_nbits));
+            }
         }
     }
 
@@ -415,26 +418,34 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     traverse_anno_chunked(
             anchor.size(), pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
-                row_nbits_block.assign(chunk_size, 0);
+                if (compute_row_reduction)
+                    row_nbits_block.assign(chunk_size, 0);
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
                     uint64_t succ,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
 
-                __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
-
                 // add current bit if this node is an anchor
                 // or if the successor has zero bit
                 if (anchor[row_idx] || !source_col[succ]) {
-                    auto &v = set_rows_fwd[source_idx][j];
-                    v.push_back(row_idx);
+                    // no reduction, we must keep the bit
+                    // Push to the buffer only if it's the final stage of the
+                    // row-diff transform, where we construct the full row-diff
+                    // columns.
+                    if (!compute_row_reduction) {
+                        auto &v = set_rows_fwd[source_idx][j];
+                        v.push_back(row_idx);
 
-                    if (v.size() == v.capacity()) {
-                        // dump chunk to disk
-                        dump_chunk_to_disk(v, source_idx, j, 0);
-                        v.resize(0);
+                        if (v.size() == v.capacity()) {
+                            // dump chunk to disk
+                            dump_chunk_to_disk(v, source_idx, j, 0);
+                            v.resize(0);
+                        }
                     }
+                } else if (compute_row_reduction) {
+                    // reduction (no bit in row-diff)
+                    __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                 }
 
                 // check non-anchor predecessor nodes and add them if they are zero
@@ -475,6 +486,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (size_t s = 0; s < sources.size(); ++s) {
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             auto &fwd = set_rows_fwd[s][j];
+            assert(fwd.empty() || !compute_row_reduction);
             if (fwd.size())
                 dump_chunk_to_disk(fwd, s, j, 0);
 
@@ -518,7 +530,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             auto call_ones = [&](const std::function<void(uint64_t)> &call) {
                 std::vector<std::string> filenames;
-                for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
+                // skip chunk with fwd bits which have already been counted if stage 1
+                for (uint32_t chunk = compute_row_reduction ? 1 : 0;
+                                    chunk < num_chunks[l_idx][j]; ++chunk) {
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
 
@@ -582,14 +596,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
                 std::move(label_encoders[l_idx]));
 
-        auto fpath = dest_dir/fs::path(source_files[l_idx])
-                                .filename()
-                                .replace_extension()
-                                .replace_extension(RowDiffColumnAnnotator::kExtension);
+        if (!compute_row_reduction) {
+            auto fpath = dest_dir/fs::path(source_files[l_idx])
+                                    .filename()
+                                    .replace_extension()
+                                    .replace_extension(RowDiffColumnAnnotator::kExtension);
 
-        row_diff[l_idx]->serialize(fpath);
+            row_diff[l_idx]->serialize(fpath);
 
-        logger->trace("Serialized {}", fpath);
+            logger->trace("Serialized {}", fpath);
+        }
     }
 
     utils::remove_temp_dir(tmp_path);
@@ -601,14 +617,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
                              std::cerr, !common::get_verbose());
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
-        std::vector<uint32_t> row_nbits_batch(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
+        row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
             for (const auto &col_ptr : row_diff[l_idx]->get_matrix().diffs().data()) {
-                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_batch.size(),
+                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                     [&](uint64_t i) {
-                        __atomic_add_fetch(&row_nbits_batch[i - chunk], 1, __ATOMIC_RELAXED);
+                        __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
                     }
                 );
             }
@@ -616,14 +632,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
-        async_writer.enqueue([&,chunk,to_minus{std::move(row_nbits_batch)}]() {
-            for (uint64_t i = 0; i < to_minus.size(); ++i) {
-                row_reduction[chunk + i] -= to_minus[i];
+        async_writer.join();
+        row_nbits_block_other.swap(row_nbits_block);
+
+        async_writer.enqueue([&,chunk]() {
+            for (uint64_t i = 0; i < row_nbits_block_other.size(); ++i) {
+                row_reduction[chunk + i] -= row_nbits_block_other[i];
                 // check if the row reduction is negative
                 if (row_reduction[chunk + i] >> (row_reduction.width() - 1))
                     num_larger_rows++;
             }
-            progress_bar += to_minus.size();
+            progress_bar += row_nbits_block_other.size();
         });
     }
 
