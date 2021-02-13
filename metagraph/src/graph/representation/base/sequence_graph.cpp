@@ -163,14 +163,16 @@ void call_sequences_from(const DeBruijnGraph &graph,
             assert(!call_unitigs || graph.has_single_incoming(targets.front().first)
                                  || (*discovered)[targets.front().first]);
             if (targets.size() == 1) {
-                if ((*visited)[targets.front().first])
+                const auto &[next, c] = targets[0];
+
+                if ((*visited)[next])
                     break;
 
-                if (!call_unitigs || !(*discovered)[targets.front().first]) {
-                    sequence.push_back('\0');
-                    std::tie(node, sequence.back()) = targets[0];
-                    path.push_back(node);
-                    (*discovered)[node] = true;
+                if (!call_unitigs || !(*discovered)[next]) {
+                    sequence.push_back(c);
+                    path.push_back(next);
+                    (*discovered)[next] = true;
+                    node = next;
                     continue;
                 }
             }
@@ -178,7 +180,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
             node_index next_node = DeBruijnGraph::npos;
             //  _____.___
             //      \.___
-            for (const auto& [next, c] : targets) {
+            for (const auto &[next, c] : targets) {
                 if (next_node == DeBruijnGraph::npos
                         && !call_unitigs
                         && !(*visited)[next]) {
@@ -241,6 +243,22 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     if (!(*visited)[dual_path[i]] || dual_path[i] == path[i]) {
                         (*visited)[dual_path[i]] = (*discovered)[dual_path[i]] = true;
                         continue;
+                    }
+
+                    // schedule traversal branched off from each terminal dual k-mer
+                    if (i == 0 || !dual_path[i - 1]) {
+                        size_t num_outgoing = 0;
+                        graph.adjacent_outgoing_nodes(dual_path[i],
+                            [&](node_index next) { num_outgoing++; node = next; }
+                        );
+                        // schedule only if it has a single outgoing k-mer,
+                        // otherwise it's a fork which will be covered in the forward pass.
+                        if (num_outgoing == 1) {
+                            if (!(*visited)[node]) {
+                                (*discovered)[node] = true;
+                                queue.push_back(node);
+                            }
+                        }
                     }
 
                     // The reverse-complement k-mer has been visited
