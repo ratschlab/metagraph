@@ -181,21 +181,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         && next == seed_->back() && !depth));
             }
 
-            // TODO
-            // if (depth) {
-            //     auto &[S_b, E_b, F_b, P_b, O_b] = column[column.size() - 2];
-            //     if (S == S_b && E == E_b && F == F_b && O == O_b) {
-            //         for (size_t i = 0; i < S.size(); ++i) {
-            //             if (P[i].first == P_b[i].first && (P[i].second == P_b[i].second + 1
-            //                     || (!P[i].first && !P[i].second && !P_b[i].second))) {
-            //                 converged = true;
-            //             } else {
-            //                 converged = false;
-            //                 break;
-            //             }
-            //         }
-            //     }
-            // }
+            if (depth)
+                converged = has_converged(column[column.size() - 2], column.back());
 
             auto max_it = std::max_element(S.begin(), S.end());
             if (best_starts.size() < config_.num_alternative_paths) {
@@ -360,6 +347,30 @@ void DefaultColumnExtender<NodeType>
         }
         callback(node, offset + start, offset + end);
     }
+}
+
+template <typename NodeType>
+bool DefaultColumnExtender<NodeType>
+::has_converged(const Scores &scores_before, const Scores &scores_now) {
+    const auto &[S, E, F, OS, OE, OF, PS, PF] = scores_now;
+    const auto &[S_b, E_b, F_b, OS_b, OE_b, OF_b, PS_b, PF_b] = scores_before;
+
+    AlignNode init_node{};
+    if (S == S_b && E == E_b && F == F_b && OS == OS_b && OE == OE_b && OF == OF_b) {
+        for (size_t i = 0; i < S.size(); ++i) {
+            if (PS[i].first != PS_b[i].first || PF[i].first != PF_b[i].first)
+                return false;
+
+            if ((PS[i].second != PS_b[i].second + 1 || PF[i].second != PF_b[i].second + 1)
+                    && PS[i] != init_node) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 template class DefaultColumnExtender<>;

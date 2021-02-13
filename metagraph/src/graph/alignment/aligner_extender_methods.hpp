@@ -78,9 +78,10 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<AlignNode> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
-    typedef std::pair<std::vector<std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                                             OpVec, OpVec, OpVec,
-                                             PrevVec, PrevVec>>, bool> Column;
+    typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
+                       OpVec, OpVec, OpVec,
+                       PrevVec, PrevVec> Scores;
+    typedef std::pair<std::vector<Scores>, bool> Column;
 
     tsl::hopscotch_map<NodeType, Column> table_;
 
@@ -104,6 +105,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     // start of the partial sum table
     const score_t *match_score_begin_;
+
+    static bool has_converged(const Scores &scores_before, const Scores &scores_now);
 };
 
 } // namespace align
