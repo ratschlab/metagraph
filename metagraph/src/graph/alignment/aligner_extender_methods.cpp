@@ -82,9 +82,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = table_.emplace(
         graph_.max_index() + 1,
         Column{ { std::make_tuple(
-            ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
-            OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED),
-            PrevVec(size, AlignNode{}), PrevVec(size, AlignNode{}),
+            ScoreVec(1, ninf), ScoreVec(1, ninf), ScoreVec(1, ninf),
+            OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED),
+            PrevVec(1, AlignNode{}), PrevVec(1, AlignNode{}),
             0 /* offset */, 0 /* max_pos */
         )}, false }
     ).first.value().first[0];
@@ -150,9 +150,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     continue;
 
                 min_i = std::max((size_t)1, max_pos_prev);
-                max_i = std::min(min_i + 1, S_prev.size());
+                max_i = std::min({ min_i, S_prev.size(), size - 1 }) + 1;
                 while (min_i > 1 && S_prev[min_i--] >= xdrop_cutoff) {}
                 while (max_i < S_prev.size() && S_prev[max_i++] >= xdrop_cutoff) {}
+                if (max_i >= S_prev.size())
+                    max_i = size;
 
                 if (min_i >= max_i)
                     continue;
@@ -160,9 +162,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             size_t depth = column.size();
             auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = column.emplace_back(
-                ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
-                OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED),
-                PrevVec(size, AlignNode{}), PrevVec(size, AlignNode{}),
+                ScoreVec(max_i, ninf), ScoreVec(max_i, ninf), ScoreVec(max_i, ninf),
+                OpVec(max_i, Cigar::CLIPPED), OpVec(max_i, Cigar::CLIPPED), OpVec(max_i, Cigar::CLIPPED),
+                PrevVec(max_i, AlignNode{}), PrevVec(max_i, AlignNode{}),
                 0 /* offset */, 0 /* max_pos */
             );
             ++num_columns;
@@ -179,15 +181,19 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 E[i] = std::max(ins_open, ins_extend);
                 OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-                score_t del_open = S_prev[i] + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[i] + config_.gap_extension_penalty;
-                PF[i] = prev;
-                F[i] = std::max(del_open, del_extend);
-                OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                if (i < S_prev.size()) {
+                    score_t del_open = S_prev[i] + config_.gap_opening_penalty;
+                    score_t del_extend = F_prev[i] + config_.gap_extension_penalty;
+                    PF[i] = prev;
+                    F[i] = std::max(del_open, del_extend);
+                    OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                }
 
-                score_t match = S_prev[i - 1] + profile_score_[c][start + i - 1];
-
-                S[i] = std::max({ E[i], F[i], match, 0 });
+                S[i] = i - 1 < S_prev.size()
+                    ? std::max({
+                        0, E[i], F[i], S_prev[i - 1] + profile_score_[c][start + i - 1]
+                      })
+                    : std::max({ 0, E[i], F[i] });
 
                 if (S[i] > 0) {
                     if (S[i] == E[i]) {
@@ -196,7 +202,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     } else if (S[i] == F[i]) {
                         PS[i] = prev;
                         OS[i] = Cigar::DELETION;
-                    } else if (S[i] == match) {
+                    } else {
+                        assert(i - 1 < S_prev.size());
                         PS[i] = prev;
                         OS[i] = profile_op_[c][start + i - 1];
                     }
@@ -353,7 +360,6 @@ void DefaultColumnExtender<NodeType>
         size_t end = 0;
         for (const auto &column : columns.first) {
             const auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = column;
-            assert(S.size() == extend_window_.size() + 1);
 
             size_t start_c
                 = std::find_if(S.begin(), S.end(), [](score_t s) { return s > 0; }) - S.begin();
