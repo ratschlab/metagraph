@@ -196,14 +196,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         OS[i] = profile_op_[c][start + i - 1];
                     }
                 }
-
-                // sanity check to ensure that the first operation taken is the
-                // last operation from the seed
-                assert(i != 1 || OS[1] == Cigar::DELETION || OS[1] == Cigar::CLIPPED
-                    || (prev.first == graph_.max_index() + 1
-                        && !prev.second && S[1] == seed_->get_score()
-                        && OS[1] == seed_->get_cigar().back().first
-                        && next == seed_->back() && !depth));
             }
 
             auto max_it = std::max_element(S.begin() + min_i, S.begin() + max_i);
