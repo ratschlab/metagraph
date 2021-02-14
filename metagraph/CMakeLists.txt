@@ -10,12 +10,6 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
-if(BUILD_STATIC)
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-  set(BUILD_SHARED_LIBS OFF)
-endif()
-
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -58,6 +52,11 @@ function(message)
 endfunction()
 
 enableCCache()
+
+if(BUILD_STATIC)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+  set(BUILD_SHARED_LIBS OFF)
+endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")

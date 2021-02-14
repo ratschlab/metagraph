@@ -94,11 +94,11 @@ jobs:
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DBUILD_STATIC=${{ matrix.build_static }} ..
+              -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
-      run: metagraph/build && make -j 2 metagraph
+      run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -164,9 +164,7 @@ jobs:
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
-      run: |
-        cd metagraph/build && make -j 2 metagraph
-        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_macos
+      run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
       run: cd metagraph/build && make -j 2 unit_tests
