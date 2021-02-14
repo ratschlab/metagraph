@@ -98,9 +98,7 @@ jobs:
               -DBUILD_STATIC=${{ matrix.build_static }} ..
 
     - name: build metagraph
-      run: |
-        cd metagraph/build && make -j 2 metagraph
-        cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_linux_x86
+      run: metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
       if: matrix.build_static == 'OFF'
@@ -127,7 +125,7 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: metagraph_${{ matrix.alphabet }}_linux_x86
-        path: metagraph/build/
+        path: metagraph/build/metagraph_${{ matrix.alphabet }}
 
 
   MacOS:
