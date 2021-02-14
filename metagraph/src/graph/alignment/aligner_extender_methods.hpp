@@ -103,7 +103,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     // start of the partial sum table
     const score_t *match_score_begin_;
 
-    static bool has_converged(const Column &column);
+    static bool has_converged(const Column &column, size_t begin, size_t end);
 };
 
 } // namespace align

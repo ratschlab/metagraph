@@ -137,10 +137,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 ? best_starts.maximum().second
                 : seed_->get_score()) - config_.xdrop;
 
-            if (best_starts.size()) {
-                const auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
-                       PS_prev, PF_prev, offset_prev, max_pos_prev]
-                    = column_pair_prev.first[prev.second];
+            {
+                const auto &S_prev = std::get<0>(column_pair_prev.first[prev.second]);
+                size_t max_pos_prev = std::get<9>(column_pair_prev.first[prev.second]);
                 assert(max_pos_prev < S_prev.size());
                 assert(std::max_element(S_prev.begin(), S_prev.end())
                     == S_prev.begin() + max_pos_prev);
@@ -150,7 +149,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             }
 
             size_t depth = column.size();
-            column.emplace_back(
+            auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = column.emplace_back(
                 ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
                 OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED), OpVec(size, Cigar::CLIPPED),
                 PrevVec(size, AlignNode{}), PrevVec(size, AlignNode{}),
@@ -160,13 +159,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             AlignNode cur{ next, depth };
 
-            auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = column.back();
             auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
                    PS_prev, PF_prev, offset_prev, max_pos_prev]
                 = column_pair_prev.first[prev.second];
-            assert(max_pos_prev < S_prev.size());
-            assert(std::max_element(S_prev.begin(), S_prev.end())
-                == S_prev.begin() + max_pos_prev);
 
             size_t min_i = std::max((size_t)1, max_pos_prev);
             size_t max_i = std::min(min_i + 1, S_prev.size());
@@ -211,9 +206,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         && next == seed_->back() && !depth));
             }
 
-            auto max_it = std::max_element(S.begin(), S.end());
+            auto max_it = std::max_element(S.begin() + min_i, S.begin() + max_i);
             max_pos = max_it - S.begin();
-            converged = has_converged(column_pair);
+            converged = has_converged(column_pair, min_i, max_i);
 
             if (best_starts.size() < config_.num_alternative_paths) {
                 best_starts.emplace(cur, *max_it);
@@ -375,7 +370,8 @@ void DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-bool DefaultColumnExtender<NodeType>::has_converged(const Column &column) {
+bool DefaultColumnExtender<NodeType>
+::has_converged(const Column &column, size_t begin, size_t end) {
     if (column.second)
         return true;
 
@@ -386,18 +382,17 @@ bool DefaultColumnExtender<NodeType>::has_converged(const Column &column) {
     const auto &[S_b, E_b, F_b, OS_b, OE_b, OF_b, PS_b, PF_b, offset_b, max_pos_b]
         = column.first[column.first.size() - 2];
 
-    AlignNode init_node{};
-    if (offset == offset_b && max_pos == max_pos_b && S == S_b && E == E_b
-            && F == F_b && OS == OS_b && OE == OE_b && OF == OF_b) {
-        for (size_t i = 0; i < S.size(); ++i) {
-            if (PS[i].first != PS_b[i].first || PF[i].first != PF_b[i].first)
-                return false;
-        }
-
-        return true;
-    }
-
-    return false;
+    return offset == offset_b && max_pos == max_pos_b
+            && std::equal(S.begin() + begin, S.begin() + end, S_b.begin() + begin)
+            && std::equal(E.begin() + begin, E.begin() + end, E_b.begin() + begin)
+            && std::equal(F.begin() + begin, F.begin() + end, F_b.begin() + begin)
+            && std::equal(OS.begin() + begin, OS.begin() + end, OS_b.begin() + begin)
+            && std::equal(OE.begin() + begin, OE.begin() + end, OE_b.begin() + begin)
+            && std::equal(OF.begin() + begin, OF.begin() + end, OF_b.begin() + begin)
+            && std::equal(PS.begin() + begin, PS.begin() + end, PS_b.begin() + begin,
+                          [](const auto &a, const auto &b) { return a.first == b.first; })
+            && std::equal(PF.begin() + begin, PF.begin() + end, PF_b.begin() + begin,
+                          [](const auto &a, const auto &b) { return a.first == b.first; });
 }
 
 template class DefaultColumnExtender<>;
