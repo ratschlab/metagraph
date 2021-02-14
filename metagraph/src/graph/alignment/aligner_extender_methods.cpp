@@ -131,6 +131,24 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (converged)
                 continue;
 
+            auto &column_pair_prev = table_[prev.first];
+
+            score_t xdrop_cutoff = (best_starts.size()
+                ? best_starts.maximum().second
+                : seed_->get_score()) - config_.xdrop;
+
+            if (best_starts.size()) {
+                const auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
+                       PS_prev, PF_prev, offset_prev, max_pos_prev]
+                    = column_pair_prev.first[prev.second];
+                assert(max_pos_prev < S_prev.size());
+                assert(std::max_element(S_prev.begin(), S_prev.end())
+                    == S_prev.begin() + max_pos_prev);
+
+                if (S_prev[max_pos_prev] < xdrop_cutoff)
+                    continue;
+            }
+
             size_t depth = column.size();
             column.emplace_back(
                 ScoreVec(size, ninf), ScoreVec(size, ninf), ScoreVec(size, ninf),
@@ -145,11 +163,17 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             auto &[S, E, F, OS, OE, OF, PS, PF, offset, max_pos] = column.back();
             auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
                    PS_prev, PF_prev, offset_prev, max_pos_prev]
-                = table_[prev.first].first[prev.second];
+                = column_pair_prev.first[prev.second];
+            assert(max_pos_prev < S_prev.size());
             assert(std::max_element(S_prev.begin(), S_prev.end())
                 == S_prev.begin() + max_pos_prev);
 
-            for (size_t i = 1; i < S.size(); ++i) {
+            size_t min_i = std::max((size_t)1, max_pos_prev);
+            size_t max_i = std::min(min_i + 1, S_prev.size());
+            while (min_i > 1 && S_prev[min_i--] >= xdrop_cutoff) {}
+            while (max_i < S_prev.size() && S_prev[max_i++] >= xdrop_cutoff) {}
+
+            for (size_t i = min_i; i < max_i; ++i) {
                 score_t ins_open   = S[i - 1] + config_.gap_opening_penalty;
                 score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
                 E[i] = std::max(ins_open, ins_extend);
@@ -201,7 +225,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 == config_.match_score(extend_window_.substr(max_pos)));
             score_t score_rest = *max_it + match_score_begin_[max_pos];
 
-            score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
+            xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
 
             if (*max_it >= xdrop_cutoff && score_rest >= min_seed_score)
                 stack.emplace(Ref{ cur, *max_it });
