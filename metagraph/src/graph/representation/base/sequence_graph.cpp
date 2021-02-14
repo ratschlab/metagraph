@@ -16,7 +16,7 @@ namespace graph {
 
 typedef DeBruijnGraph::node_index node_index;
 
-static const uint64_t kBlockSize = 9'999'872;
+static const uint64_t kBlockSize = 1 << 14;
 static_assert(!(kBlockSize & 0xFF));
 
 
@@ -132,20 +132,23 @@ void call_sequences_from(const DeBruijnGraph &graph,
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {
         node_index node = queue.back();
-        path.resize(0);
-        path.push_back(node);
-        sequence = graph.get_node_sequence(node);
         queue.pop_back();
-        start = node;
+        assert((*discovered)[node]);
         assert(!call_unitigs || !(*visited)[node]);
         if ((*visited)[node])
             continue;
 
+        path.resize(0);
+        path.push_back(node);
+        sequence = graph.get_node_sequence(node);
+        start = node;
+
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
-        while (!(*visited)[node]) {
+        while (true) {
             assert(node);
             assert((*discovered)[node]);
+            assert(!(*visited)[node]);
             assert(sequence.length() >= graph.get_k());
             (*visited)[node] = true;
             ++progress_bar;
@@ -175,6 +178,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     node = next;
                     continue;
                 }
+                assert(call_unitigs && graph.indegree(next) >= 2);
+                break;
             }
 
             node_index next_node = DeBruijnGraph::npos;
@@ -221,7 +226,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 size_t begin = 0;
 
                 assert(std::all_of(path.begin(), path.end(),
-                                   [&](auto i) { return (*visited)[i]; }));
+                                   [&](auto i) { return (*visited)[i] && (*discovered)[i]; }));
 
                 progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
                                               [&](auto node) { return node && !(*visited)[node]; });
