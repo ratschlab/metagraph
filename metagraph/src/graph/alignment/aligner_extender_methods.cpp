@@ -137,6 +137,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 ? best_starts.maximum().second
                 : seed_->get_score()) - config_.xdrop;
 
+            size_t min_i;
+            size_t max_i;
             {
                 const auto &S_prev = std::get<0>(column_pair_prev.first[prev.second]);
                 size_t max_pos_prev = std::get<9>(column_pair_prev.first[prev.second]);
@@ -145,6 +147,14 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     == S_prev.begin() + max_pos_prev);
 
                 if (S_prev[max_pos_prev] < xdrop_cutoff)
+                    continue;
+
+                min_i = std::max((size_t)1, max_pos_prev);
+                max_i = std::min(min_i + 1, S_prev.size());
+                while (min_i > 1 && S_prev[min_i--] >= xdrop_cutoff) {}
+                while (max_i < S_prev.size() && S_prev[max_i++] >= xdrop_cutoff) {}
+
+                if (min_i >= max_i)
                     continue;
             }
 
@@ -163,18 +173,13 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                    PS_prev, PF_prev, offset_prev, max_pos_prev]
                 = column_pair_prev.first[prev.second];
 
-            size_t min_i = std::max((size_t)1, max_pos_prev);
-            size_t max_i = std::min(min_i + 1, S_prev.size());
-            while (min_i > 1 && S_prev[min_i--] >= xdrop_cutoff) {}
-            while (max_i < S_prev.size() && S_prev[max_i++] >= xdrop_cutoff) {}
-
             for (size_t i = min_i; i < max_i; ++i) {
-                score_t ins_open   = S[i - 1] + config_.gap_opening_penalty;
+                score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
                 score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
                 E[i] = std::max(ins_open, ins_extend);
                 OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-                score_t del_open   = S_prev[i] + config_.gap_opening_penalty;
+                score_t del_open = S_prev[i] + config_.gap_opening_penalty;
                 score_t del_extend = F_prev[i] + config_.gap_extension_penalty;
                 PF[i] = prev;
                 F[i] = std::max(del_open, del_extend);
