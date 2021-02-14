@@ -17,6 +17,8 @@ using mtg::common::logger;
 typedef std::vector<std::vector<uint64_t>> Partition;
 typedef std::vector<const bit_vector *> VectorPtrs;
 
+typedef std::pair<uint32_t, std::vector<uint32_t>> SparseColumn;
+
 
 std::vector<sdsl::bit_vector>
 get_submatrix(const VectorPtrs &columns,
@@ -94,9 +96,37 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
+double inner_prod(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
+    assert(first.size() == second.size());
+    return static_cast<double>(::inner_prod(first, second)) / first.size();
+}
+
+double inner_prod(const SparseColumn &first, const SparseColumn &second) {
+    const auto &[size_1, col_1] = first;
+    const auto &[size_2, col_2] = second;
+    auto it_1 = col_1.begin();
+    auto it_2 = col_2.begin();
+
+    uint64_t prod = 0;
+
+    while (it_1 != col_1.end() && it_2 != col_2.end()) {
+        if (*it_1 < *it_2) {
+            ++it_1;
+        } else if (*it_1 > *it_2) {
+            ++it_2;
+        } else {
+            prod++;
+            ++it_1;
+            ++it_2;
+        }
+    }
+
+    return (double)prod / std::min(size_1, size_2);
+}
+
+template <class T>
 std::vector<std::tuple<uint32_t, uint32_t, float>>
-correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
-                       size_t num_threads) {
+correlation_similarity(const std::vector<T> &cols, size_t num_threads) {
     if (cols.size() > std::numeric_limits<uint32_t>::max()) {
         std::cerr << "ERROR: too many columns" << std::endl;
         exit(1);
@@ -176,10 +206,12 @@ inline bool first_closest(const P &first, const P &second) {
                     < std::min(std::get<0>(second), std::get<1>(second)));
 }
 
-// input: columns
-// output: partition, for instance -- a set of column pairs
-Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
-                          size_t num_threads) {
+// input: columns, where each column `T` is either `sdsl::bit_vector` or
+// `std::pair<uint32_t, std::vector<uint32>>` storing column size and positions
+// of its set bits
+// output: partition -- a set of column pairs greedily matched
+template <class T>
+Partition greedy_matching(const std::vector<T> &columns, size_t num_threads) {
     if (!columns.size())
         return {};
 
@@ -225,9 +257,63 @@ Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
     return partition;
 }
 
-LinkageMatrix
-agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
-                             size_t num_threads) {
+void merge(const sdsl::bit_vector &first, sdsl::bit_vector *second) {
+    assert(second);
+    assert(first.size() == second->size());
+    *second |= first;
+}
+
+void merge(const SparseColumn &first, SparseColumn *second) {
+    assert(second);
+
+    const auto &[size_first, col_first] = first;
+    const auto &[size_second, col_second] = *second;
+
+    SparseColumn merged;
+    auto &[size_merged, col_merged] = merged;
+
+    size_merged = std::min(size_first, size_second);
+
+    col_merged.reserve(col_first.size() + col_second.size());
+
+    auto it_first = col_first.begin();
+    auto it_second = col_second.begin();
+
+    while (it_first != col_first.end() && it_second != col_second.end()) {
+        if (*it_first < *it_second) {
+            col_merged.push_back(*it_first);
+            ++it_first;
+        } else if (*it_first > *it_second) {
+            col_merged.push_back(*it_second);
+            ++it_second;
+        } else {
+            col_merged.push_back(*it_first);
+            ++it_first;
+            ++it_second;
+        }
+    }
+    while (it_first != col_first.end() && *it_first < size_merged) {
+        col_merged.push_back(*it_first);
+        ++it_first;
+    }
+    while (it_second != col_second.end() && *it_second < size_merged) {
+        col_merged.push_back(*it_second);
+        ++it_second;
+    }
+
+    second->swap(merged);
+}
+
+uint64_t count_set_bits(const sdsl::bit_vector &v) {
+    return sdsl::util::cnt_one_bits(v);
+}
+
+uint64_t count_set_bits(const SparseColumn &v) {
+    return v.second.size();
+}
+
+template <class T>
+LinkageMatrix agglomerative_greedy_linkage(std::vector<T>&& columns, size_t num_threads) {
     if (columns.empty())
         return LinkageMatrix(0, 4);
 
@@ -246,7 +332,7 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
         assert(groups.size() > 0);
         assert(groups.size() < columns.size());
 
-        std::vector<sdsl::bit_vector> cluster_centers(groups.size());
+        std::vector<T> cluster_centers(groups.size());
         std::vector<uint64_t> cluster_ids(groups.size());
 
         ProgressBar progress_bar(groups.size(), "Merging clusters",
@@ -255,12 +341,13 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {
             // merge into new clusters
-            cluster_centers[g] = sdsl::bit_vector(columns[0].size(), 0);
-            for (size_t i : groups[g]) {
-                cluster_centers[g] |= columns[i];
+            cluster_centers[g] = std::move(columns[groups[g].at(0)]);
+            for (size_t i = 1; i < groups[g].size(); ++i) {
+                merge(columns[groups[g][i]], &cluster_centers[g]);
+                columns[groups[g][i]] = T();
             }
 
-            uint64_t num_set_bits = sdsl::util::cnt_one_bits(cluster_centers[g]);
+            uint64_t num_set_bits = count_set_bits(cluster_centers[g]);
 
             #pragma omp critical
             {
@@ -290,6 +377,13 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
 
     return linkage_matrix;
 }
+
+template
+LinkageMatrix agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&&, size_t);
+
+template
+LinkageMatrix agglomerative_greedy_linkage(std::vector<SparseColumn>&&, size_t);
+
 
 LinkageMatrix agglomerative_linkage_trivial(size_t num_columns) {
     if (!num_columns)
