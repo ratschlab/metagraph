@@ -243,8 +243,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 if (pos == 1 && best_node.first == seed_->back()
                         && !best_node.second
                         && O[pos] == seed_->get_cigar().back().first) {
-                    assert(P[pos].first == graph_.max_index() + 1);
-                    assert(!P[pos].second);
+                    assert(PS[pos].first == graph_.max_index() + 1);
+                    assert(!PS[pos].second);
                     start_node = seed_->back();
                     score -= seed_->get_score();
                     break;
@@ -360,11 +360,6 @@ bool DefaultColumnExtender<NodeType>
         for (size_t i = 0; i < S.size(); ++i) {
             if (PS[i].first != PS_b[i].first || PF[i].first != PF_b[i].first)
                 return false;
-
-            if ((PS[i].second != PS_b[i].second + 1 || PF[i].second != PF_b[i].second + 1)
-                    && PS[i] != init_node) {
-                return false;
-            }
         }
 
         return true;
