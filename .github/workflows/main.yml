@@ -138,9 +138,6 @@ jobs:
       matrix:
         alphabet: [DNA]
         build_type: [Debug, Release]
-        include:
-          - alphabet: Protein
-            build_type: Release
 
     steps:
     - uses: actions/checkout@v1
@@ -166,8 +163,6 @@ jobs:
 
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
-              -DBUILD_STATIC=$(expr "${{ matrix.build_type }}" = "Release") \
-              -DBUILD_KMC=$(expr "${{ matrix.build_type }}" = "Debug") \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
 
     - name: build metagraph
@@ -176,33 +171,22 @@ jobs:
         cp metagraph_${{ matrix.alphabet }} metagraph_${{ matrix.alphabet }}_macos
 
     - name: build unit tests
-      if: matrix.alphabet == 'DNA'
       run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
-      if: matrix.alphabet == 'DNA'
       run: cd metagraph/build && make -j 2
 
     - name: run unit tests
-      if: matrix.alphabet == 'DNA'
       run: cd metagraph/build && ./unit_tests
 
     - name: run integration tests
       run: cd metagraph/build && make check
 
-    # for potential release
-    - name: upload static binary
-      if: matrix.build_type == 'Release'
-      uses: actions/upload-artifact@v2
-      with:
-        name: metagraph_${{ matrix.alphabet }}_macos
-        path: metagraph/build/
-
   Release:
     name: Create Release
     if: contains(github.ref, 'tags/v')
     runs-on: ubuntu-latest
-    needs: [Linux, MacOS]
+    needs: [Linux]
     steps:
       - name: fetch static binary
         uses: actions/download-artifact@v2
@@ -215,8 +199,6 @@ jobs:
           body: |
             The binaries are currently provided on an experimental basis.
             The Linux binaries are statically linked and hence don't require additional libraries to be installed.
-            The Mac OS X binaries dynamically link to libhts, which would need to be available on your system, e.g. using `brew install htslib`).
-            The Mac OS X binaries are currently nor signed nor notarized - you need to explicitely allow the binary to run in the security settings of your system (or right mouse click + open).
           file: 'artifacts/*/metagraph_*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
