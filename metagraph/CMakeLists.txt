@@ -374,10 +374,10 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Dar
 endif()
 
 if(BUILD_STATIC AND NOT APPLE)
-  find_package(BZip2 REQUIRED)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
+  find_package(BZip2 REQUIRED)
   set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
 endif()
 
