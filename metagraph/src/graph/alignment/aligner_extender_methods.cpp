@@ -228,7 +228,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         score_t score = max_score;
 
         Cigar::Operator last_op
-            = std::get<4>(table_[best_node.first].first[best_node.second])[pos];
+            = std::get<3>(table_[best_node.first].first[best_node.second])[pos];
         assert(last_op == Cigar::MATCH);
 
         while (true) {
