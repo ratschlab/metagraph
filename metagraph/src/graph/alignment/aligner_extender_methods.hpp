@@ -50,11 +50,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
 
-    typedef std::tuple<NodeType, score_t, bool /* converged */> ColumnRef;
-    typedef boost::container::priority_deque<ColumnRef,
-                                             std::vector<ColumnRef>,
-                                             utils::LessSecond> ColumnQueue;
-
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
@@ -80,7 +75,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef AlignedVector<Cigar::Operator> OpVec;
     typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
                        OpVec, OpVec, OpVec,
-                       PrevVec, PrevVec> Scores;
+                       PrevVec, PrevVec,
+                       size_t /* offset */,
+                       size_t /* max_pos */> Scores;
     typedef std::pair<std::vector<Scores>, bool> Column;
 
     tsl::hopscotch_map<NodeType, Column> table_;
@@ -106,7 +103,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     // start of the partial sum table
     const score_t *match_score_begin_;
 
-    static bool has_converged(const Scores &scores_before, const Scores &scores_now);
+    static bool has_converged(const Column &column);
 };
 
 } // namespace align
