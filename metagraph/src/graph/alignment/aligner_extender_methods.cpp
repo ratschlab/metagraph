@@ -235,57 +235,54 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             const auto &[S, E, F, OS, OE, OF, PS, PF]
                 = table_[best_node.first].first[best_node.second];
 
-            const auto &O = (last_op == Cigar::MATCH || last_op == Cigar::MISMATCH)
-                ? OS
-                : (last_op == Cigar::INSERTION ? OE : OF);
+            assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
 
-            if (last_op == Cigar::MATCH || last_op == Cigar::MISMATCH) {
-                if (pos == 1 && best_node.first == seed_->back()
-                        && !best_node.second
-                        && O[pos] == seed_->get_cigar().back().first) {
-                    assert(PS[pos].first == graph_.max_index() + 1);
-                    assert(!PS[pos].second);
-                    start_node = seed_->back();
-                    score -= seed_->get_score();
-                    break;
-                } else if (O[pos] == Cigar::CLIPPED) {
-                    start_node = DeBruijnGraph::npos;
-                    break;
-                }
+            if (pos == 1 && best_node.first == seed_->back()
+                    && !best_node.second
+                    && OS[pos] == seed_->get_cigar().back().first) {
+                assert(PS[pos].first == graph_.max_index() + 1);
+                assert(!PS[pos].second);
+                start_node = seed_->back();
+                score -= seed_->get_score();
+                break;
+            } else if (OS[pos] == Cigar::CLIPPED) {
+                start_node = DeBruijnGraph::npos;
+                break;
             }
 
-            switch (last_op) {
+            last_op = OS[pos];
+
+            switch (OS[pos]) {
                 case Cigar::MATCH:
                 case Cigar::MISMATCH: {
-                    last_op = O[pos];
-                    switch (O[pos]) {
-                        case Cigar::MATCH:
-                        case Cigar::MISMATCH: {
-                            cigar.append(O[pos]);
-                            path.push_back(best_node.first);
-                            assert((O[pos] == Cigar::MATCH)
-                                == (graph_.get_node_sequence(best_node.first).back()
-                                    == extend_window_[pos - 1]));
-                            best_node = PS[pos];
-                            --pos;
-                        } break;
-                        case Cigar::INSERTION: { assert(PS[pos] == best_node); } break;
-                        case Cigar::DELETION: {} break;
-                        case Cigar::CLIPPED: { assert(false); }
-                    }
-                } break;
-                case Cigar::INSERTION: {
-                    last_op = O[pos];
-                    assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
-                    cigar.append(Cigar::INSERTION);
+                    cigar.append(OS[pos]);
+                    path.push_back(best_node.first);
+                    assert((OS[pos] == Cigar::MATCH)
+                        == (graph_.get_node_sequence(best_node.first).back()
+                            == extend_window_[pos - 1]));
+                    best_node = PS[pos];
                     --pos;
                 } break;
+                case Cigar::INSERTION: {
+                    assert(PS[pos] == best_node);
+                    while (last_op == Cigar::INSERTION) {
+                        last_op = OE[pos];
+                        assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
+                        cigar.append(Cigar::INSERTION);
+                        --pos;
+                        assert(pos);
+                    }
+                } break;
                 case Cigar::DELETION: {
-                    last_op = O[pos];
-                    assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
-                    path.push_back(best_node.first);
-                    cigar.append(Cigar::DELETION);
-                    best_node = PF[pos];
+                    while (last_op == Cigar::DELETION) {
+                        const auto &[S, E, F, OS, OE, OF, PS, PF]
+                            = table_[best_node.first].first[best_node.second];
+                        last_op = OF[pos];
+                        assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
+                        path.push_back(best_node.first);
+                        cigar.append(Cigar::DELETION);
+                        best_node = PF[pos];
+                    }
                 } break;
                 case Cigar::CLIPPED: { assert(false); }
             }
