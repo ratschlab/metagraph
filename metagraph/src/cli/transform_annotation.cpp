@@ -89,15 +89,18 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                 uint32_t &size = subvector->first;
                 std::vector<uint32_t> &set_bits = subvector->second;
 
-                size = column->num_set_bits() <= max_bits
-                        ? column->size()
-                        : column->select1(max_bits);
-                common::logger->info("Size: {}, bits: {}", size, max_bits);
+                size = std::min(column->num_set_bits() <= max_bits
+                                    ? column->size()
+                                    : column->select1(max_bits),
+                                std::numeric_limits<uint32_t>::max());
 
                 set_bits.reserve(column->rank1(size));
                 column->call_ones_in_range(0, size,
                     [&](uint64_t i) { set_bits.push_back(i); }
                 );
+
+                common::logger->trace("Subsampled size: {}, set bits: {}, column {}",
+                                      size, set_bits.size(), label);
             }
         });
     };
