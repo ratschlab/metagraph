@@ -72,10 +72,20 @@ int build_graph(Config *config) {
     Timer timer;
 
     if (config->forward_and_reverse) {
-        logger->error("Building a graph from both strands is probably undesired."
-                      " To represent both strands, consider building in canonical"
-                      " or primary mode.");
-        exit(1);
+        switch (config->graph_mode) {
+            case DeBruijnGraph::BASIC:
+                logger->warn("Building a graph from both strands is probably undesired."
+                              " To represent both strands, consider building in canonical"
+                              " or primary mode.");
+                break;
+            case DeBruijnGraph::CANONICAL:
+                config->forward_and_reverse = false;
+                break;
+            case DeBruijnGraph::PRIMARY:
+                logger->error("Passed --fwd-and-reverse but primary graph by"
+                              " definition cannot contain both strands.");
+                exit(1);
+        }
     }
 
     if (config->complete) {
