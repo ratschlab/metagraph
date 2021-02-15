@@ -70,7 +70,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     extend_window_ = { align_start, size - 1 };
     assert(extend_window_[0] == seed_->get_query().back());
 
-    size_t size_per_column = sizeof(Column) + size * (
+    size_t size_per_column = sizeof(size_t) * 2 + sizeof(Column) + size * (
         sizeof(score_t) * 3 + sizeof(AlignNode) * 2 + sizeof(Cigar::Operator) * 3
     );
 
@@ -93,7 +93,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start];
 
-    AlignNode start_node{ graph_.max_index() + 1, 0 };
+    AlignNode start_node{ graph_.max_index() + 1,
+                          seed_->get_sequence()[seed_->get_sequence().size() - 2],
+                          0 };
 
     typedef std::pair<AlignNode, score_t> Ref;
     boost::container::priority_deque<Ref, std::vector<Ref>, utils::LessSecond> best_starts;
@@ -121,7 +123,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (converged)
                 continue;
 
-            auto &column_pair_prev = table_[prev.first];
+            auto &column_pair_prev = table_[std::get<0>(prev)];
 
             score_t xdrop_cutoff = (best_starts.size()
                 ? best_starts.maximum().second
@@ -130,9 +132,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             size_t min_i;
             size_t max_i;
             {
-                const auto &S_prev = std::get<0>(column_pair_prev.first[prev.second]);
-                size_t offset_prev = std::get<9>(column_pair_prev.first[prev.second]);
-                size_t max_pos_prev = std::get<10>(column_pair_prev.first[prev.second]);
+                const auto &S_prev = std::get<0>(column_pair_prev.first[std::get<2>(prev)]);
+                size_t offset_prev = std::get<9>(column_pair_prev.first[std::get<2>(prev)]);
+                size_t max_pos_prev = std::get<10>(column_pair_prev.first[std::get<2>(prev)]);
                 assert(max_pos_prev - offset_prev < S_prev.size());
                 assert(std::max_element(S_prev.begin(), S_prev.end())
                     == S_prev.begin() + (max_pos_prev - offset_prev));
@@ -174,11 +176,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             assert(cur_size + offset <= size);
 
-            AlignNode cur{ next, depth };
+            AlignNode cur{ next, c, depth };
 
             auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
                    prev_node_prev, PS_prev, PF_prev, offset_prev, max_pos_prev]
-                = column_pair_prev.first[prev.second];
+                = column_pair_prev.first[std::get<2>(prev)];
             assert(S_prev.size() + offset_prev <= size);
 
             // compute DELETION scores
@@ -287,11 +289,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         best_starts.pop_maximum();
 
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-            = table_[best_node.first].first[best_node.second];
+            = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
 
         assert(S[max_pos - offset] == max_score);
 
-        if (max_pos < 2 && best_node.first == seed_->back() && !best_node.second) {
+        if (max_pos < 2 && std::get<0>(best_node) == seed_->back() && !std::get<2>(best_node)) {
             callback(Alignment<NodeType>(), 0);
             return;
         }
@@ -302,21 +304,22 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
         size_t pos = max_pos;
         std::vector<NodeType> path;
+        std::string seq;
         NodeType start_node = 0;
         score_t score = max_score;
 
         Cigar::Operator last_op
-            = std::get<3>(table_[best_node.first].first[best_node.second])[pos - offset];
+            = std::get<3>(table_[std::get<0>(best_node)].first[std::get<2>(best_node)])[pos - offset];
         assert(last_op == Cigar::MATCH);
 
         while (true) {
             const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-                = table_[best_node.first].first[best_node.second];
+                = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
 
             assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
 
-            if (pos == 1 && best_node.first == seed_->back()
-                    && !best_node.second
+            if (pos == 1 && std::get<0>(best_node) == seed_->back()
+                    && !std::get<2>(best_node)
                     && OS[pos - offset] == seed_->get_cigar().back().first) {
                 assert(prev == AlignNode(graph_.max_index() + 1, 0));
                 start_node = seed_->back();
@@ -333,9 +336,10 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 case Cigar::MATCH:
                 case Cigar::MISMATCH: {
                     cigar.append(OS[pos - offset]);
-                    path.push_back(best_node.first);
+                    path.push_back(std::get<0>(best_node));
+                    seq += std::get<1>(best_node);
                     assert((OS[pos - offset] == Cigar::MATCH)
-                        == (graph_.get_node_sequence(best_node.first).back()
+                        == (graph_.get_node_sequence(std::get<0>(best_node)).back()
                             == extend_window_[pos - 1]));
                     switch (PS[pos - offset]) {
                         case NONE: { best_node = {}; } break;
@@ -357,10 +361,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 case Cigar::DELETION: {
                     while (last_op == Cigar::DELETION) {
                         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-                            = table_[best_node.first].first[best_node.second];
+                            = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
                         last_op = OF[pos - offset];
                         assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
-                        path.push_back(best_node.first);
+                        path.push_back(std::get<0>(best_node));
+                        seq += std::get<1>(best_node);
                         cigar.append(Cigar::DELETION);
                         switch (PF[pos - offset]) {
                             case NONE: { best_node = {}; } break;
@@ -382,10 +387,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             cigar.append(Cigar::CLIPPED, pos - 1);
 
         std::reverse(cigar.begin(), cigar.end());
-
         std::reverse(path.begin(), path.end());
-        std::string seq;
-        spell_path(graph_, path, seq, graph_.get_k() - 1);
+        std::reverse(seq.begin(), seq.end());
 
         Alignment<NodeType> extension({ extend_window_.data() + pos, max_pos - pos },
                                       std::move(path),
@@ -435,8 +438,8 @@ bool DefaultColumnExtender<NodeType>
     const auto &[S_b, E_b, F_b, OS_b, OE_b, OF_b, prev_b, PS_b, PF_b, offset_b, max_pos_b]
         = column.first[column.first.size() - 2];
 
-    return offset == offset_b && max_pos == max_pos_b && prev.first == prev_b.first
-        && S.size() == S_b.size()
+    return offset == offset_b && max_pos == max_pos_b
+        && std::get<0>(prev) == std::get<0>(prev_b) && S.size() == S_b.size()
         && std::equal(S.begin() + begin, S.begin() + end, S_b.begin() + begin)
         && std::equal(E.begin() + begin, E.begin() + end, E_b.begin() + begin)
         && std::equal(F.begin() + begin, F.begin() + end, F_b.begin() + begin)
@@ -451,10 +454,10 @@ template <typename NodeType>
 std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
 ::get_outgoing(const AlignNode &node) const {
     std::vector<std::pair<NodeType, char>> outgoing;
-    if (node.first == graph_.max_index() + 1) {
+    if (std::get<0>(node) == graph_.max_index() + 1) {
         outgoing.emplace_back(seed_->back(), seed_->get_sequence().back());
     } else {
-        graph_.call_outgoing_kmers(node.first, [&](NodeType next, char c) {
+        graph_.call_outgoing_kmers(std::get<0>(node), [&](NodeType next, char c) {
             if (c != boss::BOSS::kSentinel)
                 outgoing.emplace_back(next, c);
         });

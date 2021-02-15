@@ -69,7 +69,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DBGAlignerConfig &config_;
     std::string_view query_;
 
-    typedef std::pair<NodeType, size_t> AlignNode;
+    typedef std::tuple<NodeType, char, size_t> AlignNode;
 
     enum NodeId : uint8_t {
         NONE,
