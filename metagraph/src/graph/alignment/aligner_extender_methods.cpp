@@ -187,7 +187,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             size_t del_end = S_prev.size() + offset_prev > offset
                 ? std::min({ S_prev.size() + offset_prev - offset,
                              cur_size,
-                             size - offset - 1 })
+                             size - offset })
                 : 0;
 
             size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
@@ -263,33 +263,27 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             max_pos = (max_it - S.begin()) + offset;
             assert(max_pos < size);
 
-            if (offset + cur_size < size && S.back() >= xdrop_cutoff) {
-                size_t old_size = cur_size;
-                cur_size = size - offset;
-                S.resize(cur_size, ninf);
-                E.resize(cur_size, ninf);
-                F.resize(cur_size, ninf);
-                OS.resize(cur_size, Cigar::CLIPPED);
-                OE.resize(cur_size, Cigar::CLIPPED);
-                OF.resize(cur_size, Cigar::CLIPPED);
-                PS.resize(cur_size, NONE);
-                PF.resize(cur_size, NONE);
-                for (size_t i = old_size; i < S.size() && S[i - 1] >= xdrop_cutoff; ++i) {
-                    score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
-                    score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
-                    E[i] = std::max(ins_open, ins_extend);
-                    OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-                    S[i] = std::max({ 0, E[i], F[i] });
-                    if (S[i] > 0 && S[i] == E[i]) {
-                        updated = true;
-                        PS[i] = CUR;
-                        OS[i] = Cigar::INSERTION;
-                    }
-                }
+            while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
+                score_t ins_open = S.back() + config_.gap_opening_penalty;
+                score_t ins_extend = E.back() + config_.gap_extension_penalty;
+                E.push_back(std::max(ins_open, ins_extend));
+                F.push_back(ninf);
+                S.push_back(std::max({ 0, E.back(), F.back() }));
 
-                max_it = S.begin() + (max_pos - offset);
+                OS.push_back(Cigar::CLIPPED);
+                OE.push_back(ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH);
+                OF.push_back(Cigar::CLIPPED);
+
+                PS.push_back(NONE);
+                PF.push_back(NONE);
+                if (S.back() > 0 && S.back() == E.back()) {
+                    updated = true;
+                    PS.back() = CUR;
+                    OS.back() = Cigar::INSERTION;
+                }
             }
 
+            max_it = S.begin() + (max_pos - offset);
             assert(max_it == std::max_element(S.begin(), S.end()));
 
             converged = !updated || has_converged(column_pair, 1, cur_size);
