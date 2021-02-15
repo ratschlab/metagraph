@@ -279,31 +279,31 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 }
             }
 
-            for (size_t i = 0; i < cur_size; ++i) {
 #ifdef __AVX2__
-                if (i + 8 <= cur_size) {
-                    __m256i e_v = _mm256_loadu_si256((__m256i*)&E[i]);
-                    __m256i f_v = _mm256_loadu_si256((__m256i*)&F[i]);
-                    __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
-                    __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(s_v, _mm256_setzero_si256()));
-                    __m128i equal_e = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, e_v));
-                    __m128i equal_f = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, f_v));
+            for (size_t i = 0; i < cur_size; i += 8) {
+                __m256i e_v = _mm256_load_si256((__m256i*)&E[i]);
+                __m256i f_v = _mm256_load_si256((__m256i*)&F[i]);
+                __m256i s_v = _mm256_load_si256((__m256i*)&S[i]);
+                __m128i mask = mm256_cvtepi32_epi8(
+                    _mm256_cmpgt_epi32(s_v, _mm256_setzero_si256())
+                );
+                __m128i equal_e = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, e_v));
+                __m128i equal_f = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, f_v));
 
-                    __m128i ps_v = _mm_blendv_epi8(_mm_set1_epi8(PREV), _mm_set1_epi8(CUR), equal_e);
-                    mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
+                __m128i ps_v = _mm_blendv_epi8(_mm_set1_epi8(PREV),
+                                               _mm_set1_epi8(CUR),
+                                               equal_e);
+                mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
 
-                    __m128i os_v = _mm_blendv_epi8(
-                        mm_loadu_si64(&profile_op_[c][start + i + offset - 1]),
-                        _mm_set1_epi8(Cigar::DELETION),
-                        equal_f
-                    );
-                    os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
-                    mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
-
-                    i += 7;
-                    continue;
-                }
-#endif
+                __m128i os_v = _mm_blendv_epi8(
+                    mm_loadu_si64(&profile_op_[c][start + i + offset - 1]),
+                    _mm_set1_epi8(Cigar::DELETION),
+                    equal_f
+                );
+                os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
+                mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
+#else
+            for (size_t i = 0; i < cur_size; ++i) {
                 if (S[i] > 0) {
                     if (S[i] == E[i]) {
                         PS[i] = CUR;
@@ -318,6 +318,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         OS[i] = profile_op_[c][start + i + offset - 1];
                     }
                 }
+#endif
             }
 
             auto max_it = std::max_element(S.begin(), S.end());
