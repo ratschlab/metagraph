@@ -203,6 +203,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 = column_prev[std::get<2>(prev)];
             assert(S_prev.size() + offset_prev <= size);
 
+            // compute deletion score vector
             size_t del_begin = offset_prev > offset ? offset_prev - offset : 0;
             size_t del_end = S_prev.size() + offset_prev > offset
                 ? std::min({ S_prev.size() + offset_prev - offset,
@@ -248,6 +249,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
             }
 
+            // compute match/mismatch and insertion score vectors
             size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
             size_t match_end = S_prev.size() + offset_prev + 1 >= offset
                 ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
@@ -279,6 +281,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 }
             }
 
+            // compute traceback vectors
 #ifdef __AVX2__
             for (size_t i = 0; i < cur_size; i += 8) {
                 __m256i e_v = _mm256_load_si256((__m256i*)&E[i]);
@@ -321,10 +324,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 #endif
             }
 
-            auto max_it = std::max_element(S.begin(), S.end());
-            max_pos = (max_it - S.begin()) + offset;
-            assert(max_pos < size);
-
+            // extend to the right with insertion scores
             while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
                 score_t ins_open = S.back() + config_.gap_opening_penalty;
                 score_t ins_extend = E.back() + config_.gap_extension_penalty;
@@ -345,8 +345,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 }
             }
 
-            max_it = S.begin() + (max_pos - offset);
-            assert(max_it == std::max_element(S.begin(), S.end()));
+            auto max_it = std::max_element(S.begin(), S.end());
+            max_pos = (max_it - S.begin()) + offset;
+            assert(max_pos < size);
 
             converged = !updated || has_converged(column_pair, 1, cur_size);
 
