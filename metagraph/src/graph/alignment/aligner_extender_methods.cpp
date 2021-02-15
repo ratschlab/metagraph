@@ -195,7 +195,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
                 : 0;
 
-
+            bool updated = false;
             for (size_t i = 0; i < cur_size; ++i) {
                 score_t del_score = ninf;
                 Cigar::Operator del_op = Cigar::CLIPPED;
@@ -230,27 +230,31 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
                 match_score = std::max({ 0, match_score, ins_score, del_score });
 
-                E[i] = ins_score;
-                F[i] = del_score;
-                S[i] = match_score;
+                if (match_score >= xdrop_cutoff) {
+                    E[i] = ins_score;
+                    F[i] = del_score;
+                    S[i] = match_score;
 
-                OE[i] = ins_op;
-                OF[i] = del_op;
+                    OE[i] = ins_op;
+                    OF[i] = del_op;
 
-                PF[i] = del_prev;
+                    PF[i] = del_prev;
 
-                if (S[i] > 0) {
-                    if (S[i] == E[i]) {
-                        PS[i] = CUR;
-                        OS[i] = Cigar::INSERTION;
-                    } else if (S[i] == F[i]) {
-                        PS[i] = PREV;
-                        OS[i] = Cigar::DELETION;
-                    } else {
-                        assert(i + offset >= offset_prev + 1
-                            && i + offset - offset_prev - 1 < S_prev.size());
-                        PS[i] = PREV;
-                        OS[i] = profile_op_[c][start + i + offset - 1];
+                    if (S[i] > 0) {
+                        updated = true;
+                        xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
+                        if (S[i] == E[i]) {
+                            PS[i] = CUR;
+                            OS[i] = Cigar::INSERTION;
+                        } else if (S[i] == F[i]) {
+                            PS[i] = PREV;
+                            OS[i] = Cigar::DELETION;
+                        } else {
+                            assert(i + offset >= offset_prev + 1
+                                && i + offset - offset_prev - 1 < S_prev.size());
+                            PS[i] = PREV;
+                            OS[i] = profile_op_[c][start + i + offset - 1];
+                        }
                     }
                 }
             }
@@ -259,40 +263,36 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             max_pos = (max_it - S.begin()) + offset;
             assert(max_pos < size);
 
-            if (offset + cur_size < size) {
-                xdrop_cutoff = std::max(
-                    best_starts.size() ? best_starts.maximum().second : 0,
-                    *max_it) - config_.xdrop;
-                if (S.back() >= xdrop_cutoff) {
-                    size_t old_size = cur_size;
-                    cur_size = size - offset;
-                    S.resize(cur_size, ninf);
-                    E.resize(cur_size, ninf);
-                    F.resize(cur_size, ninf);
-                    OS.resize(cur_size, Cigar::CLIPPED);
-                    OE.resize(cur_size, Cigar::CLIPPED);
-                    OF.resize(cur_size, Cigar::CLIPPED);
-                    PS.resize(cur_size, NONE);
-                    PF.resize(cur_size, NONE);
-                    for (size_t i = old_size; i < S.size() && S[i - 1] >= xdrop_cutoff; ++i) {
-                        score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
-                        score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
-                        E[i] = std::max(ins_open, ins_extend);
-                        OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-                        S[i] = std::max({ 0, E[i], F[i] });
-                        if (S[i] > 0 && S[i] == E[i]) {
-                            PS[i] = CUR;
-                            OS[i] = Cigar::INSERTION;
-                        }
+            if (offset + cur_size < size && S.back() >= xdrop_cutoff) {
+                size_t old_size = cur_size;
+                cur_size = size - offset;
+                S.resize(cur_size, ninf);
+                E.resize(cur_size, ninf);
+                F.resize(cur_size, ninf);
+                OS.resize(cur_size, Cigar::CLIPPED);
+                OE.resize(cur_size, Cigar::CLIPPED);
+                OF.resize(cur_size, Cigar::CLIPPED);
+                PS.resize(cur_size, NONE);
+                PF.resize(cur_size, NONE);
+                for (size_t i = old_size; i < S.size() && S[i - 1] >= xdrop_cutoff; ++i) {
+                    score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
+                    score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
+                    E[i] = std::max(ins_open, ins_extend);
+                    OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
+                    S[i] = std::max({ 0, E[i], F[i] });
+                    if (S[i] > 0 && S[i] == E[i]) {
+                        updated = true;
+                        PS[i] = CUR;
+                        OS[i] = Cigar::INSERTION;
                     }
-
-                    max_it = S.begin() + (max_pos - offset);
                 }
+
+                max_it = S.begin() + (max_pos - offset);
             }
 
             assert(max_it == std::max_element(S.begin(), S.end()));
 
-            converged = has_converged(column_pair, 1, cur_size);
+            converged = !updated || has_converged(column_pair, 1, cur_size);
 
             if (best_starts.size() < config_.num_alternative_paths) {
                 best_starts.emplace(cur, *max_it);
@@ -304,7 +304,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 == config_.match_score(extend_window_.substr(max_pos)));
             score_t score_rest = *max_it + match_score_begin_[max_pos];
 
-            xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
+            assert(xdrop_cutoff == best_starts.maximum().second - config_.xdrop);
 
             if (*max_it >= xdrop_cutoff && score_rest >= min_seed_score)
                 stack.emplace(Ref{ cur, *max_it });
