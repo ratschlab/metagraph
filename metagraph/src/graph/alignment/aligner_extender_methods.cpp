@@ -184,7 +184,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             // compute DELETION scores
             size_t begin = offset_prev > offset ? offset_prev - offset : 0;
             size_t end = S_prev.size() + offset_prev > offset
-                ? std::min(S_prev.size() + offset_prev - offset, cur_size)
+                ? std::min({ S_prev.size() + offset_prev - offset,
+                             cur_size,
+                             size - offset - 1 })
                 : 0;
             for (size_t i = begin; i < end; ++i) {
                 score_t del_open = S_prev[i + offset - offset_prev]
