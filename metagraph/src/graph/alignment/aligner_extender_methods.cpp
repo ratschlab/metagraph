@@ -123,7 +123,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (converged)
                 continue;
 
-            auto &column_pair_prev = table_[std::get<0>(prev)];
+            auto &column_prev = table_[std::get<0>(prev)].first;
 
             score_t xdrop_cutoff = (best_starts.size()
                 ? best_starts.maximum().second
@@ -132,9 +132,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             size_t min_i;
             size_t max_i;
             {
-                const auto &S_prev = std::get<0>(column_pair_prev.first[std::get<2>(prev)]);
-                size_t offset_prev = std::get<9>(column_pair_prev.first[std::get<2>(prev)]);
-                size_t max_pos_prev = std::get<10>(column_pair_prev.first[std::get<2>(prev)]);
+                const auto &S_prev = std::get<0>(column_prev[std::get<2>(prev)]);
+                size_t offset_prev = std::get<9>(column_prev[std::get<2>(prev)]);
+                size_t max_pos_prev = std::get<10>(column_prev[std::get<2>(prev)]);
                 assert(max_pos_prev - offset_prev < S_prev.size());
                 assert(std::max_element(S_prev.begin(), S_prev.end())
                     == S_prev.begin() + (max_pos_prev - offset_prev));
@@ -180,7 +180,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
                    prev_node_prev, PS_prev, PF_prev, offset_prev, max_pos_prev]
-                = column_pair_prev.first[std::get<2>(prev)];
+                = column_prev[std::get<2>(prev)];
             assert(S_prev.size() + offset_prev <= size);
 
             // compute DELETION scores
@@ -293,7 +293,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
         assert(S[max_pos - offset] == max_score);
 
-        if (max_pos < 2 && std::get<0>(best_node) == seed_->back() && !std::get<2>(best_node)) {
+        if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
+                && !std::get<2>(best_node)) {
             callback(Alignment<NodeType>(), 0);
             return;
         }
@@ -308,8 +309,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         NodeType start_node = 0;
         score_t score = max_score;
 
-        Cigar::Operator last_op
-            = std::get<3>(table_[std::get<0>(best_node)].first[std::get<2>(best_node)])[pos - offset];
+        Cigar::Operator last_op = std::get<3>(
+            table_[std::get<0>(best_node)].first[std::get<2>(best_node)])[pos - offset];
         assert(last_op == Cigar::MATCH);
 
         while (true) {
