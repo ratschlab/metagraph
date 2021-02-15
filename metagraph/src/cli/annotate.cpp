@@ -13,6 +13,8 @@
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 
+#include <sdsl/int_vector.hpp>
+
 
 namespace mtg {
 namespace cli {
@@ -281,20 +283,35 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     thread_pool.join();
 
     if (config.taxonomic_tree.size()) {
-        tsl::hopscotch_map<std::uint64_t, std::uint64_t> taxonomic_map;
-        std::mutex taxo_mutex;
+        Timer timer_update_taxonomic_map;
+        sdsl::int_vector<> taxonomic_map(graph->max_index(), 0, sizeof(annot::MultiLabelEncoded<std::string>::Index));
 
-        graph->call_kmers([&](auto index, const std::string&) {
+        std::mutex taxo_mutex;
+        auto &annotation = anno_graph->get_annotation();
+        auto &all_labels = annotation.get_all_labels();
+
+        for (const auto &label: all_labels) {
             thread_pool.enqueue([&]() {
-                const auto &labels = anno_graph->get_annotation().get(index);
-                uint64_t lca = 0;
-                if (taxonomy->find_lca(labels, lca)) {
-                    std::lock_guard<std::mutex> lock(taxo_mutex);
-                    taxonomic_map[index] = lca;
-                }
+                annotation.call_objects(label, [&](const auto &index) {
+                    uint64_t taxid;
+                    if(!taxonomy->get_normalized_taxid(label, taxid)) {
+                        return;
+                    }
+
+                    if (taxonomic_map[index] == 0) {
+                        std::lock_guard<std::mutex> lock(taxo_mutex);
+                        taxonomic_map[index] = taxid;
+                    } else {
+                        auto lca = taxonomy->find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
+                        std::lock_guard<std::mutex> lock(taxo_mutex);
+                        taxonomic_map[index] = lca;
+                    }
+                });
             });
-        });
+        }
         thread_pool.join();
+        logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
+
         taxonomy->export_to_file(config.outfbase + ".taxo", taxonomic_map);
     }
     anno_graph->get_annotation().serialize(annotator_filename);

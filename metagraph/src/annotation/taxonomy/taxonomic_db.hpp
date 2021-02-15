@@ -3,7 +3,6 @@
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
-#include "common/unix_tools.hpp"
 
 #include "annotation/representation/base/annotation.hpp"
 
@@ -68,8 +67,6 @@ class TaxonomyDB {
     tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
     std::vector<TaxId> denormalized_taxid;
 
-    Timer timer_update_taxonomic_map;
-
     /**
      * Reads and returns the taxonomic tree
      *
@@ -117,8 +114,6 @@ class TaxonomyDB {
     void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                         std::vector<NormalizedTaxId> &tree_linearization);
 
-    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
-
   public:
     /**
      * Constructs a TaxonomyDB
@@ -136,14 +131,15 @@ class TaxonomyDB {
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath,
-                        tsl::hopscotch_map<KmerId, NormalizedTaxId> &taxonomic_map);
-    bool find_lca(const std::vector<std::string> &fasta_headers,
-                  NormalizedTaxId &lca);
+                        sdsl::int_vector<> &taxonomic_map);
+    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
+
+    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid);
 
   private:
-    // num_external_lca_calls and num_external_lca_calls_failed used only for logging purposes.
-    uint64_t num_external_lca_calls;
-    uint64_t num_external_lca_calls_failed;
+    // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
+    uint64_t num_external_get_taxid_calls;
+    uint64_t num_external_get_taxid_calls_failed;
 };
 
 }
