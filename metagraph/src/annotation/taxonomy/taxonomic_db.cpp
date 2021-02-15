@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <sdsl/int_vector.hpp>
+
 #include "common/serialization.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "common/utils/string_utils.hpp"
@@ -229,45 +231,21 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
     return right_lca;
 }
 
-bool TaxonomyDB::find_lca(const std::vector<std::string> &fasta_headers,
-                          NormalizedTaxId &lca) {
-    num_external_lca_calls += 1;
-    std::vector<NormalizedTaxId> taxids;
-    for (const auto &label: fasta_headers) {
-        std::string accession_version = utils::split_string(label, "|")[3];
-        if (! lookup_table.count(accession_version)) {
-            logger->warn("Accession version {} cannot be found in the lookup_table.",
-                         accession_version);
-            num_external_lca_calls_failed += 1;
-            return false;
-        }
-        taxids.push_back(normalized_taxid[lookup_table[accession_version]]);
+bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) {
+    num_external_get_taxid_calls += 1;
+    if (! lookup_table.count(accession_version)) {
+        num_external_get_taxid_calls_failed += 1;
+        return false;
     }
-    lca = find_lca(taxids);
+    taxid = normalized_taxid[lookup_table[accession_version]];
     return true;
 }
 
-NormalizedTaxId TaxonomyDB::find_lca(const NormalizedTaxId &taxid1, const NormalizedTaxId &taxid2) {
-    return find_lca(std::vector<NormalizedTaxId> {taxid1, taxid2});
-}
-
-void TaxonomyDB::update_taxonomic_map(const std::vector<KmerId> &kmers,
-                                      const NormalizedTaxId &lca) {
-    std::mutex taxo_mutex;
-    std::lock_guard<std::mutex> lock(taxo_mutex);
-    for (const auto &kmer: kmers) {
-        if (taxonomic_map.count(kmer)) {
-            taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca);
-        } else {
-            taxonomic_map[kmer] = lca;
-        }
-    }
-}
-
-void TaxonomyDB::export_to_file(const std::string &filepath) {
-    if (num_external_lca_calls_failed) {
+void TaxonomyDB::export_to_file(const std::string &filepath,
+                                sdsl::int_vector<> &taxonomic_map) {
+    if (num_external_get_taxid_calls_failed) {
         logger->warn("Total number external LCA calls: {} from which nonexistent accession versions: {}",
-                     num_external_lca_calls, num_external_lca_calls_failed);
+                     num_external_get_taxid_calls, num_external_get_taxid_calls_failed);
     }
 
     Timer timer;
@@ -280,11 +258,11 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     }
 
     // Denormalize taxids in taxonomic map.
-    for (auto &it: taxonomic_map) {
-        taxonomic_map[it.first] = denormalized_taxid[it.second];
+    for (size_t i = 0; i < taxonomic_map.size(); ++i) {
+        taxonomic_map[i] = denormalized_taxid[taxonomic_map[i]];
     }
     assert(taxonomic_map.size());
-    serialize_number_number_map(f, taxonomic_map);
+    taxonomic_map.serialize(f);
 
     const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
 
