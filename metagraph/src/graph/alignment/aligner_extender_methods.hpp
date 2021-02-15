@@ -93,6 +93,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual const DBGAlignment& get_seed() const override { return *seed_; }
 
+    virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const;
+
   private:
     // compute perfect match scores for all suffixes
     // used for branch and bound checks

@@ -115,17 +115,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size())
             break;
 
-        std::vector<std::pair<NodeType, char>> outgoing;
-        if (prev.first == graph_.max_index() + 1) {
-            outgoing.emplace_back(seed_->back(), seed_->get_sequence().back());
-        } else {
-            graph_.call_outgoing_kmers(prev.first, [&](NodeType next, char c) {
-                if (c != boss::BOSS::kSentinel)
-                    outgoing.emplace_back(next, c);
-            });
-        }
-
-        for (const auto &[next, c] : outgoing) {
+        for (const auto &[next, c] : get_outgoing(prev)) {
             auto &column_pair = table_[next];
             auto &[column, converged] = column_pair;
             if (converged)
@@ -453,6 +443,22 @@ bool DefaultColumnExtender<NodeType>
         && std::equal(OF.begin() + begin, OF.begin() + end, OF_b.begin() + begin)
         && std::equal(PS.begin() + begin, PS.begin() + end, PS_b.begin() + begin)
         && std::equal(PF.begin() + begin, PF.begin() + end, PF_b.begin() + begin);
+}
+
+template <typename NodeType>
+std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
+::get_outgoing(const AlignNode &node) const {
+    std::vector<std::pair<NodeType, char>> outgoing;
+    if (node.first == graph_.max_index() + 1) {
+        outgoing.emplace_back(seed_->back(), seed_->get_sequence().back());
+    } else {
+        graph_.call_outgoing_kmers(node.first, [&](NodeType next, char c) {
+            if (c != boss::BOSS::kSentinel)
+                outgoing.emplace_back(next, c);
+        });
+    }
+
+    return outgoing;
 }
 
 template class DefaultColumnExtender<>;
