@@ -123,7 +123,7 @@ double inner_prod(const SparseColumn &first, const SparseColumn &second) {
         }
     }
 
-    return (double)prod / std::min(size_1, size_2);
+    return static_cast<double>(prod) / std::min(size_1, size_2);
 }
 
 template <class T>
