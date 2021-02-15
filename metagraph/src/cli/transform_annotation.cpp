@@ -270,15 +270,9 @@ int transform_annotation(Config *config) {
         }
 
         // arrange the columns in their original order
-        std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
-        permuted.swap(subcolumn_ptrs);
-        for (size_t i = 0; i < column_ids.size(); ++i) {
-            subcolumn_ptrs[column_ids[i]] = std::move(permuted[i]);
-        }
-
         std::vector<sdsl::bit_vector> subcolumns;
-        for (auto &col_ptr : subcolumn_ptrs) {
-            subcolumns.push_back(std::move(*col_ptr));
+        for (size_t i = 0; i < column_ids.size(); ++i) {
+            subcolumns[column_ids[i]] = std::move(*subcolumn_ptrs[i]);
         }
 
         binmat::LinkageMatrix linkage_matrix
