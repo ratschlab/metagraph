@@ -17,8 +17,6 @@ using mtg::common::logger;
 typedef std::vector<std::vector<uint64_t>> Partition;
 typedef std::vector<const bit_vector *> VectorPtrs;
 
-typedef std::pair<uint32_t, std::vector<uint32_t>> SparseColumn;
-
 
 std::vector<sdsl::bit_vector>
 get_submatrix(const VectorPtrs &columns,

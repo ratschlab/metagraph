@@ -14,6 +14,8 @@ namespace binmat {
 
 typedef Eigen::Matrix<uint64_t, Eigen::Dynamic, 4> LinkageMatrix;
 
+typedef std::pair<uint32_t, std::vector<uint32_t>> SparseColumn;
+
 // Clustering of columns for Multi-BRWT
 
 // input: columns, where each column `T` is either `sdsl::bit_vector` or

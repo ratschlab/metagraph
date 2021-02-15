@@ -41,12 +41,12 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
 }
 
-std::vector<sdsl::bit_vector>
-sample_subcolumns(const std::vector<std::string> &files,
-                  Config::AnnotationType anno_type,
-                  uint64_t num_rows_subsampled) {
+template <class T>
+binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
+                                      Config::AnnotationType anno_type,
+                                      uint64_t num_rows_subsampled) {
     std::vector<uint64_t> row_indexes;
-    std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
+    std::vector<std::unique_ptr<T>> subcolumn_ptrs;
     std::vector<uint64_t> column_ids;
     uint64_t num_rows = 0;
 
@@ -56,27 +56,48 @@ sample_subcolumns(const std::vector<std::string> &files,
     auto on_column = [&](uint64_t i, const std::string &label,
                          std::unique_ptr<bit_vector> &&column) {
         subsampling_pool.enqueue([&, i, label, column{std::move(column)}]() {
-            sdsl::bit_vector *subvector;
+            T *subvector;
             #pragma omp critical
             {
                 if (row_indexes.empty()) {
                     num_rows = column->size();
-                    row_indexes = binmat::sample_row_indexes(num_rows, num_rows_subsampled);
+                    if (std::is_same_v<T, sdsl::bit_vector>)
+                        row_indexes = binmat::sample_row_indexes(num_rows,
+                                                                 num_rows_subsampled);
                 } else if (column->size() != num_rows) {
                     logger->error("Size of column {} is {} != {}", label,
                                   column->size(), num_rows);
                     exit(1);
                 }
-                subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
+                subcolumn_ptrs.emplace_back(new T());
                 subvector = subcolumn_ptrs.back().get();
                 column_ids.push_back(i);
                 logger->trace("Column {}: {}", i, label);
             }
 
-            *subvector = sdsl::bit_vector(row_indexes.size(), false);
-            for (size_t j = 0; j < row_indexes.size(); ++j) {
-                if ((*column)[row_indexes[j]])
-                    (*subvector)[j] = true;
+            if constexpr(std::is_same_v<T, sdsl::bit_vector>) {
+                *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                for (size_t j = 0; j < row_indexes.size(); ++j) {
+                    if ((*column)[row_indexes[j]])
+                        (*subvector)[j] = true;
+                }
+            } else {
+                static_assert(std::is_same_v<T, binmat::SparseColumn>);
+                // allocate the same space as for bitmap
+                const uint64_t max_bits = num_rows_subsampled / 32;
+
+                uint32_t &size = subvector->first;
+                std::vector<uint32_t> &set_bits = subvector->second;
+
+                size = column->num_set_bits() <= max_bits
+                        ? column->size()
+                        : column->select1(max_bits);
+                common::logger->info("Size: {}, bits: {}", size, max_bits);
+
+                set_bits.reserve(column->rank1(size));
+                column->call_ones_in_range(0, size,
+                    [&](uint64_t i) { set_bits.push_back(i); }
+                );
             }
         });
     };
@@ -94,12 +115,12 @@ sample_subcolumns(const std::vector<std::string> &files,
     }
 
     // arrange the columns in their original order
-    std::vector<sdsl::bit_vector> subcolumns(subcolumn_ptrs.size());
+    std::vector<T> subcolumns(subcolumn_ptrs.size());
     for (size_t i = 0; i < column_ids.size(); ++i) {
         subcolumns.at(column_ids[i]) = std::move(*subcolumn_ptrs[i]);
     }
 
-    return subcolumns;
+    return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
 }
 
 int transform_annotation(Config *config) {
@@ -279,12 +300,12 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation and sampling subcolumns of size {}",
                       config->num_rows_subsampled);
 
-        std::vector<sdsl::bit_vector> subcolumns
-            = sample_subcolumns(files, input_anno_type, config->num_rows_subsampled);
-
         binmat::LinkageMatrix linkage_matrix
-                = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
-                                                       get_num_threads());
+            = config->fast
+                ? cluster_columns<sdsl::bit_vector>(files, input_anno_type,
+                                                    config->num_rows_subsampled)
+                : cluster_columns<binmat::SparseColumn>(files, input_anno_type,
+                                                        config->num_rows_subsampled);
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
