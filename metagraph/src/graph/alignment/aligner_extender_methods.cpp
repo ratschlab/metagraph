@@ -404,15 +404,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                       seed_->get_orientation(),
                                       graph_.get_k() - 1);
 
-        if (!extension.is_valid(graph_, &config_)) {
-            std::cerr << "Seed: " << *seed_;
-            if (start_node)
-                std::cerr << " " << start_node;
-
-            std::cerr << std::endl;
-            throw std::runtime_error("Internal error: invalid extension");
-        }
-
+        assert(extension.is_valid(graph_, &config_));
         callback(std::move(extension), start_node);
     }
 }
