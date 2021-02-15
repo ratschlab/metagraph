@@ -62,11 +62,6 @@ class TaxonomyDB {
     std::vector<uint64_t> precalc_pow2;
 
     /**
-     * taxonomic_map returns the taxid LCA for a given kmer.
-     */
-    tsl::hopscotch_map<KmerId, NormalizedTaxId> taxonomic_map;
-
-    /**
      * Maps taxid to its normalized index. Used for optimizing the runtime performance.
      */
     tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
@@ -119,9 +114,6 @@ class TaxonomyDB {
     void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                         std::vector<NormalizedTaxId> &tree_linearization);
 
-    NormalizedTaxId find_lca(const NormalizedTaxId &taxid1, const NormalizedTaxId &taxid2);
-    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
-
   public:
     /**
      * Constructs a TaxonomyDB
@@ -135,27 +127,19 @@ class TaxonomyDB {
                const std::string &fasta_headers_filepath);
 
     /**
-     * Update the corresponding "this->taxonomic_map" for each received kmer with
-     * the new data: taxonomic_map[kmer] = find_lca(taxonomic_map[kmer], lca).
-     *
-     * @param [input] kmers - list of kmers found in the processed contig.
-     * @param [input] lca - taxid corresponding to the LCA of all the accession versions in the processed contig.
-     */
-    void update_taxonomic_map(const std::vector<KmerId> &kmers,
-                              const NormalizedTaxId &lca);
-
-    /**
-     * Exports 'this->taxonomic_map' and the taxonomic tree (as parent list)
+     * Exports 'taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.
      */
-    void export_to_file(const std::string &filepath);
-    bool find_lca(const std::vector<std::string> &fasta_headers,
-                  NormalizedTaxId &lca);
+    void export_to_file(const std::string &filepath,
+                        sdsl::int_vector<> &taxonomic_map);
+    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
+
+    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid);
 
   private:
-    // num_external_lca_calls and num_external_lca_calls_failed used only for logging purposes.
-    uint64_t num_external_lca_calls;
-    uint64_t num_external_lca_calls_failed;
+    // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
+    uint64_t num_external_get_taxid_calls;
+    uint64_t num_external_get_taxid_calls_failed;
 };
 
 }
