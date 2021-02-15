@@ -92,7 +92,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                 size = std::min(column->num_set_bits() <= max_bits
                                     ? column->size()
                                     : column->select1(max_bits),
-                                std::numeric_limits<uint32_t>::max());
+                                (uint64_t)std::numeric_limits<uint32_t>::max());
 
                 set_bits.reserve(column->rank1(size));
                 column->call_ones_in_range(0, size,
