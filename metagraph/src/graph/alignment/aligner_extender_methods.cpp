@@ -39,15 +39,15 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     partial_sums_.push_back(0);
 
     for (char c : graph_.alphabet()) {
-        auto &score_row = profile_score_.emplace(c, query_.size() + 8).first.value();
-        auto &op_row = profile_op_.emplace(c, query_.size() + 8).first.value();
+        auto &p_score_row = profile_score_.emplace(c, query_.size() + 8).first.value();
+        auto &p_op_row = profile_op_.emplace(c, query_.size() + 8).first.value();
 
         const auto &row = config_.get_row(c);
         const auto &op_row = Cigar::get_op_row(c);
 
-        std::transform(query_.begin(), query_.end(), score_row.begin(),
+        std::transform(query_.begin(), query_.end(), p_score_row.begin(),
                        [&row](char q) { return row[q]; });
-        std::transform(query_.begin(), query_.end(), op_row.begin(),
+        std::transform(query_.begin(), query_.end(), p_op_row.begin(),
                        [&op_row](char q) { return op_row[q]; });
     }
 }
