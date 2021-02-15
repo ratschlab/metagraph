@@ -107,9 +107,13 @@ double inner_prod(const SparseColumn &first, const SparseColumn &second) {
     auto it_1 = col_1.begin();
     auto it_2 = col_2.begin();
 
+    if (!size_1 || !size_2)
+        throw std::runtime_error("Vector size must be non-zero");
+
     uint64_t prod = 0;
 
     while (it_1 != col_1.end() && it_2 != col_2.end()) {
+        assert(*it_1 < size_1 && *it_2 < size_2);
         if (*it_1 < *it_2) {
             ++it_1;
         } else if (*it_1 > *it_2) {
