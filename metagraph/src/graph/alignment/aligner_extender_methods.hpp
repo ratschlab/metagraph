@@ -70,11 +70,18 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     std::string_view query_;
 
     typedef std::pair<NodeType, size_t> AlignNode;
+
+    enum NodeId : uint8_t {
+        NONE,
+        PREV,
+        CUR
+    };
+
     typedef AlignedVector<score_t> ScoreVec;
-    typedef AlignedVector<AlignNode> PrevVec;
+    typedef AlignedVector<NodeId> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
     typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                       OpVec, OpVec, OpVec,
+                       OpVec, OpVec, OpVec, AlignNode,
                        PrevVec, PrevVec,
                        size_t /* offset */,
                        size_t /* max_pos */> Scores;
