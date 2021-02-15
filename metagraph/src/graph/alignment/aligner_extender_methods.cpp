@@ -332,7 +332,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (pos == 1 && std::get<0>(best_node) == seed_->back()
                     && !std::get<2>(best_node)
                     && OS[pos - offset] == seed_->get_cigar().back().first) {
-                assert(prev == AlignNode(graph_.max_index() + 1, 0));
+                assert(std::get<0>(prev) == graph_.max_index() + 1);
                 start_node = seed_->back();
                 score -= seed_->get_score();
                 break;
