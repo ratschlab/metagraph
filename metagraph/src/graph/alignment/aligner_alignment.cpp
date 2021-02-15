@@ -1,7 +1,10 @@
-#include "aligner_helper.hpp"
+#include "aligner_alignment.hpp"
 
+#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 namespace mtg {
@@ -19,22 +22,13 @@ Alignment<NodeType>::Alignment(std::string_view query,
                                size_t clipping,
                                bool orientation,
                                size_t offset)
-      : query_begin_(query.data()),
-        query_end_(query.data() + query.size()),
-        nodes_(std::move(nodes)),
-        sequence_(std::move(sequence)),
-        score_(score),
-        orientation_(orientation),
-        offset_(offset) {
-    assert(query_begin_);
-    assert(query_end_);
-
-    size_t query_size = query_end_ - query_begin_;
-    size_t min_length = std::min(query_size, sequence_.size());
+      : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
+        score_(score), orientation_(orientation), offset_(offset) {
+    size_t min_length = std::min(query_.size(), sequence_.size());
 
     cigar_ = std::inner_product(
-        query_begin_,
-        query_begin_ + min_length,
+        query_.data(),
+        query_.data() + min_length,
         sequence_.c_str(),
         Cigar(Cigar::CLIPPED, clipping),
         [&](Cigar &cigar, bool equal) -> Cigar& {
@@ -44,8 +38,8 @@ Alignment<NodeType>::Alignment(std::string_view query,
         std::equal_to<char>()
     );
 
-    assert(!(query_size - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::INSERTION, query_size - min_length);
+    assert(!(query_.size() - min_length) || (sequence_.size() - min_length));
+    cigar_.append(Cigar::INSERTION, query_.size() - min_length);
     cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
 }
 
@@ -58,10 +52,7 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
                                size_t offset,
                                NodeType *start_node,
                                const Alignment &seed)
-      : query_begin_(NULL),
-        query_end_(NULL),
-        orientation_(seed.get_orientation()),
-        offset_(offset) {
+      : orientation_(seed.get_orientation()), offset_(offset) {
     assert(start_node);
 
     auto i = start_pos;
@@ -218,11 +209,9 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
     cigar_.append(Cigar::CLIPPED, i);
     assert(cigar_.size());
 
-    query_begin_ = query_view.data() + i;
-    query_end_ = query_view.data() + start_pos;
+    query_ = { query_view.data() + i, start_pos - i };
 
     std::reverse(cigar_.begin(), cigar_.end());
-
 
     nodes_.resize(out_columns.size());
     std::transform(out_columns.rbegin(),
@@ -251,7 +240,7 @@ Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
 
 template <typename NodeType>
 void Alignment<NodeType>::append(Alignment&& other) {
-    assert(query_end_ == other.query_begin_);
+    assert(query_.data() + query_.size() == other.query_.data());
     assert(orientation_ == other.orientation_);
     assert(cigar_.empty() || cigar_.back().first != Cigar::CLIPPED);
 
@@ -260,7 +249,7 @@ void Alignment<NodeType>::append(Alignment&& other) {
     score_ += other.score_;
 
     cigar_.append(std::move(other.cigar_));
-    query_end_ = other.query_end_;
+    query_ = { query_.data(), query_.size() + other.query_.size() };
 }
 
 template <typename NodeType>
@@ -309,8 +298,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
     if (empty())
         return;
 
-    assert(query_end_ + get_end_clipping()
-        == query_begin_ - get_clipping() + query_rev_comp.size());
+    assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
     assert(is_valid(graph));
 
     trim_offset();
@@ -321,74 +309,109 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
     } else {
         assert(nodes_.size() == 1);
         // extract target sequence prefix
-        std::string rev_seq = graph.get_node_sequence(nodes_.front()).substr(0, offset_)
-            + sequence_;
+        sequence_ = graph.get_node_sequence(nodes_[0]).substr(0, offset_) + sequence_;
 
-        // if the alignment starts from a source k-mer, then traverse forwards
-        // until a non-dummy k-mer is hit and check if its reverse complement exists
-        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-        if (dbg_succ && rev_seq[0] == boss::BOSS::kSentinel) {
-            const auto &boss = dbg_succ->get_boss();
-            assert(rev_seq.length() == graph.get_k());
-            auto edge = dbg_succ->kmer_to_boss_index(nodes_.back());
-            auto edge_label = boss.get_W(edge) % boss.alph_size;
+        if (sequence_[0] == boss::BOSS::kSentinel) {
+            // If the alignment starts from a source k-mer, then traverse forwards
+            // until a non-dummy k-mer is hit and check if its reverse complement exists.
 
-            // TODO: for efficiency, the last outgoing edge is taken at each step.
-            // This is valid for canonical graphs since the reverse complement of
-            // the found non-dummy k-mer is guaranteed to exist, but this node may
-            // not exist in a non-canonical graph.
-            for (size_t i = 0; i < offset_; ++i) {
+            // An appropriate node may not exist if offset_ is greater than the
+            // number of sentinel characters (i.e., if some non-sentinel characters
+            // from the node prefix are not included).
+
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(
+                canonical ? canonical->get_graph() : graph
+            );
+
+            size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
+            assert(offset_ >= num_sentinels);
+
+            if (canonical && nodes_[0] != canonical->get_base_node(nodes_[0])) {
+                // reverse complement of a sink dummy k-mer, no point in traversing
+                assert(num_sentinels == 1);
+                *this = Alignment();
+                return;
+            }
+
+            size_t num_first_steps = canonical ? std::min(offset_, num_sentinels) : offset_;
+
+            // the node is present in the underlying graph, so use
+            // lower-level methods
+            const auto &boss = dbg_succ.get_boss();
+            boss::BOSS::edge_index edge = dbg_succ.kmer_to_boss_index(nodes_[0]);
+            boss::BOSS::TAlphabet edge_label = boss.get_W(edge) % boss.alph_size;
+
+            // TODO: This picks the node which is found by always traversing
+            // the last outgoing edge. Is there a better way to pick a node?
+            for (size_t i = 0; i < num_first_steps; ++i) {
                 edge = boss.fwd(edge, edge_label);
                 edge_label = boss.get_W(edge) % boss.alph_size;
                 if (edge_label == boss::BOSS::kSentinelCode) {
                     // reverse complement not found
+                    assert(offset_ > num_sentinels);
                     *this = Alignment();
                     return;
                 }
 
-                nodes_.push_back(dbg_succ->boss_to_kmer_index(edge));
-                rev_seq.push_back(boss.decode(edge_label));
+                nodes_[0] = dbg_succ.boss_to_kmer_index(edge);
+                assert(nodes_[0]);
+                sequence_.push_back(boss.decode(edge_label));
+                assert(graph.get_node_sequence(nodes_[0])
+                    == sequence_.substr(sequence_.size() - graph.get_k()));
             }
-            nodes_.assign(nodes_.begin() + offset_, nodes_.end());
-            rev_seq.assign(rev_seq.begin() + offset_, rev_seq.end());
 
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-            std::vector<NodeType> rev_nodes = nodes_;
-            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+            for (size_t i = num_first_steps; i < offset_; ++i) {
+                NodeType next_node = 0;
+                char last_char;
+                canonical->call_outgoing_kmers(nodes_[0], [&](NodeType next, char c) {
+                    if (c == boss::BOSS::kSentinel)
+                        return;
 
-            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                             DeBruijnGraph::npos) == rev_nodes.end());
+                    next_node = next;
+                    last_char = c;
+                });
 
-            assert(rev_seq.size() > offset_);
-            sequence_.assign(rev_seq.begin() + offset_, rev_seq.end());
-            nodes_.assign(rev_nodes.begin(), rev_nodes.end());
+                if (!next_node) {
+                    *this = Alignment();
+                    return;
+                } else {
+                    nodes_[0] = next_node;
+                    sequence_.push_back(last_char);
+                    assert(graph.get_node_sequence(nodes_[0])
+                        == sequence_.substr(sequence_.size() - graph.get_k()));
+                }
+            }
+
+            assert(sequence_.size() == dbg_succ.get_k() + offset_);
+            sequence_ = sequence_.substr(offset_);
+
+            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            reverse_complement_seq_path(graph, sequence_, nodes_);
+
+            assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
+                    == nodes_.end());
+
+            sequence_.assign(sequence_.data() + offset_, graph.get_k() - offset_);
 
         } else {
             assert(nodes_.size() == 1);
-            assert(nodes_ == map_sequence_to_nodes(graph, rev_seq));
-            std::vector<NodeType> rev_nodes = nodes_;
-            reverse_complement_seq_path(graph, rev_seq, rev_nodes);
+            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            reverse_complement_seq_path(graph, sequence_, nodes_);
 
-            assert(std::find(rev_nodes.begin(), rev_nodes.end(),
-                             DeBruijnGraph::npos) == rev_nodes.end());
+            assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
+                    == nodes_.end());
 
             // trim off ending from reverse complement (corresponding to the added prefix)
-            size_t trim_left = offset_;
-            while (trim_left && rev_nodes.size() > 1) {
-                rev_nodes.pop_back();
-                rev_seq.pop_back();
-                --trim_left;
-            }
-
-            for (size_t i = 0; i < trim_left; ++i) {
+            for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
-                graph.adjacent_incoming_nodes(rev_nodes[0], [&](NodeType prev) {
+                graph.adjacent_incoming_nodes(nodes_[0], [&](NodeType prev) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
                     // do we pick? Currently we pick the first one
                     if (indegree == 1)
-                        rev_nodes[0] = prev;
+                        nodes_[0] = prev;
                 });
 
                 if (!indegree) {
@@ -396,25 +419,23 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                     return;
                 }
 
-                rev_seq.pop_back();
+                sequence_.pop_back();
+                assert(graph.get_node_sequence(nodes_[0]).substr(i + 1)
+                    == sequence_.substr(sequence_.size() - graph.get_k() + i + 1));
             }
 
-            nodes_ = rev_nodes;
-            sequence_ = rev_seq;
-            offset_ = trim_left;
-            assert(!trim_left
-                    || graph.get_node_sequence(rev_nodes[0]).substr(trim_left) == sequence_);
+            assert(sequence_.size() == graph.get_k() - offset_);
         }
+
+        assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
     std::reverse(cigar_.begin(), cigar_.end());
+    assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
     orientation_ = !orientation_;
-
-    query_begin_ = query_rev_comp.data() + get_clipping();
-    query_end_ = query_rev_comp.data() + (query_rev_comp.size() - get_end_clipping());
-
-    assert(query_end_ >= query_begin_);
+    query_ = { query_rev_comp.data() + get_clipping(),
+               query_rev_comp.size() - get_clipping() - get_end_clipping() };
     assert(is_valid(graph));
 }
 
@@ -436,7 +457,11 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     assert(cigar_it != cigar_.end());
 
     int64_t rank = 1;
-    const char *query_start = query_begin_;
+    const char *query_start = query_.data();
+
+#ifndef NDEBUG
+    const char *query_end = query_.data() + query_.size();
+#endif
 
     size_t cur_pos = rank == 1 ? offset_ : 0;
 
@@ -463,14 +488,14 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         Json::Value edit;
         switch (cigar_it->first) {
             case Cigar::MISMATCH: {
-                assert(query_start + next_size <= query_end_);
+                assert(query_start + next_size <= query_end);
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 edit["sequence"] = std::string(query_start, next_size);
                 query_start += next_size;
             } break;
             case Cigar::INSERTION: {
-                assert(query_start + next_size <= query_end_);
+                assert(query_start + next_size <= query_end);
                 // this assumes that INSERTIONs can't happen right after DELETIONs
                 //edit["from_length"] = 0;
                 edit["to_length"] = Json::Value::UInt64(next_size);
@@ -485,7 +510,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
                 //edit["to_length"] = 0;
             } break;
             case Cigar::MATCH: {
-                assert(query_start + next_size <= query_end_);
+                assert(query_start + next_size <= query_end);
                 edit["from_length"] = Json::Value::UInt64(next_size);
                 edit["to_length"] = Json::Value::UInt64(next_size);
                 query_start += next_size;
@@ -528,7 +553,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         if (cigar_it->first == Cigar::INSERTION) {
             Json::Value edit;
             size_t length = cigar_it->second - cigar_offset;
-            assert(query_start + length < query_end_);
+            assert(query_start + length < query_end);
             // TODO: this assumes that INSERTIONs can't happen right after DELETIONs
             //edit["from_length"] = 0;
             edit["to_length"] = Json::Value::UInt64(length);
@@ -543,7 +568,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         Json::Value edit;
         switch (cigar_it->first) {
             case Cigar::MISMATCH: {
-                assert(query_start < query_end_);
+                assert(query_start < query_end);
                 edit["from_length"] = 1;
                 edit["to_length"] = 1;
                 edit["sequence"] = std::string(query_start, 1);
@@ -572,12 +597,14 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         path["mapping"].append(mapping);
     }
 
-    assert(query_start == query_end_);
+    assert(query_start == query_end);
     assert(cigar_it == cigar_.end()
             || (cigar_it + 1 == cigar_.end() && cigar_it->first == Cigar::CLIPPED));
 
     path["length"] = Json::Value::UInt64(nodes_.size());
-    //path["is_circular"]; // bool
+
+    if (nodes_.front() == nodes_.back())
+        path["is_circular"] = true;
 
     if (label.data())
         path["name"] = std::string(label);
@@ -586,7 +613,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 }
 
 template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(std::string_view query,
+Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
                                          const DeBruijnGraph &graph,
                                          bool is_secondary,
                                          std::string_view read_name,
@@ -597,17 +624,17 @@ Json::Value Alignment<NodeType>::to_json(std::string_view query,
     Json::Value alignment;
 
     alignment["name"] = read_name.data() ? std::string(read_name) : "";
-    alignment["sequence"] = std::string(query);
+    alignment["sequence"] = std::string(full_query);
 
     if (sequence_.size())
         alignment["annotation"]["ref_sequence"] = sequence_;
 
-    if (query_end_ == query_begin_)
+    if (query_.empty())
         return alignment;
 
-    const char *query_start = query.data();
-    assert(query_start + cigar_.get_clipping() == query_begin_);
-    assert(query_end_ >= query_start);
+    assert(query_.data() - cigar_.get_clipping() == full_query.data());
+    assert(query_.size() + cigar_.get_clipping() + cigar_.get_end_clipping()
+            == full_query.size());
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
 
@@ -617,29 +644,30 @@ Json::Value Alignment<NodeType>::to_json(std::string_view query,
 
     alignment["score"] = static_cast<int32_t>(score_);
 
-    if (query_begin_ > query_start)
-        alignment["query_position"] = static_cast<int32_t>(query_begin_ - query_start);
+    if (cigar_.get_clipping()) {
+        alignment["query_position"] = static_cast<int32_t>(cigar_.get_clipping());
+        alignment["soft_clipped"] = static_cast<bool>(cigar_.get_clipping());
+    }
 
     if (is_secondary)
         alignment["is_secondary"] = is_secondary;
 
-    alignment["identity"] = query_end_ != query_begin_
-        ? static_cast<double>(get_num_matches()) / (query_end_ - query_begin_)
+    alignment["identity"] = query_.size()
+        ? static_cast<double>(get_num_matches()) / query_.size()
         : 0;
 
-    alignment["read_mapped"] = (query_end_ != query_begin_);
+    alignment["read_mapped"] = static_cast<bool>(query_.size());
 
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
 
+    if (label.data())
+        alignment["sample_name"] = std::string(label);
 
-    if (cigar_.get_clipping())
-        alignment["soft_clipped"] = static_cast<bool>(cigar_.get_clipping());
 
     // Unused flags (for now)
     //alignment["quality"]; // bytes
     //alignment["mapping_quality"]; // int32
-    //alignment["sample_name"]; // string
     //alignment["read_group"]; // string
     //alignment["fragment_prev"]; // Alignment
     //alignment["fragment_next"]; // Alignment
@@ -666,8 +694,7 @@ Json::Value Alignment<NodeType>::to_json(std::string_view query,
 
 template <typename NodeType>
 std::shared_ptr<const std::string> Alignment<NodeType>
-::load_from_json(const Json::Value &alignment,
-                 const DeBruijnGraph &graph) {
+::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
     cigar_.clear();
     nodes_.clear();
     sequence_.clear();
@@ -675,24 +702,21 @@ std::shared_ptr<const std::string> Alignment<NodeType>
     auto query_sequence = std::make_shared<const std::string>(
         alignment["sequence"].asString()
     );
-    auto query_start = query_sequence->c_str();
-
-    query_begin_ = query_start + alignment["query_position"].asInt();
     orientation_ = alignment["read_on_reverse_strand"].asBool();
     score_ = alignment["score"].asInt();
-
-    const auto& mapping = alignment["path"]["mapping"];
+    const Json::Value &mapping = alignment["path"]["mapping"];
     assert(mapping.size() == alignment["path"]["length"].asUInt64());
 
+    cigar_.append(Cigar::CLIPPED, alignment["query_position"].asInt());
+
+    const char *this_query_begin = query_sequence->c_str() + get_clipping();
+    size_t this_query_size = 0;
+
+    size_t path_steps = 0;
     Json::ArrayIndex i = 0;
     offset_ = mapping[i]["position"]["offset"].asUInt64();
 
-    size_t path_steps = 0;
-
-    query_end_ = query_begin_;
-
-    cigar_.append(Cigar::CLIPPED, query_begin_ - query_start);
-    for (; i < mapping.size(); ++i) {
+    for ( ; i < mapping.size(); ++i) {
         nodes_.emplace_back(mapping[i]["position"]["node_id"].asUInt64());
         if (nodes_.size() == 1) {
             sequence_ = graph.get_node_sequence(nodes_.back()).substr(offset_);
@@ -705,7 +729,7 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 }
             );
         }
-        const auto& edits = mapping[i]["edit"];
+        const Json::Value &edits = mapping[i]["edit"];
 
         for (Json::ArrayIndex j = 0; j < edits.size(); ++j) {
             assert(edits[j]["from_length"].asUInt64()
@@ -719,21 +743,25 @@ std::shared_ptr<const std::string> Alignment<NodeType>
                 }
 
                 path_steps += edits[j]["from_length"].asUInt64();
-                query_end_ += edits[j]["to_length"].asUInt64();
+                this_query_size += edits[j]["to_length"].asUInt64();
+
             } else if (edits[j]["from_length"].asUInt64()) {
                 cigar_.append(Cigar::DELETION, edits[j]["from_length"].asUInt64());
                 path_steps += edits[j]["from_length"].asUInt64();
+
             } else {
                 assert(edits[j]["to_length"].asUInt64());
                 cigar_.append(Cigar::INSERTION, edits[j]["to_length"].asUInt64());
-                query_end_ += edits[j]["to_length"].asUInt64();
+                this_query_size += edits[j]["to_length"].asUInt64();
             }
         }
     }
 
-    if (query_end_ < query_sequence->c_str() + query_sequence->length()) {
+    query_ = { this_query_begin, this_query_size };
+
+    if (query_.size() + get_clipping() < query_sequence->size()) {
         cigar_.append(Cigar::CLIPPED,
-                      query_sequence->c_str() + query_sequence->length() - query_end_);
+                      query_sequence->size() - query_.size() - get_clipping());
     }
 
     if (alignment["annotation"]["cigar"]
@@ -801,12 +829,6 @@ bool spell_path(const DeBruijnGraph &graph,
 template <typename NodeType>
 bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
                                    const DBGAlignerConfig *config) const {
-    if (query_begin_ > query_end_) {
-        std::cerr << "ERROR: query begin after query end" << std::endl
-                  << *this << std::endl;
-        return false;
-    }
-
     std::string path;
     if (!spell_path(graph, nodes_, path, offset_)) {
         std::cerr << *this << std::endl;
@@ -820,16 +842,16 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
         return false;
     }
 
-    if (!cigar_.is_valid(sequence_, get_query())) {
+    if (!cigar_.is_valid(sequence_, query_)) {
         std::cerr << *this << std::endl;
         return false;
     }
 
-    score_t cigar_score = config ? config->score_cigar(sequence_, get_query(), cigar_) : 0;
+    score_t cigar_score = config ? config->score_cigar(sequence_, query_, cigar_) : 0;
     if (config && score_ != cigar_score) {
         std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
                   << "CIGAR score: " << cigar_score << std::endl
-                  << get_query() << "\t"
+                  << query_ << "\t"
                   << *this << std::endl;
         return false;
     }

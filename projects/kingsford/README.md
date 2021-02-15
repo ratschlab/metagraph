@@ -124,7 +124,7 @@ bsub -J "kingsford_build_brwt_primary" \
     "cat ~/metagenome/data/kingsford/annotation/columns_primary.txt \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
             --anno-type brwt \
-            -i ~/metagenome/data/kingsford/annotation/linkage_kingsford_primary.csv \
+            --linkage-file ~/metagenome/data/kingsford/annotation/linkage_kingsford_primary.csv \
             -o ~/metagenome/data/kingsford/annotation/annotation_primary \
             -p 36 --parallel-nodes 10 \
             2>&1"

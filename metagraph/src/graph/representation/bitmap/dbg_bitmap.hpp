@@ -69,8 +69,6 @@ class DBGBitmap : public DeBruijnGraph {
     bool has_multiple_outgoing(node_index) const;
 
     size_t indegree(node_index) const;
-    bool has_no_incoming(node_index) const;
-    bool has_single_incoming(node_index) const;
 
     node_index kmer_to_node(std::string_view kmer) const;
 

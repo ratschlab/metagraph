@@ -23,9 +23,9 @@ class TestAPIBase(TestingBase):
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
-        cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct',
+        cls._build_graph(fasta_path, graph_path, 6, 'succinct',
                          canonical=canonical, primary=primary)
-        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column')
+        cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
@@ -290,7 +290,7 @@ class TestAPIJson(TestAPIBase):
         res_obj = res_list[0]['results']
         self.assertEqual(len(res_obj), self.sample_query_expected_cols)
 
-        first_res = res_obj[0]
+        first_res = sorted(res_obj, key=lambda k: k['kmer_count'], reverse=True)[0]
 
         self.assertEqual(first_res['kmer_count'], 39)
 

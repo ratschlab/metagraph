@@ -39,19 +39,14 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              IExtender<node_index>&& extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
-    std::vector<DBGAlignment> seeds;
-    seeder.call_seeds([&](DBGAlignment&& seed) {
-        assert(seed.is_valid(graph_, &config_));
-        seeds.emplace_back(std::move(seed));
-    });
-
-    for (auto &seed : seeds) {
+    for (auto &seed : seeder.get_seeds()) {
 #ifndef NDEBUG
         mtg::common::logger->trace("Seed: {}", seed);
 #endif
         score_t min_path_score = get_min_path_score(seed);
 
-        if (seed.get_query_end() == query.data() + query.size()) {
+        if (seed.get_query().data() + seed.get_query().size()
+                == query.data() + query.size()) {
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(graph_, &config_));

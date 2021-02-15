@@ -1,6 +1,9 @@
-#include "aligner_helper.hpp"
+#include "aligner_dp_table.hpp"
 
 #include <tsl/hopscotch_set.h>
+
+#include "aligner_alignment.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg {
 namespace graph {
@@ -14,7 +17,7 @@ bool DPTable<NodeType>::add_seed(const Alignment<NodeType> &seed,
                                  size_t start_pos,
                                  size_t query_offset) {
     query_offset_ = query_offset;
-    char start_char = *(seed.get_query_end() - 1);
+    char start_char = seed.get_query().back();
     score_t last_char_score = config.get_row(start_char)[seed.get_sequence().back()];
 
     iterator column_it = dp_table_.find(seed.back());
