@@ -20,6 +20,26 @@ namespace align {
 
 using mtg::common::logger;
 
+#ifdef __AVX2__
+
+// Drop-in replacement for _mm_loadu_si64
+inline __m128i mm_loadu_si64(const void *mem_addr) {
+    return _mm_loadl_epi64((const __m128i*)mem_addr);
+}
+
+// Drop-in replacement for _mm_storeu_si64
+inline void mm_storeu_si64(void *mem_addr, __m128i a) {
+    _mm_storel_epi64((__m128i*)mem_addr, a);
+}
+
+inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
+    __m128i orig = mm_loadu_si64((__m128i*)mem_addr);
+    a = _mm_blendv_epi8(orig, a, mask);
+    mm_storeu_si64(mem_addr, a);
+}
+
+#endif
+
 
 template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
@@ -191,6 +211,34 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 : 0;
 
             for (size_t i = del_begin; i < del_end; ++i) {
+#ifdef __AVX2__
+                if (i + 8 <= del_end) {
+                    __m256i del_open = _mm256_add_epi32(
+                        _mm256_loadu_si256((__m256i*)&S_prev[i + offset - offset_prev]),
+                        _mm256_set1_epi32(config_.gap_opening_penalty)
+                    );
+                    __m256i del_extend = _mm256_add_epi32(
+                        _mm256_loadu_si256((__m256i*)&F_prev[i + offset - offset_prev]),
+                        _mm256_set1_epi32(config_.gap_extension_penalty)
+                    );
+
+                    mm_storeu_si64(&PF[i], _mm_set1_epi8(PREV));
+                    _mm256_storeu_si256((__m256i*)&F[i],
+                                        _mm256_max_epi32(del_open, del_extend));
+
+                    mm_storeu_si64(
+                        &OF[i],
+                        _mm_blendv_epi8(
+                            _mm_set1_epi8(Cigar::MATCH),
+                            _mm_set1_epi8(Cigar::DELETION),
+                            mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
+                        )
+                    );
+
+                    i += 7;
+                    continue;
+                }
+#endif
                 score_t del_open = S_prev[i + offset - offset_prev]
                                         + config_.gap_opening_penalty;
                 score_t del_extend = F_prev[i + offset - offset_prev]
@@ -226,22 +274,48 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
                 if (match_score >= xdrop_cutoff) {
                     S[i] = match_score;
+                    xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
+                    updated = true;
+                }
+            }
 
-                    if (S[i] > 0) {
-                        updated = true;
-                        xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
-                        if (S[i] == E[i]) {
-                            PS[i] = CUR;
-                            OS[i] = Cigar::INSERTION;
-                        } else if (S[i] == F[i]) {
-                            PS[i] = PREV;
-                            OS[i] = Cigar::DELETION;
-                        } else {
-                            assert(i + offset >= offset_prev + 1
-                                && i + offset - offset_prev - 1 < S_prev.size());
-                            PS[i] = PREV;
-                            OS[i] = profile_op_[c][start + i + offset - 1];
-                        }
+            for (size_t i = 0; i < cur_size; ++i) {
+#ifdef __AVX2__
+                if (i + 8 <= cur_size) {
+                    __m256i e_v = _mm256_loadu_si256((__m256i*)&E[i]);
+                    __m256i f_v = _mm256_loadu_si256((__m256i*)&F[i]);
+                    __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
+                    __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(s_v, _mm256_setzero_si256()));
+                    __m128i equal_e = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, e_v));
+                    __m128i equal_f = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, f_v));
+
+                    __m128i ps_v = _mm_blendv_epi8(_mm_set1_epi8(PREV), _mm_set1_epi8(CUR), equal_e);
+                    mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
+
+                    __m128i os_v = _mm_blendv_epi8(
+                        mm_loadu_si64(&profile_op_[c][start + i + offset - 1]),
+                        _mm_set1_epi8(Cigar::DELETION),
+                        equal_f
+                    );
+                    os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
+                    mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
+
+                    i += 7;
+                    continue;
+                }
+#endif
+                if (S[i] > 0) {
+                    if (S[i] == E[i]) {
+                        PS[i] = CUR;
+                        OS[i] = Cigar::INSERTION;
+                    } else if (S[i] == F[i]) {
+                        PS[i] = PREV;
+                        OS[i] = Cigar::DELETION;
+                    } else {
+                        assert(i + offset >= offset_prev + 1
+                            && i + offset - offset_prev - 1 < S_prev.size());
+                        PS[i] = PREV;
+                        OS[i] = profile_op_[c][start + i + offset - 1];
                     }
                 }
             }
