@@ -183,36 +183,35 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 = column_prev[std::get<2>(prev)];
             assert(S_prev.size() + offset_prev <= size);
 
-            // compute DELETION scores
-            size_t begin = offset_prev > offset ? offset_prev - offset : 0;
-            size_t end = S_prev.size() + offset_prev > offset
+            size_t del_begin = offset_prev > offset ? offset_prev - offset : 0;
+            size_t del_end = S_prev.size() + offset_prev > offset
                 ? std::min({ S_prev.size() + offset_prev - offset,
                              cur_size,
                              size - offset - 1 })
                 : 0;
-            for (size_t i = begin; i < end; ++i) {
-                score_t del_open = S_prev[i + offset - offset_prev]
-                                    + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[i + offset - offset_prev]
-                                    + config_.gap_extension_penalty;
-                PF[i] = PREV;
-                F[i] = std::max(del_open, del_extend);
-                OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-            }
 
-
-            // compute MATCH/MISMATCH scores
-            begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
-            end = S_prev.size() + offset_prev + 1 >= offset
+            size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
+            size_t match_end = S_prev.size() + offset_prev + 1 >= offset
                 ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
                 : 0;
-            for (size_t i = begin; i < end; ++i) {
-                S[i] = S_prev[i + offset - offset_prev - 1]
-                            + profile_score_[c][start + i + offset - 1];
-            }
 
-            // compute INSERTION scores, take max, then compute traceback vectors
+
             for (size_t i = 0; i < cur_size; ++i) {
+                if (i >= del_begin && i < del_end) {
+                    score_t del_open = S_prev[i + offset - offset_prev]
+                                        + config_.gap_opening_penalty;
+                    score_t del_extend = F_prev[i + offset - offset_prev]
+                                        + config_.gap_extension_penalty;
+                    PF[i] = PREV;
+                    F[i] = std::max(del_open, del_extend);
+                    OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                }
+
+                if (i >= match_begin && i < match_end) {
+                    S[i] = S_prev[i + offset - offset_prev - 1]
+                            + profile_score_[c][start + i + offset - 1];
+                }
+
                 if (i) {
                     score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
                     score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
