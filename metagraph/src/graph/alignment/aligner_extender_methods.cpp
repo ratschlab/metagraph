@@ -240,8 +240,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                                         + config_.gap_opening_penalty;
                 score_t del_extend = F_prev[i + offset - offset_prev]
                                         + config_.gap_extension_penalty;
-                F[i] = std::max(del_open, del_extend);
                 OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+                F[i] = std::max(del_open, del_extend);
             };
 
             // handle match score in front
@@ -274,9 +274,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     f_prev_v, _mm256_set1_epi32(config_.gap_extension_penalty)
                 );
 
-                _mm256_storeu_si256((__m256i*)&F[i],
-                                    _mm256_max_epi32(del_extend, del_open));
-
                 __m128i del_op_v = _mm_blendv_epi8(
                     _mm_set1_epi8(Cigar::MATCH),
                     _mm_set1_epi8(Cigar::DELETION),
@@ -284,11 +281,19 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 );
 
                 mm_storeu_si64(&OF[i], del_op_v);
+
+                __m256i del_score = _mm256_max_epi32(del_extend, del_open);
+                _mm256_storeu_si256((__m256i*)&F[i], del_score);
+
+                // vectorized max operator
+                __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
+                _mm256_storeu_si256((__m256i*)&S[i], _mm256_max_epi32(s_v, del_score));
             }
 #else
             for (size_t i = del_begin; i + 1 < match_end; ++i) {
                 update_match(i + 1);
                 update_del(i);
+                S[i] = std::max(S[i], F[i]);
             }
 #endif
 
@@ -306,7 +311,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
                 }
 
-                S[i] = std::max({ 0, S[i], E[i], F[i] });
+                S[i] = std::max({ 0, S[i], E[i] });
 
                 if (S[i] >= xdrop_cutoff) {
                     xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
