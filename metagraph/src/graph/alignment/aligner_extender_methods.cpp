@@ -6,10 +6,8 @@
 
 #include <priority_deque.hpp>
 
-#include "common/logger.hpp"
-#include "common/hashers/hash.hpp"
 #include "common/utils/simd_utils.hpp"
-#include "common/aligned_vector.hpp"
+#include "common/utils/template_utils.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -17,8 +15,6 @@
 namespace mtg {
 namespace graph {
 namespace align {
-
-using mtg::common::logger;
 
 #ifdef __AVX2__
 

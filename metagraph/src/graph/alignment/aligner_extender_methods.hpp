@@ -1,14 +1,10 @@
 #ifndef __DBG_ALIGNER_METHODS_HPP__
 #define __DBG_ALIGNER_METHODS_HPP__
 
-#include <queue>
-
-#include <priority_deque.hpp>
 #include <tsl/hopscotch_map.h>
 
 #include "aligner_alignment.hpp"
 #include "common/aligned_vector.hpp"
-#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
