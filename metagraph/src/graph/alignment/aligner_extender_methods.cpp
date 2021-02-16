@@ -204,6 +204,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             assert(S_prev.size() + offset_prev <= size);
 
             // compute column boundaries for updating the match and deletion scores
+
+            // to define the boundaries for match scores
             // need i + offset - offset_prev - 1 >= 0
             // &&   i + offset - offset_prev - 1 < S_prev.size()
             size_t match_begin = offset_prev + 1 >= offset ? offset_prev + 1 - offset : 0;
@@ -212,6 +214,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 : 0;
             assert(match_begin + offset);
 
+            // to define the boundaries for deletion scores
             // need i + offset - offset_prev >= 0
             // &&   i + offset - offset_prev < S_prev.size()
             size_t del_begin = match_begin ? match_begin - 1 : 0;
@@ -224,22 +227,55 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             assert(match_end == std::min(cur_size, del_end + 1));
 
             // set prev node vector for deletion
-            std::fill(PF.begin() + del_begin, PF.begin() + del_end, PREV);
+            if (del_end > del_begin)
+                std::fill(PF.begin() + del_begin, PF.begin() + del_end, PREV);
 
+            auto update_match = [&](size_t i) {
+                S[i] = S_prev[i + offset - offset_prev - 1]
+                        + profile_score_[c][start + i + offset - 1];
+            };
+
+            auto update_del = [&](size_t i) {
+                score_t del_open = S_prev[i + offset - offset_prev]
+                                        + config_.gap_opening_penalty;
+                score_t del_extend = F_prev[i + offset - offset_prev]
+                                        + config_.gap_extension_penalty;
+                F[i] = std::max(del_open, del_extend);
+                OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+            };
+
+            // handle match score in front
+            if (match_end > match_begin && del_begin == match_begin)
+                update_match(match_begin);
+
+            // handle match and delete scores in the middle
 #ifdef __AVX2__
-            // compute deletion score vector
-            for (size_t i = del_begin; i < del_end; i += 8) {
+            for (size_t i = del_begin; i + 1 < match_end; i += 8) {
+                // vectorized update_match(i + 1)
+                __m256i profile_v = _mm256_cvtepi8_epi32(
+                    mm_loadu_si64(&profile_score_[c][start + i + offset])
+                );
+                __m256i s_prev_v = _mm256_loadu_si256(
+                    (__m256i*)&S_prev[i + offset - offset_prev]
+                );
+
+                _mm256_storeu_si256((__m256i*)&S[i + 1],
+                                    _mm256_add_epi32(s_prev_v, profile_v));
+
+                // vectorized update_del(i)
                 __m256i del_open = _mm256_add_epi32(
-                    _mm256_loadu_si256((__m256i*)&S_prev[i + offset - offset_prev]),
-                    _mm256_set1_epi32(config_.gap_opening_penalty)
+                    s_prev_v, _mm256_set1_epi32(config_.gap_opening_penalty)
+                );
+
+                __m256i f_prev_v = _mm256_loadu_si256(
+                    (__m256i*)&F_prev[i + offset - offset_prev]
                 );
                 __m256i del_extend = _mm256_add_epi32(
-                    _mm256_loadu_si256((__m256i*)&F_prev[i + offset - offset_prev]),
-                    _mm256_set1_epi32(config_.gap_extension_penalty)
+                    f_prev_v, _mm256_set1_epi32(config_.gap_extension_penalty)
                 );
 
                 _mm256_storeu_si256((__m256i*)&F[i],
-                                    _mm256_max_epi32(del_open, del_extend));
+                                    _mm256_max_epi32(del_extend, del_open));
 
                 __m128i del_op_v = _mm_blendv_epi8(
                     _mm_set1_epi8(Cigar::MATCH),
@@ -249,36 +285,16 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
                 mm_storeu_si64(&OF[i], del_op_v);
             }
-
-            // compute initial match/mismatch scores
-            for (size_t i = match_begin; i < match_end; i += 8) {
-                __m256i s_prev_v = _mm256_loadu_si256(
-                    (__m256i*)&S_prev[i + offset - offset_prev - 1]
-                );
-                __m256i profile_v = _mm256_cvtepi8_epi32(
-                    mm_loadu_si64(&profile_score_[c][start + i + offset - 1])
-                );
-
-                _mm256_storeu_si256((__m256i*)&S[i],
-                                    _mm256_add_epi32(s_prev_v, profile_v));
-            }
 #else
-            // compute deletion score vector
-            for (size_t i = del_begin; i < del_end; ++i) {
-                score_t del_open = S_prev[i + offset - offset_prev]
-                                        + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[i + offset - offset_prev]
-                                        + config_.gap_extension_penalty;
-                F[i] = std::max(del_open, del_extend);
-                OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-            }
-
-            // compute initial match/mismatch scores
-            for (size_t i = match_begin; i < match_end; ++i) {
-                S[i] = S_prev[i + offset - offset_prev - 1]
-                        + profile_score_[c][start + i + offset - 1];
+            for (size_t i = del_begin; i + 1 < match_end; ++i) {
+                update_match(i + 1);
+                update_del(i);
             }
 #endif
+
+            // handle delete score in the back
+            if (del_end > del_begin && match_end < del_end + 1)
+                update_del(del_end - 1);
 
             // compute insert and best scores
             bool updated = false;
@@ -288,9 +304,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
                     E[i] = std::max(ins_open, ins_extend);
                     OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-                } else {
-                    E[i] = ninf;
-                    OE[i] = Cigar::CLIPPED;
                 }
 
                 S[i] = std::max({ 0, S[i], E[i], F[i] });
