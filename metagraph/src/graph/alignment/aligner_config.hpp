@@ -51,8 +51,6 @@ class DBGAlignerConfig {
         return score_matrix_[char_in_query];
     }
 
-    size_t queue_size = std::numeric_limits<size_t>::max();
-    size_t bandwidth = std::numeric_limits<size_t>::max();
     size_t num_alternative_paths = 1;
     size_t min_seed_length = 1;
     size_t max_seed_length = std::numeric_limits<size_t>::max();

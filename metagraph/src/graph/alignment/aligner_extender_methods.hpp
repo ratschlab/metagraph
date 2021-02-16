@@ -4,9 +4,9 @@
 #include <queue>
 
 #include <priority_deque.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "aligner_alignment.hpp"
-#include "aligner_dp_table.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/utils/template_utils.hpp"
 
@@ -34,7 +34,10 @@ class IExtender {
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
-    virtual void call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const = 0;
+    virtual void
+    call_visited_nodes(const std::function<void(NodeType,
+                                                size_t /* range begin */,
+                                                size_t /* range end */)> &callback) const = 0;
 
   protected:
     virtual void reset() = 0;
@@ -62,7 +65,10 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual void initialize(const DBGAlignment &seed) override;
 
-    virtual void call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const override;
+    virtual void
+    call_visited_nodes(const std::function<void(NodeType,
+                                                size_t /* range begin */,
+                                                size_t /* range end */)> &callback) const override;
 
   protected:
     const DeBruijnGraph &graph_;

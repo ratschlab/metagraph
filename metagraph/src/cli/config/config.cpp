@@ -197,10 +197,6 @@ Config::Config(int argc, char *argv[]) {
             batch_align = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-queue-size")) {
-            alignment_queue_size = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-vertical-bandwidth")) {
-            alignment_vertical_bandwidth = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-match-score")) {
             alignment_match_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
@@ -888,8 +884,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [inf]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [10.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
             fprintf(stderr, "\n");
@@ -1118,8 +1112,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [inf]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [10.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
             fprintf(stderr, "\n");

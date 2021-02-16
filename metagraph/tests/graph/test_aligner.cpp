@@ -559,7 +559,6 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
-    config.queue_size = 100;
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
@@ -607,41 +606,6 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
-}
-
-TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
-    size_t k = 4;
-    std::string reference = "AAAGCGGACCCTTTCCGTTAT";
-    std::string query =     "AAAGGGGACCCTTTTCGTTAT";
-    //                           X         X
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-
-    for (uint64_t bandwidth : std::vector<uint64_t>{ 2, 5, 10, std::numeric_limits<uint64_t>::max()}) {
-        auto config_bandwidth = config;
-        config_bandwidth.bandwidth = bandwidth;
-
-        DBGAligner<> aligner(*graph, config_bandwidth);
-        auto paths = aligner.align(query);
-
-        ASSERT_EQ(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-        EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
-        EXPECT_EQ(19u, path.get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-        check_extend(graph, aligner.get_config(), paths, query);
-    }
 }
 
 TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
@@ -1293,7 +1257,6 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
             config.xdrop = xdrop;
             config.min_exact_match = discovery_fraction;
             config.max_nodes_per_seq_char = 10.0;
-            config.queue_size = 20;
             config.num_alternative_paths = 2;
             config.min_path_score = 0;
             config.min_cell_score = 0;
