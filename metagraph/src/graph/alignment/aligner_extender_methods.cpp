@@ -303,13 +303,15 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             // compute insert and best scores
             bool updated = false;
-            for (size_t i = 0; i < cur_size; ++i) {
-                if (i) {
-                    score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
-                    score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
-                    E[i] = std::max(ins_open, ins_extend);
-                    OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-                }
+            S[0] = std::max(0, S[0]);
+            if (S[0] < xdrop_cutoff)
+                S[0] = ninf;
+
+            for (size_t i = 1; i < cur_size; ++i) {
+                score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
+                score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
+                E[i] = std::max(ins_open, ins_extend);
+                OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
                 S[i] = std::max({ 0, S[i], E[i] });
 
@@ -435,8 +437,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         NodeType start_node = 0;
         score_t score = max_score;
 
-        Cigar::Operator last_op = std::get<3>(
-            table_[std::get<0>(best_node)].first[std::get<2>(best_node)])[pos - offset];
+        Cigar::Operator last_op = OS[pos - offset];
         assert(last_op == Cigar::MATCH);
 
         while (true) {
