@@ -219,6 +219,10 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 ? std::min(S_prev.size() + offset_prev - offset, cur_size)
                 : 0;
 
+            assert(del_begin <= match_begin);
+            assert(match_begin - del_begin <= 1);
+            assert(match_end == std::min(cur_size, del_end + 1));
+
             // set prev node vector for deletion
             std::fill(PF.begin() + del_begin, PF.begin() + del_end, PREV);
 
