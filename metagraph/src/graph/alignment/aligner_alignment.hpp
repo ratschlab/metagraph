@@ -11,7 +11,6 @@
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
-#include "aligner_dp_table.hpp"
 
 
 namespace mtg {
@@ -55,16 +54,6 @@ class Alignment {
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0);
-
-    // TODO: construct multiple alignments from the same starting point
-    Alignment(const DPTable<NodeType> &dp_table,
-              const DBGAlignerConfig &config,
-              std::string_view query_view,
-              typename DPTable<NodeType>::const_iterator column,
-              size_t start_pos,
-              size_t offset,
-              NodeType *start_node,
-              const Alignment &seed);
 
     void append(Alignment&& other);
 
