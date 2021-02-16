@@ -113,6 +113,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const score_t *match_score_begin_;
 
     static bool has_converged(const Column &column, size_t begin, size_t end);
+
+    static void sanitize(Scores &scores);
 };
 
 } // namespace align

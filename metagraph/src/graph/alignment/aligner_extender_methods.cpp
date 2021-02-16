@@ -99,7 +99,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     assert(seed_->get_cigar().back().first == Cigar::MATCH
         || seed_->get_cigar().back().first == Cigar::MISMATCH);
 
-    auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = table_.emplace(
+    auto &first_column = table_.emplace(
         graph_.max_index() + 1,
         Column{ { std::make_tuple(
             ScoreVec(1, ninf), ScoreVec(1, ninf), ScoreVec(1, ninf),
@@ -108,6 +108,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             0 /* offset */, 0 /* max_pos */
         )}, false }
     ).first.value().first[0];
+    sanitize(first_column);
+    auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = first_column;
 
     size_t num_columns = 1;
 
@@ -183,8 +185,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             size_t depth = column.size();
             size_t cur_size = max_i - min_i + 1;
 
-            auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos]
-                    = column.emplace_back(
+            auto &next_column = column.emplace_back(
                 ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
                 ScoreVec(cur_size, ninf),
                 OpVec(cur_size, Cigar::CLIPPED), OpVec(cur_size, Cigar::CLIPPED),
@@ -192,6 +193,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
                 min_i - 1 /* offset */, 0 /* max_pos */
             );
+            sanitize(next_column);
+            auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
             ++num_columns;
 
             assert(cur_size + offset <= size);
@@ -211,35 +214,32 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                              size - offset })
                 : 0;
 
-            for (size_t i = del_begin; i < del_end; ++i) {
 #ifdef __AVX2__
-                if (i + 8 <= del_end) {
-                    __m256i del_open = _mm256_add_epi32(
-                        _mm256_loadu_si256((__m256i*)&S_prev[i + offset - offset_prev]),
-                        _mm256_set1_epi32(config_.gap_opening_penalty)
-                    );
-                    __m256i del_extend = _mm256_add_epi32(
-                        _mm256_loadu_si256((__m256i*)&F_prev[i + offset - offset_prev]),
-                        _mm256_set1_epi32(config_.gap_extension_penalty)
-                    );
+            for (size_t i = del_begin; i < del_end; i += 8) {
+                __m256i del_open = _mm256_add_epi32(
+                    _mm256_loadu_si256((__m256i*)&S_prev[i + offset - offset_prev]),
+                    _mm256_set1_epi32(config_.gap_opening_penalty)
+                );
+                __m256i del_extend = _mm256_add_epi32(
+                    _mm256_loadu_si256((__m256i*)&F_prev[i + offset - offset_prev]),
+                    _mm256_set1_epi32(config_.gap_extension_penalty)
+                );
 
-                    mm_storeu_si64(&PF[i], _mm_set1_epi8(PREV));
-                    _mm256_storeu_si256((__m256i*)&F[i],
-                                        _mm256_max_epi32(del_open, del_extend));
+                mm_storeu_si64(&PF[i], _mm_set1_epi8(PREV));
+                _mm256_storeu_si256((__m256i*)&F[i],
+                                    _mm256_max_epi32(del_open, del_extend));
 
-                    mm_storeu_si64(
-                        &OF[i],
-                        _mm_blendv_epi8(
-                            _mm_set1_epi8(Cigar::MATCH),
-                            _mm_set1_epi8(Cigar::DELETION),
-                            mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
-                        )
-                    );
-
-                    i += 7;
-                    continue;
-                }
-#endif
+                mm_storeu_si64(
+                    &OF[i],
+                    _mm_blendv_epi8(
+                        _mm_set1_epi8(Cigar::MATCH),
+                        _mm_set1_epi8(Cigar::DELETION),
+                        mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
+                    )
+                );
+            }
+#else
+            for (size_t i = del_begin; i < del_end; ++i) {
                 score_t del_open = S_prev[i + offset - offset_prev]
                                         + config_.gap_opening_penalty;
                 score_t del_extend = F_prev[i + offset - offset_prev]
@@ -248,6 +248,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 F[i] = std::max(del_open, del_extend);
                 OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
             }
+#endif
 
             // compute match/mismatch and insertion score vectors
             size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
@@ -305,6 +306,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 );
                 os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
                 mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
+            }
 #else
             for (size_t i = 0; i < cur_size; ++i) {
                 if (S[i] > 0) {
@@ -321,8 +323,8 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         OS[i] = profile_op_[c][start + i + offset - 1];
                     }
                 }
-#endif
             }
+#endif
 
             // extend to the right with insertion scores
             while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
@@ -344,6 +346,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     OS.back() = Cigar::INSERTION;
                 }
             }
+            sanitize(next_column);
 
             auto max_it = std::max_element(S.begin(), S.end());
             max_pos = (max_it - S.begin()) + offset;
@@ -533,6 +536,36 @@ bool DefaultColumnExtender<NodeType>
         && std::equal(OF.begin() + begin, OF.begin() + end, OF_b.begin() + begin)
         && std::equal(PS.begin() + begin, PS.begin() + end, PS_b.begin() + begin)
         && std::equal(PF.begin() + begin, PF.begin() + end, PF_b.begin() + begin);
+}
+
+template <typename NodeType>
+void DefaultColumnExtender<NodeType>::sanitize(Scores &scores) {
+    auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = scores;
+
+    size_t size = S.size();
+    size_t pad_size = ((size + 7) / 8) * 8 + 8;
+    size_t size_diff = pad_size - size;
+
+    if (!size_diff)
+        return;
+
+    S.reserve(pad_size);
+    E.reserve(pad_size);
+    F.reserve(pad_size);
+    OS.reserve(pad_size);
+    OE.reserve(pad_size);
+    OF.reserve(pad_size);
+    PS.reserve(pad_size);
+    PF.reserve(pad_size);
+
+    memset(&S[size], 0, sizeof(typename decltype(S)::value_type) * size_diff);
+    memset(&E[size], 0, sizeof(typename decltype(E)::value_type) * size_diff);
+    memset(&F[size], 0, sizeof(typename decltype(F)::value_type) * size_diff);
+    memset(&OS[size], 0, sizeof(typename decltype(OS)::value_type) * size_diff);
+    memset(&OE[size], 0, sizeof(typename decltype(OE)::value_type) * size_diff);
+    memset(&OF[size], 0, sizeof(typename decltype(OF)::value_type) * size_diff);
+    memset(&PS[size], 0, sizeof(typename decltype(PS)::value_type) * size_diff);
+    memset(&PF[size], 0, sizeof(typename decltype(PF)::value_type) * size_diff);
 }
 
 template <typename NodeType>
