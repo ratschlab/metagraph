@@ -58,15 +58,11 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         }
 
         if (!inserted) {
-#ifndef NDEBUG
-            mtg::common::logger->trace("Skipping seed: {}", seed);
-#endif
+            DEBUG_LOG("Skipping seed: {}", seed);
             continue;
         }
 
-#ifndef NDEBUG
-        mtg::common::logger->trace("Seed: {}", seed);
-#endif
+        DEBUG_LOG("Seed: {}", seed);
         score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query().data() + seed.get_query().size()
@@ -74,9 +70,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                mtg::common::logger->trace("Alignment: {}", seed);
-#endif
+                DEBUG_LOG("Alignment: {}", seed);
                 callback(std::move(seed));
             }
 
@@ -92,9 +86,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     seed.extend_query_end(query.data() + query.size());
                     seed.trim_offset();
                     assert(seed.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                    mtg::common::logger->trace("Alignment: {}", seed);
-#endif
+                    DEBUG_LOG("Alignment: {}", seed);
                     callback(std::move(seed));
                 }
                 extended = true;
@@ -110,9 +102,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 extension.extend_query_begin(query.data());
                 extension.trim_offset();
                 assert(extension.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                mtg::common::logger->trace("Alignment: {}", extension);
-#endif
+                DEBUG_LOG("Alignment: {}", extension);
                 callback(std::move(extension));
                 return;
             }
@@ -123,9 +113,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             next_path.trim_offset();
             assert(next_path.is_valid(graph_, &config_));
 
-#ifndef NDEBUG
-            mtg::common::logger->trace("Alignment: {}", next_path);
-#endif
+            DEBUG_LOG("Alignment: {}", next_path);
             callback(std::move(next_path));
             extended = true;
         }, min_path_score);
@@ -192,9 +180,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-#ifndef NDEBUG
-        mtg::common::logger->trace("Aligning forwards");
-#endif
+        DEBUG_LOG("Aligning forwards");
 
         // First get forward alignments
         align_core(forward, forward_seeder, std::move(forward_extender),
@@ -213,9 +199,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 auto rev = path;
                 rev.reverse_complement(graph_, reverse);
                 if (rev.empty()) {
-#ifndef NDEBUG
-                    mtg::common::logger->trace("Alignment cannot be reversed, returning");
-#endif
+                    DEBUG_LOG("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
                         alignment_callback(std::move(path));
 
@@ -240,9 +224,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             }
         );
 
-#ifndef NDEBUG
-        mtg::common::logger->trace("Aligning backwards");
-#endif
+        DEBUG_LOG("Aligning backwards");
 
         // Then use the reverse complements of the forward alignments as seeds
         rev_comp_core_generator(reverse, forward_seeder, std::move(reverse_seeds),
@@ -260,8 +242,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                             path = std::move(forward_path);
 #ifndef NDEBUG
                         } else {
-                            mtg::common::logger->trace(
-                                "Backwards alignment cannot be reversed, returning");
+                            DEBUG_LOG("Backwards alignment cannot be reversed, returning");
 #endif
                         }
                     }
