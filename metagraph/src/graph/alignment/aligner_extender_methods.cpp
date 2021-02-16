@@ -250,12 +250,32 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             }
 #endif
 
-            // compute match/mismatch and insertion score vectors
+            // compute initial match/mismatch scores
             size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
             size_t match_end = S_prev.size() + offset_prev + 1 >= offset
                 ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
                 : 0;
 
+#ifdef __AVX2__
+            for (size_t i = match_begin; i < match_end; i += 8) {
+                __m256i s_prev_v = _mm256_loadu_si256(
+                    (__m256i*)&S_prev[i + offset - offset_prev - 1]
+                );
+                __m256i profile_v = _mm256_cvtepi8_epi32(
+                    mm_loadu_si64(&profile_score_[c][start + i + offset - 1])
+                );
+
+                _mm256_storeu_si256((__m256i*)&S[i],
+                                    _mm256_add_epi32(s_prev_v, profile_v));
+            }
+#else
+            for (size_t i = match_begin; i < match_end; ++i) {
+                S[i] = S_prev[i + offset - offset_prev - 1]
+                        + profile_score_[c][start + i + offset - 1];
+            }
+#endif
+
+            // compute insert and best scores
             bool updated = false;
             for (size_t i = 0; i < cur_size; ++i) {
                 if (i) {
@@ -268,17 +288,13 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                     OE[i] = Cigar::CLIPPED;
                 }
 
-                score_t match_score = i >= match_begin && i < match_end
-                    ? S_prev[i + offset - offset_prev - 1]
-                        + profile_score_[c][start + i + offset - 1]
-                    : ninf;
+                S[i] = std::max({ 0, S[i], E[i], F[i] });
 
-                match_score = std::max({ 0, match_score, E[i], F[i] });
-
-                if (match_score >= xdrop_cutoff) {
-                    S[i] = match_score;
+                if (S[i] >= xdrop_cutoff) {
                     xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
                     updated = true;
+                } else {
+                    S[i] = ninf;
                 }
             }
 
