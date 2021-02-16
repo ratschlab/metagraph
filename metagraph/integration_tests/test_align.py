@@ -51,47 +51,7 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('canonical mode: no', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --align-min-exact-match 0.0 {reads}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-            reads=TEST_DATA_DIR + '/genome_MT1.fq',
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().rstrip().split('\n')
-        self.assertEqual(len(params_str), 6)
-        self.assertEqual(params_str[0], 'MT-10/1\tAACAGAGAATAGTTTAAATTAGAATCTTAGCTTTGGGTGCTAATGGTGGAGTTAAAGACTTTTTCTCTGATTTGTCCTTGGAAAAAGGTTTTCATCTCCGGTTTACAAGACTGGTGTATTAGTTTATACTACAAGGACAGGCCCATTTGA\t+\tTAGAATCTTAG\t22\t11\t19S11=120S\t0')
-        self.assertEqual(params_str[1], 'MT-8/1\tAAAACTAACCCCCTAATAAAATTAATTAACCACTCATTCATCGACCTCCCCACCCCATCCAACATCTCCGCATGATGAAACTTCGGCTCACTCCTTGGCGCCTGCCTGATCCTCCAAATCACCACAGGACTATTCCTAGCCATGCACTAC\t+\tAAAACTAACCCCCTAATAAAATTAATTAACCACTCATTCATCGACCTCCCCACCCCATCCAACATCTCCGCATGATGAAACTTCGGCTCACTCCTTGGCGCCTGCCTGATCCTCCAAATCACCACAGGACTATTCCTAGCCATGCACTAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
-        self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t*\t*\t0\t*\t*\t*')
-        self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
-
-    @parameterized.expand(GRAPH_TYPES)
-    def test_simple_align_banded_all_graphs(self, representation):
-
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
-
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
-
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
