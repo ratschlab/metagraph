@@ -512,16 +512,16 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
+TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "AAAACTTTTTT";
     std::string reference_2 = "AAAATTGGGGG";
     std::string query =       "AAAATTTTTTT";
-    //                             X
+    //                             D
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3), -3, -1);
     config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
@@ -531,11 +531,10 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_NE(paths[0], paths[1]);
     auto path = paths[0];
 
-    EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query, reference_1), path.get_score());
-    EXPECT_EQ("4=1X6=", path.get_cigar().to_string());
-    EXPECT_EQ(10u, path.get_num_matches());
+    EXPECT_EQ(query.size() - k + 2, path.size());
+    EXPECT_EQ(reference_1 + "T", path.get_sequence());
+    EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
+    EXPECT_EQ(11u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
