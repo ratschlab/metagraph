@@ -202,14 +202,19 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 = column_prev[std::get<2>(prev)];
             assert(S_prev.size() + offset_prev <= size);
 
-            // compute deletion score vector
-            size_t del_begin = offset_prev > offset ? offset_prev - offset : 0;
+            // compute column boundaries
+            size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
+            size_t match_end = S_prev.size() + offset_prev + 1 >= offset
+                ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
+                : 0;
+            assert(match_begin + offset);
+
+            size_t del_begin = match_begin ? match_begin - 1 : 0;
             size_t del_end = S_prev.size() + offset_prev > offset
-                ? std::min({ S_prev.size() + offset_prev - offset,
-                             cur_size,
-                             size - offset })
+                ? std::min(S_prev.size() + offset_prev - offset, cur_size)
                 : 0;
 
+            // compute deletion score vector
 #ifdef __AVX2__
             for (size_t i = del_begin; i < del_end; i += 8) {
                 __m256i del_open = _mm256_add_epi32(
@@ -247,11 +252,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 #endif
 
             // compute initial match/mismatch scores
-            size_t match_begin = offset_prev + 1 > offset ? offset_prev + 1 - offset : 0;
-            size_t match_end = S_prev.size() + offset_prev + 1 >= offset
-                ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
-                : 0;
-
 #ifdef __AVX2__
             for (size_t i = match_begin; i < match_end; i += 8) {
                 __m256i s_prev_v = _mm256_loadu_si256(
