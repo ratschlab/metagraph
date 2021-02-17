@@ -20,13 +20,11 @@ class IExtender {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::node_index node_index;
     typedef typename DBGAlignment::score_t score_t;
-    typedef std::function<void(DBGAlignment&&, NodeType)> ExtensionCallback;
 
     virtual ~IExtender() {}
 
-    virtual void
-    operator()(ExtensionCallback callback,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
+    virtual std::vector<std::pair<DBGAlignment, NodeType>>
+    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
@@ -47,7 +45,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef typename IExtender<NodeType>::score_t score_t;
-    typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
 
     enum NodeId : uint8_t {
         NONE,
@@ -61,9 +58,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual void
-    operator()(ExtensionCallback callback,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) override;
+    virtual std::vector<std::pair<DBGAlignment, NodeType>>
+    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
     virtual void initialize(const DBGAlignment &seed) override;
 

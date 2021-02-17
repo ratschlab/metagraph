@@ -79,7 +79,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
         bool extended = false;
         extender.initialize(seed);
-        extender([&](DBGAlignment&& extension, auto start_node) {
+        for (auto&& [extension, start_node] : extender.get_extensions(min_path_score)) {
             if (!start_node && !extended) {
                 // no good extension found
                 if (seed.get_score() >= min_path_score) {
@@ -90,7 +90,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     callback(std::move(seed));
                 }
                 extended = true;
-                return;
+                continue;
             }
 
             assert(extension.is_valid(graph_, &config_));
@@ -104,7 +104,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 assert(extension.is_valid(graph_, &config_));
                 DEBUG_LOG("Alignment: {}", extension);
                 callback(std::move(extension));
-                return;
+                continue;
             }
 
             assert(extension.get_offset() == graph_.get_k() - 1);
@@ -116,7 +116,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             DEBUG_LOG("Alignment: {}", next_path);
             callback(std::move(next_path));
             extended = true;
-        }, min_path_score);
+        }
 
         // if !extended, then the seed was not extended because of early cutoff
 

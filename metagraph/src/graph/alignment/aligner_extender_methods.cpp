@@ -332,7 +332,6 @@ std::pair<Alignment<NodeType>, NodeType>
 backtrack(const Table &table_,
           const Alignment<NodeType> &seed_,
           const DeBruijnGraph &graph_,
-          const DBGAlignerConfig &config_,
           score_t min_seed_score,
           AlignNode best_node,
           score_t max_score,
@@ -435,23 +434,17 @@ backtrack(const Table &table_,
     std::reverse(path.begin(), path.end());
     std::reverse(seq.begin(), seq.end());
 
-    Alignment<NodeType> extension({ extend_window_.data() + pos, max_pos - pos },
-                                  std::move(path),
-                                  std::move(seq),
-                                  score,
-                                  std::move(cigar),
-                                  0,
-                                  seed_.get_orientation(),
-                                  graph_.get_k() - 1);
-
-    std::ignore = config_;
-    assert(extension.is_valid(graph_, &config_));
-    return std::make_pair(std::move(extension), start_node);
+    return std::make_pair(
+        Alignment<NodeType>({ extend_window_.data() + pos, max_pos - pos },
+                            std::move(path), std::move(seq), score, std::move(cigar),
+                            0, seed_.get_orientation(), graph_.get_k() - 1),
+        start_node
+    );
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
-                                                 score_t min_seed_score) {
+auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
+        -> std::vector<std::pair<DBGAlignment, NodeType>> {
     const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
     size_t start = align_start - query_.data();
     size_t size = query_.size() - start + 1;
@@ -582,6 +575,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         }
     }
 
+    std::vector<std::pair<DBGAlignment, NodeType>> extensions;
     while (best_starts.size()) {
         auto [best_node, max_score] = best_starts.maximum();
         best_starts.pop_maximum();
@@ -593,16 +587,18 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
-            callback(Alignment<NodeType>(), 0);
-            return;
+            extensions.emplace_back();
+            return extensions;
         }
 
-        std::apply(
-            callback,
-            backtrack<NodeType>(table_, *seed_, graph_, config_, min_seed_score,
-                                best_node, max_score, max_pos, size, extend_window_)
+        extensions.emplace_back(
+            backtrack<NodeType>(table_, *seed_, graph_, min_seed_score, best_node,
+                                max_score, max_pos, size, extend_window_)
         );
+        assert(extensions.back().is_valid(graph_, &config_));
     }
+
+    return extensions;
 }
 
 template <typename NodeType>
