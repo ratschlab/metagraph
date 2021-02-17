@@ -327,18 +327,18 @@ bool update_column(const DBGAlignerConfig &config_,
     return updated;
 }
 
-template <typename NodeType, typename AlignNode, class Callback, class Table>
-void backtrack(const Table &table_,
-               const Alignment<NodeType> &seed_,
-               const DeBruijnGraph &graph_,
-               const DBGAlignerConfig &config_,
-               score_t min_seed_score,
-               AlignNode best_node,
-               score_t max_score,
-               size_t max_pos,
-               size_t size,
-               std::string_view extend_window_,
-               const Callback &callback) {
+template <typename NodeType, typename AlignNode, class Table>
+std::pair<Alignment<NodeType>, NodeType>
+backtrack(const Table &table_,
+          const Alignment<NodeType> &seed_,
+          const DeBruijnGraph &graph_,
+          const DBGAlignerConfig &config_,
+          score_t min_seed_score,
+          AlignNode best_node,
+          score_t max_score,
+          size_t max_pos,
+          size_t size,
+          std::string_view extend_window_) {
     typedef DefaultColumnExtender<NodeType> Extender;
 
     Cigar cigar;
@@ -426,7 +426,7 @@ void backtrack(const Table &table_,
     }
 
     if (max_score < min_seed_score)
-        return;
+        return {};
 
     if (pos > 1)
         cigar.append(Cigar::CLIPPED, pos - 1);
@@ -446,7 +446,7 @@ void backtrack(const Table &table_,
 
     std::ignore = config_;
     assert(extension.is_valid(graph_, &config_));
-    callback(std::move(extension), start_node);
+    return std::make_pair(std::move(extension), start_node);
 }
 
 template <typename NodeType>
@@ -597,9 +597,11 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             return;
         }
 
-        backtrack<NodeType>(table_, *seed_, graph_, config_, min_seed_score,
-                            best_node, max_score, max_pos, size, extend_window_,
-                            callback);
+        std::apply(
+            callback,
+            backtrack<NodeType>(table_, *seed_, graph_, config_, min_seed_score,
+                                best_node, max_score, max_pos, size, extend_window_)
+        );
     }
 }
 

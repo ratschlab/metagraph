@@ -29,6 +29,22 @@ class Alignment {
     typedef NodeType node_index;
     typedef DBGAlignerConfig::score_t score_t;
 
+    Alignment(std::string_view query,
+              std::vector<NodeType>&& nodes = {},
+              std::string&& sequence = "",
+              score_t score = 0,
+              Cigar&& cigar = Cigar(),
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0)
+          : query_(query),
+            nodes_(std::move(nodes)),
+            sequence_(std::move(sequence)),
+            score_(score),
+            cigar_(Cigar::CLIPPED, clipping),
+            orientation_(orientation),
+            offset_(offset) { cigar_.append(std::move(cigar)); }
+
     // Used for constructing seeds
     Alignment(std::string_view query = {},
               std::vector<NodeType>&& nodes = {},
@@ -47,6 +63,7 @@ class Alignment {
         assert(nodes.empty() || clipping || is_exact_match());
     }
 
+    // Used for constructing exact match seeds
     Alignment(std::string_view query,
               std::vector<NodeType>&& nodes,
               std::string&& sequence,
@@ -147,22 +164,6 @@ class Alignment {
                    const DeBruijnGraph &graph);
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
-
-    Alignment(std::string_view query,
-              std::vector<NodeType>&& nodes = {},
-              std::string&& sequence = "",
-              score_t score = 0,
-              Cigar&& cigar = Cigar(),
-              size_t clipping = 0,
-              bool orientation = false,
-              size_t offset = 0)
-          : query_(query),
-            nodes_(std::move(nodes)),
-            sequence_(std::move(sequence)),
-            score_(score),
-            cigar_(Cigar::CLIPPED, clipping),
-            orientation_(orientation),
-            offset_(offset) { cigar_.append(std::move(cigar)); }
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
