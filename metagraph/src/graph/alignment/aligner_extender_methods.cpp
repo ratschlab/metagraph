@@ -88,10 +88,6 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
     extend_window_ = { align_start, size - 1 };
     assert(extend_window_[0] == seed_->get_query().back());
 
-    size_t size_per_column = sizeof(size_t) * 2 + sizeof(Column) + size * (
-        sizeof(score_t) * 3 + sizeof(AlignNode) * 2 + sizeof(Cigar::Operator) * 3
-    );
-
     constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
     assert(seed_->get_cigar().back().first == Cigar::MATCH
@@ -104,12 +100,21 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED), OpVec(1, Cigar::CLIPPED),
             AlignNode{}, PrevVec(1, NONE), PrevVec(1, NONE),
             0 /* offset */, 0 /* max_pos */
-        )}, false }
+        ) }, false }
     ).first.value().first[0];
     sanitize(first_column);
     auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = first_column;
 
     size_t num_columns = 1;
+    constexpr size_t column_vector_size = sizeof(std::pair<NodeType, std::pair<Column, bool>>);
+
+    auto get_column_size = [&](const Scores &scores) {
+        size_t size = std::get<0>(scores).capacity();
+        return sizeof(Scores) + size * (
+            sizeof(score_t) * 3 + sizeof(Cigar::Operator) * 3 + sizeof(NodeId) * 2
+        );
+    };
+    size_t total_size = column_vector_size + get_column_size(first_column);
 
     S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start + 1];
 
@@ -128,14 +133,15 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         AlignNode prev = stack.top().first;
         stack.pop();
 
-        size_t total_size = num_columns * size_per_column
-            + table_.size() * sizeof(NodeType);
-
-        if (total_size > config_.max_ram_per_alignment * 1000000)
+        if (total_size > config_.max_ram_per_alignment * 1000000) {
+            common::logger->warn("Alignment RAM limit reached, stopping extension");
             break;
+        }
 
-        if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size())
+        if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size()) {
+            common::logger->warn("Alignment node limit reached, stopping extension");
             break;
+        }
 
         for (const auto &[next, c] : get_outgoing(prev)) {
             auto &column_pair = table_[next];
@@ -180,6 +186,9 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             }
 
             size_t depth = column.size();
+            if (!depth)
+                total_size += column_vector_size;
+
             size_t cur_size = max_i - min_i + 1;
 
             auto &next_column = column.emplace_back(
@@ -191,6 +200,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 min_i - 1 /* offset */, 0 /* max_pos */
             );
             sanitize(next_column);
+            total_size += get_column_size(next_column);
             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
             ++num_columns;
 
