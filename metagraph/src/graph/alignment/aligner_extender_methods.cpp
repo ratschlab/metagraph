@@ -145,9 +145,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             auto &column_prev = table_[std::get<0>(prev)].first;
 
-            score_t xdrop_cutoff = (best_starts.size()
-                ? best_starts.maximum().second
-                : seed_->get_score()) - config_.xdrop;
+            score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
 
             // compute bandwidth based on xdrop criterion
             size_t min_i;
