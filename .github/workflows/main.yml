@@ -50,7 +50,17 @@ jobs:
     - name: install dependencies
       run: |
         # If clang, use the default version. Otherwise the compiler install with apt-get.
-        if [[ "${{ matrix.compiler }}" != "clang" ]]; then
+        if [[ "${{ matrix.compiler }}" == "g++-8" ]]; then
+            sudo add-apt-repository "deb http://us.archive.ubuntu.com/ubuntu/ bionic universe multiverse"
+            sudo apt-get --allow-downgrades install \
+                g++-8=8-20180414-1ubuntu2 \
+                gcc-8-base=8-20180414-1ubuntu2 \
+                gcc-8=8-20180414-1ubuntu2 \
+                libstdc++-8-dev=8-20180414-1ubuntu2 \
+                cpp-8=8-20180414-1ubuntu2 \
+                libgcc-8-dev=8-20180414-1ubuntu2 \
+                libmpx2=8-20180414-1ubuntu2
+        elif [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
