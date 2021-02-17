@@ -56,6 +56,7 @@ jobs:
             done
             for a in g++-8 libstdc++-8-dev cpp-8 libgcc-8-dev libmpx2; do
                 wget http://archive.ubuntu.com/ubuntu/pool/universe/g/gcc-8/${a}_8-20180414-1ubuntu2_amd64.deb
+            done
             sudo dpkg -i *.dev
         elif [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install ${{ matrix.compiler }}
