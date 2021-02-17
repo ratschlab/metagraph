@@ -297,7 +297,7 @@ bool update_column(const DBGAlignerConfig &config_,
                 assert(i + offset >= offset_prev + 1
                     && i + offset - offset_prev - 1 < S_prev.size());
                 PS[i] = Extender::PREV;
-                OS[i] = profile_op_[c][start + i + offset];
+                OS[i] = profile_op_.find(c)->second[start + i + offset];
             }
         }
     }
