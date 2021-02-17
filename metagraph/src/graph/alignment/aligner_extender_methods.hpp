@@ -49,6 +49,12 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
 
+    enum NodeId : uint8_t {
+        NONE,
+        PREV,
+        CUR
+    };
+
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
@@ -72,12 +78,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     std::string_view query_;
 
     typedef std::tuple<NodeType, char, size_t> AlignNode;
-
-    enum NodeId : uint8_t {
-        NONE,
-        PREV,
-        CUR
-    };
 
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<NodeId> PrevVec;
