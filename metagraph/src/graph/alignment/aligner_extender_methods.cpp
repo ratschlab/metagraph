@@ -260,6 +260,7 @@ bool update_column(const DBGAlignerConfig &config_,
     }
 
     // compute traceback vectors
+    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
 #ifdef __AVX2__
     for (size_t i = 0; i < cur_size; i += 8) {
         __m256i e_v = _mm256_load_si256((__m256i*)&E[i]);
@@ -276,11 +277,9 @@ bool update_column(const DBGAlignerConfig &config_,
                                        equal_e);
         mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
 
-        __m128i os_v = _mm_blendv_epi8(
-            mm_loadu_si64(&profile_op_.find(c)->second[start + i + offset]),
-            _mm_set1_epi8(Cigar::DELETION),
-            equal_f
-        );
+        __m128i os_v = _mm_blendv_epi8(mm_loadu_si64(&profile_o[i]),
+                                       _mm_set1_epi8(Cigar::DELETION),
+                                       equal_f);
         os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
         mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
     }
@@ -297,7 +296,7 @@ bool update_column(const DBGAlignerConfig &config_,
                 assert(i + offset >= offset_prev + 1
                     && i + offset - offset_prev - 1 < S_prev.size());
                 PS[i] = Extender::PREV;
-                OS[i] = profile_op_.find(c)->second[start + i + offset];
+                OS[i] = profile_o[i];
             }
         }
     }
