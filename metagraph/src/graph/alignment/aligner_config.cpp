@@ -2,22 +2,29 @@
 
 #include "aligner_cigar.hpp"
 #include "kmer/alphabets.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 namespace align {
 
+using mtg::common::logger;
+
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
     int8_t min_penalty_score = std::numeric_limits<int8_t>::max();
     for (const auto &row : score_matrix_) {
-        min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
+        min_penalty_score = std::min(min_penalty_score,
+                                     *std::min_element(row.begin(), row.end()));
     }
 
     if (gap_opening_penalty * 2 >= min_penalty_score) {
-        std::cerr << "|gap_opening_penalty| * 2 should be greater than greatest mismatch penalty: "
-                  << gap_opening_penalty * 2 << " >= " << (score_t)min_penalty_score << std::endl;
+        common::logger->error(
+            "|gap_opening_penalty| * 2 should be greater than greatest mismatch penalty: "
+            "{} >= {}",
+            gap_opening_penalty * 2, (score_t)min_penalty_score
+        );
         return false;
     }
 
