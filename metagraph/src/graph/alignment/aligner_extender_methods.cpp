@@ -134,12 +134,12 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
         stack.pop();
 
         if (total_size > config_.max_ram_per_alignment * 1000000) {
-            common::logger->warn("Alignment RAM limit reached, stopping extension");
+            DEBUG_LOG("Alignment RAM limit reached, stopping extension");
             break;
         }
 
         if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size()) {
-            common::logger->warn("Alignment node limit reached, stopping extension");
+            DEBUG_LOG("Alignment node limit reached, stopping extension");
             break;
         }
 
@@ -403,7 +403,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             max_pos = (max_it - S.begin()) + offset;
             assert(max_pos < size);
 
-            converged = !updated || has_converged(column_pair, 1, cur_size);
+            converged = !updated || has_converged(column_pair);
 
             if (best_starts.size() < config_.num_alternative_paths) {
                 best_starts.emplace(cur, *max_it);
@@ -564,8 +564,7 @@ void DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-bool DefaultColumnExtender<NodeType>
-::has_converged(const Column &column, size_t begin, size_t end) {
+bool DefaultColumnExtender<NodeType>::has_converged(const Column &column) {
     if (column.second)
         return true;
 
@@ -577,15 +576,9 @@ bool DefaultColumnExtender<NodeType>
         = column.first[column.first.size() - 2];
 
     return offset == offset_b && max_pos == max_pos_b
-        && std::get<0>(prev) == std::get<0>(prev_b) && S.size() == S_b.size()
-        && std::equal(S.begin() + begin, S.begin() + end, S_b.begin() + begin)
-        && std::equal(E.begin() + begin, E.begin() + end, E_b.begin() + begin)
-        && std::equal(F.begin() + begin, F.begin() + end, F_b.begin() + begin)
-        && std::equal(OS.begin() + begin, OS.begin() + end, OS_b.begin() + begin)
-        && std::equal(OE.begin() + begin, OE.begin() + end, OE_b.begin() + begin)
-        && std::equal(OF.begin() + begin, OF.begin() + end, OF_b.begin() + begin)
-        && std::equal(PS.begin() + begin, PS.begin() + end, PS_b.begin() + begin)
-        && std::equal(PF.begin() + begin, PF.begin() + end, PF_b.begin() + begin);
+        && std::get<0>(prev) == std::get<0>(prev_b)
+        && S == S_b && E == E_b && F == F_b && OS == OS_b && OE == OE_b && OF == OF_b
+        && PS == PS_b && PF == PF_b;
 }
 
 template <typename NodeType>
