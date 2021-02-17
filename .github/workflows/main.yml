@@ -57,6 +57,7 @@ jobs:
             for a in gcc-8 g++-8 libstdc++-8-dev cpp-8 libgcc-8-dev; do
                 wget http://archive.ubuntu.com/ubuntu/pool/universe/g/gcc-8/${a}_8-20180414-1ubuntu2_amd64.deb
             done
+            wget http://archive.ubuntu.com/ubuntu/pool/main/i/isl/libisl19_0.19-1_amd64.deb
             sudo dpkg -i *.deb
         elif [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install ${{ matrix.compiler }}
