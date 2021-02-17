@@ -1,9 +1,5 @@
 #include "aligner_extender_methods.hpp"
 
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
 #include <priority_deque.hpp>
 
 #include "common/utils/simd_utils.hpp"
@@ -15,26 +11,6 @@
 namespace mtg {
 namespace graph {
 namespace align {
-
-#ifdef __AVX2__
-
-// Drop-in replacement for _mm_loadu_si64
-inline __m128i mm_loadu_si64(const void *mem_addr) {
-    return _mm_loadl_epi64((const __m128i*)mem_addr);
-}
-
-// Drop-in replacement for _mm_storeu_si64
-inline void mm_storeu_si64(void *mem_addr, __m128i a) {
-    _mm_storel_epi64((__m128i*)mem_addr, a);
-}
-
-inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
-    __m128i orig = mm_loadu_si64((__m128i*)mem_addr);
-    a = _mm_blendv_epi8(orig, a, mask);
-    mm_storeu_si64(mem_addr, a);
-}
-
-#endif
 
 typedef DBGAlignerConfig::score_t score_t;
 constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
