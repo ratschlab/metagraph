@@ -61,9 +61,11 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
         const auto &row = config_.get_row(c);
         const auto &op_row = Cigar::get_op_row(c);
 
-        std::transform(query_.begin(), query_.end(), p_score_row.begin(),
+        // the first cell in a DP table row is one position before the last matched
+        // character, so we need to shift the indices of profile_score_ and profile_op_
+        std::transform(query_.begin(), query_.end(), p_score_row.begin() + 1,
                        [&row](char q) { return row[q]; });
-        std::transform(query_.begin(), query_.end(), p_op_row.begin(),
+        std::transform(query_.begin(), query_.end(), p_op_row.begin() + 1,
                        [&op_row](char q) { return op_row[q]; });
     }
 }
@@ -109,7 +111,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
     size_t num_columns = 1;
 
-    S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start];
+    S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start + 1];
 
     AlignNode start_node{ graph_.max_index() + 1,
                           seed_->get_sequence()[seed_->get_sequence().size() - 2],
@@ -232,7 +234,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             auto update_match = [&](size_t i) {
                 S[i] = S_prev[i + offset - offset_prev - 1]
-                        + profile_score_[c][start + i + offset - 1];
+                        + profile_score_[c][start + i + offset];
             };
 
             auto update_del = [&](size_t i) {
@@ -253,7 +255,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             for (size_t i = del_begin; i + 1 < match_end; i += 8) {
                 // vectorized update_match(i + 1)
                 __m256i profile_v = _mm256_cvtepi8_epi32(
-                    mm_loadu_si64(&profile_score_[c][start + i + offset])
+                    mm_loadu_si64(&profile_score_[c][start + i + offset + 1])
                 );
                 __m256i s_prev_v = _mm256_loadu_si256(
                     (__m256i*)&S_prev[i + offset - offset_prev]
@@ -341,7 +343,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                 mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
 
                 __m128i os_v = _mm_blendv_epi8(
-                    mm_loadu_si64(&profile_op_[c][start + i + offset - 1]),
+                    mm_loadu_si64(&profile_op_[c][start + i + offset]),
                     _mm_set1_epi8(Cigar::DELETION),
                     equal_f
                 );
@@ -361,7 +363,7 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
                         assert(i + offset >= offset_prev + 1
                             && i + offset - offset_prev - 1 < S_prev.size());
                         PS[i] = PREV;
-                        OS[i] = profile_op_[c][start + i + offset - 1];
+                        OS[i] = profile_op_[c][start + i + offset];
                     }
                 }
             }
