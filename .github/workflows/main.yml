@@ -51,9 +51,11 @@ jobs:
       run: |
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         if [[ "${{ matrix.compiler }}" == "g++-8" ]]; then
-            for a in g++-8 gcc-8-base gcc-8 libstdc++-8 cpp-8 libgcc-8-dev libmpx2; do
+            for a in gcc-8-base gcc-8; do
                 wget http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-8/${a}_8-20180414-1ubuntu2_amd64.deb
             done
+            for a in g++-8 libstdc++-8-dev cpp-8 libgcc-8-dev libmpx2; do
+                wget http://archive.ubuntu.com/ubuntu/pool/universe/g/gcc-8/${a}_8-20180414-1ubuntu2_amd64.deb
             sudo dpkg -i *.dev
         elif [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install ${{ matrix.compiler }}
