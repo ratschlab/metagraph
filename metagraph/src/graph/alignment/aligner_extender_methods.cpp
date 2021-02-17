@@ -595,7 +595,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
             backtrack<NodeType>(table_, *seed_, graph_, min_seed_score, best_node,
                                 max_score, max_pos, size, extend_window_)
         );
-        assert(extensions.back().is_valid(graph_, &config_));
+        assert(extensions.back().first.is_valid(graph_, &config_));
     }
 
     return extensions;
