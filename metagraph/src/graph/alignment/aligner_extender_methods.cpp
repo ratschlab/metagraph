@@ -240,16 +240,16 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
             if (del_end > del_begin)
                 std::fill(PF.begin() + del_begin, PF.begin() + del_end, PREV);
 
-            auto update_match = [&](size_t i) {
-                S[i] = S_prev[i + offset - offset_prev - 1]
-                        + profile_score_[c][start + i + offset];
+            auto update_match = [S=S.data(),sprev=&S_prev[offset - offset_prev - 1],
+                                 profile=&profile_score_[c][start + offset]](size_t i) {
+                S[i] = sprev[i] + profile[i];
             };
 
-            auto update_del = [&](size_t i) {
-                score_t del_open = S_prev[i + offset - offset_prev]
-                                        + config_.gap_opening_penalty;
-                score_t del_extend = F_prev[i + offset - offset_prev]
-                                        + config_.gap_extension_penalty;
+            auto update_del = [this,OF=OF.data(),F=F.data(),
+                               sprev=&S_prev[offset - offset_prev],
+                               fprev=&F_prev[offset - offset_prev]](size_t i) {
+                score_t del_open = sprev[i] + config_.gap_opening_penalty;
+                score_t del_extend = fprev[i] + config_.gap_extension_penalty;
                 OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
                 F[i] = std::max(del_open, del_extend);
             };
@@ -260,14 +260,12 @@ void DefaultColumnExtender<NodeType>::operator()(ExtensionCallback callback,
 
             // handle match and delete scores in the middle
 #ifdef __AVX2__
+            const int8_t *profile = &profile_score_[c][start + offset + 1];
+            const score_t *sprev = &S_prev[offset - offset_prev];
             for (size_t i = del_begin; i + 1 < match_end; i += 8) {
                 // vectorized update_match(i + 1)
-                __m256i profile_v = _mm256_cvtepi8_epi32(
-                    mm_loadu_si64(&profile_score_[c][start + i + offset + 1])
-                );
-                __m256i s_prev_v = _mm256_loadu_si256(
-                    (__m256i*)&S_prev[i + offset - offset_prev]
-                );
+                __m256i profile_v = _mm256_cvtepi8_epi32(mm_loadu_si64(&profile[i]));
+                __m256i s_prev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
 
                 _mm256_storeu_si256((__m256i*)&S[i + 1],
                                     _mm256_add_epi32(s_prev_v, profile_v));
