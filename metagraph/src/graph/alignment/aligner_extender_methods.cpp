@@ -155,12 +155,8 @@ bool update_column(const DBGAlignerConfig &config_,
                        fprev=&F_prev[offset - offset_prev]](size_t i) {
         score_t del_open = sprev[i] + config_.gap_opening_penalty;
         score_t del_extend = fprev[i] + config_.gap_extension_penalty;
-        score_t del_score = std::max(del_open, del_extend);
-
-        if (del_score > ninf) {
-            F[i] = del_score;
-            OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
-        }
+        OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+        F[i] = std::max(del_open, del_extend);
     };
 
     // handle match score in front
@@ -190,20 +186,15 @@ bool update_column(const DBGAlignerConfig &config_,
             f_prev_v, _mm256_set1_epi32(config_.gap_extension_penalty)
         );
 
-        __m256i ninf_v = _mm256_set1_epi32(ninf);
-        __m256i del_score = _mm256_max_epi32(_mm256_max_epi32(del_extend, del_open), ninf_v);
-
         __m128i del_op_v = _mm_blendv_epi8(
-            _mm_blendv_epi8(
-                _mm_set1_epi8(Cigar::MATCH),
-                _mm_set1_epi8(Cigar::DELETION),
-                mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(del_score, del_extend))
-            ),
-            _mm_set1_epi8(Cigar::CLIPPED),
-            mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(del_score, ninf_v))
+            _mm_set1_epi8(Cigar::MATCH),
+            _mm_set1_epi8(Cigar::DELETION),
+            mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
         );
+
         mm_storeu_si64(&OF[i], del_op_v);
 
+        __m256i del_score = _mm256_max_epi32(del_extend, del_open);
         _mm256_storeu_si256((__m256i*)&F[i], del_score);
 
         // vectorized max operator
@@ -231,12 +222,8 @@ bool update_column(const DBGAlignerConfig &config_,
     for (size_t i = 1; i < cur_size; ++i) {
         score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
         score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
-        score_t ins_score = std::max(ins_open, ins_extend);
-
-        if (ins_score > ninf) {
-            E[i] = ins_score;
-            OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
-        }
+        E[i] = std::max(ins_open, ins_extend);
+        OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
         S[i] = std::max({ 0, S[i], E[i] });
 
