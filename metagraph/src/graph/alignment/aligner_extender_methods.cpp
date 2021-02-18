@@ -175,8 +175,10 @@ bool update_column(const DeBruijnGraph &graph_,
     if (del_begin < std::min(del_end, match_begin))
         update_del(del_begin);
 
-    if (match_begin < del_end)
-        update_match(match_begin - 1);
+    if (match_begin < del_end) {
+        assert(offset + match_begin >= offset_prev + 1);
+        update_match(static_cast<ssize_t>(match_begin) - 1);
+    }
 
 #ifdef __AVX2__
     for (size_t i = match_begin; i < del_end; i += 8) {
