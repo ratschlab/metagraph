@@ -91,13 +91,11 @@ std::pair<size_t, size_t> get_band(const Node &prev,
 
 template <typename NodeType,
           typename Column,
-          typename AlignNode,
           typename Scores,
           typename ProfileScore,
           typename ProfileOp>
 bool update_column(const DBGAlignerConfig &config_,
                    const Column &column_prev,
-                   const AlignNode &prev,
                    Scores &next_column,
                    char c,
                    size_t start,
@@ -113,7 +111,7 @@ bool update_column(const DBGAlignerConfig &config_,
 
     auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
            prev_node_prev, PS_prev, PF_prev, offset_prev, max_pos_prev]
-        = column_prev[std::get<2>(prev)];
+        = column_prev[std::get<2>(prev_node)];
     assert(S_prev.size() + offset_prev <= size);
 
     // compute column boundaries for updating the match and deletion scores
@@ -124,7 +122,7 @@ bool update_column(const DBGAlignerConfig &config_,
     size_t match_begin = offset_prev + 1 >= offset ? offset_prev + 1 - offset : 0;
     size_t match_end = S_prev.size() + offset_prev + 1 >= offset
         ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
-        : 0;
+        : match_begin;
     assert(match_begin + offset);
 
     // to define the boundaries for deletion scores
@@ -133,15 +131,12 @@ bool update_column(const DBGAlignerConfig &config_,
     size_t del_begin = match_begin ? match_begin - 1 : 0;
     size_t del_end = S_prev.size() + offset_prev >= offset
         ? std::min(S_prev.size() + offset_prev - offset, cur_size)
-        : 0;
+        : del_begin;
 
     assert(del_begin <= match_begin);
     assert(match_begin - del_begin <= 1);
     assert(match_end == std::min(cur_size, del_end + 1));
 
-    // set prev node vector for deletion
-    if (del_end > del_begin)
-        std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
 
     const int8_t *profile = &profile_score_.find(c)->second[start + offset];
     auto update_match = [S=S.data(),
@@ -150,6 +145,7 @@ bool update_column(const DBGAlignerConfig &config_,
         S[i] = sprev[i] + profile[i];
     };
 
+    std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
     auto update_del = [&config_,OF=OF.data(),F=F.data(),
                        sprev=&S_prev[offset - offset_prev],
                        fprev=&F_prev[offset - offset_prev]](size_t i) {
@@ -307,65 +303,66 @@ std::pair<Alignment<NodeType>, NodeType>
 backtrack(const Table &table_,
           const Alignment<NodeType> &seed_,
           const DeBruijnGraph &graph_,
-          score_t min_seed_score,
+          score_t min_path_score,
           AlignNode best_node,
-          score_t max_score,
-          size_t max_pos,
           size_t size,
           std::string_view extend_window_) {
     typedef DefaultColumnExtender<NodeType> Extender;
 
     Cigar cigar;
+    std::vector<NodeType> path;
+    std::string seq;
+    NodeType start_node = 0;
+
+    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+        = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
+
+    score_t max_score = S[max_pos - offset];
+    score_t score = max_score;
+    Cigar::Operator last_op = OS[max_pos - offset];
+    assert(last_op == Cigar::MATCH);
+
     if (max_pos + 1 < size)
         cigar.append(Cigar::CLIPPED, size - max_pos - 1);
 
     size_t pos = max_pos;
-    std::vector<NodeType> path;
-    std::string seq;
-    NodeType start_node = 0;
-    score_t score = max_score;
-
-    Cigar::Operator last_op = Cigar::CLIPPED;
     while (true) {
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
             = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
 
-        if (last_op == Cigar::CLIPPED) {
-            last_op = OS[pos - offset];
-            assert(last_op == Cigar::MATCH);
-        }
-
         assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
+        last_op = OS[pos - offset];
 
-        if (pos == 1 && std::get<0>(best_node) == seed_.back()
-                && !std::get<2>(best_node)
-                && OS[pos - offset] == seed_.get_cigar().back().first) {
+        if (last_op == Cigar::CLIPPED) {
+            max_score = score;
+            start_node = DeBruijnGraph::npos;
+            break;
+        } else if (pos == 1 && last_op != Cigar::DELETION) {
             assert(std::get<0>(prev) == graph_.max_index() + 1);
+            assert(std::get<0>(best_node) == seed_.back());
+            assert(!std::get<2>(best_node));
+            assert(last_op == seed_.get_cigar().back().first);
             start_node = seed_.back();
             score -= seed_.get_score();
             break;
-        } else if (OS[pos - offset] == Cigar::CLIPPED) {
-            start_node = DeBruijnGraph::npos;
-            break;
         }
 
-        last_op = OS[pos - offset];
-
-        switch (OS[pos - offset]) {
+        switch (last_op) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
-                cigar.append(OS[pos - offset]);
+                cigar.append(last_op);
                 path.push_back(std::get<0>(best_node));
                 seq += std::get<1>(best_node);
-                assert((OS[pos - offset] == Cigar::MATCH)
+                assert((last_op == Cigar::MATCH)
                     == (graph_.get_node_sequence(std::get<0>(best_node)).back()
                         == extend_window_[pos - 1]));
                 switch (PS[pos - offset]) {
-                    case Extender::NONE: { best_node = {}; } break;
                     case Extender::PREV: { best_node = prev; } break;
-                    case Extender::CUR: {}
+                    case Extender::CUR: {} break;
+                    case Extender::NONE: { assert(false); }
                 }
                 --pos;
+                assert(pos);
             } break;
             case Cigar::INSERTION: {
                 assert(PS[pos - offset] == Extender::CUR);
@@ -387,9 +384,9 @@ backtrack(const Table &table_,
                     seq += std::get<1>(best_node);
                     cigar.append(Cigar::DELETION);
                     switch (PF[pos - offset]) {
-                        case Extender::NONE: { best_node = {}; } break;
                         case Extender::PREV: { best_node = prev; } break;
-                        case Extender::CUR: {}
+                        case Extender::CUR: {} break;
+                        case Extender::NONE: { assert(false); }
                     }
                 }
             } break;
@@ -399,7 +396,7 @@ backtrack(const Table &table_,
         assert(pos);
     }
 
-    if (max_score < min_seed_score)
+    if (max_score < min_path_score)
         return {};
 
     if (pos > 1)
@@ -418,7 +415,7 @@ backtrack(const Table &table_,
 }
 
 template <typename NodeType>
-auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
+auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         -> std::vector<std::pair<DBGAlignment, NodeType>> {
     const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
     size_t start = align_start - query_.data();
@@ -517,11 +514,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
             total_size += get_column_size(next_column);
             ++num_columns;
 
-            bool updated = update_column<NodeType>(
-                config_, column_prev, prev, next_column, c, start, size,
-                xdrop_cutoff, profile_score_, profile_op_
-            );
-
+            bool updated = update_column<NodeType>(config_, column_prev, next_column,
+                                                   c, start, size, xdrop_cutoff,
+                                                   profile_score_, profile_op_);
             sanitize(next_column);
 
             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
@@ -545,7 +540,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
 
             assert(xdrop_cutoff == best_starts.maximum().second - config_.xdrop);
 
-            if (*max_it >= xdrop_cutoff && score_rest >= min_seed_score)
+            if (*max_it >= xdrop_cutoff && score_rest >= min_path_score)
                 stack.emplace(Ref{ cur, *max_it });
         }
     }
@@ -566,10 +561,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_seed_score)
             return extensions;
         }
 
-        extensions.emplace_back(
-            backtrack<NodeType>(table_, *seed_, graph_, min_seed_score, best_node,
-                                max_score, max_pos, size, extend_window_)
-        );
+        extensions.emplace_back(backtrack<NodeType>(table_, *seed_, graph_,
+                                                    min_path_score, best_node,
+                                                    size, extend_window_));
         assert(extensions.back().first.is_valid(graph_, &config_));
     }
 
