@@ -138,17 +138,17 @@ bool update_column(const DBGAlignerConfig &config_,
     assert(match_end == std::min(cur_size, del_end + 1));
 
 
+    const score_t *sprev=&S_prev[offset - offset_prev];
+    const score_t *fprev=&F_prev[offset - offset_prev];
     const int8_t *profile = &profile_score_.find(c)->second[start + offset];
-    auto update_match = [S=S.data(),
-                         sprev=&S_prev[offset - offset_prev - 1],
-                         profile](size_t i) {
-        S[i] = sprev[i] + profile[i];
+    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
+
+    auto update_match = [S=S.data(),sprev,profile](size_t i) {
+        S[i] = *(sprev + i - 1) + profile[i];
     };
 
     std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
-    auto update_del = [&config_,OF=OF.data(),F=F.data(),
-                       sprev=&S_prev[offset - offset_prev],
-                       fprev=&F_prev[offset - offset_prev]](size_t i) {
+    auto update_del = [&config_,OF=OF.data(),F=F.data(),sprev,fprev](size_t i) {
         score_t del_open = sprev[i] + config_.gap_opening_penalty;
         score_t del_extend = fprev[i] + config_.gap_extension_penalty;
         OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
@@ -161,7 +161,6 @@ bool update_column(const DBGAlignerConfig &config_,
 
     // handle match and delete scores in the middle
 #ifdef __AVX2__
-    const score_t *sprev = &S_prev[offset - offset_prev];
     for (size_t i = del_begin; i + 1 < match_end; i += 8) {
         // vectorized update_match(i + 1)
         __m256i profile_v = _mm256_cvtepi8_epi32(mm_loadu_si64(&profile[i + 1]));
@@ -232,7 +231,6 @@ bool update_column(const DBGAlignerConfig &config_,
     }
 
     // compute traceback vectors
-    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
 #ifdef __AVX2__
     for (size_t i = 0; i < cur_size; i += 8) {
         __m256i e_v = _mm256_load_si256((__m256i*)&E[i]);
