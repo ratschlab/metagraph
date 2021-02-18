@@ -94,7 +94,8 @@ template <typename NodeType,
           typename Scores,
           typename ProfileScore,
           typename ProfileOp>
-bool update_column(const DBGAlignerConfig &config_,
+bool update_column(const DeBruijnGraph &graph_,
+                   const DBGAlignerConfig &config_,
                    const Column &column_prev,
                    Scores &next_column,
                    char c,
@@ -102,7 +103,8 @@ bool update_column(const DBGAlignerConfig &config_,
                    size_t size,
                    score_t &xdrop_cutoff,
                    const ProfileScore &profile_score_,
-                   const ProfileOp &profile_op_) {
+                   const ProfileOp &profile_op_,
+                   const Alignment<NodeType> &seed_) {
     typedef DefaultColumnExtender<NodeType> Extender;
 
     auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
@@ -120,10 +122,14 @@ bool update_column(const DBGAlignerConfig &config_,
     // need i + offset - offset_prev - 1 >= 0
     // &&   i + offset - offset_prev - 1 < S_prev.size()
     size_t match_begin = offset_prev + 1 >= offset ? offset_prev + 1 - offset : 0;
+
+    // ensure that the last operation from the seed is not overwritten
+    if (match_begin + offset <= 1)
+        match_begin = 2 - offset;
+
     size_t match_end = S_prev.size() + offset_prev + 1 >= offset
         ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
         : match_begin;
-    assert(match_begin + offset);
 
     // to define the boundaries for deletion scores
     // need i + offset - offset_prev >= 0
@@ -138,81 +144,98 @@ bool update_column(const DBGAlignerConfig &config_,
     assert(match_end == std::min(cur_size, del_end + 1));
 
 
-    const score_t *sprev=&S_prev[offset - offset_prev];
-    const score_t *fprev=&F_prev[offset - offset_prev];
-    const int8_t *profile = &profile_score_.find(c)->second[start + offset];
-    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
+    const score_t *__restrict__ sprev = &S_prev[offset - offset_prev];
+    const score_t *__restrict__ fprev = &F_prev[offset - offset_prev];
+    const int8_t *__restrict__ profile = &profile_score_.find(c)->second[start + offset];
+    const Cigar::Operator *__restrict__ profile_o = &profile_op_.find(c)->second[start + offset];
 
-    auto update_match = [S=S.data(),sprev,profile](size_t i) {
-        S[i] = *(sprev + i - 1) + profile[i];
+    std::fill(PS.begin() + match_begin, PS.begin() + match_end, Extender::PREV);
+    std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
+
+    bool updated = false;
+
+    auto update_match = [sprev,profile,profile_o,S=S.data(),OS=OS.data()](ssize_t i) {
+        S[i + 1] = sprev[i] + profile[i + 1];
+        OS[i + 1] = profile_o[i + 1];
     };
 
-    std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
-    auto update_del = [&config_,OF=OF.data(),F=F.data(),sprev,fprev](size_t i) {
+    auto update_del = [&config_,sprev,fprev,F=F.data(),OF=OF.data(),
+                       S=S.data(),OS=OS.data()](size_t i) {
         score_t del_open = sprev[i] + config_.gap_opening_penalty;
         score_t del_extend = fprev[i] + config_.gap_extension_penalty;
-        OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
         F[i] = std::max(del_open, del_extend);
+        OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+
+        if (F[i] > S[i]) {
+            S[i] = F[i];
+            OS[i] = Cigar::DELETION;
+        }
     };
 
-    // handle match score in front
-    if (match_end > match_begin && del_begin == match_begin)
-        update_match(match_begin);
+    if (del_begin < std::min(del_end, match_begin))
+        update_del(del_begin);
 
-    // handle match and delete scores in the middle
+    if (match_begin < del_end)
+        update_match(match_begin - 1);
+
 #ifdef __AVX2__
-    for (size_t i = del_begin; i + 1 < match_end; i += 8) {
-        // vectorized update_match(i + 1)
+    for (size_t i = match_begin; i < del_end; i += 8) {
+        // vectorized update_match(i)
+        __m256i sprev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
         __m256i profile_v = _mm256_cvtepi8_epi32(mm_loadu_si64(&profile[i + 1]));
-        __m256i s_prev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
-
-        _mm256_storeu_si256((__m256i*)&S[i + 1],
-                            _mm256_add_epi32(s_prev_v, profile_v));
+        _mm256_storeu_si256((__m256i*)&S[i + 1], _mm256_add_epi32(sprev_v, profile_v));
+        *((uint64_t*)&OS[i + 1]) = *((uint64_t*)&profile_o[i + 1]);
 
         // vectorized update_del(i)
-        __m256i del_open = _mm256_add_epi32(
-            s_prev_v, _mm256_set1_epi32(config_.gap_opening_penalty)
-        );
+        __m256i gap_open = _mm256_set1_epi32(config_.gap_opening_penalty);
+        __m256i del_open = _mm256_add_epi32(sprev_v, gap_open);
 
-        __m256i f_prev_v = _mm256_loadu_si256(
-            (__m256i*)&F_prev[i + offset - offset_prev]
-        );
-        __m256i del_extend = _mm256_add_epi32(
-            f_prev_v, _mm256_set1_epi32(config_.gap_extension_penalty)
-        );
+        __m256i fprev_v = _mm256_loadu_si256((__m256i*)&fprev[i]);
+        __m256i gap_extend = _mm256_set1_epi32(config_.gap_extension_penalty);
+        __m256i del_extend = _mm256_add_epi32(fprev_v, gap_extend);
+
+        __m256i del_score = _mm256_max_epi32(del_open, del_extend);
+        _mm256_storeu_si256((__m256i*)&F[i], del_score);
 
         __m128i del_op_v = _mm_blendv_epi8(
             _mm_set1_epi8(Cigar::MATCH),
             _mm_set1_epi8(Cigar::DELETION),
             mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
         );
-
         mm_storeu_si64(&OF[i], del_op_v);
 
-        __m256i del_score = _mm256_max_epi32(del_extend, del_open);
-        _mm256_storeu_si256((__m256i*)&F[i], del_score);
-
-        // vectorized max operator
         __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
-        _mm256_storeu_si256((__m256i*)&S[i], _mm256_max_epi32(s_v, del_score));
+        __m256i score_max = _mm256_max_epi32(s_v, del_score);
+        _mm256_storeu_si256((__m256i*)&S[i], score_max);
+
+        __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_score, s_v));
+        mm_maskstorel_epi8((int8_t*)&OS[i], mask, _mm_set1_epi8(Cigar::DELETION));
     }
 #else
-    for (size_t i = del_begin; i + 1 < match_end; ++i) {
-        update_match(i + 1);
+    for (size_t i = match_begin; i < del_end; ++i) {
+        update_match(i);
         update_del(i);
-        S[i] = std::max(S[i], F[i]);
     }
 #endif
 
-    // handle delete score in the back
-    if (del_end > del_begin && match_end < del_end + 1)
-        update_del(del_end - 1);
+    auto update_max = [&xdrop_cutoff,&updated,&config_,ninf=ninf,
+                       S=S.data(),OS=OS.data(),PS=PS.data()](size_t i) {
+        if (S[i] < xdrop_cutoff) {
+            S[i] = ninf;
+            OS[i] = Cigar::CLIPPED;
+            PS[i] = Extender::NONE;
+        } else if (S[i] <= 0) {
+            S[i] = 0;
+            OS[i] = Cigar::CLIPPED;
+            PS[i] = Extender::NONE;
+            updated = true;
+        } else {
+            xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
+            updated = true;
+        }
+    };
 
-    // compute insert and best scores
-    bool updated = false;
-    S[0] = std::max(0, S[0]);
-    if (S[0] < xdrop_cutoff)
-        S[0] = ninf;
+    update_max(0);
 
     for (size_t i = 1; i < cur_size; ++i) {
         score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
@@ -220,57 +243,14 @@ bool update_column(const DBGAlignerConfig &config_,
         E[i] = std::max(ins_open, ins_extend);
         OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
-        S[i] = std::max({ 0, S[i], E[i] });
-
-        if (S[i] >= xdrop_cutoff) {
-            xdrop_cutoff = std::max(xdrop_cutoff, S[i] - config_.xdrop);
-            updated = true;
-        } else {
-            S[i] = ninf;
+        if (E[i] > S[i]) {
+            S[i] = E[i];
+            OS[i] = Cigar::INSERTION;
+            PS[i] = Extender::CUR;
         }
-    }
 
-    // compute traceback vectors
-#ifdef __AVX2__
-    for (size_t i = 0; i < cur_size; i += 8) {
-        __m256i e_v = _mm256_load_si256((__m256i*)&E[i]);
-        __m256i f_v = _mm256_load_si256((__m256i*)&F[i]);
-        __m256i s_v = _mm256_load_si256((__m256i*)&S[i]);
-        __m128i mask = mm256_cvtepi32_epi8(
-            _mm256_cmpgt_epi32(s_v, _mm256_setzero_si256())
-        );
-        __m128i equal_e = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, e_v));
-        __m128i equal_f = mm256_cvtepi32_epi8(_mm256_cmpeq_epi32(s_v, f_v));
-
-        __m128i ps_v = _mm_blendv_epi8(_mm_set1_epi8(Extender::PREV),
-                                       _mm_set1_epi8(Extender::CUR),
-                                       equal_e);
-        mm_maskstorel_epi8((int8_t*)&PS[i], mask, ps_v);
-
-        __m128i os_v = _mm_blendv_epi8(mm_loadu_si64(&profile_o[i]),
-                                       _mm_set1_epi8(Cigar::DELETION),
-                                       equal_f);
-        os_v = _mm_blendv_epi8(os_v, _mm_set1_epi8(Cigar::INSERTION), equal_e);
-        mm_maskstorel_epi8((int8_t*)&OS[i], mask, os_v);
+        update_max(i);
     }
-#else
-    for (size_t i = 0; i < cur_size; ++i) {
-        if (S[i] > 0) {
-            if (S[i] == E[i]) {
-                PS[i] = Extender::CUR;
-                OS[i] = Cigar::INSERTION;
-            } else if (S[i] == F[i]) {
-                PS[i] = Extender::PREV;
-                OS[i] = Cigar::DELETION;
-            } else {
-                assert(i + offset >= offset_prev + 1
-                    && i + offset - offset_prev - 1 < S_prev.size());
-                PS[i] = Extender::PREV;
-                OS[i] = profile_o[i];
-            }
-        }
-    }
-#endif
 
     // extend to the right with insertion scores
     while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
@@ -292,6 +272,14 @@ bool update_column(const DBGAlignerConfig &config_,
             OS.back() = Cigar::INSERTION;
         }
     }
+
+    // make sure that the first operation taken matches the seed
+    std::ignore = graph_;
+    std::ignore = seed_;
+    assert(std::get<0>(prev_node) != graph_.max_index() + 1 || std::get<2>(prev_node)
+        || (offset <= 1 && S[1 - offset] == seed_.get_score()
+            && OS[1 - offset] == seed_.get_cigar().back().first
+            && PS[1 - offset] == Extender::PREV));
 
     return updated;
 }
@@ -508,13 +496,21 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 min_i - 1 /* offset */, 0 /* max_pos */
             );
             sanitize(next_column);
+            if (std::get<0>(prev) == graph_.max_index() + 1 && !std::get<2>(prev)) {
+                auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos]
+                    = next_column;
+                S[1 - offset] = seed_->get_score();
+                OS[1 - offset] = seed_->get_cigar().back().first;
+                PS[1 - offset] = PREV;
+            }
 
             total_size += get_column_size(next_column);
             ++num_columns;
 
-            bool updated = update_column<NodeType>(config_, column_prev, next_column,
-                                                   c, start, size, xdrop_cutoff,
-                                                   profile_score_, profile_op_);
+            bool updated = update_column<NodeType>(graph_, config_, column_prev,
+                                                   next_column, c, start, size,
+                                                   xdrop_cutoff, profile_score_,
+                                                   profile_op_, *seed_);
             sanitize(next_column);
 
             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
