@@ -194,15 +194,22 @@ jobs:
         with:
           path: artifacts
 
+      - name: Tag name
+        id: tag_name
+        run: |
+          echo ::set-output name=TAG::${GITHUB_REF#refs/tags/}
+
       - name: build source archive including submodules
         run: |
           mkdir -p artifacts/sources
-          bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${{ github.event.release.tag_name }}.tar.gz
+          tag=${{ steps.tag_name.outputs.TAG }}
+          bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${tag}.tar.gz
+          bash .github/workflows/git-archive-all.sh --format zip artifacts/sources/${tag}.zip
 
       - name: create release with static binaries
         uses: svenstaro/upload-release-action@v2
         with:
-          release_name: Release ${{ github.event.release.tag_name }}
+          release_name: Release ${{ steps.tag_name.outputs.TAG }}
           body: |
             The binaries are currently provided on an experimental basis.
             The Linux binaries are statically linked and hence don't require additional libraries to be installed.
