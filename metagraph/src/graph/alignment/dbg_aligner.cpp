@@ -39,27 +39,42 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              IExtender<node_index>&& extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
-    for (auto &seed : seeder.get_seeds()) {
-        bool inserted = false;
-        std::pair<size_t, size_t> idx_range {
-            seed.get_clipping(),
-            seed.get_clipping() + seed.get_query().size()
-        };
-        for (node_index node : seed) {
-            auto emplace = visited_nodes_.emplace(node, idx_range);
-            auto &range = emplace.first.value();
-            if (emplace.second) {
-                inserted = true;
-            } else if (range.first > idx_range.first || range.second < idx_range.second) {
-                range.first = std::min(range.first, idx_range.first);
-                range.second = std::max(range.second, idx_range.second);
-                inserted = true;
-            }
-        }
+    std::vector<DBGAlignment> seeds = seeder.get_seeds();
 
-        if (!inserted) {
-            DEBUG_LOG("Skipping seed: {}", seed);
-            continue;
+    // The visited_nodes_ table is not used for filtration with the ManualSeeder,
+    // so sort the seeds to give higher-scoring candidates greater priority
+    // (this leads to subsequent alignments having greater min_path_score bounds)
+    bool is_manual_seeder = dynamic_cast<const ManualSeeder<node_index>*>(&seeder);
+    if (is_manual_seeder) {
+        std::sort(seeds.begin(), seeds.end(),
+                  std::not_fn(LocalAlignmentLess<node_index>()));
+    }
+
+    for (auto &seed : seeds) {
+        // check if this seed has been explored before in an alignment and discard
+        // it if so
+        if (!is_manual_seeder) {
+            bool inserted = false;
+            std::pair<size_t, size_t> idx_range {
+                seed.get_clipping(),
+                seed.get_clipping() + seed.get_query().size()
+            };
+            for (node_index node : seed) {
+                auto emplace = visited_nodes_.emplace(node, idx_range);
+                auto &range = emplace.first.value();
+                if (emplace.second) {
+                    inserted = true;
+                } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                    range.first = std::min(range.first, idx_range.first);
+                    range.second = std::max(range.second, idx_range.second);
+                    inserted = true;
+                }
+            }
+
+            if (!inserted) {
+                DEBUG_LOG("Skipping seed: {}", seed);
+                continue;
+            }
         }
 
         DEBUG_LOG("Seed: {}", seed);
@@ -120,14 +135,18 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
         // if !extended, then the seed was not extended because of early cutoff
 
-        extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-            auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-            auto &range = emplace.first.value();
-            if (!emplace.second) {
-                range.first = std::min(range.first, begin);
-                range.second = std::max(range.second, end);
-            }
-        });
+        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
+        // table to allow for seed filtration
+        if (!is_manual_seeder) {
+            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+                auto &range = emplace.first.value();
+                if (!emplace.second) {
+                    range.first = std::min(range.first, begin);
+                    range.second = std::max(range.second, end);
+                }
+            });
+        }
     }
 }
 

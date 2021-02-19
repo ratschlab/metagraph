@@ -197,8 +197,12 @@ bool spell_path(const DeBruijnGraph &graph,
 template <typename NodeType = uint64_t>
 struct LocalAlignmentLess {
     bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
-        return std::make_pair(-a.get_score(), a.get_query().size())
-                > std::make_pair(-b.get_score(), b.get_query().size());
+        // score is less, or more of the query is covered, or if the starting
+        // point is later in the query
+        return std::make_tuple(-a.get_score(), a.get_query().size(),
+                               static_cast<ssize_t>(a.get_clipping()))
+                > std::make_tuple(-b.get_score(), b.get_query().size(),
+                                  static_cast<ssize_t>(b.get_clipping()));
     }
 };
 
