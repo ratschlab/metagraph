@@ -117,31 +117,30 @@ bool update_column(const DeBruijnGraph &graph_,
     assert(S_prev.size() + offset_prev <= size);
 
     // compute column boundaries for updating the match and deletion scores
+    ssize_t offset_diff = static_cast<ssize_t>(offset_prev) - offset;
 
     // to define the boundaries for match scores
     // need i + offset - offset_prev - 1 >= 0
     // &&   i + offset - offset_prev - 1 < S_prev.size()
-    size_t match_begin = offset_prev + 1 >= offset ? offset_prev + 1 - offset : 0;
-
-    // ensure that the last operation from the seed is not overwritten
-    if (match_begin + offset <= 1)
-        match_begin = 2 - offset;
-
-    size_t match_end = S_prev.size() + offset_prev + 1 >= offset
-        ? std::min(S_prev.size() + offset_prev + 1 - offset, cur_size)
-        : match_begin;
+    // so offset_diff + 1 <= i < S_prev.size() + offset_diff + 1
+    size_t match_begin = std::max((ssize_t)0, offset_diff + 1);
+    size_t match_end = std::max(
+        match_begin,
+        static_cast<size_t>(std::min(S_prev.size() + offset_diff + 1, cur_size))
+    );
 
     // to define the boundaries for deletion scores
     // need i + offset - offset_prev >= 0
     // &&   i + offset - offset_prev < S_prev.size()
-    size_t del_begin = match_begin ? match_begin - 1 : 0;
-    size_t del_end = S_prev.size() + offset_prev >= offset
-        ? std::min(S_prev.size() + offset_prev - offset, cur_size)
-        : del_begin;
+    // so offset_diff <= i < S_prev.size() + offset_diff
+    size_t del_begin = std::max((ssize_t)0, offset_diff);
+    size_t del_end = std::max(
+        del_begin,
+        static_cast<size_t>(std::min(S_prev.size() + offset_diff, cur_size))
+    );
 
-    assert(del_begin <= match_begin);
-    assert(match_begin - del_begin <= 1);
-    assert(match_end == std::min(cur_size, del_end + 1));
+    assert(del_end <= match_end);
+    assert(del_end + 1 >= match_end);
 
 
     const score_t *__restrict__ sprev = &S_prev[offset - offset_prev];
@@ -155,7 +154,7 @@ bool update_column(const DeBruijnGraph &graph_,
     bool updated = false;
 
     auto update_match = [sprev,profile,profile_o,S=S.data(),OS=OS.data()](ssize_t i) {
-        S[i + 1] = sprev[i] + profile[i + 1];
+        S[i + 1] = *(sprev + i) + profile[i + 1];
         OS[i + 1] = profile_o[i + 1];
     };
 
@@ -175,12 +174,15 @@ bool update_column(const DeBruijnGraph &graph_,
     if (del_begin < std::min(del_end, match_begin))
         update_del(del_begin);
 
-    if (match_begin < del_end) {
-        assert(offset + match_begin >= offset_prev + 1);
+    if (match_begin < match_end)
         update_match(static_cast<ssize_t>(match_begin) - 1);
-    }
 
-#ifdef __AVX2__
+#ifndef __AVX2__
+    for (size_t i = match_begin; i < del_end; ++i) {
+        update_del(i);
+        update_match(i);
+    }
+#else
     for (size_t i = match_begin; i < del_end; i += 8) {
         // vectorized update_match(i)
         __m256i sprev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
@@ -212,11 +214,6 @@ bool update_column(const DeBruijnGraph &graph_,
 
         __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_score, s_v));
         mm_maskstorel_epi8((int8_t*)&OS[i], mask, _mm_set1_epi8(Cigar::DELETION));
-    }
-#else
-    for (size_t i = match_begin; i < del_end; ++i) {
-        update_match(i);
-        update_del(i);
     }
 #endif
 
@@ -329,16 +326,22 @@ backtrack(const Table &table_,
         last_op = OS[pos - offset];
 
         if (last_op == Cigar::CLIPPED) {
+            assert(S[pos - offset] == 0);
             max_score = score;
             start_node = DeBruijnGraph::npos;
             break;
         } else if (pos == 1 && last_op != Cigar::DELETION) {
-            assert(std::get<0>(prev) == graph_.max_index() + 1);
-            assert(std::get<0>(best_node) == seed_.back());
-            assert(!std::get<2>(best_node));
-            assert(last_op == seed_.get_cigar().back().first);
-            start_node = seed_.back();
-            score -= seed_.get_score();
+            score -= S[pos - offset];
+            if (std::get<0>(prev) != graph_.max_index() + 1
+                    || std::get<0>(best_node) != seed_.back()
+                    || std::get<2>(best_node)
+                    || last_op != seed_.get_cigar().back().first) {
+                start_node = DeBruijnGraph::npos;
+                max_score = score;
+            } else {
+                assert(seed_.get_score() == S[pos - offset]);
+                start_node = seed_.back();
+            }
             break;
         }
 
@@ -505,13 +508,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 min_i - 1 /* offset */, 0 /* max_pos */
             );
             sanitize(next_column);
-            if (std::get<0>(prev) == graph_.max_index() + 1 && !std::get<2>(prev)) {
-                auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos]
-                    = next_column;
-                S[1 - offset] = seed_->get_score();
-                OS[1 - offset] = seed_->get_cigar().back().first;
-                PS[1 - offset] = PREV;
-            }
 
             total_size += get_column_size(next_column);
             ++num_columns;
