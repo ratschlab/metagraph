@@ -221,11 +221,18 @@ bool update_column(const DeBruijnGraph &graph_,
 #endif
 
     auto update_max = [&xdrop_cutoff,&updated,&config_,ninf=ninf,
-                       S=S.data(),OS=OS.data(),PS=PS.data()](size_t i) {
+                       S=S.data(),E=E.data(),F=F.data(),
+                       OS=OS.data(),OE=OE.data(),OF=OF.data(),
+                       PS=PS.data(),PF=PF.data()](size_t i) {
         if (S[i] < xdrop_cutoff) {
             S[i] = ninf;
+            E[i] = ninf;
+            F[i] = ninf;
             OS[i] = Cigar::CLIPPED;
+            OE[i] = Cigar::CLIPPED;
+            OF[i] = Cigar::CLIPPED;
             PS[i] = Extender::NONE;
+            PF[i] = Extender::NONE;
         } else if (S[i] <= 0) {
             S[i] = 0;
             OS[i] = Cigar::CLIPPED;
