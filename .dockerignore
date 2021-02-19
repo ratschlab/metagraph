@@ -1,0 +1,10 @@
+**/.idea
+.git
+Dockerfile
+metagraph/CMakeFiles
+metagraph/build*
+metagraph/cmake-build*
+metagraph/docker
+metagraph/external-libaries/caches/*
+projects
+visualization
