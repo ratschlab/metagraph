@@ -461,7 +461,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     best_starts.emplace(start_node, S[0]);
 
     std::priority_queue<Ref, std::vector<Ref>, utils::LessSecond> stack;
-    stack.emplace(start_node, 0);
+    stack.emplace(start_node, S[0]);
 
     while (stack.size()) {
         AlignNode prev = stack.top().first;
