@@ -58,10 +58,7 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 template <typename Node, typename Column>
 std::pair<size_t, size_t> get_band(const Node &prev,
                                    const Column &column_prev,
-                                   size_t size,
                                    score_t xdrop_cutoff) {
-    size_t min_i;
-    size_t max_i;
     const auto &S_prev = std::get<0>(column_prev[std::get<2>(prev)]);
     size_t offset_prev = std::get<9>(column_prev[std::get<2>(prev)]);
     size_t max_pos_prev = std::get<10>(column_prev[std::get<2>(prev)]);
@@ -69,24 +66,17 @@ std::pair<size_t, size_t> get_band(const Node &prev,
     assert(std::max_element(S_prev.begin(), S_prev.end())
         == S_prev.begin() + (max_pos_prev - offset_prev));
 
-    if (S_prev[max_pos_prev - offset_prev] < xdrop_cutoff)
+    size_t start_pos = max_pos_prev - offset_prev;
+    if (S_prev[start_pos] < xdrop_cutoff)
         return {};
 
-    min_i = std::max((size_t)1, max_pos_prev);
-    max_i = std::min({ min_i + 2, S_prev.size() + offset_prev + 2, size });
-    while (min_i >= std::max((size_t)2, offset_prev)
-            && S_prev[min_i - offset_prev] >= xdrop_cutoff) {
-        --min_i;
-    }
-    while (max_i - offset_prev < S_prev.size()
-            && S_prev[max_i - offset_prev] >= xdrop_cutoff) {
-        ++max_i;
-    }
+    auto stop = [cutoff=std::max(xdrop_cutoff, ninf)](score_t s) { return s < cutoff; };
+    auto min_rit = std::find_if(std::make_reverse_iterator(S_prev.begin() + start_pos),
+                                S_prev.rend(), stop);
+    auto max_it = std::find_if(S_prev.begin() + start_pos, S_prev.end(), stop);
 
-    if (max_i - offset_prev >= S_prev.size())
-        max_i = size;
-
-    return std::make_pair(min_i, max_i);
+    return std::make_pair(S_prev.rend() - min_rit + offset_prev,
+                          max_it - S_prev.begin() + offset_prev);
 }
 
 template <typename NodeType,
@@ -243,7 +233,8 @@ bool update_column(const DeBruijnGraph &graph_,
 
     update_max(0);
 
-    for (size_t i = 1; i < cur_size; ++i) {
+    size_t i = 1;
+    for ( ; i < cur_size; ++i) {
         score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
         score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
         E[i] = std::max(ins_open, ins_extend);
@@ -255,6 +246,13 @@ bool update_column(const DeBruijnGraph &graph_,
             PS[i] = Extender::CUR;
         }
 
+        update_max(i);
+
+        if (S[i] == ninf && E[i] == ninf)
+            break;
+    }
+
+    for ( ; i < cur_size; ++i) {
         update_max(i);
     }
 
@@ -272,7 +270,8 @@ bool update_column(const DeBruijnGraph &graph_,
 
         PS.push_back(Extender::NONE);
         PF.push_back(Extender::NONE);
-        if (S.back() > 0 && S.back() == E.back()) {
+        if (S.back() > 0) {
+            assert(S.back() == E.back());
             updated = true;
             PS.back() = Extender::CUR;
             OS.back() = Cigar::INSERTION;
@@ -488,16 +487,17 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
 
             // compute bandwidth based on xdrop criterion
-            auto [min_i, max_i] = get_band(prev, column_prev, size, xdrop_cutoff);
-
+            auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff);
             if (min_i >= max_i)
                 continue;
+
+            max_i = std::min(max_i + 1, size);
 
             size_t depth = column.size();
             if (!depth)
                 total_size += column_vector_size;
 
-            size_t cur_size = max_i - min_i + 1;
+            size_t cur_size = max_i - min_i;
 
             auto &next_column = column.emplace_back(
                 ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
@@ -505,7 +505,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 OpVec(cur_size, Cigar::CLIPPED), OpVec(cur_size, Cigar::CLIPPED),
                 OpVec(cur_size, Cigar::CLIPPED),
                 prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
-                min_i - 1 /* offset */, 0 /* max_pos */
+                min_i /* offset */, 0 /* max_pos */
             );
             sanitize(next_column);
 
@@ -540,7 +540,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(xdrop_cutoff == best_starts.maximum().second - config_.xdrop);
 
             if (*max_it >= xdrop_cutoff && score_rest >= min_path_score)
-                stack.emplace(Ref{ cur, *max_it });
+                stack.emplace(cur, *max_it);
         }
     }
 
