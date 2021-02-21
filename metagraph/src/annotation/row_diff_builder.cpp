@@ -320,7 +320,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const fs::path &col_out_dir,
                                const fs::path &swap_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size,
+                               uint64_t buf_size_bytes,
                                bool compute_row_reduction) {
     if (source_files.empty())
         return;
@@ -369,6 +369,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         Encoder<uint64_t>::append(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
     };
+
+    // In the first stage, only one buffer is created per column (`bwd`).
+    // In the last stage, two buffers (`fwd` and `bwd`) are created per column.
+    const uint64_t buf_size = compute_row_reduction
+                                ? buf_size_bytes / sizeof(uint64_t)
+                                : buf_size_bytes / sizeof(uint64_t) / 2;
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {

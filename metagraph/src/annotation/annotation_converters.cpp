@@ -34,10 +34,12 @@ using namespace mtg::annot::binmat;
 
 using mtg::common::logger;
 
+namespace fs = std::filesystem;
+
 typedef LabelEncoder<std::string> LEncoder;
 
 const size_t kNumRowsInBlock = 50'000;
-const uint64_t ROW_DIFF_BUFFER_SIZE = 500'000;
+const uint64_t ROW_DIFF_BUFFER_BYTES = 8'000'000;
 
 
 template <class RowCallback>
@@ -430,7 +432,7 @@ convert_to_BRWT(
         const std::string &linkage_matrix_file,
         size_t num_parallel_nodes,
         size_t num_threads,
-        const std::filesystem::path &tmp_path,
+        const fs::path &tmp_path,
         const std::function<void(const BRWTBottomUpBuilder::CallColumn &)> &get_columns,
         std::vector<std::pair<uint64_t, std::string>> &&column_names) {
     auto linkage = parse_linkage_matrix(linkage_matrix_file);
@@ -462,7 +464,7 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::string &linkage_matrix_file,
         size_t num_parallel_nodes,
         size_t num_threads,
-        const std::filesystem::path &tmp_path) {
+        const fs::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -493,7 +495,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
                          const std::string &linkage_matrix_file,
                          size_t num_parallel_nodes,
                          size_t num_threads,
-                         const std::filesystem::path &tmp_path) {
+                         const fs::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -1121,8 +1123,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         std::filesystem::path out_dir,
-                         std::filesystem::path swap_dir,
+                         fs::path out_dir,
+                         fs::path swap_dir,
                          bool optimize) {
     if (!files.size())
         return;
@@ -1135,7 +1137,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     if (optimize)
         optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction.unopt");
 
-    std::filesystem::path row_reduction_fname;
+    fs::path row_reduction_fname;
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1143,11 +1145,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
-            // also include two buffers (fwd and back) for each column transformed,
-            // or only one buffer if it's the first stage where only the number of
-            // bits per row in row-diff is computed
-            uint64_t file_size = std::filesystem::file_size(files[i])
-                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * (optimize ? 2 : 1);
+            // also add some space for buffers for each column
+            uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
             if (file_size > mem_bytes) {
                 logger->warn(
                         "Not enough memory to process {}, requires {} MB, skipped",
@@ -1162,17 +1161,17 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
             // derive name from first file in batch
             if (row_reduction_fname.empty()) {
-                row_reduction_fname = out_dir/std::filesystem::path(file_batch.back())
+                row_reduction_fname = out_dir/fs::path(file_batch.back())
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".row_reduction");
                 if (!optimize)
                     row_reduction_fname += ".unopt";
 
-                if (std::filesystem::exists(row_reduction_fname)) {
+                if (fs::exists(row_reduction_fname)) {
                     logger->warn("Found row reduction vector {}, will be overwritten",
                                  row_reduction_fname);
-                    std::filesystem::remove(row_reduction_fname);
+                    fs::remove(row_reduction_fname);
                 }
             }
         }
@@ -1183,7 +1182,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         convert_batch_to_row_diff(
                 graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE, !optimize);
+                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES, !optimize);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
@@ -1197,10 +1196,10 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
         RowDiffColumnAnnotator input_anno;
         input_anno.load(file);
 
-        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(),
+        std::string outname = utils::remove_suffix(fs::path(file).filename(),
                                                    RowDiffColumnAnnotator::kExtension);
         std::string out_path
-                = (std::filesystem::path(outfbase).remove_filename() / outname).string()
+                = (fs::path(outfbase).remove_filename() / outname).string()
                 + "_row_diff" + ColumnCompressed<std::string>::kExtension;
         std::ofstream outstream(out_path, std::ios::binary);
         logger->trace("Transforming {} to {}", file, out_path);
@@ -1227,7 +1226,7 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
             std::exit(1);
         }
         std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
-        if (!std::filesystem::exists(anchors_file)) {
+        if (!fs::exists(anchors_file)) {
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
