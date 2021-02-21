@@ -1126,9 +1126,6 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path out_dir,
                          fs::path swap_dir,
                          bool optimize) {
-    if (!files.size())
-        return;
-
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1136,6 +1133,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
     if (optimize)
         optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
+
+    if (!files.size())
+        return;
 
     fs::path row_reduction_fname;
 

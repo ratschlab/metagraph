@@ -442,6 +442,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity != CONCATENATE
             && identity != STATS
             && identity != SERVER_QUERY
+            && !(identity == TRANSFORM_ANNOTATION && anno_type == Config::RowDiff)
             && !(identity == BUILD && complete)
             && !fnames.size())
         print_usage_and_exit = true;
