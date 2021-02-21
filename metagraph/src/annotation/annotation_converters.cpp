@@ -1135,7 +1135,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     if (optimize)
-        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction.unopt");
+        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
 
     fs::path row_reduction_fname;
 
@@ -1165,8 +1165,6 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".row_reduction");
-                if (!optimize)
-                    row_reduction_fname += ".unopt";
 
                 if (fs::exists(row_reduction_fname)) {
                     logger->warn("Found row reduction vector {}, will be overwritten",
