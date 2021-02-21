@@ -123,7 +123,7 @@ class Config {
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
-    double alignment_max_nodes_per_seq_char = 10.0;
+    double alignment_max_nodes_per_seq_char = 30.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
     std::vector<double> count_slice_quantiles;
