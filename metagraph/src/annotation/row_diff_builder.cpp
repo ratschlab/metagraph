@@ -11,9 +11,10 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 25;
-constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
-constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
+const uint64_t BLOCK_SIZE = 1 << 25;
+const uint64_t ROW_REDUCTION_WIDTH = 32;
+const uint32_t MAX_NUM_FILES_OPEN = 2000;
+
 
 namespace mtg {
 namespace annot {
@@ -76,9 +77,9 @@ void build_successor(const std::string &graph_fname,
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
-    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
-    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, 1024 * 1024);
-    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
+    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, BLOCK_SIZE, width);
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BLOCK_SIZE);
+    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, BLOCK_SIZE, width);
 
     ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
@@ -396,11 +397,11 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         if (new_reduction_vector) {
             // create an empty vector
             sdsl::int_vector_buffer(row_reduction_fname,
-                                    std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
+                                    std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
         }
 
         row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
-                                                std::ios::in | std::ios::out, 1024 * 1024);
+                                                std::ios::in | std::ios::out, BLOCK_SIZE);
 
         if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
             logger->error("Incompatible sizes of '{}': {} and '{}': {}",
@@ -667,7 +668,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
-            row_reduction.emplace_back(path, std::ios::in, 1024 * 1024);
+            row_reduction.emplace_back(path, std::ios::in, BLOCK_SIZE);
 
             if (row_reduction.back().size() != row_reduction.front().size()) {
                 logger->error("Row reduction vectors have different sizes");
