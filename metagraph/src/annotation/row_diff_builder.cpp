@@ -402,10 +402,14 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     sdsl::int_vector_buffer row_reduction;
     const bool new_reduction_vector = !fs::exists(row_reduction_fname);
     if (compute_row_reduction) {
+        logger->trace("Row reduction vector: {}", row_reduction_fname);
         if (new_reduction_vector) {
             // create an empty vector
             sdsl::int_vector_buffer(row_reduction_fname,
                                     std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
+            logger->trace("Initialized new row reduction vector");
+        } else {
+            logger->trace("Row reduction vector already exists and will be updated");
         }
 
         row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
@@ -664,7 +668,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         return;
     }
 
-    logger->trace("Optimizing anchors");
+    logger->info("Optimizing anchors...");
 
     std::vector<sdsl::int_vector_buffer<>> row_reduction;
     for (const auto &p : fs::directory_iterator(dir)) {

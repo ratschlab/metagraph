@@ -401,7 +401,7 @@ int transform_annotation(Config *config) {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
                                     config->max_path_length, out_dir, config->tmp_dir,
-                                    config->optimize);
+                                    config->optimize, config->outfbase);
                 break;
             }
             case Config::RowCompressed: {

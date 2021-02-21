@@ -1125,7 +1125,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          uint32_t max_path_length,
                          fs::path out_dir,
                          fs::path swap_dir,
-                         bool optimize) {
+                         bool optimize,
+                         fs::path row_reduction_fname) {
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1136,8 +1137,6 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
     if (!files.size())
         return;
-
-    fs::path row_reduction_fname;
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1160,11 +1159,21 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             file_batch.push_back(files[i]);
 
             // derive name from first file in batch
-            if (row_reduction_fname.empty()) {
+            if (!optimize && row_reduction_fname.extension() != ".row_reduction") {
+                if (!row_reduction_fname.empty()) {
+                    logger->warn(
+                        "The output filename {} does not have extension '.row_reduction'."
+                        " The name of the row reduction vector will be derived"
+                        " from the first column in batch.", row_reduction_fname);
+                }
                 row_reduction_fname = out_dir/fs::path(file_batch.back())
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".row_reduction");
+
+                logger->info("The name of the row reduction vector was automatically"
+                             " derived from the first column in batch and set to {}",
+                             row_reduction_fname);
 
                 if (fs::exists(row_reduction_fname)) {
                     logger->warn("Found row reduction vector {}, will be overwritten",
