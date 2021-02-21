@@ -317,7 +317,8 @@ void traverse_anno_chunked(
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
-                               const fs::path &dest_dir,
+                               const fs::path &col_out_dir,
+                               const fs::path &swap_dir,
                                const std::string &row_reduction_fname,
                                uint64_t buf_size,
                                bool compute_row_reduction) {
@@ -350,7 +351,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    const fs::path tmp_path = utils::create_temp_dir(fs::path(dest_dir).remove_filename(), "col");
+    const fs::path tmp_path = utils::create_temp_dir(swap_dir, "col");
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -594,7 +595,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 std::move(label_encoders[l_idx]));
 
         if (!compute_row_reduction) {
-            auto fpath = dest_dir/fs::path(source_files[l_idx])
+            auto fpath = col_out_dir/fs::path(source_files[l_idx])
                                     .filename()
                                     .replace_extension()
                                     .replace_extension(RowDiffColumnAnnotator::kExtension);
@@ -650,7 +651,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 }
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const fs::path &dest_dir,
+                                  const fs::path &dir,
                                   const std::string &row_reduction_extension) {
     if (fs::exists(graph_fname + kRowDiffAnchorExt)) {
         logger->info("Found optimized anchors {}", graph_fname + kRowDiffAnchorExt);
@@ -660,7 +661,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     logger->trace("Optimizing anchors");
 
     std::vector<sdsl::int_vector_buffer<>> row_reduction;
-    for (const auto &p : fs::directory_iterator(dest_dir)) {
+    for (const auto &p : fs::directory_iterator(dir)) {
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
@@ -680,7 +681,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     }
 
     if (!row_reduction.size()) {
-        logger->error("Didn't find any row reduction vectors in {} to merge", dest_dir);
+        logger->error("Didn't find any row reduction vectors in {} to merge", dir);
         exit(1);
     }
 

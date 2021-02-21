@@ -1121,18 +1121,19 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         std::filesystem::path dest_dir,
+                         std::filesystem::path out_dir,
+                         std::filesystem::path swap_dir,
                          bool optimize) {
     if (!files.size())
         return;
 
-    if (dest_dir.empty())
-        dest_dir = "./";
+    if (out_dir.empty())
+        out_dir = "./";
 
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     if (optimize)
-        optimize_anchors_in_row_diff(graph_fname, dest_dir, ".row_reduction.unopt");
+        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction.unopt");
 
     std::filesystem::path row_reduction_fname;
 
@@ -1161,7 +1162,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
             // derive name from first file in batch
             if (row_reduction_fname.empty()) {
-                row_reduction_fname = dest_dir/std::filesystem::path(file_batch.back())
+                row_reduction_fname = out_dir/std::filesystem::path(file_batch.back())
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".row_reduction");
@@ -1182,7 +1183,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         convert_batch_to_row_diff(
                 graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, dest_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE, !optimize);
+                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE, !optimize);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
