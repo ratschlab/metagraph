@@ -6,7 +6,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/threads/threading.hpp"
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -24,6 +24,8 @@ using mtg::common::logger;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
+template <typename T>
+using Encoder = common::EliasFanoEncoder<T>;
 
 
 void build_successor(const std::string &graph_fname,
@@ -363,8 +365,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
                                   size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
-        std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
+        Encoder<uint64_t>::append(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -560,22 +561,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         assert(to_merge.size() < files_open_per_thread);
 
                         new_chunks.push_back(to_merge.at(0) + "_");
-                        std::ofstream f(new_chunks.back(), std::ios::binary);
-
                         std::vector<uint64_t> buf;
                         buf.reserve(1024 * 1024);
 
                         common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
                             buf.push_back(i);
                             if (buf.size() == buf.capacity()) {
-                                f.write(reinterpret_cast<const char *>(buf.data()),
-                                        buf.size() * sizeof(decltype(buf.front())));
+                                Encoder<uint64_t>::append(buf, new_chunks.back());
                                 buf.resize(0);
                             }
                         });
                         if (buf.size()) {
-                            f.write(reinterpret_cast<const char *>(buf.data()),
-                                    buf.size() * sizeof(decltype(buf.front())));
+                            Encoder<uint64_t>::append(buf, new_chunks.back());
                         }
 
                         // remove merged chunks
@@ -586,7 +583,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     filenames.swap(new_chunks);
                 }
 
-                //TODO: benchmark using Elias-Fano encoders + merger
                 common::merge_files<uint64_t>(filenames, call);
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
