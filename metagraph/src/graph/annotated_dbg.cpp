@@ -63,6 +63,7 @@ void AnnotatedSequenceGraph
             return;
         }
     }
+
     annotator_->add_labels(indices, labels);
 }
 
