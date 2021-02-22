@@ -44,8 +44,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     // The visited_nodes_ table is not used for filtration with the ManualSeeder,
     // so sort the seeds to give higher-scoring candidates greater priority
     // (this leads to subsequent alignments having greater min_path_score bounds)
-    bool is_manual_seeder = dynamic_cast<const ManualSeeder<node_index>*>(&seeder);
-    if (is_manual_seeder) {
+    bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
+    if (!filter_seeds) {
         std::sort(seeds.begin(), seeds.end(),
                   std::not_fn(LocalAlignmentLess<node_index>()));
     }
@@ -53,27 +53,28 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     for (auto &seed : seeds) {
         // check if this seed has been explored before in an alignment and discard
         // it if so
-        if (!is_manual_seeder) {
-            bool inserted = false;
-            std::pair<size_t, size_t> idx_range {
-                seed.get_clipping(),
-                seed.get_clipping() + seed.get_query().size()
-            };
+        if (filter_seeds) {
+            size_t found_count = 0;
+            std::pair<size_t, size_t> idx_range { seed.get_clipping(),
+                                                  seed.get_clipping() + graph_.get_k() };
             for (node_index node : seed) {
                 auto emplace = visited_nodes_.emplace(node, idx_range);
                 auto &range = emplace.first.value();
                 if (emplace.second) {
-                    inserted = true;
                 } else if (range.first > idx_range.first || range.second < idx_range.second) {
                     DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
                     range.first = std::min(range.first, idx_range.first);
                     range.second = std::max(range.second, idx_range.second);
                     DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-                    inserted = true;
+                } else {
+                    ++found_count;
                 }
+
+                ++idx_range.first;
+                ++idx_range.second;
             }
 
-            if (!inserted) {
+            if (found_count == seed.size()) {
                 DEBUG_LOG("Skipping seed: {}", seed);
                 continue;
             }
@@ -97,7 +98,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         bool extended = false;
         extender.initialize(seed);
         for (auto&& [extension, start_node] : extender.get_extensions(min_path_score)) {
-            if (!start_node && !extended) {
+            if (!start_node && !extended && extension.empty()) {
                 // no good extension found
                 if (seed.get_score() >= min_path_score) {
                     seed.extend_query_end(query.data() + query.size());
@@ -139,7 +140,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
         // table to allow for seed filtration
-        if (!is_manual_seeder) {
+        if (filter_seeds) {
             extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
                 auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
                 auto &range = emplace.first.value();

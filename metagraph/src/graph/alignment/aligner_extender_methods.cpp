@@ -580,9 +580,11 @@ void DefaultColumnExtender<NodeType>
             const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = column;
 
             auto it = std::find_if(S.begin(), S.end(), [](score_t s) { return s > 0; });
+            auto rit = std::find_if(S.rbegin(), S.rend(), [](score_t s) { return s > 0; });
             size_t start_c = (it - S.begin()) + offset;
+            size_t end_c = (S.rend() - rit) + offset;
             start = std::min(start, start_c ? start_c - 1 : start_c);
-            end = std::max(end, max_pos ? max_pos - 1 : max_pos);
+            end = std::max(end, end_c);
         }
 
         if (start < end)
