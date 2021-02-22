@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "annotation/representation/base/annotation.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
@@ -68,6 +69,11 @@ class TaxonomyDB {
     std::vector<TaxId> denormalized_taxid;
 
     /**
+    * taxonomic_map returns the taxid LCA for a given kmer.
+    */
+    std::shared_ptr<sdsl::int_vector<>> taxonomic_map = nullptr;
+
+    /**
      * Reads and returns the taxonomic tree
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
@@ -114,6 +120,12 @@ class TaxonomyDB {
     void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                         std::vector<NormalizedTaxId> &tree_linearization);
 
+    /**
+     * Update kmers' LCA in "this->taxonomic_map" according to the received set of columns.
+     */
+    void run_taxo_columns_update(const annot::MultiLabelEncoded<AccessionVersion> &annotation,
+                                 const std::vector<AccessionVersion> &columns);
+
   public:
     /**
      * Constructs a TaxonomyDB
@@ -127,14 +139,29 @@ class TaxonomyDB {
                const std::string &fasta_headers_filepath);
 
     /**
+     * Iterate the annotation matrix (kmer-OX labels-OY) for updating the LCA taxid
+     * per kmer. The new data is stored in "this->taxonomic_map".
+     *
+     * @param [input] anno_graph - the annotation matrix object.
+     */
+    void taxonomic_update(const graph::AnnotatedDBG &anno_graph);
+
+    /**
+     * Similar to taxonomic_update, but use annotation columns batches for rounds of
+     * updates of RAM size.
+     */
+    void taxonomic_update_fast(const graph::AnnotatedDBG &anno_graph,
+                               size_t mem_bytes);
+
+    /**
      * Exports 'taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.
      */
-    void export_to_file(const std::string &filepath,
-                        sdsl::int_vector<> &taxonomic_map);
+    void export_to_file(const std::string &filepath);
     NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
 
     bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid);
+    std::string get_accession_version_from_label(const std::string &label);
 
   private:
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
