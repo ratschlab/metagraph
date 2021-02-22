@@ -202,17 +202,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename) {
 
-    std::shared_ptr<annot::TaxonomyDB> taxonomy = nullptr;
-    if (config.taxonomic_tree.size()) {
-        if (config.separately) {
-            logger->error("TaxonomicDB cannot be constructed on separated files (flag '--separately')");
-            exit(1);
-        }
-        taxonomy = std::make_shared<annot::TaxonomyDB>(config.taxonomic_tree,
-                                                       config.lookup_table,
-                                                       config.fasta_header_delimiter);
-    }
-
     auto anno_graph = initialize_annotated_dbg(graph, config);
 
     bool forward_and_reverse = config.forward_and_reverse;
@@ -283,36 +272,17 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     thread_pool.join();
 
     if (config.taxonomic_tree.size()) {
-        Timer timer_update_taxonomic_map;
-        sdsl::int_vector<> taxonomic_map(graph->max_index(), 0, sizeof(annot::MultiLabelEncoded<std::string>::Index));
-
-        std::mutex taxo_mutex;
-        auto &annotation = anno_graph->get_annotation();
-        auto &all_labels = annotation.get_all_labels();
-
-        for (const auto &label: all_labels) {
-            thread_pool.enqueue([&]() {
-                annotation.call_objects(label, [&](const auto &index) {
-                    uint64_t taxid;
-                    if(!taxonomy->get_normalized_taxid(label, taxid)) {
-                        return;
-                    }
-
-                    if (taxonomic_map[index] == 0) {
-                        std::lock_guard<std::mutex> lock(taxo_mutex);
-                        taxonomic_map[index] = taxid;
-                    } else {
-                        auto lca = taxonomy->find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
-                        std::lock_guard<std::mutex> lock(taxo_mutex);
-                        taxonomic_map[index] = lca;
-                    }
-                });
-            });
+        if (config.separately) {
+            logger->error("TaxonomicDB cannot be constructed on separated files (flag '--separately')");
+            exit(1);
         }
-        thread_pool.join();
-        logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
-
-        taxonomy->export_to_file(config.outfbase + ".taxo", taxonomic_map);
+        annot::TaxonomyDB taxonomy(config.taxonomic_tree, config.lookup_table, config.fasta_header_delimiter);
+        if (config.fast) {
+            taxonomy.taxonomic_update_fast(*anno_graph, config.memory_available);
+        } else {
+            taxonomy.taxonomic_update(*anno_graph);
+        }
+        taxonomy.export_to_file(config.outfbase + ".taxo");
     }
     anno_graph->get_annotation().serialize(annotator_filename);
 }

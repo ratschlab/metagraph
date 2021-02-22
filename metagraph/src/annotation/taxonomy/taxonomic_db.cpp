@@ -11,6 +11,8 @@
 #include "seq_io/sequence_io.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/unix_tools.hpp"
+#include "common/threads/threading.hpp"
+#include "graph/annotated_dbg.hpp"
 
 #include "common/logger.hpp"
 
@@ -131,14 +133,18 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
     }
 }
 
+std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+    return  utils::split_string(label, "|")[3];
+}
+
 void TaxonomyDB::get_input_accessions(const std::string &fasta_headers_filepath,
                                       tsl::hopscotch_set<AccessionVersion> &input_accessions) {
     std::ifstream f(fasta_headers_filepath);
     std::string line;
 
     while (getline(f, line) ) {
-        std::string fasta_header = utils::split_string(line, "\t")[0];
-        std::string accession_version = utils::split_string(fasta_header, "|")[3];
+        std::string fasta_label = utils::split_string(line, "\t")[0];
+        std::string accession_version = get_accession_version_from_label(fasta_label);
         input_accessions.insert(accession_version);
     }
     assert(input_accessions.size());
@@ -148,6 +154,7 @@ void TaxonomyDB::get_input_accessions(const std::string &fasta_headers_filepath,
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
                                    const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
+    //   TODO Print an error when the file format (e.g. '\t') is broken.
     std::ifstream f(lookup_table_filepath);
     std::string line;
     while (getline(f, line) ) {
@@ -241,10 +248,71 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, Norma
     return true;
 }
 
-void TaxonomyDB::export_to_file(const std::string &filepath,
-                                sdsl::int_vector<> &taxonomic_map) {
+void TaxonomyDB::run_taxo_columns_update(const annot::MultiLabelEncoded<AccessionVersion> &annotation,
+                                         const std::vector<AccessionVersion> &columns) {
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+    auto &taxo = *taxonomic_map;
+    std::mutex taxo_mutex;
+
+    for (const auto &label: columns) {
+        thread_pool.enqueue([&]() {
+          std::string accession_version = get_accession_version_from_label(label);
+          uint64_t taxid;
+          if(!get_normalized_taxid(accession_version, taxid)) {
+              return;
+          }
+          annotation.call_objects(label, [&](const auto &index) {
+            if (taxo[index] == 0) {
+                std::lock_guard<std::mutex> lock(taxo_mutex);
+                taxo[index] = taxid;
+            } else {
+                auto lca = find_lca(std::vector<uint64_t>{taxo[index], taxid});
+                std::lock_guard<std::mutex> lock(taxo_mutex);
+                taxo[index] = lca;
+            }
+          });
+        });
+    }
+    thread_pool.join();
+}
+
+void TaxonomyDB::taxonomic_update(const graph::AnnotatedDBG &anno_graph) {
+    Timer timer_update_taxonomic_map;
+    taxonomic_map = std::make_shared<sdsl::int_vector<>>(anno_graph.get_graph().max_index(), 0);
+
+    auto &annotation = anno_graph.get_annotation();
+    run_taxo_columns_update(annotation, annotation.get_all_labels());
+    logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
+}
+
+void TaxonomyDB::taxonomic_update_fast(const graph::AnnotatedDBG &anno_graph,
+                                       size_t max_col_in_ram) {
+    Timer timer_update_taxonomic_map;
+    taxonomic_map = std::make_shared<sdsl::int_vector<>>(anno_graph.get_graph().max_index(), 0);
+    auto &annotation = anno_graph.get_annotation();
+    const std::vector<AccessionVersion> &all_labels = annotation.get_all_labels();
+
+    for (uint64_t i = 0; i < all_labels.size(); ) {
+        logger->trace("Loading columns for batch-conversion...");
+        std::vector<AccessionVersion> current_labels;
+        size_t no_columns = 0;
+        for ( ; i < all_labels.size(); ++i) {
+            no_columns += 1;
+            if (no_columns > max_col_in_ram) {
+                break;
+            }
+            current_labels.push_back(all_labels[i]);
+        }
+        logger->trace("Running taxonomic_update on {}-batch column", no_columns);
+        run_taxo_columns_update(annotation, current_labels);
+    }
+
+    logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
+}
+
+void TaxonomyDB::export_to_file(const std::string &filepath) {
     if (num_external_get_taxid_calls_failed) {
-        logger->warn("Total number external LCA calls: {} from which nonexistent accession versions: {}",
+        logger->warn("Total number external get_normalized_taxid calls: {} from which nonexistent accession versions: {}",
                      num_external_get_taxid_calls, num_external_get_taxid_calls_failed);
     }
 
@@ -256,13 +324,6 @@ void TaxonomyDB::export_to_file(const std::string &filepath,
         logger->error("Can't open taxonomic file '{}'.", filepath.c_str());
         std::exit(1);
     }
-
-    // Denormalize taxids in taxonomic map.
-    for (size_t i = 0; i < taxonomic_map.size(); ++i) {
-        taxonomic_map[i] = denormalized_taxid[taxonomic_map[i]];
-    }
-    assert(taxonomic_map.size());
-    taxonomic_map.serialize(f);
 
     const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
 
@@ -282,6 +343,16 @@ void TaxonomyDB::export_to_file(const std::string &filepath,
     }
     assert(node_parents.size());
     serialize_number_number_map(f, node_parents);
+
+    auto &taxo = *taxonomic_map;
+    // Denormalize taxids in taxonomic map.
+    for (size_t i = 0; i < taxo.size(); ++i) {
+        if (taxo[i]) {
+            taxo[i] = denormalized_taxid[taxo[i]];
+        }
+    }
+    taxo.serialize(f);
+
     f.close();
     logger->trace("Finished exporting metagraph taxonomic data after '{}' sec", timer.elapsed());
 }
