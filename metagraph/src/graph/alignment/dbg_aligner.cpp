@@ -65,8 +65,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 if (emplace.second) {
                     inserted = true;
                 } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                    DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
                     range.first = std::min(range.first, idx_range.first);
                     range.second = std::max(range.second, idx_range.second);
+                    DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
                     inserted = true;
                 }
             }
