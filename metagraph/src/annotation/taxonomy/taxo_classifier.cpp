@@ -33,13 +33,14 @@ void TaxoClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
 
-    if (!load_number_number_map(f, &taxonomic_map)) {
-        logger->error("Can't load serialized 'taxonomic_map' from file '{}'.", filepath.c_str());
+    if (!load_number_number_map(f, &node_parent)) {
+        logger->error("Can't load serialized 'node_parent' from file '{}'.", filepath.c_str());
         std::exit(1);
     }
 
-    if (!load_number_number_map(f, &node_parent)) {
-        logger->error("Can't load serialized 'node_parent' from file '{}'.", filepath.c_str());
+    taxonomic_map.load(f);
+    if (taxonomic_map.empty()) {
+        logger->error("Can't load serialized 'taxonomic_map' from file '{}'.", filepath.c_str());
         std::exit(1);
     }
     f.close();

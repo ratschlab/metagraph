@@ -312,6 +312,7 @@ void TaxonomyDB::taxonomic_update_fast(const graph::AnnotatedDBG &anno_graph,
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {
     if (num_external_get_taxid_calls_failed) {
+//        TODO Check why 'num_external_get_taxid_calls' is so large.
         logger->warn("Total number external get_normalized_taxid calls: {} from which nonexistent accession versions: {}",
                      num_external_get_taxid_calls, num_external_get_taxid_calls_failed);
     }

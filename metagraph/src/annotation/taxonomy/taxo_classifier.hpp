@@ -32,7 +32,7 @@ class TaxoClassifier {
     /**
      * taxonomic_map returns the taxid LCA for a given kmer.
      */
-    tsl::hopscotch_map<KmerId, TaxId> taxonomic_map;
+    sdsl::int_vector<> taxonomic_map;
 
     /**
      * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
