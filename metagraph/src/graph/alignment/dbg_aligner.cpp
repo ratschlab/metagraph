@@ -51,6 +51,20 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     }
 
     for (auto &seed : seeds) {
+        score_t min_path_score = get_min_path_score(seed);
+
+        if (seed.get_query().data() + seed.get_query().size()
+                == query.data() + query.size()) {
+            if (seed.get_score() >= min_path_score) {
+                seed.trim_offset();
+                assert(seed.is_valid(graph_, &config_));
+                DEBUG_LOG("Alignment: {}", seed);
+                callback(std::move(seed));
+            }
+
+            continue;
+        }
+
         // check if this seed has been explored before in an alignment and discard
         // it if so
         if (filter_seeds) {
@@ -81,19 +95,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         }
 
         DEBUG_LOG("Seed: {}", seed);
-        score_t min_path_score = get_min_path_score(seed);
-
-        if (seed.get_query().data() + seed.get_query().size()
-                == query.data() + query.size()) {
-            if (seed.get_score() >= min_path_score) {
-                seed.trim_offset();
-                assert(seed.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment: {}", seed);
-                callback(std::move(seed));
-            }
-
-            continue;
-        }
 
         bool extended = false;
         extender.initialize(seed);
