@@ -134,10 +134,10 @@ class CanonicalDBG : public DeBruijnGraph {
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
-        return !graph_.is_canonical_mode()
-            ? (node > offset_ ? node - offset_ : node)
-            : std::min(node, reverse_complement(node));
+        return (node > offset_ ? node - offset_ : node);
     }
+
+    node_index reverse_complement(node_index node) const;
 
   private:
     std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
@@ -160,8 +160,6 @@ class CanonicalDBG : public DeBruijnGraph {
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
-
-    node_index reverse_complement(node_index node) const;
 
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph

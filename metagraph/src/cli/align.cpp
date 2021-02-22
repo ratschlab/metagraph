@@ -6,7 +6,8 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_methods.hpp"
+#include "graph/alignment/aligner_seeder_methods.hpp"
+#include "graph/alignment/aligner_extender_methods.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -99,8 +100,11 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
     if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            if (!canonical || !dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
+                logger->error("SuffixSeeder can be used only with succinct graph representation");
+                exit(1);
+            }
         }
 
         // Use the seeder that seeds to node suffixes
@@ -404,13 +408,6 @@ int align_to_graph(Config *config) {
             config->alignment_length = graph->get_k();
         }
 
-        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
-                && config->alignment_length != graph->get_k()) {
-            logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct without --canonical flag");
-            exit(1);
-        }
-
         logger->trace("Map sequences against the de Bruijn graph with k={}",
                       graph->get_k());
         logger->trace("Length of mapped k-mers: {}", config->alignment_length);
@@ -433,12 +430,6 @@ int align_to_graph(Config *config) {
     }
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
-
-    if (config->canonical && !graph->is_canonical_mode()
-            && aligner_config.min_seed_length < graph->get_k()) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
-        exit(1);
-    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);

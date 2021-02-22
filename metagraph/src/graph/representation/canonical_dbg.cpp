@@ -62,54 +62,101 @@ void CanonicalDBG
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
-    std::vector<node_index> path = map_sequence_to_nodes(graph_, sequence);
-    auto first_not_found = graph_.is_canonical_mode()
-        ? path.end()
-        : std::find(path.begin(), path.end(), DeBruijnGraph::npos);
-
-    for (auto jt = path.begin(); jt != first_not_found; ++jt) {
-        if (terminate())
-            return;
-
-        callback(*jt);
-    }
-
-    if (first_not_found == path.end())
+    if (sequence.size() < get_k())
         return;
 
-    std::string rev_seq(sequence.begin() + (first_not_found - path.begin()),
-                        sequence.end());
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+    std::vector<node_index> path;
+    path.reserve(sequence.size() - get_k() + 1);
 
-    auto it = rev_path.rbegin();
-    for (auto jt = first_not_found; jt != path.end(); ++jt) {
-        assert(it != rev_path.rend());
+    // map until the first mismatch
+    bool stop = false;
+    graph_.map_to_nodes_sequentially(sequence,
+        [&](node_index node) {
+            if (node) {
+                path.push_back(node);
+            } else {
+                stop = true;
+            }
+        },
+        [&]() { return stop; }
+    );
 
+    for (node_index node : path) {
         if (terminate())
             return;
 
-        if (*jt != DeBruijnGraph::npos) {
+        callback(node);
+    }
+
+    // trim the mapped prefix
+    sequence = sequence.substr(path.size());
+    path.resize(0);
+    if (sequence.size() < get_k())
+        return;
+
+    std::string rev_seq(sequence);
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    // map the reverse-complement
+    std::vector<node_index> rev_path = map_sequence_to_nodes(graph_, rev_seq);
+
+    // map the forward
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
+    if (dbg_succ && get_k() % 2) {
+        // if it's a boss table with odd k (without palindromic k-mers),
+        // we can skip k-mers that have been found in the rev-compl sequence
+        const auto &boss = dbg_succ->get_boss();
+        // the initial forward mapping stopped on this k-mer,
+        // hence it's missing and we skip it
+        path.push_back(npos);
+        auto it = rev_path.rbegin() + 1;
+        auto is_missing = get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
+                                                   sequence.substr(1));
+        boss.map_to_edges(sequence.substr(1),
+            [&](boss::BOSS::edge_index edge) {
+                path.push_back(dbg_succ->boss_to_kmer_index(edge));
+                ++it;
+            },
+            []() { return false; },
+            [&]() {
+                if (is_missing() || *it) {
+                    path.push_back(npos);
+                    ++it;
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        );
+
+        assert(it == rev_path.rend());
+
+    } else {
+        path = map_sequence_to_nodes(graph_, sequence);
+    }
+
+    assert(path.size() == rev_path.size());
+
+    auto it = rev_path.rbegin();
+    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
+        if (terminate())
+            return;
+
+        if (*jt != npos) {
             callback(*jt);
-        } else if (*it != DeBruijnGraph::npos) {
+        } else if (*it != npos) {
             callback(*it + offset_);
         } else {
-            callback(DeBruijnGraph::npos);
+            callback(npos);
         }
-        ++it;
     }
 }
 
 void CanonicalDBG::map_to_nodes(std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
-    if (graph_.is_canonical_mode()) {
-        graph_.map_to_nodes(sequence, callback, terminate);
-    } else {
-        map_to_nodes_sequentially(sequence, [&](node_index i) {
-            callback(i != DeBruijnGraph::npos ? get_base_node(i) : i);
-        }, terminate);
-    }
+    map_to_nodes_sequentially(sequence, [&](node_index i) {
+        callback(i != npos ? get_base_node(i) : i);
+    }, terminate);
 }
 
 void CanonicalDBG::append_next_rc_nodes(node_index node,
@@ -148,7 +195,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
                 c = kmer::KmerExtractorBOSS::complement(c);
 
-                if (children[c] == DeBruijnGraph::npos)
+                if (children[c] == npos)
                     children[c] = next + offset_;
             },
             get_k() - 1
@@ -156,12 +203,12 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != DeBruijnGraph::npos)
+            if (children[c] != npos)
                 continue;
 
             rev_seq[0] = complement(alphabet[c]);
             node_index next = graph_.kmer_to_node(rev_seq);
-            if (next != DeBruijnGraph::npos)
+            if (next != npos)
                 children[c] = next + offset_;
         }
     }
@@ -185,7 +232,7 @@ void CanonicalDBG
     try {
         auto children = child_node_cache_.Get(node);
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != DeBruijnGraph::npos)
+            if (children[c] != npos)
                 callback(children[c], alphabet[c]);
         }
 
@@ -200,12 +247,12 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left)
+        if (max_num_edges_left)
             append_next_rc_nodes(node, children);
 
         child_node_cache_.Put(node, children);
         for (size_t c = 0; c < children.size(); ++c) {
-            if (children[c] != DeBruijnGraph::npos) {
+            if (children[c] != npos) {
                 callback(children[c], alphabet[c]);
                 assert(traverse(node, alphabet[c]) == children[c]);
             }
@@ -254,7 +301,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
                     c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[c] == DeBruijnGraph::npos)
+                    if (parents[c] == npos)
                         parents[c] = prev + offset_;
                 }
             });
@@ -262,12 +309,12 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != DeBruijnGraph::npos)
+            if (parents[c] != npos)
                 continue;
 
             rev_seq.back() = complement(alphabet[c]);
             node_index prev = graph_.kmer_to_node(rev_seq);
-            if (prev != DeBruijnGraph::npos)
+            if (prev != npos)
                 parents[c] = prev + offset_;
         }
     }
@@ -291,7 +338,7 @@ void CanonicalDBG
     try {
         auto parents = parent_node_cache_.Get(node);
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != DeBruijnGraph::npos)
+            if (parents[c] != npos)
                 callback(parents[c], alphabet[c]);
         }
 
@@ -306,12 +353,12 @@ void CanonicalDBG
             --max_num_edges_left;
         });
 
-        if (!graph_.is_canonical_mode() && max_num_edges_left)
+        if (max_num_edges_left)
             append_prev_rc_nodes(node, parents);
 
         parent_node_cache_.Put(node, parents);
         for (size_t c = 0; c < parents.size(); ++c) {
-            if (parents[c] != DeBruijnGraph::npos) {
+            if (parents[c] != npos) {
                 callback(parents[c], alphabet[c]);
                 assert(traverse_back(node, alphabet[c]) == parents[c]);
             }
@@ -381,16 +428,16 @@ DeBruijnGraph::node_index CanonicalDBG::traverse(node_index node, char next_char
     assert(node <= offset_ * 2);
     if (node > offset_) {
         node = traverse_back(node - offset_, complement(next_char));
-        return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
+        return node != npos ? reverse_complement(node) : npos;
     } else {
         node_index next = graph_.traverse(node, next_char);
-        if (next != DeBruijnGraph::npos || graph_.is_canonical_mode())
+        if (next != npos)
             return next;
 
         std::string rev_seq = get_node_sequence(node).substr(1) + next_char;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
         next = graph_.kmer_to_node(rev_seq);
-        return next != DeBruijnGraph::npos ? reverse_complement(next) : next;
+        return next != npos ? reverse_complement(next) : next;
     }
 }
 
@@ -399,17 +446,17 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
     assert(node <= offset_ * 2);
     if (node > offset_) {
         node = traverse(node - offset_, complement(prev_char));
-        return node != DeBruijnGraph::npos ? reverse_complement(node) : DeBruijnGraph::npos;
+        return node != npos ? reverse_complement(node) : npos;
     } else {
         node_index prev = graph_.traverse_back(node, prev_char);
-        if (prev != DeBruijnGraph::npos || graph_.is_canonical_mode())
+        if (prev != npos)
             return prev;
 
         std::string rev_seq = std::string(1, prev_char)
             + get_node_sequence(node).substr(0, get_k() - 1);
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
         prev = graph_.kmer_to_node(rev_seq);
-        return prev != DeBruijnGraph::npos ? reverse_complement(prev) : prev;
+        return prev != npos ? reverse_complement(prev) : prev;
     }
 }
 
@@ -461,14 +508,14 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
         bool palindrome = (rev_seq == seq);
 
-        assert(palindrome || graph_.kmer_to_node(rev_seq) == DeBruijnGraph::npos);
+        assert(palindrome || graph_.kmer_to_node(rev_seq) == npos);
 
         is_palindrome_cache_.Put(node, palindrome);
         return palindrome ? node : node + offset_;
     }
 
     assert(false && "All cases should have been captured until now.");
-    return DeBruijnGraph::npos;
+    return npos;
 }
 
 void CanonicalDBG::reverse_complement(std::string &seq,

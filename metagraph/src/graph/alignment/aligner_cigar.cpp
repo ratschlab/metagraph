@@ -1,4 +1,4 @@
-#include "aligner_helper.hpp"
+#include "aligner_cigar.hpp"
 
 #include "kmer/alphabets.hpp"
 
@@ -82,19 +82,6 @@ Cigar::OperatorTable Cigar::initialize_opt_table() {
 }
 
 Cigar::OperatorTable Cigar::char_to_op = Cigar::initialize_opt_table();
-
-char Cigar::opt_to_char(Cigar::Operator op) {
-    switch (op) {
-        case Cigar::MATCH: return '=';
-        case Cigar::MISMATCH: return 'X';
-        case Cigar::INSERTION: return 'I';
-        case Cigar::DELETION: return 'D';
-        case Cigar::CLIPPED: return 'S';
-    }
-
-    assert(false);
-    return '\0';
-}
 
 std::string Cigar::to_string() const {
     std::string cigar_string;

@@ -148,7 +148,7 @@ class Config {
     std::string taxonomic_tree;
     std::string lookup_table;
     uint32_t max_path_length = 50;
-    std::string anchors;
+    std::string linkage_file;
 
     std::filesystem::path tmp_dir;
 

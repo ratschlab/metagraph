@@ -76,9 +76,6 @@ build-docker-all: build-docker-dev-env build-docker-bin build-docker
 build-sdsl-lite:
 	$(EXEC_CMD) 'cd $(CODE_BASE)/metagraph/external-libraries/sdsl-lite && ./install.sh $${PWD}'
 
-build-libmaus:
-	$(EXEC_CMD) 'cd $(CODE_BASE)/metagraph/external-libraries/libmaus2; rm -f CMakeCache.txt; cmake -DCMAKE_INSTALL_PREFIX:PATH=$${PWD} . && make -j $$(($$(getconf _NPROCESSORS_ONLN) - 1)) && make install'
-
 build-metagraph:
 	[ -d $(BUILD_DIR_HOST_DOCKER) ] || mkdir -p $(BUILD_DIR_HOST_DOCKER)
 	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) && cmake -DBUILD_KMC=OFF $(CODE_BASE)/metagraph && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
@@ -93,7 +90,7 @@ api-integration-tests:
 integration-tests:
 	$(EXEC_CMD) 'cd $(BUILD_DIR) && ./integration_tests'
 
-build-server: sync build-docker-dev-env build-sdsl-lite build-libmaus build-metagraph api-integration-tests
+build-server: sync build-docker-dev-env build-sdsl-lite build-metagraph api-integration-tests
 
 start-server:
 	docker run -d --restart=always -it $(DOCKER_OPTS) -p 5555:5555 $(IMG_NAME_DEV) /opt/metagraph_build/metagraph server_query -i $(SERVER_GRAPH_FILE) -a $(SERVER_ANNOT_FILE) -v -p 8
