@@ -1130,7 +1130,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     if (out_dir.empty())
         out_dir = "./";
 
-    build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
+    build_pred_succ(graph_fname, graph_fname, get_num_threads());
+    assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     if (optimize)
         optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");

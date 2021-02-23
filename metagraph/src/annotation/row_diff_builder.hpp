@@ -12,10 +12,14 @@
 namespace mtg {
 namespace annot {
 
-void build_successor(const std::string &graph_filename,
+void build_pred_succ(const std::string &graph_filename,
                      const std::string &outfbase,
-                     uint32_t max_length,
                      uint32_t num_threads);
+
+void assign_anchors(const std::string &graph_filename,
+                    const std::string &outfbase,
+                    uint32_t max_length,
+                    uint32_t num_threads);
 
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,

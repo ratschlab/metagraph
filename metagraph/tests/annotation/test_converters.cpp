@@ -174,19 +174,9 @@ TEST(RowDiff, succ) {
      * 2 -> 4 -> 5 -> 3 -> 1
      */
 
-    const std::vector<std::vector<uint64_t>> expected_succ = {
-        { 5, 5, 5, 5, 5 },
-        { 5, 3, 0, 5, 2 },
-        { 5, 3, 0, 4, 2 } };
-    const std::vector<std::vector<uint64_t>> expected_pred = {
-        {},
-        { 2, 4, 1 },
-        { 2, 4, 1, 3 } };
-    const std::vector<std::vector<bool>> expected_boundary = {
-        { 1, 1, 1, 1, 1 },
-        { 0, 1, 1, 0, 1, 0, 1, 1 },
-        { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
-    };
+    const std::vector<uint64_t> expected_succ = { 5, 3, 0, 4, 2 };
+    const std::vector<uint64_t> expected_pred = { 2, 4, 1, 3 };
+    const std::vector<bool> expected_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
@@ -209,26 +199,25 @@ TEST(RowDiff, succ) {
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
 
-        uint32_t idx = max_depth / 2;
         ASSERT_EQ(5, succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[idx][i], succ[i]) << max_depth << " " << i;;
+            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;;
         }
 
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
 
-        EXPECT_EQ(expected_pred[idx].size(), pred.size());
+        EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
-            EXPECT_EQ(expected_pred[idx][i], pred[i]) << max_depth << " " << i;
+            EXPECT_EQ(expected_pred[i], pred[i]) << max_depth << " " << i;
         }
 
         sdsl::bit_vector boundary;
         std::ifstream fpred_boundary(pred_boundary_file, std::ios::binary);
         boundary.load(fpred_boundary);
 
-        ASSERT_EQ(expected_boundary[idx].size(), boundary.size());
-        for(uint32_t i = 0; i < expected_boundary[idx].size(); ++i) {
-            EXPECT_EQ(expected_boundary[idx][i], boundary[i]) << max_depth << " " << i;
+        ASSERT_EQ(expected_boundary.size(), boundary.size());
+        for(uint32_t i = 0; i < expected_boundary.size(); ++i) {
+            EXPECT_EQ(expected_boundary[i], boundary[i]) << max_depth << " " << i;
         }
     }
 

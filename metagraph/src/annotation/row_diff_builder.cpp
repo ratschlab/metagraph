@@ -21,6 +21,7 @@ namespace annot {
 
 using namespace mtg::annot::binmat;
 using mtg::common::logger;
+using mtg::graph::boss::BOSS;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
@@ -28,18 +29,16 @@ template <typename T>
 using Encoder = common::EliasFanoEncoder<T>;
 
 
-void build_successor(const std::string &graph_fname,
+void build_pred_succ(const std::string &graph_fname,
                      const std::string &outfbase,
-                     uint32_t max_length,
                      uint32_t num_threads) {
     if (fs::exists(outfbase + ".succ")
-        && fs::exists(outfbase + ".pred")
-        && fs::exists(outfbase + ".pred_boundary")
-        && fs::exists(outfbase + kRowDiffAnchorExt + ".unopt")) {
-        logger->trace("Using existing pred/succ/anchors.unopt files in {}.*", outfbase);
+            && fs::exists(outfbase + ".pred")
+            && fs::exists(outfbase + ".pred_boundary")) {
+        logger->trace("Using existing pred/succ files in {}.*", outfbase);
         return;
     }
-    logger->trace("Building and writing successor, predecessor and anchor files to {}.*",
+    logger->trace("Building and writing successor and predecessor files to {}.*",
                   outfbase);
 
     graph::DBGSuccinct graph(2);
@@ -49,33 +48,11 @@ void build_successor(const std::string &graph_fname,
         std::exit(1);
     }
 
-    using graph::boss::BOSS;
     const BOSS &boss = graph.get_boss();
-    sdsl::bit_vector terminal;
-    sdsl::bit_vector dummy;
-    boss.row_diff_traverse(num_threads, max_length, &terminal, &dummy);
+
+    sdsl::bit_vector dummy = boss.mark_all_dummy_edges(num_threads);
 
     uint64_t num_rows = graph.num_nodes();
-
-    // terminal uses BOSS edges as indices, so we need to map it to annotation indices
-    sdsl::bit_vector term(num_rows, 0);
-    for (BOSS::edge_index i = 1; i < terminal.size(); ++i) {
-        if (terminal[i]) {
-            uint64_t graph_idx = graph.boss_to_kmer_index(i);
-            uint64_t anno_index
-                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
-            assert(anno_index < num_rows);
-            term[anno_index] = 1;
-        }
-    }
-    logger->trace("Number of anchors before anchor optimization: {}",
-                  sdsl::util::cnt_one_bits(term));
-
-    std::ofstream fterm(outfbase + kRowDiffAnchorExt + ".unopt", ios::binary);
-    anchor_bv_type(term).serialize(fterm);
-    term = sdsl::bit_vector();
-    fterm.close();
-    logger->trace("Anchor nodes written to {}.unopt", outfbase + kRowDiffAnchorExt);
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -97,16 +74,20 @@ void build_successor(const std::string &graph_fname,
         for (uint64_t i = start; i < std::min(start + BLOCK_SIZE, graph.num_nodes() + 1); ++i) {
             const size_t r = omp_get_thread_num();
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
-            if (dummy[boss_idx] || terminal[boss_idx]) {
+            if (dummy[boss_idx]) {
                 succ_buf[r].push_back(num_rows);
             } else {
                 const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
                 assert(d && "must not be dummy");
-                uint64_t next = graph.boss_to_kmer_index(boss.fwd(boss_idx, d));
+                BOSS::edge_index next = boss.fwd(boss_idx, d);
                 assert(next);
-                succ_buf[r].push_back(
-                    graph::AnnotatedSequenceGraph::graph_to_anno_index(next)
-                );
+                if (!dummy[next]) {
+                    succ_buf[r].push_back(
+                        graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                            graph.boss_to_kmer_index(next)));
+                } else {
+                    succ_buf[r].push_back(num_rows);
+                }
             }
             // ignore predecessors if boss_idx is not the last outgoing
             // edge (bc. we only traverse the last outgoing at a bifurcation)
@@ -115,8 +96,8 @@ void build_successor(const std::string &graph_fname,
                 BOSS::edge_index back_idx = boss.bwd(boss_idx);
                 boss.call_incoming_to_target(back_idx, d,
                     [&](BOSS::edge_index pred) {
-                        // terminal and dummy predecessors are ignored
-                        if (!terminal[pred] && !dummy[pred]) {
+                        // dummy predecessors are ignored
+                        if (!dummy[pred]) {
                             uint64_t node_index = graph.boss_to_kmer_index(pred);
                             pred_buf[r].push_back(
                                 graph::AnnotatedSequenceGraph::graph_to_anno_index(node_index)
@@ -146,6 +127,52 @@ void build_successor(const std::string &graph_fname,
     pred_boundary.close();
 
     logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
+}
+
+void assign_anchors(const std::string &graph_fname,
+                    const std::string &outfbase,
+                    uint32_t max_length,
+                    uint32_t num_threads) {
+    std::string anchor_filename = outfbase + kRowDiffAnchorExt + ".unopt";
+    if (fs::exists(anchor_filename)) {
+        logger->trace("Using existing {}", anchor_filename);
+        return;
+    }
+    logger->trace("Building and writing anchor bitmap to {}", anchor_filename);
+
+    graph::DBGSuccinct graph(2);
+    logger->trace("Loading graph...");
+    if (!graph.load(graph_fname)) {
+        logger->error("Cannot load graph from {}", graph_fname);
+        std::exit(1);
+    }
+
+    const BOSS &boss = graph.get_boss();
+    sdsl::bit_vector anchors_bv;
+    sdsl::bit_vector dummy; // TODO: don't compute dummy
+    boss.row_diff_traverse(num_threads, max_length, &anchors_bv, &dummy);
+
+    uint64_t num_rows = graph.num_nodes();
+
+    // anchors_bv uses BOSS edges as indices, so we need to map it to annotation indices
+    sdsl::bit_vector term(num_rows, 0);
+    for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
+        if (anchors_bv[i]) {
+            uint64_t graph_idx = graph.boss_to_kmer_index(i);
+            uint64_t anno_index
+                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
+            assert(anno_index < num_rows);
+            term[anno_index] = 1;
+        }
+    }
+    anchors_bv = sdsl::bit_vector();
+    anchor_bv_type anchors(std::move(term));
+    logger->trace("Number of anchors before anchor optimization: {}",
+                  anchors.num_set_bits());
+
+    std::ofstream fterm(anchor_filename, ios::binary);
+    anchors.serialize(fterm);
+    logger->trace("Anchor nodes written to {}", anchor_filename);
 }
 
 
