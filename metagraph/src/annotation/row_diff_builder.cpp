@@ -33,6 +33,7 @@ void build_pred_succ(const std::string &graph_fname,
                      const std::string &outfbase,
                      uint32_t num_threads) {
     if (fs::exists(outfbase + ".succ")
+            && fs::exists(outfbase + ".succ_boundary")
             && fs::exists(outfbase + ".pred")
             && fs::exists(outfbase + ".pred_boundary")) {
         logger->trace("Using existing pred/succ files in {}.*", outfbase);
@@ -52,43 +53,43 @@ void build_pred_succ(const std::string &graph_fname,
 
     sdsl::bit_vector dummy = boss.mark_all_dummy_edges(num_threads);
 
-    uint64_t num_rows = graph.num_nodes();
-
-    // create the succ file, indexed using annotation indices
+    // create the succ/pred files, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
     sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, BLOCK_SIZE, width);
-    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BLOCK_SIZE);
+    sdsl::int_vector_buffer<1> succ_boundary(outfbase + ".succ_boundary", std::ios::out, BLOCK_SIZE);
     sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, BLOCK_SIZE, width);
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BLOCK_SIZE);
 
-    ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
+    ProgressBar progress_bar(graph.num_nodes(), "Compute succ/pred", std::cerr,
                              !common::get_verbose());
 
-    // traverse BOSS table in parallel processing blocks of size |BLOCK_SIZE|
-    for (uint64_t start = 1; start <= graph.num_nodes(); start += BLOCK_SIZE) {
-        std::vector<std::vector<uint64_t>> pred_buf(num_threads);
-        std::vector<std::vector<uint64_t>> succ_buf(num_threads);
-        std::vector<std::vector<bool>> pred_boundary_buf(num_threads);
+    const uint64_t BS = 1'000'000;
+    // traverse BOSS table in parallel processing blocks of size |BS|
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    for (uint64_t start = 1; start <= graph.num_nodes(); start += BS) {
+        std::vector<uint64_t> succ_buf;
+        std::vector<bool> succ_boundary_buf;
+        std::vector<uint64_t> pred_buf;
+        std::vector<bool> pred_boundary_buf;
 
         // use static scheduling to make threads process ordered contiguous blocks
-        #pragma omp parallel for num_threads(num_threads) schedule(static)
-        for (uint64_t i = start; i < std::min(start + BLOCK_SIZE, graph.num_nodes() + 1); ++i) {
-            const size_t r = omp_get_thread_num();
+        for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
-            if (dummy[boss_idx]) {
-                succ_buf[r].push_back(num_rows);
-            } else {
+            if (!dummy[boss_idx]) {
                 const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
                 assert(d && "must not be dummy");
                 BOSS::edge_index next = boss.fwd(boss_idx, d);
                 assert(next);
                 if (!dummy[next]) {
-                    succ_buf[r].push_back(
-                        graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                            graph.boss_to_kmer_index(next)));
-                } else {
-                    succ_buf[r].push_back(num_rows);
+                    do {
+                        succ_buf.push_back(
+                            graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                                graph.boss_to_kmer_index(next)));
+                        succ_boundary_buf.push_back(0);
+                    } while (--next && !boss.get_last(next));
                 }
             }
+            succ_boundary_buf.push_back(1);
             // ignore predecessors if boss_idx is not the last outgoing
             // edge (bc. we only traverse the last outgoing at a bifurcation)
             if (!dummy[boss_idx] && boss.get_last(boss_idx)) {
@@ -99,32 +100,27 @@ void build_pred_succ(const std::string &graph_fname,
                         // dummy predecessors are ignored
                         if (!dummy[pred]) {
                             uint64_t node_index = graph.boss_to_kmer_index(pred);
-                            pred_buf[r].push_back(
+                            pred_buf.push_back(
                                 graph::AnnotatedSequenceGraph::graph_to_anno_index(node_index)
                             );
-                            pred_boundary_buf[r].push_back(0);
+                            pred_boundary_buf.push_back(0);
                         }
                     }
                 );
             }
-            pred_boundary_buf[r].push_back(1);
+            pred_boundary_buf.push_back(1);
             ++progress_bar;
         }
-        for (uint32_t i = 0; i < num_threads; ++i) {
-            for (uint64_t v : succ_buf[i]) {
-                succ.push_back(v);
-            }
-            for (uint64_t v : pred_buf[i]) {
-                pred.push_back(v);
-            }
-            for (bool v : pred_boundary_buf[i]) {
-                pred_boundary.push_back(v);
-            }
+
+        #pragma omp ordered
+        {
+            // append to the files on disk
+            for (uint64_t v : succ_buf) { succ.push_back(v); }
+            for (bool v : succ_boundary_buf) { succ_boundary.push_back(v); }
+            for (uint64_t v : pred_buf) { pred.push_back(v); }
+            for (bool v : pred_boundary_buf) { pred_boundary.push_back(v); }
         }
     }
-    succ.close();
-    pred.close();
-    pred_boundary.close();
 
     logger->trace("Pred/succ nodes written to {}.pred/succ", outfbase);
 }
@@ -184,7 +180,8 @@ void assign_anchors(const std::string &graph_fname,
  * @param source_idx index of the source file for the current column
  * @param coll_idx index of the column in the current source file (typically, the source
  *        files contain a single column each, but that's not a requirement)
- * @param succ successor of #row_idx in the row-diff path
+ * @param succ_begin begin of the successor values
+ * @param succ_end end of the successor values
  * @param pred_begin begin of the predecessor values
  * @param pred_end end of the predecessor values
  */
@@ -193,54 +190,47 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     uint64_t row_idx_chunk,
                                     size_t source_idx,
                                     size_t col_idx,
-                                    uint64_t succ,
-                                    const uint64_t *pred_begin,
-                                    const uint64_t *pred_end)>;
+                                    const uint64_t *succ_begin, const uint64_t *succ_end,
+                                    const uint64_t *pred_begin, const uint64_t *pred_end)>;
 
-void read_next_block(sdsl::int_vector_buffer<>::iterator *succ_it_p,
-                     sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
-                     sdsl::int_vector_buffer<>::iterator *pred_it_p,
+void read_next_block(sdsl::int_vector_buffer<>::iterator &it,
+                     sdsl::int_vector_buffer<1>::iterator &boundary_it,
                      uint64_t block_size,
-                     std::array<std::vector<uint64_t>, 3> *out) {
-    auto &succ_it = *succ_it_p;
-    auto &pred_boundary_it = *pred_boundary_it_p;
-    auto &pred_it = *pred_it_p;
+                     std::vector<uint64_t> &chunk,
+                     std::vector<uint64_t> &chunk_idx) {
+    // read offsets
+    chunk_idx.resize(block_size + 1);
+    chunk_idx[0] = 0;
+    for (uint64_t i = 1; i <= block_size; ++i) {
+        // find where the last element for the node ends
+        chunk_idx[i] = chunk_idx[i - 1];
+        while (*boundary_it == 0) {
+            ++chunk_idx[i];
+            ++boundary_it;
+        }
+        ++boundary_it;
+    }
+    // read all elements from the block
+    chunk.resize(chunk_idx.back());
+    for (uint64_t i = 0; i < chunk.size(); ++i, ++it) {
+        chunk[i] = *it;
+    }
+}
 
-    std::vector<uint64_t> &succ_chunk = out->at(0);
-    std::vector<uint64_t> &pred_chunk_idx = out->at(1);
-    std::vector<uint64_t> &pred_chunk = out->at(2);
-
+void read_next_blocks(sdsl::int_vector_buffer<>::iterator *succ_it_p,
+                      sdsl::int_vector_buffer<1>::iterator *succ_boundary_it_p,
+                      sdsl::int_vector_buffer<>::iterator *pred_it_p,
+                      sdsl::int_vector_buffer<1>::iterator *pred_boundary_it_p,
+                      uint64_t block_size,
+                      std::array<std::vector<uint64_t>, 4> *out) {
     #pragma omp parallel sections num_threads(2)
     {
         #pragma omp section
-        {
-            succ_chunk.resize(block_size);
-            for (uint64_t i = 0; i < block_size; ++i, ++succ_it) {
-                succ_chunk[i] = *succ_it;
-            }
-        }
-
+        read_next_block(*succ_it_p, *succ_boundary_it_p, block_size,
+                        out->at(0), out->at(1));
         #pragma omp section
-        {
-            // read predecessor offsets
-            pred_chunk_idx.resize(block_size + 1);
-            pred_chunk_idx[0] = 0;
-            for (uint64_t i = 1; i <= block_size; ++i) {
-                // find where the last predecessor for the node ends
-                pred_chunk_idx[i] = pred_chunk_idx[i - 1];
-                while (*pred_boundary_it == 0) {
-                    ++pred_chunk_idx[i];
-                    ++pred_boundary_it;
-                }
-                ++pred_boundary_it;
-            }
-
-            // read all predecessors for the block
-            pred_chunk.resize(pred_chunk_idx.back());
-            for (uint64_t i = 0; i < pred_chunk.size(); ++i, ++pred_it) {
-                pred_chunk[i] = *pred_it;
-            }
-        }
+        read_next_block(*pred_it_p, *pred_boundary_it_p, block_size,
+                        out->at(2), out->at(3));
     }
 }
 
@@ -268,26 +258,25 @@ void traverse_anno_chunked(
     const uint32_t num_threads = get_num_threads();
 
     sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, BLOCK_SIZE);
+    sdsl::int_vector_buffer<1> succ_boundary(pred_succ_fprefix + ".succ_boundary",
+                                             std::ios::in, BLOCK_SIZE);
     sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, BLOCK_SIZE);
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
                                              std::ios::in, BLOCK_SIZE);
-
-    assert(succ.size() == num_rows);
-    assert(static_cast<uint64_t>(std::count(pred_boundary.begin(), pred_boundary.end(), 0))
-                   == pred.size());
-
     auto succ_it = succ.begin();
-    auto pred_boundary_it = pred_boundary.begin();
+    auto succ_boundary_it = succ_boundary.begin();
     auto pred_it = pred.begin();
+    auto pred_boundary_it = pred_boundary.begin();
 
     ThreadPool async_reader(1, 1);
     // start reading the first block
     uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
-    std::array<std::vector<uint64_t>, 3> context;
-    std::array<std::vector<uint64_t>, 3> context_other;
-    async_reader.enqueue(read_next_block,
-                         &succ_it, &pred_boundary_it, &pred_it, next_block_size,
-                         &context_other);
+    std::array<std::vector<uint64_t>, 4> context;
+    std::array<std::vector<uint64_t>, 4> context_other;
+    async_reader.enqueue(read_next_blocks,
+                         &succ_it, &succ_boundary_it,
+                         &pred_it, &pred_boundary_it,
+                         next_block_size, &context_other);
 
     ProgressBar progress_bar(num_rows, "Compute diffs", std::cerr, !common::get_verbose());
 
@@ -301,15 +290,17 @@ void traverse_anno_chunked(
         async_reader.join();
         context.swap(context_other);
         std::vector<uint64_t> &succ_chunk = context[0];
-        std::vector<uint64_t> &pred_chunk_idx = context[1];
+        std::vector<uint64_t> &succ_chunk_idx = context[1];
         std::vector<uint64_t> &pred_chunk = context[2];
+        std::vector<uint64_t> &pred_chunk_idx = context[3];
 
         // start reading next block
-        async_reader.enqueue(read_next_block,
-                             &succ_it, &pred_boundary_it, &pred_it, next_block_size,
-                             &context_other);
+        async_reader.enqueue(read_next_blocks,
+                             &succ_it, &succ_boundary_it,
+                             &pred_it, &pred_boundary_it,
+                             next_block_size, &context_other);
 
-        assert(succ_chunk.size() == block_size);
+        assert(succ_chunk.size() == succ_chunk_idx.back());
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -320,7 +311,8 @@ void traverse_anno_chunked(
                 source_col.call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
                         call_ones(source_col, i, i - chunk, l_idx, j,
-                                  succ_chunk[i - chunk],
+                                  succ_chunk.data() + succ_chunk_idx[i - chunk],
+                                  succ_chunk.data() + succ_chunk_idx[i - chunk + 1],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
                     }
@@ -330,11 +322,13 @@ void traverse_anno_chunked(
 
         after_chunk(chunk);
 
-        progress_bar += succ_chunk.size();
+        progress_bar += block_size;
     }
 
-    if (succ_it != succ.end() || pred_it != pred.end()
-                              || pred_boundary_it != pred_boundary.end()) {
+    if (succ_it != succ.end()
+            || succ_boundary_it != succ_boundary.end()
+            || pred_it != pred.end()
+            || pred_boundary_it != pred_boundary.end()) {
         logger->error("Buffers were not read to the end, they might be corrupted");
         exit(1);
     }
@@ -463,12 +457,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
-                    uint64_t succ,
+                    const uint64_t *succ_begin, const uint64_t *,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
 
                 // add current bit if this node is an anchor
                 // or if the successor has zero bit
-                if (anchor[row_idx] || !source_col[succ]) {
+                if (anchor[row_idx] || !source_col[*succ_begin]) {
                     // no reduction, we must keep the bit
                     // Push to the buffer only if it's the final stage of the
                     // row-diff transform, where we construct the full row-diff

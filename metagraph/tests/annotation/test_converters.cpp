@@ -159,6 +159,7 @@ TEST(RowDiff, succ) {
     const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ";
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     const std::string succ_file = graph_fname + ".succ";
+    const std::string succ_boundary_file = graph_fname + ".succ_boundary";
     const std::string pred_file = graph_fname + ".pred";
     const std::string pred_boundary_file = graph_fname + ".pred_boundary";
 
@@ -174,9 +175,10 @@ TEST(RowDiff, succ) {
      * 2 -> 4 -> 5 -> 3 -> 1
      */
 
-    const std::vector<uint64_t> expected_succ = { 5, 3, 0, 4, 2 };
+    const std::vector<uint64_t> expected_succ = { 3, 0, 4, 2 };
+    const std::vector<bool> expected_succ_boundary = { 1, 0, 1, 0, 1, 0, 1, 0, 1 };
     const std::vector<uint64_t> expected_pred = { 2, 4, 1, 3 };
-    const std::vector<bool> expected_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<bool> expected_pred_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
@@ -185,39 +187,35 @@ TEST(RowDiff, succ) {
         std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
         graph->serialize(graph_fname);
 
-        ColumnCompressed<> source_annot(5);
-        source_annot.add_labels({ 0, 1, 2, 3, 4 }, { "Label1" });
-        std::string annot_fname
-                = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
-        source_annot.serialize(annot_fname);
-
-        convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+        convert_to_row_diff({}, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
+        ASSERT_TRUE(std::filesystem::exists(succ_boundary_file));
         ASSERT_TRUE(std::filesystem::exists(pred_file));
         ASSERT_TRUE(std::filesystem::exists(pred_boundary_file));
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
-
-        ASSERT_EQ(5, succ.size());
+        ASSERT_EQ(expected_succ.size(), succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
             EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;;
         }
 
-        sdsl::int_vector_buffer pred(pred_file, std::ios::in);
+        sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
+        ASSERT_EQ(expected_succ_boundary.size(), succ_boundary.size());
+        for(uint32_t i = 0; i < expected_succ_boundary.size(); ++i) {
+            EXPECT_EQ(expected_succ_boundary[i], succ_boundary[i]) << max_depth << " " << i;
+        }
 
+        sdsl::int_vector_buffer pred(pred_file, std::ios::in);
         EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
             EXPECT_EQ(expected_pred[i], pred[i]) << max_depth << " " << i;
         }
 
-        sdsl::bit_vector boundary;
-        std::ifstream fpred_boundary(pred_boundary_file, std::ios::binary);
-        boundary.load(fpred_boundary);
-
-        ASSERT_EQ(expected_boundary.size(), boundary.size());
-        for(uint32_t i = 0; i < expected_boundary.size(); ++i) {
-            EXPECT_EQ(expected_boundary[i], boundary[i]) << max_depth << " " << i;
+        sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);
+        ASSERT_EQ(expected_pred_boundary.size(), pred_boundary.size());
+        for(uint32_t i = 0; i < expected_pred_boundary.size(); ++i) {
+            EXPECT_EQ(expected_pred_boundary[i], pred_boundary[i]) << max_depth << " " << i;
         }
     }
 
