@@ -467,7 +467,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     typedef std::pair<AlignNode, score_t> Ref;
     Ref best_start{ start_node, S[0] };
     std::vector<Ref> starts;
-    starts.emplace_back(start_node, S[0]);
 
     std::priority_queue<Ref, std::vector<Ref>, utils::LessSecond> stack;
     stack.emplace(start_node, S[0]);
@@ -561,7 +560,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(starts.empty() || starts[0].second == best_start.second);
     std::vector<std::pair<DBGAlignment, NodeType>> extensions;
     tsl::hopscotch_set<AlignNode, utils::Hash<AlignNode>> prev_starts;
-    for (auto [best_node, max_score] : starts) {
+    for (const auto &[best_node, max_score] : starts) {
         if (prev_starts.count(best_node))
             continue;
 
@@ -569,13 +568,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
 
         assert(S[max_pos - offset] == max_score);
-        assert(OS[max_pos - offset] == Cigar::MATCH);
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
             extensions.emplace_back();
             break;
         }
+
+        assert(OS[max_pos - offset] == Cigar::MATCH);
 
         extensions.emplace_back(backtrack<NodeType>(table_, *seed_, graph_,
                                                     min_path_score, best_node,
