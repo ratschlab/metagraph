@@ -5,7 +5,7 @@
 
 #include <sdsl/bits.hpp>
 
-//TODO(ddanciu) -merge in functionality from circular_buffer and remove circular_buffer
+
 template <typename T, class Storage = std::vector<T>>
 class RingBuffer {
   public:

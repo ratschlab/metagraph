@@ -201,7 +201,7 @@ TEST(RowDiff, succ) {
                 = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
         source_annot.serialize(annot_fname);
 
-        convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
+        convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
         ASSERT_TRUE(std::filesystem::exists(pred_file));
@@ -248,8 +248,8 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     graph->serialize(graph_fname);
 
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir);
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, true);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, true);
 
     const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
@@ -289,8 +289,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             source_annot.add_labels({ 0, 1, 2, 3, 4 }, labels);
             source_annot.serialize(annot_fname);
 
-            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
-            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, true);
+            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
 
             ASSERT_TRUE(std::filesystem::exists(dest_fname));
             RowDiffColumnAnnotator annotator;
@@ -342,8 +342,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 annot_fnames.push_back(annot_fname);
             }
 
-            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir);
-            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, true);
+            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
 
             for (uint32_t i = 0; i < labels.size(); ++i) {
                 std::string rd_anno = dst_dir/(labels[i] + RowDiffColumnAnnotator::kExtension);
@@ -402,8 +402,8 @@ void test_row_diff(uint32_t k,
 
     initial_annotation.serialize(annot_fname);
 
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir);
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, true);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
 
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
     RowDiffColumnAnnotator annotator;
@@ -460,8 +460,8 @@ void test_row_diff_separate_columns(uint32_t k,
         initial_annotation.serialize(annot_fname);
     }
 
-    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir);
-    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, true);
+    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
 
     for (const auto& [label, indices] : col_annotations) {
         const std::string dest_fname
