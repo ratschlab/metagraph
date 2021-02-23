@@ -557,6 +557,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
 
         assert(S[max_pos - offset] == max_score);
+        if (OS[max_pos - offset] != Cigar::MATCH)
+            continue;
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
