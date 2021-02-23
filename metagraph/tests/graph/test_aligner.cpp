@@ -703,7 +703,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
-    size_t k = 4;
+    size_t k = 5;
     std::string reference = "TTTCCGGTTGTTA";
     std::string query =     "TTTCCGCAAAAAAAAATTGTTA";
     //                             XIIIIIIIII

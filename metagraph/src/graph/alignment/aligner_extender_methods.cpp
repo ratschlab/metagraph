@@ -1,9 +1,10 @@
 #include "aligner_extender_methods.hpp"
 
-#include <priority_deque.hpp>
+#include <tsl/hopscotch_set.h>
 
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/hashers/hash.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -292,13 +293,14 @@ bool update_column(const DeBruijnGraph &graph_,
     return updated;
 }
 
-template <typename NodeType, typename AlignNode, class Table>
+template <typename NodeType, typename AlignNode, class Table, class StartSet>
 std::pair<Alignment<NodeType>, NodeType>
 backtrack(const Table &table_,
           const Alignment<NodeType> &seed_,
           const DeBruijnGraph &graph_,
           score_t min_path_score,
           AlignNode best_node,
+          StartSet &prev_starts,
           size_t size,
           std::string_view extend_window_) {
     typedef DefaultColumnExtender<NodeType> Extender;
@@ -323,6 +325,8 @@ backtrack(const Table &table_,
     while (true) {
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
             = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
+
+        prev_starts.emplace(best_node);
 
         assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
         last_op = OS[pos - offset];
@@ -388,6 +392,7 @@ backtrack(const Table &table_,
                         case Extender::CUR: {} break;
                         case Extender::NONE: { assert(false); }
                     }
+                    prev_starts.emplace(best_node);
                 }
             } break;
             case Cigar::CLIPPED: { assert(false); }
@@ -460,8 +465,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                           0 };
 
     typedef std::pair<AlignNode, score_t> Ref;
-    boost::container::priority_deque<Ref, std::vector<Ref>, utils::LessSecond> best_starts;
-    best_starts.emplace(start_node, S[0]);
+    Ref best_start{ start_node, S[0] };
+    std::vector<Ref> starts;
+    starts.emplace_back(start_node, S[0]);
 
     std::priority_queue<Ref, std::vector<Ref>, utils::LessSecond> stack;
     stack.emplace(start_node, S[0]);
@@ -488,7 +494,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             auto &column_prev = table_[std::get<0>(prev)].first;
 
-            score_t xdrop_cutoff = best_starts.maximum().second - config_.xdrop;
+            score_t xdrop_cutoff = best_start.second - config_.xdrop;
 
             // compute bandwidth based on xdrop criterion
             auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff);
@@ -531,45 +537,53 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             converged = !updated || has_converged(column_pair);
 
             AlignNode cur{ next, c, depth };
-            if (best_starts.size() < config_.num_alternative_paths) {
-                best_starts.emplace(cur, *max_it);
-            } else if (*max_it > best_starts.minimum().second) {
-                best_starts.update(best_starts.begin(), Ref{ cur, *max_it });
+            if (OS[max_pos - offset] == Cigar::MATCH) {
+                starts.emplace_back(cur, *max_it);
+
+                if (*max_it > best_start.second) {
+                    best_start.first = cur;
+                    best_start.second = *max_it;
+                }
             }
 
             assert(match_score_begin_[max_pos]
                 == config_.match_score(extend_window_.substr(max_pos)));
             score_t score_rest = *max_it + match_score_begin_[max_pos];
 
-            assert(xdrop_cutoff == best_starts.maximum().second - config_.xdrop);
+            assert(xdrop_cutoff == best_start.second - config_.xdrop);
 
             if (*max_it >= xdrop_cutoff && score_rest >= min_path_score)
                 stack.emplace(cur, *max_it);
         }
     }
 
+    std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
+    assert(starts.empty() || starts[0].second == best_start.second);
     std::vector<std::pair<DBGAlignment, NodeType>> extensions;
-    while (best_starts.size()) {
-        auto [best_node, max_score] = best_starts.maximum();
-        best_starts.pop_maximum();
+    tsl::hopscotch_set<AlignNode, utils::Hash<AlignNode>> prev_starts;
+    for (auto [best_node, max_score] : starts) {
+        if (prev_starts.count(best_node))
+            continue;
 
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
             = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
 
         assert(S[max_pos - offset] == max_score);
-        if (OS[max_pos - offset] != Cigar::MATCH)
-            continue;
+        assert(OS[max_pos - offset] == Cigar::MATCH);
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
             extensions.emplace_back();
-            return extensions;
+            break;
         }
 
         extensions.emplace_back(backtrack<NodeType>(table_, *seed_, graph_,
                                                     min_path_score, best_node,
-                                                    size, extend_window_));
+                                                    prev_starts, size, extend_window_));
         assert(extensions.back().first.is_valid(graph_, &config_));
+
+        if (extensions.size() == config_.num_alternative_paths)
+            break;
     }
 
     return extensions;
