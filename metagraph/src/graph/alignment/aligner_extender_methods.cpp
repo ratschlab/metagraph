@@ -44,6 +44,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
         // character, so we need to shift the indices of profile_score_ and profile_op_
         std::transform(query_.begin(), query_.end(), p_score_row.begin() + 1,
                        [&row](char q) { return row[q]; });
+
         std::transform(query_.begin(), query_.end(), p_op_row.begin() + 1,
                        [&op_row](char q) { return op_row[q]; });
     }
@@ -173,6 +174,7 @@ bool update_column(const DeBruijnGraph &graph_,
         update_match(i);
     }
 #else
+    static_assert(sizeof(score_t) == sizeof(int32_t));
     for (size_t i = match_begin; i < del_end; i += 8) {
         // vectorized update_match(i)
         __m256i sprev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
@@ -275,6 +277,7 @@ bool update_column(const DeBruijnGraph &graph_,
             updated = true;
             PS.back() = Extender::CUR;
             OS.back() = Cigar::INSERTION;
+            xdrop_cutoff = std::max(xdrop_cutoff, S.back() - config_.xdrop);
         }
     }
 
@@ -618,8 +621,7 @@ void DefaultColumnExtender<NodeType>::sanitize(Scores &scores) {
     size_t pad_size = ((size + 7) / 8) * 8 + 8;
     size_t size_diff = pad_size - size;
 
-    if (!size_diff)
-        return;
+    assert(size_diff);
 
     S.reserve(pad_size);
     E.reserve(pad_size);
@@ -630,9 +632,9 @@ void DefaultColumnExtender<NodeType>::sanitize(Scores &scores) {
     PS.reserve(pad_size);
     PF.reserve(pad_size);
 
-    memset(&S[size], 0, sizeof(typename decltype(S)::value_type) * size_diff);
-    memset(&E[size], 0, sizeof(typename decltype(E)::value_type) * size_diff);
-    memset(&F[size], 0, sizeof(typename decltype(F)::value_type) * size_diff);
+    std::fill(&S[size], &S[size] + size_diff, ninf);
+    std::fill(&E[size], &E[size] + size_diff, ninf);
+    std::fill(&F[size], &F[size] + size_diff, ninf);
     memset(&OS[size], 0, sizeof(typename decltype(OS)::value_type) * size_diff);
     memset(&OE[size], 0, sizeof(typename decltype(OE)::value_type) * size_diff);
     memset(&OF[size], 0, sizeof(typename decltype(OF)::value_type) * size_diff);
