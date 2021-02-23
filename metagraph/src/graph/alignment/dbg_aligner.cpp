@@ -245,7 +245,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             forward, reverse, forward_seeder, forward_extender
         );
 
-
         auto extend_reverse = [&](std::string_view query_rc,
                                   const ISeeder<node_index> &seeder,
                                   std::vector<DBGAlignment>&& rc_of_alignments) {
