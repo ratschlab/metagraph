@@ -47,7 +47,9 @@ int transform_annotation(Config *config) {
     const auto &files = config->fnames;
 
     if (config->anno_type == Config::RowDiff && !files.size()) {
-        logger->trace("Passed no input annotations to transform. Prepare to RowDiff transform...");
+        // Only prepare for the row-diff transform:
+        //      Generate pred/succ/anchors (if stage 1) or optimize anchors (if stage 2).
+        logger->trace("Passed no columns to transform. Only preparations will be performed.");
         auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
         convert_to_row_diff({}, config->infbase, config->memory_available * 1e9,
                             config->max_path_length, out_dir, config->tmp_dir,
