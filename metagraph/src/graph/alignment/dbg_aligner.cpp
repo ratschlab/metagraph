@@ -36,7 +36,7 @@ template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
              const ISeeder<node_index> &seeder,
-             IExtender<node_index>&& extender,
+             IExtender<node_index> &extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
@@ -164,8 +164,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(query, seeder, std::move(extender),
-                   alignment_callback, get_min_path_score);
+        align_core(query, seeder, extender, alignment_callback, get_min_path_score);
     });
 }
 
@@ -181,12 +180,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(forward, seeder, std::move(extender),
-                   alignment_callback, get_min_path_score);
-
-        align_core(reverse, seeder_rc, std::move(extender_rc),
-                   alignment_callback, get_min_path_score);
-
+        align_core(forward, seeder, extender, alignment_callback, get_min_path_score);
+        align_core(reverse, seeder_rc, extender_rc, alignment_callback, get_min_path_score);
     });
 }
 
@@ -194,24 +189,23 @@ template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(DBGQueryAlignment &paths,
                         const ISeeder<node_index> &forward_seeder,
+                        const ISeeder<node_index> &reverse_seeder,
                         IExtender<node_index>&& forward_extender,
+                        IExtender<node_index>&& reverse_extender,
                         const AlignCoreGenerator &rev_comp_core_generator) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
-    std::vector<DBGAlignment> reverse_seeds;
-
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        DEBUG_LOG("Aligning forwards");
-
-        // First get forward alignments
-        align_core(forward, forward_seeder, std::move(forward_extender),
-            [&](DBGAlignment&& path) {
+        auto process_query = [&](std::string_view query,
+                                 std::string_view query_rc,
+                                 const ISeeder<node_index> &seeder,
+                                 IExtender<node_index> &extender) {
+            std::vector<DBGAlignment> rc_of_alignments;
+            align_core(query, seeder, extender, [&](DBGAlignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
-                // If the alignment starts from the beginning of the query,
-                // there's no sequence left for aligning backwards.
                 if (!path.get_clipping()) {
                     if (path.get_score() >= min_path_score)
                         alignment_callback(std::move(path));
@@ -220,7 +214,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 }
 
                 auto rev = path;
-                rev.reverse_complement(graph_, reverse);
+                rev.reverse_complement(graph_, query_rc);
                 if (rev.empty()) {
                     DEBUG_LOG("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
@@ -237,45 +231,18 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
                 // Pass the reverse complement of the forward alignment
                 // as a seed for extension
-                reverse_seeds.emplace_back(std::move(rev));
-            },
-            [&](const auto&) {
-                // ignore the min path score for the forward alignment,
-                // since it may have a score that is too low before it is
-                // extended backwards
-                return config_.min_cell_score;
-            }
-        );
+                rc_of_alignments.emplace_back(std::move(rev));
+            }, [&](const auto&) { return config_.min_cell_score; });
 
-        DEBUG_LOG("Aligning backwards");
+            rev_comp_core_generator(query_rc, seeder, std::move(rc_of_alignments),
+                                    [&](const auto &seeder_rc, auto&& extender_rc) {
+                align_core(query_rc, seeder_rc, extender_rc,
+                           alignment_callback, get_min_path_score);
+            });
+        };
 
-        // Then use the reverse complements of the forward alignments as seeds
-        rev_comp_core_generator(reverse, forward_seeder, std::move(reverse_seeds),
-                                [&](const auto &seeder_rc, auto&& extender_rc) {
-            align_core(reverse, seeder_rc, std::move(extender_rc),
-                [&](DBGAlignment&& path) {
-                    // If the path originated from a backwards alignment (forward
-                    // alignment of a reverse complement) and did not skip the first
-                    // characters (so it is unable to be reversed), change back
-                    // to the forward orientation
-                    if (path.get_orientation()) {
-                        auto forward_path = path;
-                        forward_path.reverse_complement(graph_, forward);
-                        if (!forward_path.empty()) {
-                            path = std::move(forward_path);
-#ifndef NDEBUG
-                        } else {
-                            DEBUG_LOG("Backwards alignment cannot be reversed, returning");
-#endif
-                        }
-                    }
-
-                    assert(path.is_valid(graph_, &config_));
-                    alignment_callback(std::move(path));
-                },
-                get_min_path_score
-            );
-        });
+        process_query(reverse, forward, reverse_seeder, reverse_extender);
+        process_query(forward, reverse, forward_seeder, forward_extender);
     });
 }
 

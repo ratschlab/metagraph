@@ -129,14 +129,16 @@ class SeedAndExtendAlignerCore {
     // 4. Reverse complement A' to get the final alignment A''
     void align_both_directions(DBGQueryAlignment &paths,
                                const ISeeder<node_index> &forward_seeder,
+                               const ISeeder<node_index> &reverse_seeder,
                                IExtender<node_index>&& forward_extender,
+                               IExtender<node_index>&& reverse_extender,
                                const AlignCoreGenerator &rev_comp_core_generator) const;
 
   protected:
     // Generate seeds, then extend them
     void align_core(std::string_view query,
                     const ISeeder<node_index> &seeder,
-                    IExtender<node_index>&& extender,
+                    IExtender<node_index> &extender,
                     const LocalAlignmentCallback &callback,
                     const MinScoreComputer &get_min_path_score) const;
 
@@ -185,7 +187,12 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
-            aligner_core.align_both_directions(paths, seeder, std::move(extender),
+            std::string_view reverse = paths.get_query(true);
+            Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
+                             map_sequence_to_nodes(graph_, reverse), config_);
+            aligner_core.align_both_directions(paths, seeder, seeder_rc,
+                                               std::move(extender),
+                                               Extender(graph_, config_, reverse),
                                                build_rev_comp_alignment_core);
         } else if (config_.forward_and_reverse_complement) {
             assert(!is_reverse_complement);

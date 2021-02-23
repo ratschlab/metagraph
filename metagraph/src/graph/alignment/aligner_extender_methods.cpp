@@ -591,7 +591,7 @@ void DefaultColumnExtender<NodeType>
         }
 
         if (start < end)
-            callback(node, window_start + start, window_start + end);
+            callback(node, window_start + start + 1 - graph_.get_k(), window_start + end);
     }
 }
 

@@ -212,6 +212,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
     if (canonical) {
         // find sub-k matches in the reverse complement
+        // TODO: find sub-k seeds which are sink tips in the underlying graph
         std::string query_rc(this->query_);
         reverse_complement(query_rc.begin(), query_rc.end());
 
