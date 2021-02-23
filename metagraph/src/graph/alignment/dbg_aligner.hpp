@@ -122,11 +122,12 @@ class SeedAndExtendAlignerCore {
                               IExtender<node_index>&& extender,
                               IExtender<node_index>&& extender_rc) const;
 
-    // Align both forwards and backwards from a given seed. Procedure
-    // 1. Given each seed, extend forward to produce an alignment A
-    // 2. Reverse complement the alignment to get A', treated like a new seed
-    // 3. Extend A' forwards
-    // 4. Reverse complement A' to get the final alignment A''
+    // Align the forward and reverse complement of the query sequence in both
+    // directions and return the overall best alignment. e.g., for the forward query
+    // 1. Find all seeds of its reverse complement
+    // 2. Given a seed, extend forwards to get alignment A
+    // 3. Reverse complement the alignment to get A', treat it like a new seed
+    // 4. Extend A' forwards to get the final alignment A''
     void align_both_directions(DBGQueryAlignment &paths,
                                const ISeeder<node_index> &forward_seeder,
                                const ISeeder<node_index> &reverse_seeder,

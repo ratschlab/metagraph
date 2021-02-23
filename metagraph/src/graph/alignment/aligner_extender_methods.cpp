@@ -424,6 +424,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     match_score_begin_ = partial_sums_.data() + start;
 
     extend_window_ = { align_start, size - 1 };
+    DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
 
     assert(seed_->get_cigar().back().first == Cigar::MATCH
