@@ -39,6 +39,11 @@ class Cigar {
     // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
     explicit Cigar(const std::string &cigar_str);
 
+    Cigar(const Cigar&) = default;
+    Cigar(Cigar&&) = default;
+    Cigar& operator=(const Cigar&) = default;
+    Cigar& operator=(Cigar&&) = default;
+
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
 

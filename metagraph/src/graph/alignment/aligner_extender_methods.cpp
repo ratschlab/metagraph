@@ -309,8 +309,9 @@ backtrack(const Table &table_,
     std::string seq;
     NodeType start_node = 0;
 
+    assert(table_.count(std::get<0>(best_node)));
     const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-        = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
+        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
 
     score_t max_score = S[max_pos - offset];
     score_t score = max_score;
@@ -322,8 +323,9 @@ backtrack(const Table &table_,
 
     size_t pos = max_pos;
     while (true) {
+        assert(table_.count(std::get<0>(best_node)));
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-            = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
+            = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
 
         prev_starts.emplace(best_node);
 
@@ -379,8 +381,9 @@ backtrack(const Table &table_,
             } break;
             case Cigar::DELETION: {
                 while (last_op == Cigar::DELETION) {
+                    assert(table_.count(std::get<0>(best_node)));
                     const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-                        = table_.find(std::get<0>(best_node))->second.first[std::get<2>(best_node)];
+                        = table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
                     last_op = OF[pos - offset];
                     assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
                     path.push_back(std::get<0>(best_node));
@@ -490,6 +493,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (converged)
                 continue;
 
+            assert(table_.count(std::get<0>(prev)));
             auto &column_prev = table_[std::get<0>(prev)].first;
 
             score_t xdrop_cutoff = best_start.second - config_.xdrop;
@@ -575,8 +579,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         if (prev_starts.count(best_node))
             continue;
 
+        assert(table_.count(std::get<0>(best_node)));
         const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-            = table_[std::get<0>(best_node)].first[std::get<2>(best_node)];
+            = table_[std::get<0>(best_node)].first.at(std::get<2>(best_node));
 
         assert(S[max_pos - offset] == max_score);
 
@@ -633,7 +638,7 @@ bool DefaultColumnExtender<NodeType>::has_converged(const Column &column) {
 
     const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = column.first.back();
     const auto &[S_b, E_b, F_b, OS_b, OE_b, OF_b, prev_b, PS_b, PF_b, offset_b, max_pos_b]
-        = column.first[column.first.size() - 2];
+        = column.first.at(column.first.size() - 2);
 
     return offset == offset_b && max_pos == max_pos_b
         && std::get<0>(prev) == std::get<0>(prev_b)
