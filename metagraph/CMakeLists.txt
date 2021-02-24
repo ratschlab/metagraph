@@ -53,6 +53,11 @@ endfunction()
 
 enableCCache()
 
+if(BUILD_STATIC)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+  set(BUILD_SHARED_LIBS OFF)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
@@ -225,7 +230,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
-  ${CMAKE_BINARY_DIR}/zlib
+  ${CMAKE_BINARY_DIR}/external-libraries/zlib
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/sdsl-lite/lib
@@ -350,8 +355,6 @@ add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
-find_package(BZip2 REQUIRED)
-
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts zlib
@@ -369,11 +372,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Dar
   set(METALIBS ${METALIBS} -latomic)
 endif()
 
-if(BUILD_STATIC)
+if(BUILD_STATIC AND NOT APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto)
+  find_package(BZip2 REQUIRED)
+  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
 endif()
 
 # check for std::filesystem::temp_directory_path
@@ -433,6 +437,8 @@ add_custom_target(link_target ALL
     "metagraph_${CMAKE_DBG_ALPHABET}"
     "metagraph"
 )
+
+add_dependencies(metagraph link_target)
 
 
 #-------------------

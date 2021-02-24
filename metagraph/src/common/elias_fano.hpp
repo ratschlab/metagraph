@@ -59,6 +59,9 @@ class EliasFanoEncoder {
     /** Dumps any pending data to the stream. Must be called exactly once when done #add-ing */
     size_t finish();
 
+    /** Append sorted array #data to EF-coded #out_fname */
+    static void append(const std::vector<T> &data, const std::string &out_fname);
+
   private:
     /**
      * Returns the number of lower bits used in the Elias-Fano encoding of a sorted array

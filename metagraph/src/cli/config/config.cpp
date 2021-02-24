@@ -446,9 +446,12 @@ Config::Config(int argc, char *argv[]) {
     if (identity != CONCATENATE
             && identity != STATS
             && identity != SERVER_QUERY
+            && !(identity == TRANSFORM_ANNOTATION && anno_type == Config::RowDiff)
             && !(identity == BUILD && complete)
-            && !fnames.size())
+            && !fnames.size()) {
+        std::cerr << "Error: No input file(s) passed" << std::endl;
         print_usage_and_exit = true;
+    }
 
     if (identity == CONCATENATE && !(fnames.empty() ^ infbase.empty())) {
         std::cerr << "Error: Either set all chunk filenames"

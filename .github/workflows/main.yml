@@ -1,4 +1,4 @@
-name: Metagraph C++ CI
+name: MetaGraph CI
 
 on: [push]
 
@@ -6,13 +6,14 @@ jobs:
 
   Linux:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     strategy:
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
         compiler: [g++-8, g++-9, g++-10]
+        build_static: [OFF, ON]
         include:
           - compiler: g++-8
             cxx: g++-8
@@ -31,6 +32,14 @@ jobs:
             compiler: g++-8
           - alphabet: Protein
             compiler: g++-9
+          - compiler: g++-8
+            build_static: ON
+          - compiler: g++-9
+            build_static: ON
+          - build_type: Debug
+            build_static: ON
+
+    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }})
 
     steps:
     - uses: actions/checkout@v1
@@ -56,6 +65,16 @@ jobs:
 
         sudo apt-get install libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
+        if [ "${{ matrix.build_static }}" = "ON" ]; then
+          # for static builds, compile curl ourselves
+          git clone https://github.com/curl/curl.git
+          mkdir curl/_build
+          cd curl/_build
+          cmake -DBUILD_SHARED_LIBS=off ..
+          make -j 2
+          sudo make install
+        fi
+
     - name: install dependencies for integration tests
       run: |
         pip3 install parameterized
@@ -75,18 +94,22 @@ jobs:
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DBUILD_STATIC=${{ matrix.build_static }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
       run: cd metagraph/build && make -j 2 metagraph
 
     - name: build unit tests
+      if: matrix.build_static == 'OFF'
       run: cd metagraph/build && make -j 2 unit_tests
 
     - name: build other
+      if: matrix.build_static == 'OFF'
       run: cd metagraph/build && make -j 2
 
     - name: run unit tests
+      if: matrix.build_static == 'OFF'
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && ./unit_tests
@@ -95,6 +118,14 @@ jobs:
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
         cd metagraph/build && make check
+
+    # for potential release
+    - name: upload static binary
+      if: matrix.build_static == 'ON'
+      uses: actions/upload-artifact@v2
+      with:
+        name: metagraph_${{ matrix.alphabet }}_linux_x86
+        path: metagraph/build/metagraph_${{ matrix.alphabet }}
 
 
   MacOS:
@@ -127,6 +158,7 @@ jobs:
       run: |
         mkdir metagraph/build
         cd metagraph/build
+
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} \
               -DWITH_AVX=OFF -DWITH_MSSE42=OFF ..
@@ -145,3 +177,26 @@ jobs:
 
     - name: run integration tests
       run: cd metagraph/build && make check
+
+  Release:
+    name: Create Release
+    if: contains(github.ref, 'tags/v')
+    runs-on: ubuntu-latest
+    needs: [Linux]
+    steps:
+      - name: fetch static binary
+        uses: actions/download-artifact@v2
+        with:
+          path: artifacts
+      - name: create release with static binaries
+        uses: svenstaro/upload-release-action@v2
+        with:
+          release_name: Release ${{ github.ref }}
+          body: |
+            The binaries are currently provided on an experimental basis.
+            The Linux binaries are statically linked and hence don't require additional libraries to be installed.
+          file: 'artifacts/*/metagraph_*'
+          file_glob: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          prerelease: true

@@ -1967,6 +1967,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2363,7 +2364,7 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        call_path(boss, callback, path, sequence,
+        call_path(boss, callback, path, sequence, split_to_unitigs,
                   kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
                   async, fetched_mutex, progress_bar, subgraph_mask, &edges);
     }
@@ -2488,6 +2489,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2578,6 +2580,15 @@ call_path(const BOSS &boss,
             // to the buffer. The index is inverted because dual_path will be
             // reversed.
             dual_visited.push_back(dual_path.size() - 1 - i);
+
+            // For the unitig mode, wait until the dual unitig is fully traversed
+            // by the same thread that visited its first node.
+            if (i == 0 && split_to_unitigs
+                       && !std::count(dual_path.begin(), dual_path.end(), 0)) {
+                // The first node had already been visited, hence, the remaining
+                // part of this non-branching path will be reached as well.
+                while (!fetch_bit(visited.data(), dual_path.back(), concurrent)) {}
+            }
         }
     }
 
@@ -2641,8 +2652,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),
@@ -2883,8 +2893,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),

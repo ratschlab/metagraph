@@ -6,14 +6,15 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/threads/threading.hpp"
-#include "common/file_merger.hpp"
+#include "common/elias_fano_file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
 
-constexpr uint64_t BLOCK_SIZE = 1 << 25;
-constexpr uint64_t ROW_REDUCTION_WIDTH = 32;
-constexpr uint32_t MAX_NUM_FILES_OPEN = 2000;
+const uint64_t BLOCK_SIZE = 1 << 25;
+const uint64_t ROW_REDUCTION_WIDTH = 32;
+const uint32_t MAX_NUM_FILES_OPEN = 2000;
+
 
 namespace mtg {
 namespace annot {
@@ -23,6 +24,8 @@ using mtg::common::logger;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
+template <typename T>
+using Encoder = common::EliasFanoEncoder<T>;
 
 
 void build_successor(const std::string &graph_fname,
@@ -76,9 +79,9 @@ void build_successor(const std::string &graph_fname,
 
     // create the succ file, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
-    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, 1024 * 1024, width);
-    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, 1024 * 1024);
-    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, 1024 * 1024, width);
+    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, BLOCK_SIZE, width);
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BLOCK_SIZE);
+    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, BLOCK_SIZE, width);
 
     ProgressBar progress_bar(graph.num_nodes(), "Compute successors", std::cerr,
                              !common::get_verbose());
@@ -314,9 +317,10 @@ void traverse_anno_chunked(
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
-                               const fs::path &dest_dir,
+                               const fs::path &col_out_dir,
+                               const fs::path &swap_dir,
                                const std::string &row_reduction_fname,
-                               uint64_t buf_size,
+                               uint64_t buf_size_bytes,
                                bool compute_row_reduction) {
     if (source_files.empty())
         return;
@@ -347,7 +351,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
-    const fs::path tmp_path = utils::create_temp_dir(fs::path(dest_dir).remove_filename(), "col");
+    const fs::path tmp_path = utils::create_temp_dir(swap_dir, "col");
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -362,10 +366,15 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
                                   size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
-        std::ofstream f(tmp_file(s, j, chunk), std::ios::binary | std::ios::app);
-        f.write(reinterpret_cast<const char *>(v.data()), v.size() * sizeof(uint64_t));
+        Encoder<uint64_t>::append(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
     };
+
+    // In the first stage, only one buffer is created per column (`bwd`).
+    // In the last stage, two buffers (`fwd` and `bwd`) are created per column.
+    const uint64_t buf_size = compute_row_reduction
+                                ? buf_size_bytes / sizeof(uint64_t)
+                                : buf_size_bytes / sizeof(uint64_t) / 2;
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t s = 0; s < sources.size(); ++s) {
@@ -393,14 +402,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     sdsl::int_vector_buffer row_reduction;
     const bool new_reduction_vector = !fs::exists(row_reduction_fname);
     if (compute_row_reduction) {
+        logger->trace("Row reduction vector: {}", row_reduction_fname);
         if (new_reduction_vector) {
             // create an empty vector
             sdsl::int_vector_buffer(row_reduction_fname,
-                                    std::ios::out, 1024 * 1024, ROW_REDUCTION_WIDTH);
+                                    std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
+            logger->trace("Initialized new row reduction vector");
+        } else {
+            logger->trace("Row reduction vector already exists and will be updated");
         }
 
         row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
-                                                std::ios::in | std::ios::out, 1024 * 1024);
+                                                std::ios::in | std::ios::out, BLOCK_SIZE);
 
         if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
             logger->error("Incompatible sizes of '{}': {} and '{}': {}",
@@ -559,22 +572,18 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         assert(to_merge.size() < files_open_per_thread);
 
                         new_chunks.push_back(to_merge.at(0) + "_");
-                        std::ofstream f(new_chunks.back(), std::ios::binary);
-
                         std::vector<uint64_t> buf;
                         buf.reserve(1024 * 1024);
 
                         common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
                             buf.push_back(i);
                             if (buf.size() == buf.capacity()) {
-                                f.write(reinterpret_cast<const char *>(buf.data()),
-                                        buf.size() * sizeof(decltype(buf.front())));
+                                Encoder<uint64_t>::append(buf, new_chunks.back());
                                 buf.resize(0);
                             }
                         });
                         if (buf.size()) {
-                            f.write(reinterpret_cast<const char *>(buf.data()),
-                                    buf.size() * sizeof(decltype(buf.front())));
+                            Encoder<uint64_t>::append(buf, new_chunks.back());
                         }
 
                         // remove merged chunks
@@ -585,7 +594,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     filenames.swap(new_chunks);
                 }
 
-                //TODO: benchmark using Elias-Fano encoders + merger
                 common::merge_files<uint64_t>(filenames, call);
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
@@ -597,7 +605,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 std::move(label_encoders[l_idx]));
 
         if (!compute_row_reduction) {
-            auto fpath = dest_dir/fs::path(source_files[l_idx])
+            auto fpath = col_out_dir/fs::path(source_files[l_idx])
                                     .filename()
                                     .replace_extension()
                                     .replace_extension(RowDiffColumnAnnotator::kExtension);
@@ -653,21 +661,21 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 }
 
 void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const fs::path &dest_dir,
+                                  const fs::path &dir,
                                   const std::string &row_reduction_extension) {
     if (fs::exists(graph_fname + kRowDiffAnchorExt)) {
         logger->info("Found optimized anchors {}", graph_fname + kRowDiffAnchorExt);
         return;
     }
 
-    logger->trace("Optimizing anchors");
+    logger->info("Optimizing anchors...");
 
     std::vector<sdsl::int_vector_buffer<>> row_reduction;
-    for (const auto &p : fs::directory_iterator(dest_dir)) {
+    for (const auto &p : fs::directory_iterator(dir)) {
         auto path = p.path();
         if (utils::ends_with(path, row_reduction_extension)) {
             logger->info("Found row reduction vector {}", path);
-            row_reduction.emplace_back(path, std::ios::in, 1024 * 1024);
+            row_reduction.emplace_back(path, std::ios::in, BLOCK_SIZE);
 
             if (row_reduction.back().size() != row_reduction.front().size()) {
                 logger->error("Row reduction vectors have different sizes");
@@ -683,7 +691,7 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
     }
 
     if (!row_reduction.size()) {
-        logger->error("Didn't find any row reduction vectors in {} to merge", dest_dir);
+        logger->error("Didn't find any row reduction vectors in {} to merge", dir);
         exit(1);
     }
 
