@@ -75,7 +75,7 @@ class Config {
     unsigned int suffix_len = 0;
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
-    unsigned int memory_available = 1;
+    double memory_available = 1;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;

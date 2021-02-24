@@ -170,7 +170,7 @@ Config::Config(int argc, char *argv[]) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
-            memory_available = atoi(get_value(i++));
+            memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
@@ -1019,6 +1019,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");

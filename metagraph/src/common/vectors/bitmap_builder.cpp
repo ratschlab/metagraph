@@ -14,7 +14,8 @@ bitmap_builder_set_disk::bitmap_builder_set_disk(uint64_t size,
       : size_(size),
         swap_dir_(swap_dir),
         chunks_tmp_dir_(utils::create_temp_dir(swap_dir, "bitmap_chunks")),
-        set_bit_positions_(num_threads, buffer_size_in_bytes, chunks_tmp_dir_, -1, 16) {}
+        set_bit_positions_(num_threads, buffer_size_in_bytes / sizeof(uint64_t),
+                           chunks_tmp_dir_, -1, 16) {}
 
 bitmap_builder_set_disk::~bitmap_builder_set_disk() {
     utils::remove_temp_dir(chunks_tmp_dir_);
