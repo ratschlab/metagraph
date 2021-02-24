@@ -165,7 +165,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);;
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -176,7 +176,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
                 sum_counts += v;
             }
 
-            relation_counts_[j].serialize(outstream);;
+            relation_counts_[j].serialize(outstream);
         }
     }
 

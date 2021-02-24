@@ -76,7 +76,7 @@ void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
                 dest->second = max_count();
             }
         } else {
-            *++dest = std::move(*first);;
+            *++dest = std::move(*first);
         }
     }
 
