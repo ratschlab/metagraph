@@ -65,10 +65,10 @@ RUN wget https://github.com/samtools/htslib/releases/download/$HTSLIB_VERSION/ht
     && make install \
     && cd /opt && rm -rf htslib-$HTSLIB_VERSION htslib-${HTSLIB_VERSION}.tar.bz2
 
-RUN mkdir -p /opt/metagraph/build_docker
-RUN chmod o+rwx /opt/metagraph
+RUN mkdir -p /opt/metagraph/build_docker /opt/ccache_docker
+RUN chmod o+rwx /opt/metagraph /opt/ccache_docker
 
-ENV CCACHE_DIR=/opt/metagraph_build/ccache_docker
+ENV CCACHE_DIR=/opt/ccache_docker
 
 FROM metagraph_dev_env as metagraph_bin
 ARG CODE_BASE
