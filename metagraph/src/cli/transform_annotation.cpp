@@ -131,6 +131,18 @@ int transform_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
+    if (config->anno_type == Config::RowDiff && !files.size()) {
+        // Only prepare for the row-diff transform:
+        //      Generate pred/succ/anchors (if stage 1) or optimize anchors (if stage 2).
+        logger->trace("Passed no columns to transform. Only preparations will be performed.");
+        auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
+        convert_to_row_diff({}, config->infbase, config->memory_available * 1e9,
+                            config->max_path_length, out_dir, config->tmp_dir,
+                            config->optimize);
+        logger->trace("Done");
+        return 0;
+    }
+
     if (!std::filesystem::exists(files.at(0))) {
         logger->error("File {} does not exist", files.at(0));
         exit(1);
@@ -415,7 +427,8 @@ int transform_annotation(Config *config) {
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
-                                    config->max_path_length, out_dir, config->optimize);
+                                    config->max_path_length, out_dir, config->tmp_dir,
+                                    config->optimize, config->outfbase);
                 break;
             }
             case Config::RowCompressed: {

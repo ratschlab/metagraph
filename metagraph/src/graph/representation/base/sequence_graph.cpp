@@ -16,7 +16,7 @@ namespace graph {
 
 typedef DeBruijnGraph::node_index node_index;
 
-static const uint64_t kBlockSize = 9'999'872;
+static const uint64_t kBlockSize = 1 << 14;
 static_assert(!(kBlockSize & 0xFF));
 
 
@@ -132,20 +132,22 @@ void call_sequences_from(const DeBruijnGraph &graph,
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {
         node_index node = queue.back();
-        path.resize(0);
-        path.push_back(node);
-        sequence = graph.get_node_sequence(node);
         queue.pop_back();
-        start = node;
-        assert(!call_unitigs || !(*visited)[node]);
+        assert((*discovered)[node]);
         if ((*visited)[node])
             continue;
 
+        path.resize(0);
+        path.push_back(node);
+        sequence = graph.get_node_sequence(node);
+        start = node;
+
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
-        while (!(*visited)[node]) {
+        while (true) {
             assert(node);
             assert((*discovered)[node]);
+            assert(!(*visited)[node]);
             assert(sequence.length() >= graph.get_k());
             (*visited)[node] = true;
             ++progress_bar;
@@ -163,22 +165,26 @@ void call_sequences_from(const DeBruijnGraph &graph,
             assert(!call_unitigs || graph.has_single_incoming(targets.front().first)
                                  || (*discovered)[targets.front().first]);
             if (targets.size() == 1) {
-                if ((*visited)[targets.front().first])
+                const auto &[next, c] = targets[0];
+
+                if ((*visited)[next])
                     break;
 
-                if (!call_unitigs || !(*discovered)[targets.front().first]) {
-                    sequence.push_back('\0');
-                    std::tie(node, sequence.back()) = targets[0];
-                    path.push_back(node);
-                    (*discovered)[node] = true;
+                if (!call_unitigs || !(*discovered)[next]) {
+                    sequence.push_back(c);
+                    path.push_back(next);
+                    (*discovered)[next] = true;
+                    node = next;
                     continue;
                 }
+                assert(call_unitigs && graph.indegree(next) >= 2);
+                break;
             }
 
             node_index next_node = DeBruijnGraph::npos;
             //  _____.___
             //      \.___
-            for (const auto& [next, c] : targets) {
+            for (const auto &[next, c] : targets) {
                 if (next_node == DeBruijnGraph::npos
                         && !call_unitigs
                         && !(*visited)[next]) {
@@ -219,7 +225,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 size_t begin = 0;
 
                 assert(std::all_of(path.begin(), path.end(),
-                                   [&](auto i) { return (*visited)[i]; }));
+                                   [&](auto i) { return (*visited)[i] && (*discovered)[i]; }));
 
                 progress_bar += std::count_if(dual_path.begin(), dual_path.end(),
                                               [&](auto node) { return node && !(*visited)[node]; });
@@ -259,6 +265,36 @@ void call_sequences_from(const DeBruijnGraph &graph,
                 } else if (begin < path.size()) {
                     callback(sequence.substr(begin),
                              { path.begin() + begin, path.end() });
+                }
+
+                for (size_t i = 0; i < path.size(); ++i) {
+                    if (!dual_path[i])
+                        continue;
+
+                    // schedule traversal branched off from each terminal dual k-mer
+                    if (i == 0) {
+                        graph.adjacent_outgoing_nodes(dual_path[i],
+                            [&](auto next) {
+                                if (!(*discovered)[next]) {
+                                    (*discovered)[next] = true;
+                                    queue.push_back(next);
+                                }
+                            }
+                        );
+                    } else if (!dual_path[i - 1]) {
+                        size_t num_outgoing = 0;
+                        graph.adjacent_outgoing_nodes(dual_path[i],
+                            [&](node_index next) { num_outgoing++; node = next; }
+                        );
+                        // schedule only if it has a single outgoing k-mer,
+                        // otherwise it's a fork which will be covered in the forward pass.
+                        if (num_outgoing == 1) {
+                            if (!(*discovered)[node]) {
+                                (*discovered)[node] = true;
+                                queue.push_back(node);
+                            }
+                        }
+                    }
                 }
 
             } else {
