@@ -165,8 +165,8 @@ class TaxonomyDB {
 
   private:
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
-    uint64_t num_external_get_taxid_calls;
-    uint64_t num_external_get_taxid_calls_failed;
+    uint64_t num_external_get_taxid_calls = 0;
+    uint64_t num_external_get_taxid_calls_failed = 0;
 };
 
 }
