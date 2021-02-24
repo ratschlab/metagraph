@@ -4,7 +4,7 @@
 
 ### Prerequisites
 - cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - bzip2
 - HTSlib
 
@@ -176,7 +176,7 @@ Requires `N*R/8 + 6*N^2` bytes of RAM, where `N` is the number of columns and `R
 2) Construct Multi-BRWT
 ```bash
 ./metagraph transform_anno -v -p NCORES --anno-type brwt \
-                           -i linkage.txt \
+                           --linkage-file linkage.txt \
                            -o primates \
                            --parallel-nodes V \
                            -p NCORES \

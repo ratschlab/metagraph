@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -84,13 +85,13 @@ class RowDiff : public IRowDiff {
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
-    inline bool load(std::istream &f) override;
-    inline void serialize(std::ostream &f) const override;
+    bool load(std::istream &f) override;
+    void serialize(std::ostream &f) const override;
 
     void serialize(const std::string &filename) const;
     bool load(const std::string &filename);
 
-    void load_anchor(const std::string& filename);
+    void load_anchor(const std::string &filename);
     const anchor_bv_type& anchor() const { return anchor_; }
 
     const BaseMatrix& diffs() const { return diffs_; }
@@ -99,7 +100,7 @@ class RowDiff : public IRowDiff {
     Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
 
   private:
-    static void merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2);
+    static void add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row);
 
     const graph::DBGSuccinct *graph_ = nullptr;
 
@@ -154,7 +155,7 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 
         auto diff_row = get_diff(row);
         std::sort(diff_row.begin(), diff_row.end());
-        merge(&result, diff_row);
+        add_diff(diff_row, &result);
     }
 
     return result;
@@ -200,7 +201,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
             rd_ids.push_back(row);
 
-            if (anchor()[row])
+            if (anchor_[row])
                 break;
 
             graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
@@ -224,7 +225,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
         // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
             std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            merge(&result, rd_rows[*it]);
+            add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             rd_rows[*it] = result;
         }
@@ -234,52 +235,35 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 }
 
 template <class BaseMatrix>
-inline bool RowDiff<BaseMatrix>::load(std::istream &f) {
-    if constexpr (!std::is_same_v<BaseMatrix, ColumnMajor>) {
+bool RowDiff<BaseMatrix>::load(std::istream &f) {
+    if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
         anchor_.load(f);
     }
     return diffs_.load(f);
 }
 
 template <class BaseMatrix>
-inline void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
-    if constexpr (!std::is_same_v<BaseMatrix, ColumnMajor>) {
+void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+    if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
         anchor_.serialize(f);
     }
     diffs_.serialize(f);
 }
 
 template <class BaseMatrix>
-void RowDiff<BaseMatrix>::merge(Vector<uint64_t> *result, const Vector<uint64_t> &diff2) {
-    assert(std::is_sorted(result->begin(), result->end()));
-    assert(std::is_sorted(diff2.begin(), diff2.end()));
+void RowDiff<BaseMatrix>::add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row) {
+    assert(std::is_sorted(row->begin(), row->end()));
+    assert(std::is_sorted(diff.begin(), diff.end()));
 
-    if (diff2.empty())
+    if (diff.empty())
         return;
 
-    Vector<uint64_t> diff1;
-    std::swap(*result, diff1);
-    result->reserve(std::max(diff1.size(), diff2.size()));
-    uint64_t idx1 = 0;
-    uint64_t idx2 = 0;
-    while (idx1 < diff1.size() && idx2 < diff2.size()) {
-        if (diff1[idx1] == diff2[idx2]) {
-            idx1++;
-            idx2++;
-        } else if (diff1[idx1] < diff2[idx2]) {
-            result->push_back(diff1[idx1++]);
-        } else {
-            result->push_back(diff2[idx2++]);
-        }
-    }
-    while (idx1 < diff1.size()) {
-        result->push_back(diff1[idx1++]);
-    }
-    while (idx2 < diff2.size()) {
-        result->push_back(diff2[idx2++]);
-    }
-
-    assert(std::is_sorted(result->begin(), result->end()));
+    Vector<uint64_t> result;
+    result.reserve(row->size() + diff.size());
+    std::set_symmetric_difference(row->begin(), row->end(),
+                                  diff.begin(), diff.end(),
+                                  std::back_inserter(result));
+    row->swap(result);
 }
 
 } // namespace binmat

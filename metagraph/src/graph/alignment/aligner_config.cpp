@@ -1,5 +1,6 @@
-#include "aligner_helper.hpp"
+#include "aligner_config.hpp"
 
+#include "aligner_cigar.hpp"
 #include "kmer/alphabets.hpp"
 
 
@@ -38,8 +39,8 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
         score_matrix_(std::move(score_matrix)) {}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
-::score_cigar(const std::string_view reference,
-              const std::string_view query,
+::score_cigar(std::string_view reference,
+              std::string_view query,
               const Cigar &cigar) const {
     score_t score = 0;
 
@@ -62,11 +63,11 @@ DBGAlignerConfig::score_t DBGAlignerConfig
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Cigar::DELETION: {
+            case Cigar::INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 alt_it += op.second;
             } break;
-            case Cigar::INSERTION: {
+            case Cigar::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
             } break;

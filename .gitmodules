@@ -41,9 +41,6 @@
 [submodule "metagraph/external-libraries/nvbio"]
 	path = metagraph/external-libraries/nvbio
 	url = https://github.com/NVlabs/nvbio
-[submodule "metagraph/external-libraries/fmt"]
-	path = metagraph/external-libraries/fmt
-	url = https://github.com/fmtlib/fmt.git
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
 	url = https://github.com/hmusta/rollinghashcpp

@@ -236,25 +236,19 @@ Vector<T_TO>& reinterpret_container(Vector<T_FROM> &container) {
 }
 
 
-// Although this function could be parallelized better,
-// the experiments show it's already fast enough.
 /**
- * Adds dummy nodes for the given kmers.
+ * Adds dummy nodes for the given kmers and then builds a BOSS table (chunk).
  * The method first adds dummy sink kmers, then dummy sources with sentinels of length 1
  * (aka dummy-1 sources). The method will then gradually add dummy sources with sentinels
  * of length 2, 3, ... up to k-1.
  *
- * @param k the node length in the BOOS graph (so k-mer length is k+1)
- * @param num_threads number of threads available for sorting
- * @param both_strands for each k-mer, also add its reverse complement
- * @param kmers_out sorted real+dummy k-mers
  * @tparam T a k-mer over the same alphabet as T_REAL plus the $ sentinel character (may
  * require one extra bit of storage per character)
  */
-template <typename KmerCollector, typename T>
-void recover_dummy_nodes(KmerCollector &kmer_collector,
-                         ChunkedWaitQueue<T> *kmers_out,
-                         ThreadPool &async_worker) {
+template <typename T, class KmerCollector>
+BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
+                                 uint8_t bits_per_count,
+                                 std::filesystem::path swap_dir) {
     using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
     using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
 
@@ -265,8 +259,9 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
 
     size_t k = kmer_collector.get_k() - 1;
     size_t num_threads = kmer_collector.num_threads();
+    bool both_strands_mode = kmer_collector.is_both_strands_mode();
 
-    if (kmer_collector.is_both_strands_mode()) {
+    if (both_strands_mode) {
         add_reverse_complements(k, num_threads, &kmers);
     }
 
@@ -311,6 +306,8 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
     ips4o::parallel::sort(dummy_kmers.begin(), dummy_kmers.end(),
                           utils::LessFirst(), num_threads);
 
+    auto kmers_out = std::make_shared<ChunkedWaitQueue<T>>(ENCODER_BUFFER_SIZE);
+
     // add the main dummy source k-mer
     if constexpr(utils::is_pair_v<T>) {
         kmers_out->push({ KMER(0), 0 });
@@ -318,6 +315,7 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
         kmers_out->push(KMER(0));
     }
 
+    ThreadPool async_worker(1, 1);
     async_worker.enqueue([k, &kmers, dummy_kmers{std::move(dummy_kmers)}, kmers_out]() {
         const KMER_INT kmer_delta
                 = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
@@ -349,6 +347,14 @@ void recover_dummy_nodes(KmerCollector &kmer_collector,
         }
         kmers_out->shutdown();
     });
+
+    BOSS::Chunk result(KmerExtractorBOSS().alphabet.size(),
+                       k, both_strands_mode, *kmers_out,
+                       bits_per_count, swap_dir);
+
+    kmer_collector.clear();
+
+    return result;
 }
 
 template <typename T>
@@ -404,12 +410,17 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
 }
 
 /**
- * Generates non-redundant dummy-1 source k-mers and dummy sink kmers from #kmers.
- * @return a triplet containing the names of the original k-mer blocks, the dummy-1 source
- * k-mer blocks and the dummy sink k-mers
+ * Generates ordered blocks of k-mers for the BOSS table.
+ * Adds non-redundant dummy-1 source k-mers and dummy sink k-mers.
+ * @return a triplet containing the names of the k-mer blocks.
+ * 1) real k-mers (split by F),
+ * 2) the dummy-1 source k-mers (split by F and W),
+ * 3) the dummy sink k-mers (split by F).
  */
 template <typename T_REAL, typename T>
-std::tuple<std::vector<std::string>, std::vector<std::string>, std::string>
+std::tuple<std::vector<std::string>,
+           std::vector<std::string>,
+           std::vector<std::string>>
 generate_dummy_1_kmers(size_t k,
                        size_t num_threads,
                        const std::filesystem::path &dir,
@@ -422,15 +433,25 @@ generate_dummy_1_kmers(size_t k,
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
 
-    std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
+    using T_INT = get_int_t<T>;
+    using T_INT_REAL = get_int_t<T_REAL>;
+    std::vector<Encoder<T_INT>> real_chunks;
     std::vector<Encoder<KMER_INT>> dummy_sink_chunks;
-    std::vector<std::string> dummy_l1_names(alphabet_size);
+    std::vector<std::string> real_names(alphabet_size);
     std::vector<std::string> dummy_sink_names(alphabet_size);
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
-        dummy_l1_names[i] = dir/("dummy_source_1_" + std::to_string(i));
+        real_names[i] = dir/("real_split_by_F_" + std::to_string(i));
         dummy_sink_names[i] = dir/("dummy_sink_" + std::to_string(i));
-        dummy_l1_chunks.emplace_back(dummy_l1_names[i], ENCODER_BUFFER_SIZE);
+        real_chunks.emplace_back(real_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
+    }
+    std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
+    std::vector<std::string> dummy_l1_names;
+    for (TAlphabet F = 0; F <= alphabet_size; ++F) {
+        for (TAlphabet W = 0; W <= alphabet_size; ++W) {
+            dummy_l1_names.push_back(dir/fmt::format("dummy_source_1_{}_{}", F, W));
+            dummy_l1_chunks.emplace_back(dummy_l1_names.back(), ENCODER_BUFFER_SIZE);
+        }
     }
 
     logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
@@ -438,14 +459,14 @@ generate_dummy_1_kmers(size_t k,
     static constexpr size_t L = KMER::kBitsPerChar;
     KMER_INT kmer_delta = kmer::get_sentinel_delta<KMER_INT>(L, k + 1);
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
-    kmer_delta &= ~KMER_INT(((1ull << L) - 1) << L);
+    KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
-        common::MergeDecoder<KMER_INT_REAL> it(F_chunks, false);
+        common::MergeDecoder<T_INT_REAL> it(F_chunks, false);
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 0; c < alphabet_size; ++c) {
             W_chunks.push_back(real_F_W[c * alphabet_size + F]);
@@ -453,9 +474,22 @@ generate_dummy_1_kmers(size_t k,
         common::ConcatDecoder<KMER_INT_REAL> sink_gen_it(W_chunks);
 
         while (!it.empty()) {
-            KMER_REAL dummy_source(it.pop());
+            T_REAL v(it.pop());
+
+            // write k-mer to its respective block |real_chunks[F]|
+            if constexpr(utils::is_pair_v<T>) {
+                real_chunks[F].add({ kmer::transform<KMER>(v.first, k + 1) + kmer_delta, v.second });
+            } else {
+                real_chunks[F].add(kmer::transform<KMER>(v, k + 1) + kmer_delta);
+            }
+
+            KMER_REAL dummy_source(utils::get_first(v));
             // skip k-mers that would generate identical source dummy k-mers
-            skip_same_suffix(dummy_source, it, 0);
+            if (!it.empty() && KMER_REAL::compare_suffix(KMER_REAL(utils::get_first(it.top())),
+                                                         dummy_source, 0)) {
+                continue;
+            }
+
             dummy_source.to_prev(k + 1, 0);
             // generate dummy sink k-mers from all non-dummy kmers smaller than |dummy_source|
             while (!sink_gen_it.empty()
@@ -478,8 +512,11 @@ generate_dummy_1_kmers(size_t k,
                     continue;
                 }
             }
+            assert(F == dummy_source[0]);
+            TAlphabet next_F = dummy_source[k];
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta);
+            dummy_l1_chunks[(next_F+1) * (alphabet_size+1) + (F+1)].add(
+                kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
         }
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
@@ -489,39 +526,25 @@ generate_dummy_1_kmers(size_t k,
         }
     }
 
+    // remove all unmerged chunks
+    common::remove_chunks(real_F_W);
+
     uint64_t num_sink = 0;
     uint64_t num_source = 0;
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
+        real_chunks[i].finish();
         dummy_sink_chunks[i].finish();
-        dummy_l1_chunks[i].finish();
         num_sink += dummy_sink_chunks[i].size();
-        num_source += dummy_l1_chunks[i].size();
+    }
+    for (auto &dummy_l1_chunk : dummy_l1_chunks) {
+        dummy_l1_chunk.finish();
+        num_source += dummy_l1_chunk.size();
     }
 
     logger->trace("Generated {} dummy sink and {} dummy source k-mers",
                   num_sink, num_source);
 
-    // dummy sink k-mers are partitioned into blocks by F (kmer[1]), so simply
-    // concatenating the blocks will result in a single ordered block
-    logger->trace("Concatenating blocks of dummy sink k-mers ({} -> 1)...",
-                  dummy_sink_names.size());
-    std::string dummy_sink_name = dir/"dummy_sink";
-    common::concat(dummy_sink_names, dummy_sink_name);
-
-    // similarly, the 16 blocks of the original k-mers can be concatenated in groups of
-    // 4 without destroying the order
-    logger->trace("Concatenating blocks of original real k-mers ({} -> {})...",
-                  real_F_W.size(), alphabet_size);
-    std::vector<std::string> real_split_by_W;
-    for (TAlphabet W = 0; W < alphabet_size; ++W) {
-        std::vector<std::string> blocks;
-        for (TAlphabet F = 0; F < alphabet_size; ++F) {
-            blocks.push_back(real_F_W[F * alphabet_size + W]);
-        }
-        real_split_by_W.push_back(dir/("real_split_by_W_" + std::to_string(W)));
-        common::concat(blocks, real_split_by_W.back());
-    }
-    return { real_split_by_W, dummy_l1_names, dummy_sink_name };
+    return { real_names, dummy_l1_names, dummy_sink_names };
 }
 
 /**
@@ -610,9 +633,26 @@ void add_reverse_complements(size_t k,
     }
 }
 
+template <typename KMER>
+std::vector<std::vector<std::string>>
+reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
+                         size_t k,
+                         size_t num_threads,
+                         std::filesystem::path dir);
+
+template <typename T>
+BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
+                       const std::vector<std::vector<std::string>> &dummy_source_names,
+                       const std::vector<std::string> &dummy_sink_names,
+                       std::filesystem::path dir,
+                       size_t k,
+                       bool both_strands_mode,
+                       uint8_t bits_per_count,
+                       std::filesystem::path swap_dir,
+                       size_t num_threads);
+
 /**
- * Specialization of recover_dummy_nodes for a disk-based container, such as
- * #SortedSetDisk and #SortedMultisetDisk.
+ * Reconstructs all the required dummy k-mers and builds a BOSS table (chunk).
  * The method first traverses the original kmers and generates dummy source k-mers of
  * prefix length 1 (dummy-1). At the next step, the non-redundant dummy-1 kmers are merged
  * with the original k-mers.
@@ -621,21 +661,20 @@ void add_reverse_complements(size_t k,
  * The final result is obtained by merging the original #kmers and dummy-1 kmers with
  * the dummy-k kmers, for k=2..k
  */
-template <class KmerCollector, typename T>
-void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
-                              ChunkedWaitQueue<T> *kmers_out,
-                              ThreadPool &async_worker) {
+template <typename T, class KmerCollector>
+BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
+                                      uint8_t bits_per_count,
+                                      std::filesystem::path swap_dir) {
     using T_INT_REAL = typename KmerCollector::Data::value_type; // either KMER_INT or <KMER_INT, count>
     using T_REAL = get_kmer_t<typename KmerCollector::Kmer, T_INT_REAL>;
-    using KMER_REAL = typename KmerCollector::Kmer; // 64/128/256-bit KmerBOSS
 
     using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
-    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
     size_t num_threads = kmer_collector.num_threads();
     const uint64_t buffer_size = kmer_collector.buffer_size();
+    bool both_strands_mode = kmer_collector.is_both_strands_mode();
 
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.files_to_merge();
@@ -651,8 +690,7 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
     container.clear();
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
-    std::vector<std::string> real_F_W(std::pow(alphabet_size, 2));
+    std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
 
     // merge each group of chunks into a single one for each F and W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -673,107 +711,143 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
                       std::filesystem::file_size(real_F_W[j]));
     }
 
-    if (kmer_collector.is_both_strands_mode()) {
+    if (both_strands_mode) {
         // compute reverse complements k-mers and update the blocks #real_F_W
         add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
     }
 
-    std::string dummy_sink_name;
-    std::vector<std::string> real_split_by_W;
-    std::vector<std::string> dummy_names;
-    std::tie(real_split_by_W, dummy_names, dummy_sink_name)
+    // k-mer blocks split by F
+    auto [real_names, dummy_l1_names, dummy_sink_names]
             = generate_dummy_1_kmers<T_REAL, T>(k, num_threads, dir, real_F_W);
 
-    // stores the sorted original kmers and dummy-1 k-mers
-    std::vector<std::string> dummy_chunks = { dummy_sink_name };
+    auto dummy_source_names
+            = reconstruct_dummy_source<KMER>(dummy_l1_names, k, num_threads, dir);
+
+    // merge all the original k-mers with the dummy k-mers and generate a BOSS table
+    return build_boss<T>(real_names, dummy_source_names, dummy_sink_names,
+                         dir, k, both_strands_mode, bits_per_count, swap_dir, num_threads);
+}
+
+template <typename KMER>
+std::vector<std::vector<std::string>>
+reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
+                         size_t k,
+                         size_t num_threads,
+                         std::filesystem::path dir) {
+    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+    const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
+
+    std::vector<std::string> names = dummy_l1_names;
+
+    std::vector<std::vector<std::string>> result;
+
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
-        // this will compress all sorted dummy k-mers of given prefix length
-        for (const std::string &f : dummy_names) {
-            dummy_chunks.push_back(f);
-        }
-
-        const uint8_t alphabet_size = KmerExtractorBOSS::alphabet.size();
-        std::vector<std::string> dummy_next_names(alphabet_size);
-        std::vector<Encoder<KMER_INT>> dummy_next_chunks;
-        for (TAlphabet i = 0; i < alphabet_size; ++i) {
-            dummy_next_names[i] = dir/fmt::format("dummy_source_{}_{}", dummy_pref_len + 1, i);
-            dummy_next_chunks.emplace_back(dummy_next_names[i], ENCODER_BUFFER_SIZE);
-        }
-
-        KMER prev_kmer(0);
+        // this will store blocks of source dummy k-mers of the current level
         uint64_t num_kmers = 0;
-        const std::function<void(const KMER_INT &)> &write_dummy = [&](const KMER_INT &v) {
-            KMER kmer(v);
-            kmer.to_prev(k + 1, BOSS::kSentinelCode);
-            if (prev_kmer != kmer) {
-                dummy_next_chunks[kmer[0]].add(kmer.data());
-                prev_kmer = std::move(kmer);
-            }
-            num_kmers++;
-        };
-        common::merge_files(dummy_names, write_dummy, false);
+        result.emplace_back(alphabet_size);
+        std::vector<std::string> next_names(alphabet_size * alphabet_size);
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (TAlphabet F = 0; F < alphabet_size; ++F) {
+            // will store sorted dummy source k-mers of pattern ***F*
+            result.back()[F] = dir/fmt::format("dummy_source_{}_{}", dummy_pref_len, F);
+            Encoder<KMER_INT> dummy_chunk(result.back()[F], ENCODER_BUFFER_SIZE);
 
-        std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
-                      [](auto &v) { v.finish(); });
-        dummy_names = std::move(dummy_next_names);
+            std::vector<Encoder<KMER_INT>> dummy_next_chunks;
+            for (TAlphabet i = 0; i < alphabet_size; ++i) {
+                next_names[i * alphabet_size + F]
+                    = dir/fmt::format("dummy_source_{}_{}_{}", dummy_pref_len + 1, i, F);
+                dummy_next_chunks.emplace_back(next_names[i * alphabet_size + F],
+                                               ENCODER_BUFFER_SIZE);
+            }
+
+            KMER prev_kmer(0);
+            const std::function<void(const KMER_INT &)> &write_dummy = [&](const KMER_INT &v) {
+                dummy_chunk.add(v);
+                // ***F*
+                KMER kmer(v);
+                // $***F
+                kmer.to_prev(k + 1, BOSS::kSentinelCode);
+                if (prev_kmer != kmer) {
+                    // $**XF
+                    assert(kmer[0] == F);
+                    dummy_next_chunks[kmer[k]].add(kmer.data());
+                    prev_kmer = std::move(kmer);
+                }
+            };
+            std::vector<std::string> F_chunk_names(names.begin() + F * alphabet_size,
+                                                   names.begin() + (F + 1) * alphabet_size);
+            common::merge_files(F_chunk_names, write_dummy, true);
+
+            dummy_chunk.finish();
+            std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
+                          [](auto &v) { v.finish(); });
+
+            #pragma omp atomic
+            num_kmers += dummy_chunk.size();
+        }
         logger->trace("Number of dummy k-mers with dummy prefix of length {}: {}",
                       dummy_pref_len, num_kmers);
+        names = std::move(next_names);
     }
     // remove the last chunks with .up and .count
-    const std::function<void(const KMER_INT &)> on_merge = [](const KMER_INT &) {};
-    common::merge_files(dummy_names, on_merge);
+    common::remove_chunks(names);
 
-    // at this point, we have the original k-mers and dummy-1 k-mers in original_and_dummy_l1,
-    // the dummy-x k-mers in dummy_source_{x}, and we merge them all into a single stream
-    kmers_out->reset();
+    return result;
+}
 
-    // add the main dummy source k-mer
-    if constexpr(utils::is_pair_v<T>) {
-        kmers_out->push({ KMER(0), 0 });
-    } else {
-        kmers_out->push(KMER(0));
+template <typename T>
+BOSS::Chunk build_boss_chunk(bool is_first_chunk,
+                             const std::string &real_name,
+                             const std::vector<std::string> &dummy_names,
+                             size_t k,
+                             bool both_strands_mode,
+                             uint8_t bits_per_count,
+                             std::filesystem::path swap_dir) {
+    using T_INT = get_int_t<T>;
+    using KMER = get_first_type_t<T>; // 64/128/256-bit KmerBOSS with sentinel $
+    using KMER_INT = typename KMER::WordType; // 64/128/256-bit integer
+
+    auto kmers_out = std::make_shared<ChunkedWaitQueue<T_INT>>(ENCODER_BUFFER_SIZE);
+
+    if (is_first_chunk) {
+        // add the main dummy source k-mer
+        if constexpr(utils::is_pair_v<T>) {
+            kmers_out->push({ KMER_INT(0), 0 });
+        } else {
+            kmers_out->push(KMER_INT(0));
+        }
     }
 
     // push all other dummy and non-dummy k-mers to |kmers_out|
-    async_worker.enqueue([k, kmers_out, real_split_by_W, dummy_chunks]() {
-        const KMER_INT kmer_delta
-                = kmer::get_sentinel_delta<KMER_INT>(KMER::kBitsPerChar, k + 1);
+    ThreadPool async_worker(1, 1);
+    async_worker.enqueue([kmers_out, real_name, dummy_names]() {
+        Decoder<T_INT> decoder(real_name, true);
 
-        common::Transformed<common::MergeDecoder<T_INT_REAL>, T> decoder(
-            [&](const T_INT_REAL &v) {
-                if constexpr(utils::is_pair_v<T>) {
-                    return T(kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v.first), k + 1)
-                                + kmer_delta,
-                             v.second);
-                } else {
-                    return kmer::transform<KMER>(reinterpret_cast<const KMER_REAL &>(v), k + 1) + kmer_delta;
-                }
-            },
-            real_split_by_W, true
-        );
-
-        common::Transformed<common::MergeDecoder<KMER_INT>, T> decoder_dummy(
+        common::Transformed<common::MergeDecoder<KMER_INT>, T_INT> decoder_dummy(
             [](const KMER_INT &v) {
                 if constexpr(utils::is_pair_v<T>) {
-                    return T(reinterpret_cast<const KMER &>(v), 0);
+                    return std::make_pair(v, 0);
                 } else {
-                    return reinterpret_cast<const KMER &>(v);
+                    return v;
                 }
             },
-            dummy_chunks, true
+            dummy_names, true
         );
 
-        while (!decoder.empty() && !decoder_dummy.empty()) {
-            if (get_first(decoder.top()) < get_first(decoder_dummy.top())) {
-                kmers_out->push(decoder.pop());
+        std::optional<T_INT> next = decoder.next();
+        while (next && !decoder_dummy.empty()) {
+            if (get_first(next.value()) < get_first(decoder_dummy.top())) {
+                kmers_out->push(next.value());
+                next = decoder.next();
             } else {
                 kmers_out->push(decoder_dummy.pop());
             }
         }
-        while (!decoder.empty()) {
-            kmers_out->push(decoder.pop());
+        while (next) {
+            kmers_out->push(next.value());
+            next = decoder.next();
         }
         while (!decoder_dummy.empty()) {
             kmers_out->push(decoder_dummy.pop());
@@ -781,6 +855,81 @@ void recover_dummy_nodes_disk(KmerCollector &kmer_collector,
 
         kmers_out->shutdown();
     });
+
+    return BOSS::Chunk(KmerExtractorBOSS().alphabet.size(),
+                       k, both_strands_mode,
+                       reinterpret_container<T>(*kmers_out),
+                       bits_per_count, swap_dir);
+}
+
+template <typename T>
+BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
+                       const std::vector<std::vector<std::string>> &dummy_source_names,
+                       const std::vector<std::string> &dummy_sink_names,
+                       std::filesystem::path dir,
+                       size_t k,
+                       bool both_strands_mode,
+                       uint8_t bits_per_count,
+                       std::filesystem::path swap_dir,
+                       size_t num_threads) {
+    assert(real_names.size() == dummy_sink_names.size());
+    assert(real_names.size() + 1 == dummy_source_names.front().size());
+    assert(dummy_source_names.size() == k);
+
+    if (k <= 1) {
+        // For k <= 1 BOSS chunks can't be built independently.
+        // Concatenate blocks and build a full BOSS table.
+        logger->trace("Concatenating blocks of real k-mers ({} -> 1)...", real_names.size());
+        std::string real_name = dir/"real_kmers";
+        common::concat(real_names, real_name);
+
+        logger->trace("Concatenating blocks of dummy sink k-mers ({} -> 1)...",
+                      dummy_sink_names.size());
+        std::vector<std::string> dummy_names { dir/"dummy_sink" };
+        common::concat(dummy_sink_names, dummy_names.back());
+
+        for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+            logger->trace("Concatenating blocks of dummy-{} source k-mers ({} -> 1)...",
+                          i + 1, dummy_source_names[i].size());
+            dummy_names.push_back(dir/fmt::format("dummy_source_{}", i));
+            common::concat(dummy_source_names[i], dummy_names.back());
+        }
+
+        return build_boss_chunk<T>(true, real_name, dummy_names,
+                                   k, both_strands_mode, bits_per_count, swap_dir);
+    }
+
+    // For k >= 2, BOSS chunks can be built independently, in parallel.
+
+    // there are real k-mers that end with $, so we do the following trick
+    const std::string empty_real_name = real_names.front() + "_empty";
+    Encoder<get_int_t<T>> empty_real(empty_real_name, ENCODER_BUFFER_SIZE);
+    empty_real.finish();
+
+    // the first chunk has at most alphabet_size + 1 k-mers (where F = $)
+    std::vector<std::string> dummy_names;
+    for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+        dummy_names.push_back(dummy_source_names[i][0]);
+    }
+    BOSS::Chunk chunk = build_boss_chunk<T>(true, empty_real_name, dummy_names,
+                                            k, both_strands_mode, bits_per_count, swap_dir);
+    logger->trace("Chunk ..$. constructed");
+    // construct all other chunks in parallel
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    for (size_t F = 0; F < real_names.size(); ++F) {
+        std::vector<std::string> dummy_names { dummy_sink_names[F] };
+        for (size_t i = 0; i < dummy_source_names.size(); ++i) {
+            dummy_names.push_back(dummy_source_names[i][F + 1]);
+        }
+        BOSS::Chunk next = build_boss_chunk<T>(false, // not the first chunk
+                                               real_names[F], dummy_names,
+                                               k, both_strands_mode, bits_per_count, swap_dir);
+        logger->trace("Chunk ..{}. constructed", KmerExtractor2Bit().alphabet[F]);
+        #pragma omp ordered
+        chunk.extend(next);
+        logger->trace("Chunk ..{}. appended", KmerExtractor2Bit().alphabet[F]);
+    }
+    return chunk;
 }
 
 inline std::vector<TAlphabet>
@@ -806,7 +955,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          size_t num_threads,
                          double memory_preallocated,
                          const std::filesystem::path &swap_dir,
-                         size_t max_disk_space)
+                         size_t disk_cap_bytes)
         : swap_dir_(swap_dir),
           kmer_collector_(k + 1,
                           both_strands_mode,
@@ -814,7 +963,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           num_threads,
                           memory_preallocated,
                           swap_dir,
-                          max_disk_space,
+                          disk_cap_bytes,
                           both_strands_mode && filter_suffix.empty() /* keep only canonical k-mers */),
           bits_per_count_(bits_per_count) {
         if (filter_suffix.size()
@@ -835,8 +984,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         kmer_collector_.add_sequences(std::move(sequences));
     }
 
-    BOSS::Chunk* build_chunk() {
-        BOSS::Chunk *result;
+    BOSS::Chunk build_chunk() {
+        BOSS::Chunk result;
 
         using T_INT = typename KmerCollector::Data::value_type;
         using T = get_kmer_t<typename KmerCollector::Kmer, T_INT>;
@@ -848,12 +997,12 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
             typename KmerCollector::Data &kmer_ints = kmer_collector_.data();
 
-            result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
-                                     kmer_collector_.get_k() - 1,
-                                     kmer_collector_.is_both_strands_mode(),
-                                     reinterpret_container<T>(kmer_ints),
-                                     bits_per_count_,
-                                     swap_dir_);
+            result = BOSS::Chunk(kmer_collector_.alphabet_size(),
+                                 kmer_collector_.get_k() - 1,
+                                 kmer_collector_.is_both_strands_mode(),
+                                 reinterpret_container<T>(kmer_ints),
+                                 bits_per_count_,
+                                 swap_dir_);
         } else {
             static_assert(std::is_same_v<typename KmerCollector::Extractor,
                                          KmerExtractor2Bit>);
@@ -862,31 +1011,22 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
             logger->trace("Reconstructing all required dummy source k-mers...");
             Timer timer;
 
-#define INIT_CHUNK(KMER) \
-    ChunkedWaitQueue<utils::replace_first_t<KMER, T>> queue(ENCODER_BUFFER_SIZE); \
+#define CONSTRUCT_CHUNK(KMER) \
+    using T_FINAL = utils::replace_first_t<KMER, T>; \
     if constexpr(utils::is_instance_v<typename KmerCollector::Data, common::ChunkedWaitQueue>) { \
-        recover_dummy_nodes_disk(kmer_collector_, &queue, async_worker_); \
+        result = construct_boss_chunk_disk<T_FINAL>(kmer_collector_, bits_per_count_, swap_dir_); \
     } else { \
-        recover_dummy_nodes(kmer_collector_, &queue, async_worker_); \
-    } \
-    logger->trace("Dummy source k-mers were reconstructed in {} sec", timer.elapsed()); \
-    result = new BOSS::Chunk(KmerExtractorBOSS().alphabet.size(), \
-                             kmer_collector_.get_k() - 1, \
-                             kmer_collector_.is_both_strands_mode(), \
-                             queue, \
-                             bits_per_count_,                                     \
-                             swap_dir_)
+        result = construct_boss_chunk<T_FINAL>(kmer_collector_, bits_per_count_, swap_dir_); \
+    }
 
             if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 64) {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer64);
+                CONSTRUCT_CHUNK(KmerExtractorBOSS::Kmer64);
             } else if (kmer_collector_.get_k() * KmerExtractorBOSS::bits_per_char <= 128) {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer128);
+                CONSTRUCT_CHUNK(KmerExtractorBOSS::Kmer128);
             } else {
-                INIT_CHUNK(KmerExtractorBOSS::Kmer256);
+                CONSTRUCT_CHUNK(KmerExtractorBOSS::Kmer256);
             }
         }
-
-        kmer_collector_.clear();
 
         return result;
     }
@@ -897,8 +1037,6 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     std::filesystem::path swap_dir_;
     KmerCollector kmer_collector_;
     uint8_t bits_per_count_;
-    /** Used as an async executor for merging chunks from disk */
-    ThreadPool async_worker_ = ThreadPool(1, 1);
 };
 
 template <template <typename, class> class KmerContainer, typename... Args>
@@ -909,8 +1047,9 @@ initialize_boss_chunk_constructor(size_t k,
                                   const std::string &filter_suffix,
                                   const Args& ...args) {
     if (k < 1 || k > 256 / KmerExtractorBOSS::bits_per_char - 1) {
+        // DBGSuccinct::k = BOSS::k + 1
         logger->error("For succinct graph, k must be between 2 and {}",
-                      256 / KmerExtractorBOSS::bits_per_char - 1);
+                      256 / KmerExtractorBOSS::bits_per_char);
         exit(1);
     }
 
@@ -993,9 +1132,9 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   double memory_preallocated,
                                   kmer::ContainerType container_type,
                                   const std::filesystem::path &swap_dir,
-                                  size_t max_disk_space_bytes) {
+                                  size_t disk_cap_bytes) {
 #define OTHER_ARGS k, canonical_mode, bits_per_count, filter_suffix, \
-                   num_threads, memory_preallocated, swap_dir, max_disk_space_bytes
+                   num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

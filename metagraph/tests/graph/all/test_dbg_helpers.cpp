@@ -12,6 +12,31 @@ namespace test {
 
 using namespace mtg::graph::boss;
 
+template <class Graph>
+size_t max_test_k() {
+    return 256 / kmer::KmerExtractorBOSS::bits_per_char;
+}
+template size_t max_test_k<DBGSuccinct>();
+template size_t max_test_k<DBGSuccinctIndexed<1>>();
+template size_t max_test_k<DBGSuccinctIndexed<2>>();
+template size_t max_test_k<DBGSuccinctIndexed<10>>();
+template size_t max_test_k<DBGSuccinctBloomFPR<1, 1>>();
+template size_t max_test_k<DBGSuccinctBloomFPR<1, 10>>();
+template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
+template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
+
+template<> size_t max_test_k<DBGBitmap>() {
+    return 63. / kmer::KmerExtractor2Bit().bits_per_char;
+}
+template<> size_t max_test_k<DBGHashOrdered>() {
+    return 256 / kmer::KmerExtractor2Bit::bits_per_char;
+}
+template<> size_t max_test_k<DBGHashFast>() {
+    return 256 / kmer::KmerExtractor2Bit::bits_per_char;
+}
+template<> size_t max_test_k<DBGHashString>() {
+    return 100;
+}
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph> make_graph_primary(std::shared_ptr<DeBruijnGraph> graph) {
@@ -41,7 +66,7 @@ build_graph(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<Graph>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<Graph>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<Graph>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -73,7 +98,7 @@ build_graph<DBGHashString>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGHashString>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGHashString>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGHashString>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -94,7 +119,7 @@ build_graph<DBGBitmap>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGBitmap>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -120,7 +145,7 @@ build_graph<DBGSuccinct>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGSuccinct>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -295,7 +320,7 @@ build_graph_batch<DBGBitmap>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGBitmap>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGBitmap>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -316,7 +341,7 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
     if (mode == DBGMode::PRIMARY) {
         return make_graph_primary<DBGSuccinct>(graph);
     } else if (mode == DBGMode::CANONICAL_WRAPPER) {
-        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), true, 2 /* cache size */);
+        return std::make_shared<CanonicalDBG>(make_graph_primary<DBGSuccinct>(graph), 2 /* cache size */);
     }
 
     return graph;
@@ -471,7 +496,11 @@ bool check_graph(const std::string &alphabet, DBGMode mode, bool check_sequence)
         sequences.push_back(seq);
     }
 
+#if _PROTEIN_GRAPH
+    auto graph = build_graph<Graph>(12, sequences, mode);
+#else
     auto graph = build_graph<Graph>(20, sequences, mode);
+#endif
 
     bool node_remap_failed = false;
     graph->call_nodes(

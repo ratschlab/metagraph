@@ -6,7 +6,8 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_methods.hpp"
+#include "graph/alignment/aligner_seeder_methods.hpp"
+#include "graph/alignment/aligner_extender_methods.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -39,7 +40,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
     aligner_config.xdrop = config.alignment_xdrop;
-    aligner_config.exact_kmer_match_fraction = config.discovery_fraction;
+    aligner_config.min_exact_match = config.alignment_min_exact_match;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
     aligner_config.forward_and_reverse_complement = config.align_both_strands;
@@ -68,7 +69,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
-    logger->trace("\t Exact k-mer match fraction: {}", aligner_config.exact_kmer_match_fraction);
+    logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {
@@ -94,18 +95,31 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &aligner_config) {
     assert(aligner_config.min_seed_length <= aligner_config.max_seed_length);
 
-    if (aligner_config.min_seed_length < graph.get_k()) {
+    size_t k = graph.get_k();
+
+    if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
         if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            logger->error("SuffixSeeder can be used only with succinct graph representation");
-            exit(1);
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+            if (!canonical || !dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
+                logger->error("SuffixSeeder can be used only with succinct graph representation");
+                exit(1);
+            }
         }
 
         // Use the seeder that seeds to node suffixes
-        return std::make_unique<DBGAligner<SuffixSeeder<>>>(graph, aligner_config);
+        if (aligner_config.max_seed_length == k) {
+            return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder<>>>>(
+                graph, aligner_config
+            );
+        } else {
+            return std::make_unique<DBGAligner<SuffixSeeder<UniMEMSeeder<>>>>(
+                graph, aligner_config
+            );
+        }
 
-    } else if (aligner_config.max_seed_length == graph.get_k()) {
-        assert(aligner_config.min_seed_length == graph.get_k());
+    } else if (aligner_config.max_seed_length == k) {
+        assert(aligner_config.min_seed_length == k);
 
         // seeds are single k-mers
         return std::make_unique<DBGAligner<>>(graph, aligner_config);
@@ -293,10 +307,9 @@ void gfa_map_files(const Config *config,
         },
         get_num_threads()
     );
-    
-    // Open gfa_file in append mode.
-    std::ofstream gfa_file(utils::remove_suffix(config->gfa_mapping_path, ".gfa") + ".gfa",
-                           std::ios_base::app);
+
+    std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa", ".path") + ".path.gfa");
+
     std::mutex print_mutex;
     for (const std::string &file : files) {
         logger->trace("Loading sequences from FASTA file '{}' to append gfa paths.", file);
@@ -321,6 +334,47 @@ void gfa_map_files(const Config *config,
     }
 }
 
+std::string format_alignment(std::string_view header,
+                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const DeBruijnGraph &graph,
+                             const Config &config) {
+    std::string sout;
+    if (!config.output_json) {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths) {
+                sout += fmt::format("\t{}", path);
+            }
+        }
+
+        sout += "\n";
+    } else {
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "";
+
+        bool secondary = false;
+        for (const auto &path : paths) {
+            Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
+                                                 graph, secondary, header);
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+            secondary = true;
+        }
+
+        if (paths.empty()) {
+            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
+                paths.get_query(), graph, secondary, header
+            );
+
+            sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+        }
+    }
+
+    return sout;
+}
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -328,14 +382,10 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    if (utils::ends_with(config->infbase, ".gfa")) {
-        logger->trace("Received GFA input file. Trying to find the '.dbg' at the same path.");
-        config->gfa_mapping_path = config->infbase;
-        config->infbase = utils::remove_suffix(config->infbase, ".gfa") + ".dbg";
-    }
     // initialize aligner
     auto graph = load_critical_dbg(config->infbase);
-    if (config->gfa_mapping_path.size()) {
+
+    if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, graph);
         return 0;
     }
@@ -345,12 +395,6 @@ int align_to_graph(Config *config) {
     // This speeds up mapping, and allows for node suffix matching
     if (dbg)
         dbg->reset_mask();
-
-    if (config->canonical && !graph->is_canonical_mode()) {
-        logger->trace("Wrap as canonical DBG");
-        // TODO: check and wrap into canonical only if the graph is primary
-        graph.reset(new CanonicalDBG(graph, true));
-    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
@@ -362,13 +406,6 @@ int align_to_graph(Config *config) {
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
-        }
-
-        if ((!dbg || std::dynamic_pointer_cast<const CanonicalDBG>(graph))
-                && config->alignment_length != graph->get_k()) {
-            logger->error("Matching k-mers shorter than k only "
-                          "supported for DBGSuccinct without --canonical flag");
-            exit(1);
         }
 
         logger->trace("Map sequences against the de Bruijn graph with k={}",
@@ -392,16 +429,11 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    auto aligner = build_aligner(*graph, *config);
-
-    if (aligner->get_config().min_seed_length < graph->get_k()
-            && std::dynamic_pointer_cast<const CanonicalDBG>(graph)) {
-        logger->error("Seeds of length < k not supported with --canonical flag");
-        exit(1);
-    }
+    DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file '{}'", file);
+        seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
 
         Timer data_reading_timer;
 
@@ -409,67 +441,89 @@ int align_to_graph(Config *config) {
             ? new std::ofstream(config->outfbase)
             : &std::cout;
 
-        seq_io::read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-            thread_pool.enqueue([&](const std::string &query, const std::string &header) {
-                auto paths = aligner->align(query);
+        const uint64_t batch_size = config->query_batch_size_in_bytes;
 
-                std::lock_guard<std::mutex> lock(print_mutex);
-                if (!config->output_json) {
-                    *out << header << "\t" << paths.get_query();
-                    if (paths.empty()) {
-                        *out << "\t*\t*\t" << config->alignment_min_path_score
-                             << "\t*\t*\t*";
-                    } else {
-                        for (const auto &path : paths) {
-                            *out << "\t" << path;
-                        }
+        auto it = fasta_parser.begin();
+        auto end = fasta_parser.end();
+
+        size_t num_batches = 0;
+
+        while (it != end) {
+            uint64_t num_bytes_read = 0;
+
+            // Read a batch to pass on to a thread
+            typedef std::vector<std::pair<std::string, std::string>> SeqBatch;
+            SeqBatch seq_batch;
+            num_bytes_read = 0;
+            for ( ; it != end && num_bytes_read <= batch_size; ++it) {
+                std::string header
+                    = config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                        && it->comment.l
+                            ? utils::join_strings({ it->name.s, it->comment.s },
+                                                  config->fasta_anno_comment_delim,
+                                                  true)
+                            : std::string(it->name.s);
+                seq_batch.emplace_back(std::move(header), it->seq.s);
+                num_bytes_read += it->seq.l;
+            }
+
+            auto process_batch = [&](SeqBatch batch, uint64_t size) {
+                auto aln_graph = graph;
+                if (config->canonical && !graph->is_canonical_mode())
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
+
+                auto aligner = build_aligner(*aln_graph, aligner_config);
+
+                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                    std::string sout = format_alignment(
+                        header, paths, *aln_graph, *config
+                    );
+
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << sout;
+                });
+            };
+
+            ++num_batches;
+
+            uint64_t mbatch_size = it == end && num_batches < get_num_threads()
+                ? num_bytes_read / std::max(get_num_threads() - num_batches,
+                                            static_cast<size_t>(1))
+                : 0;
+
+            if (mbatch_size) {
+                // split remaining batch
+                logger->trace("Splitting final batch into minibatches");
+
+                auto it = seq_batch.begin();
+                auto b_end = seq_batch.end();
+                uint64_t num_minibatches = 0;
+                while (it != b_end) {
+                    uint64_t cur_minibatch_read = 0;
+                    auto last_mv_it = std::make_move_iterator(it);
+                    for ( ; it != b_end && cur_minibatch_read < mbatch_size; ++it) {
+                        cur_minibatch_read += it->second.size();
                     }
 
-                    *out << "\n";
-                } else {
-                    Json::StreamWriterBuilder builder;
-                    builder["indentation"] = "";
-
-                    bool secondary = false;
-                    for (const auto &path : paths) {
-                        const auto& path_query = path.get_orientation()
-                            ? paths.get_query_reverse_complement()
-                            : paths.get_query();
-
-                        *out << Json::writeString(builder,
-                                                  path.to_json(path_query,
-                                                               *graph,
-                                                               secondary,
-                                                               header)) << "\n";
-
-                        secondary = true;
-                    }
-
-                    if (paths.empty()) {
-                        *out << Json::writeString(builder,
-                                                  DBGAligner<>::DBGAlignment().to_json(
-                                                      query,
-                                                      *graph,
-                                                      secondary,
-                                                      header)
-                                                  ) << "\n";
-                    }
+                    thread_pool.enqueue(process_batch,
+                                        SeqBatch(last_mv_it, std::make_move_iterator(it)),
+                                        mbatch_size);
+                    ++num_minibatches;
                 }
-            }, std::string(read_stream->seq.s),
-               config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
-                   && read_stream->comment.l
-                       ? utils::join_strings(
-                           { read_stream->name.s, read_stream->comment.s },
-                           config->fasta_anno_comment_delim,
-                           true)
-                       : std::string(read_stream->name.s));
-        });
+
+                logger->trace("Num minibatches: {}, minibatch size: {} KiB",
+                              num_minibatches, mbatch_size >> 10);
+            } else {
+                thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+            }
+        };
 
         thread_pool.join();
 
         logger->trace("File '{}' processed in {} sec, "
+                      "num batches: {}, batch size: {} KiB, "
                       "current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(),
+                      file, data_reading_timer.elapsed(), num_batches, batch_size >> 10,
                       get_curr_RSS() >> 20, timer.elapsed());
 
         if (config->outfbase.size())

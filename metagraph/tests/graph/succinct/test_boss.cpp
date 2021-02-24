@@ -1101,6 +1101,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1,
                   num_kmers);
 
+#if ! _PROTEIN_GRAPH
         num_sequences = 0;
         num_kmers = 0;
 
@@ -1114,6 +1115,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
         // EXPECT_EQ(2, num_sequences);
         EXPECT_EQ(sequences[0].size() - k - 1 + sequences[1].size() - k - 1 - 1,
                   num_kmers);
+#endif
     }
 }
 
@@ -1872,6 +1874,7 @@ TEST(BOSS, CallUnitigsMasked) {
     }
 }
 
+#if ! _PROTEIN_GRAPH
 TEST(BOSS, CallUnitigsSingleKmer) {
     size_t k = 6;
     std::vector<std::string> sequences {
@@ -1898,6 +1901,7 @@ TEST(BOSS, CallUnitigsSingleKmer) {
         EXPECT_EQ(unitigs, obs_unitigs);
     }
 }
+#endif
 
 template <class Callback>
 void call_edges(const BOSS &boss, Callback callback) {
@@ -2216,7 +2220,7 @@ TEST(BOSS, PredKmer) {
         test_pred_kmer(graph, "NNNNN", 8);
         test_pred_kmer(graph, "$$$$$", 2);
     }
-#ifndef _PROTEIN_GRAPH
+#if ! _PROTEIN_GRAPH
     {
         BOSS graph(5);
         graph.add_sequence("AAACGTAGTATGTAGC");

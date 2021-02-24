@@ -49,7 +49,7 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
     }
 
     void build_graph(DBGBitmap *graph);
-    DBGBitmap::Chunk* build_chunk() { return constructor_->build_chunk(); }
+    DBGBitmap::Chunk build_chunk() { return constructor_->build_chunk(); }
 
     uint64_t get_k() const { return constructor_->get_k(); }
 

@@ -2,7 +2,6 @@
 
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
-#include <fmt/format.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -118,7 +117,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 }
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
-                                 const std::string_view contig,
+                                 std::string_view contig,
                                  const std::vector<node_index> &nodes_in_full,
                                  const std::function<void(std::string&&,
                                                           node_index)> &callback,

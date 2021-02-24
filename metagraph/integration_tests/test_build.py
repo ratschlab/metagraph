@@ -10,6 +10,8 @@ import os
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
+DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -37,7 +39,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         return res
 
-    @parameterized.expand(BUILDS)
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -101,6 +103,7 @@ class TestBuild(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, build):
         """
         Build simple canonical graphs
@@ -149,6 +152,7 @@ class TestBuild(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -214,6 +218,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('canonical mode: no', params_str[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -237,6 +242,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('canonical mode: yes', params_str[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -260,6 +266,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('canonical mode: yes', params_str[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
+    @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
     def test_build_chunks_from_kmc(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -299,6 +306,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('canonical mode: no', params_str[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
+    @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
     def test_build_chunks_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
