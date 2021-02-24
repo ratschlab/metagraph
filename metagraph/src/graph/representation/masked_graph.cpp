@@ -21,7 +21,8 @@ MaskedDeBruijnGraph
     assert(kmers_in_graph_->size() == graph->max_index() + 1);
 
     if (graph_->get_mode() == PRIMARY && mode_ != PRIMARY) {
-        throw std::runtime_error("Any subgraph of a primary graph is primary");
+        throw std::runtime_error("Any subgraph of a primary graph is primary, thus"
+                                 " the mode of the subgraph must be set to PRIMARY");
     }
     if (graph_->get_mode() != CANONICAL && mode_ == CANONICAL) {
         throw std::runtime_error("Canonical subgraph requires canonical base graph");

@@ -147,7 +147,7 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation, canonical=True,
+                          k=11, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
@@ -177,7 +177,7 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT',
-                          k=11, repr=representation, canonical=True,
+                          k=11, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
@@ -207,7 +207,7 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT.primary',
-                          k=11, repr=representation, primary=True,
+                          k=11, repr=representation, mode='primary',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
@@ -237,7 +237,7 @@ class TestDNAAlign(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
                           output=self.tempdir.name + '/genome.MT.primary',
-                          k=11, repr=representation, primary=True,
+                          k=11, repr=representation, mode='primary',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])

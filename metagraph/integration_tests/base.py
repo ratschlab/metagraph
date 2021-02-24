@@ -36,18 +36,20 @@ class TestingBase(unittest.TestCase):
         return res
 
     @staticmethod
-    def _build_graph(input, output, k, repr, canonical=False, primary=False, extra_params=''):
+    def _build_graph(input, output, k, repr, mode='basic', extra_params=''):
         if not output.startswith(graph_file_extension[repr]):
             output += graph_file_extension[repr]
 
-        construct_command = '{exe} build -p {num_threads} {canonical} {extra_params} \
+        assert mode in ['basic', 'primary', 'canonical']
+
+        construct_command = '{exe} build -p {num_threads} --mode {mode} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             extra_params=extra_params,
             k=k,
             repr=repr,
-            canonical='--mode canonical' if canonical or primary else '',
+            mode='--mode basic' if mode == 'basic' else 'canonical',
             outfile=output,
             input=input
         )
@@ -56,7 +58,7 @@ class TestingBase(unittest.TestCase):
                              stderr=PIPE)
         assert res.returncode == 0
 
-        if primary:
+        if mode == 'primary':
             transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
                     -o {outfile} {input}'.format(
                 exe=METAGRAPH,

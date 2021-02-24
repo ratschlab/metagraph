@@ -209,7 +209,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
@@ -227,7 +227,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
@@ -244,7 +244,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers --count-width 2")
 
         res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
@@ -262,7 +262,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
@@ -278,7 +278,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -288,7 +288,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
@@ -302,7 +302,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -312,7 +312,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
@@ -355,7 +355,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -365,7 +365,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
@@ -381,7 +381,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -391,7 +391,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
