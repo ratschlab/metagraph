@@ -9,6 +9,7 @@
 #include "common/elias_fano_file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 #include "graph/annotated_dbg.hpp"
 
 const uint64_t BLOCK_SIZE = 1 << 25;
@@ -35,7 +36,8 @@ void build_pred_succ(const std::string &graph_fname,
     if (fs::exists(outfbase + ".succ")
             && fs::exists(outfbase + ".succ_boundary")
             && fs::exists(outfbase + ".pred")
-            && fs::exists(outfbase + ".pred_boundary")) {
+            && fs::exists(outfbase + ".pred_boundary")
+            && fs::exists(outfbase + ".rd_succ")) {
         logger->trace("Using existing pred/succ files in {}.*", outfbase);
         return;
     }
@@ -90,11 +92,10 @@ void build_pred_succ(const std::string &graph_fname,
                 }
             }
             succ_boundary_buf.push_back(1);
-            // ignore predecessors if boss_idx is not the last outgoing
-            // edge (bc. we only traverse the last outgoing at a bifurcation)
-            if (!dummy[boss_idx] && boss.get_last(boss_idx)) {
+            if (!dummy[boss_idx]) {
                 BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
                 BOSS::edge_index back_idx = boss.bwd(boss_idx);
+                // TODO: can be optimized, so we don't call incoming for each outgoing
                 boss.call_incoming_to_target(back_idx, d,
                     [&](BOSS::edge_index pred) {
                         // dummy predecessors are ignored
@@ -144,11 +145,27 @@ void assign_anchors(const std::string &graph_fname,
     }
 
     const BOSS &boss = graph.get_boss();
+    const uint64_t num_rows = graph.num_nodes();
+
+    // the last outgoing edges are always the row-diff successors
+    sdsl::bit_vector rd_succ(num_rows, 0);
+    boss.get_last().call_ones([&](uint64_t i) {
+        if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
+            uint64_t anno_index
+                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
+            assert(anno_index < num_rows);
+            rd_succ[anno_index] = 1;
+        }
+    });
+    const std::string rd_succ_filename = outfbase + ".rd_succ";
+    std::ofstream f(rd_succ_filename, ios::binary);
+    anchor_bv_type(rd_succ).serialize(f);
+    logger->trace("RowDiff successors are written to {}", rd_succ_filename);
+    rd_succ = sdsl::bit_vector();
+
     sdsl::bit_vector anchors_bv;
     sdsl::bit_vector dummy; // TODO: don't compute dummy
     boss.row_diff_traverse(num_threads, max_length, &anchors_bv, &dummy);
-
-    uint64_t num_rows = graph.num_nodes();
 
     // anchors_bv uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(num_rows, 0);
@@ -353,6 +370,17 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::ifstream f(anchors_fname, std::ios::binary);
         anchor.load(f);
     }
+    anchor_bv_type rd_succ;
+    {
+        const std::string rd_succ_filename = pred_succ_fprefix + ".rd_succ";
+        std::ifstream f(rd_succ_filename, std::ios::binary);
+        rd_succ.load(f);
+    }
+    if (rd_succ.size() != anchor.size()) {
+        logger->error("The anchor and rd_succ bitmaps have different size: {} vs {}",
+                      anchor.size(), rd_succ.size());
+        exit(1);
+    }
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
 
@@ -481,6 +509,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     // reduction (no bit in row-diff)
                     __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                 }
+
+                // predecessors are checked only for the row-diff successors
+                if (!rd_succ[row_idx])
+                    return;
 
                 // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
