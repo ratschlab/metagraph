@@ -34,8 +34,8 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     partial_sums_.push_back(0);
 
     for (char c : graph_.alphabet()) {
-        auto &p_score_row = profile_score_.emplace(c, query_.size() + 8).first.value();
-        auto &p_op_row = profile_op_.emplace(c, query_.size() + 8).first.value();
+        auto &p_score_row = profile_score_.emplace(c, query_.size() + 9).first.value();
+        auto &p_op_row = profile_op_.emplace(c, query_.size() + 9).first.value();
 
         const auto &row = config_.get_row(c);
         const auto &op_row = Cigar::get_op_row(c);
