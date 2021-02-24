@@ -6,7 +6,6 @@ metagraph/CMakeFiles
 metagraph/build*
 metagraph/ccache_docker
 metagraph/cmake-build*
-metagraph/docker
 metagraph/external-libaries/caches/*
 projects
 visualization

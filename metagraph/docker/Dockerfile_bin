@@ -1,5 +1,0 @@
-FROM metagraph_dev_env
-
-COPY . /opt/metagraph/metagraph
-
-RUN cd /opt/metagraph/metagraph/docker && make build-sdsl-lite build-metagraph docker=false
