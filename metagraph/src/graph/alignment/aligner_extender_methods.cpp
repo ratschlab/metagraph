@@ -4,7 +4,6 @@
 
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/hashers/hash.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -559,7 +558,19 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
     assert(starts.empty() || starts[0].second == best_start.second);
     std::vector<std::pair<DBGAlignment, NodeType>> extensions;
-    tsl::hopscotch_set<AlignNode, utils::Hash<AlignNode>> prev_starts;
+
+    struct AlignNodeHash {
+        uint64_t operator()(const AlignNode &x) const {
+            uint64_t seed = hasher1(std::get<0>(x));
+            return seed ^ (hasher2(std::get<2>(x)) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+        }
+
+        std::hash<NodeType> hasher1;
+        std::hash<size_t> hasher2;
+    };
+
+    tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
+
     for (const auto &[best_node, max_score] : starts) {
         if (prev_starts.count(best_node))
             continue;
