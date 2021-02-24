@@ -238,7 +238,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
             size_t j_max = query_rc.size() - i - this->config_.min_seed_length;
 
             // skip over positions which have better matches
-            while (min_seed_length[j_min] > max_seed_length && j_min <= j_max) {
+            while (j_min <= j_max && min_seed_length[j_min] > max_seed_length) {
                 ++j_min;
                 --max_seed_length;
             }
