@@ -1,5 +1,7 @@
 #include "clustering.hpp"
 
+#include <algorithm>
+
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
 
@@ -94,12 +96,18 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
-double inner_prod(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
+// number of shared set bits divided by the size of the bitmaps
+double intersection_ratio(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
     assert(first.size() == second.size());
     return static_cast<double>(::inner_prod(first, second)) / first.size();
 }
 
-double inner_prod(const SparseColumn &first, const SparseColumn &second) {
+// Estimation of the number of shared set bits divided by the bitmap size.
+// |first| and |second| are assumed to have the same origin (starting position),
+// but one of them may be shorter than the other.
+// The result is equivalent to resizing the longest vector to even the sizes
+// and computing the intersection ratio as usual.
+double intersection_ratio(const SparseColumn &first, const SparseColumn &second) {
     const auto &[size_1, col_1] = first;
     const auto &[size_2, col_2] = second;
     auto it_1 = col_1.begin();
@@ -147,7 +155,7 @@ correlation_similarity(const std::vector<T> &cols, size_t num_threads) {
     for (uint64_t j = 1; j < cols.size(); ++j) {
         for (uint64_t i = 0; i < cols.size(); ++i) {
             if (i < j) {
-                float sim = inner_prod(cols[i], cols[j]);
+                float sim = intersection_ratio(cols[i], cols[j]);
                 similarities[(j - 1) * j / 2 + i] = std::tie(i, j, sim);
                 ++progress_bar;
             }
@@ -273,35 +281,14 @@ void merge(const SparseColumn &first, SparseColumn *second) {
 
     SparseColumn merged;
     auto &[size_merged, col_merged] = merged;
-
     size_merged = std::min(size_first, size_second);
-
     col_merged.reserve(col_first.size() + col_second.size());
 
-    auto it_first = col_first.begin();
-    auto it_second = col_second.begin();
-
-    while (it_first != col_first.end() && it_second != col_second.end()) {
-        if (*it_first < *it_second) {
-            col_merged.push_back(*it_first);
-            ++it_first;
-        } else if (*it_first > *it_second) {
-            col_merged.push_back(*it_second);
-            ++it_second;
-        } else {
-            col_merged.push_back(*it_first);
-            ++it_first;
-            ++it_second;
-        }
-    }
-    while (it_first != col_first.end() && *it_first < size_merged) {
-        col_merged.push_back(*it_first);
-        ++it_first;
-    }
-    while (it_second != col_second.end() && *it_second < size_merged) {
-        col_merged.push_back(*it_second);
-        ++it_second;
-    }
+    auto first_end = std::lower_bound(col_first.begin(), col_first.end(), size_merged);
+    auto second_end = std::lower_bound(col_second.begin(), col_second.end(), size_merged);
+    std::set_union(col_first.begin(), first_end,
+                   col_second.begin(), second_end,
+                   std::back_inserter(col_merged));
 
     second->swap(merged);
 }
