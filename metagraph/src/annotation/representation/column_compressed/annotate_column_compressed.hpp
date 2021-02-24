@@ -26,10 +26,13 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
+    // |swap_dir| specifies a location on disk for temp buffer chunks during
+    // column construction. If empty, no swap is used and all is stored in RAM.
+    // |buffer_size| sets the buffer size, in bytes per column (1 GiB by default)
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size = 1024 * 1024 * 1024 / sizeof(uint64_t));
+                     uint64_t buffer_size = 1 << 30);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
@@ -103,7 +106,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
   private:
     void set(Index i, size_t j, bool value);
     void flush() const;
-    void flush(size_t j, const bitmap_builder &column_builder);
+    void flush(size_t j, bitmap_builder *column_builder);
     bitmap_builder& decompress_builder(size_t j);
     bitmap_dyn& decompress_bitmap(size_t j);
     const bitmap& get_column(size_t j) const;

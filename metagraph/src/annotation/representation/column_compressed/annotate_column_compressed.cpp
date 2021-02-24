@@ -37,7 +37,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
                             assert(column_builder);
-                            this->flush(j, *column_builder);
+                            this->flush(j, column_builder);
                             delete column_builder;
                         }) {}
 
@@ -486,7 +486,8 @@ void ColumnCompressed<Label>::flush() const {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::flush(size_t j, const bitmap_builder &builder) {
+void ColumnCompressed<Label>::flush(size_t j, bitmap_builder *builder) {
+    assert(builder);
     assert(j < bitmatrix_.size());
 
     // Note: asserting that j is cached cannot be done here when this function
@@ -496,7 +497,7 @@ void ColumnCompressed<Label>::flush(size_t j, const bitmap_builder &builder) {
 
     bitmatrix_[j].reset();
 
-    auto initialization_data = builder.get_initialization_data();
+    auto initialization_data = builder->get_initialization_data();
     bitmatrix_[j].reset(new bit_vector_smart(initialization_data.call_ones,
                                              initialization_data.size,
                                              initialization_data.num_set_bits));
@@ -568,7 +569,7 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
                 // For large bitmaps, use the efficient builder, using only
                 // space proportional to the number of bits set in the bitmap.
                 vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
-                                                     buffer_size_, swap_dir_, -1, 16);
+                                                     buffer_size_, swap_dir_);
             } else {
                 // For large bitmaps, use the efficient builder, using only
                 // space proportional to the number of bits set in the bitmap.
@@ -596,7 +597,7 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
     // lock the mutex in case the bitmap conversion happens
     std::lock_guard<std::mutex> lock(bitmap_conversion_mu_);
 
-    const auto &builder = *cached_columns_.Get(j);
+    auto &builder = *cached_columns_.Get(j);
 
     if (const bitmap *uncompressed = dynamic_cast<const bitmap*>(&builder))
         return *uncompressed;

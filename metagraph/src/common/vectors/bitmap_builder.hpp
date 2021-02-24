@@ -5,7 +5,6 @@
 #include <functional>
 #include <filesystem>
 
-#include "common/utils/file_utils.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
 #include "common/sorted_sets/sorted_set_disk.hpp"
 
@@ -29,7 +28,7 @@ class bitmap_builder {
         const std::function<void(const std::function<void(uint64_t)> &callback)> call_ones;
     };
 
-    virtual InitializationData get_initialization_data() const = 0;
+    virtual InitializationData get_initialization_data() = 0;
 };
 
 
@@ -56,7 +55,7 @@ class bitmap_builder_set : public bitmap_builder {
         set_bit_positions_.insert(begin, end);
     }
 
-    virtual InitializationData get_initialization_data() const {
+    virtual InitializationData get_initialization_data() {
         return { size(), num_set_bits(),
                  [&](auto callback) { call_ones(callback); } };
     }
@@ -82,16 +81,10 @@ class bitmap_builder_set_disk : public bitmap_builder {
   public:
     bitmap_builder_set_disk(uint64_t size,
                             size_t num_threads,
-                            uint64_t buffer_size,
-                            const std::string &swap_dir,
-                            size_t max_disk_space_bytes = -1,
-                            size_t merge_count = 4)
-          : size_(size),
-            tmp_dir_(utils::create_temp_dir(swap_dir, "bitmap")),
-            set_bit_positions_(num_threads, buffer_size, tmp_dir_,
-                               max_disk_space_bytes, merge_count) {}
+                            uint64_t buffer_size_in_bytes,
+                            const std::string &swap_dir);
 
-    ~bitmap_builder_set_disk() { std::filesystem::remove_all(tmp_dir_); }
+    ~bitmap_builder_set_disk();
 
     virtual void add_one(uint64_t pos) { set_bit_positions_.insert(&pos, &pos + 1); }
     virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
@@ -99,11 +92,12 @@ class bitmap_builder_set_disk : public bitmap_builder {
     }
 
     // can only be called once
-    virtual InitializationData get_initialization_data() const;
+    virtual InitializationData get_initialization_data();
 
   private:
     const uint64_t size_;
-    const std::filesystem::path tmp_dir_;
+    const std::filesystem::path swap_dir_;
+    const std::filesystem::path chunks_tmp_dir_;
     mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
     bool merged_ = false;
 };
