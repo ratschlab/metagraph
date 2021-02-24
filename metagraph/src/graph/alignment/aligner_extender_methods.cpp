@@ -477,12 +477,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         AlignNode prev = stack.top().first;
         stack.pop();
 
-        if (total_size > config_.max_ram_per_alignment * 1000000) {
+        if (static_cast<double>(total_size) / 1000000
+                > config_.max_ram_per_alignment) {
             DEBUG_LOG("Alignment RAM limit reached, stopping extension");
             break;
         }
 
-        if (num_columns > config_.max_nodes_per_seq_char * extend_window_.size()) {
+        if (static_cast<double>(num_columns) / extend_window_.size()
+                > config_.max_nodes_per_seq_char) {
             DEBUG_LOG("Alignment node limit reached, stopping extension");
             break;
         }
