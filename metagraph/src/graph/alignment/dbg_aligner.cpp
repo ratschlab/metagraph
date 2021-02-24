@@ -105,7 +105,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     seed.extend_query_end(query.data() + query.size());
                     seed.trim_offset();
                     assert(seed.is_valid(graph_, &config_));
-                    DEBUG_LOG("Alignment: {}", seed);
+                    DEBUG_LOG("Alignment (seed): {}", seed);
                     callback(std::move(seed));
                 }
                 extended = true;
@@ -121,7 +121,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 extension.extend_query_begin(query.data());
                 extension.trim_offset();
                 assert(extension.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment: {}", extension);
+                DEBUG_LOG("Alignment (trim seed): {}", extension);
                 callback(std::move(extension));
                 continue;
             }
@@ -132,7 +132,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             next_path.trim_offset();
             assert(next_path.is_valid(graph_, &config_));
 
-            DEBUG_LOG("Alignment: {}", next_path);
+            DEBUG_LOG("Alignment (extended): {}", next_path);
             callback(std::move(next_path));
             extended = true;
         }
