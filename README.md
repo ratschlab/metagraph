@@ -2,6 +2,22 @@
 
 ## Install
 
+### Docker
+
+If docker is available on your system, you can immediately get started using
+e.g.
+```
+docker run -v ${DATA_DIR_HOST}:/data ratschlab/metagraph build -v -k 10 /data/transcripts_1000.fa -o /data/transcripts_1000
+```
+
+where you'd need to replace `${DATA_DIR_HOST}` with a directory on a host system. This directory is then mapped under 
+`/data` in the container.
+
+See also section [Developing with Docker Images](#developing-with-docker-images)
+
+
+## Install From Sources
+
 ### Prerequisites
 - cmake 3.10 or higher
 - GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
@@ -228,6 +244,36 @@ Stats for both
 ```bash
 ./metagraph stats -a annotation.column.annodbg graph.dbg
 ```
+
+## Developer Notes
+
+### Makefile
+
+The `Makefile` in the top level source directory can be used to build and test `metagraph` more conveniently. The following
+arguments are supported:
+* `env`: environment in which to compile/run, if empty on the host, if `docker` in a docker container
+* `alphabet`: compiling metagraph for a certain alphabet (e.g. `DNA` or `Protein`)
+* `additional_cmake_args`: additional arguments to pass to cmake.
+
+Examples:
+
+```
+# compiles metagraph in a docker container for the `Protein` alphabet
+make build-metagraph env=docker alphabet=Protein
+```
+
+### Developing with Docker Images
+
+To have a portable and consistent developer environment, docker containers can be used.
+
+The Dockerfile in the source root consists of the following 3 stages:
+1. `metagraph_dev_env`: contains all dependencies to build metagraph. Can also be used during development by mounting the code base and build dir on the host (this is done in `make build-metagraph env=docker`)
+2. `metagraph_bin`: based on `docker_dev_env` but contains the `metagraph` binary. It is more of an intermediary image and not really used per se.
+3. `metagraph`: "the final output", the image used in production. It contains a basic runtime environment for metagraph (no build tools) along with the metagraph binary. The binary is copied out of the `metagraph_bin` image. It also contains the python API code. This image is published on dockerhub.
+
+The just mentioned intermediate stages can be tagged using `make build-docker-dev-env` or `make build-docker-bin`.
+
+Note, that the official docker image is tagged as `ratschlab/metagraph`.
 
 ## License
 Metagraph is distributed under the GPLv3 License (see LICENSE).
