@@ -219,7 +219,7 @@ class TestDNAAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().rstrip().split('\n')
         self.assertEqual(len(params_str), 6)
@@ -340,7 +340,7 @@ class TestDNAAlign(unittest.TestCase):
             graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
         )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().rstrip().split('\n')
         self.assertEqual(len(params_str), 6)
