@@ -361,23 +361,23 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
         size_t mem_length = (next - it) + k - 1;
         assert(i + mem_length <= this->query_.size());
 
-        const char *begin_it = this->query_.data() + i;
-        const char *end_it = begin_it + mem_length;
+        if (mem_length >= this->config_.min_seed_length) {
+            const char *begin_it = this->query_.data() + i;
+            const char *end_it = begin_it + mem_length;
 
-        assert(end_it >= begin_it + this->config_.min_seed_length);
+            score_t match_score = this->partial_sum_[end_it - this->query_.data()]
+                                        - this->partial_sum_[i];
 
-        score_t match_score = this->partial_sum_[end_it - this->query_.data()]
-                                    - this->partial_sum_[i];
+            auto node_begin_it = this->query_nodes_.begin() + i;
+            auto node_end_it = node_begin_it + (next - it);
+            assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
-        auto node_begin_it = this->query_nodes_.begin() + i;
-        auto node_end_it = node_begin_it + (next - it);
-        assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
-
-        if (match_score > this->config_.min_cell_score) {
-            seeds.emplace_back(std::string_view(begin_it, mem_length),
-                               std::vector<NodeType>{ node_begin_it, node_end_it },
-                               match_score, i,this->orientation_);
-            assert(seeds.back().is_valid(this->graph_, &this->config_));
+            if (match_score > this->config_.min_cell_score) {
+                seeds.emplace_back(std::string_view(begin_it, mem_length),
+                                   std::vector<NodeType>{ node_begin_it, node_end_it },
+                                   match_score, i,this->orientation_);
+                assert(seeds.back().is_valid(this->graph_, &this->config_));
+            }
         }
 
         it = next;
