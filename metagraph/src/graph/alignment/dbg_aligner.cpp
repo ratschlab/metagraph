@@ -50,7 +50,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                   std::not_fn(LocalAlignmentLess<node_index>()));
     }
 
-    for (auto&& seed : seeds) {
+    for (auto &seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query().data() + seed.get_query().size()
