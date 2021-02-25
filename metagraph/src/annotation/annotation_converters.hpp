@@ -102,13 +102,16 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * is fully stored
  * @param out_dir directory where the transformed columns will be dumped. Filenames are
  * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
+ * @param swap_dir directory for temporary files
  */
 void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         std::filesystem::path dest_dir,
-                         bool optimize = false);
+                         std::filesystem::path out_dir,
+                         std::filesystem::path swap_dir,
+                         bool optimize = false,
+                         std::filesystem::path row_reduction_fname = "");
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);

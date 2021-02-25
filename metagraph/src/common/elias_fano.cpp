@@ -224,6 +224,15 @@ EliasFanoEncoder<T>::~EliasFanoEncoder() {
 }
 
 template <typename T>
+void EliasFanoEncoder<T>::append(const std::vector<T> &data,
+                                 const std::string &out_fname) {
+    std::ofstream sink(out_fname, std::ios::binary | std::ios::app);
+    std::ofstream sink_upper(out_fname + ".up", std::ios::binary | std::ios::app);
+    EliasFanoEncoder<T> encoder(data, &sink, &sink_upper);
+    encoder.finish();
+}
+
+template <typename T>
 void EliasFanoEncoder<T>::add(T value) {
 #ifndef NDEBUG
     assert(value >= last_value_);

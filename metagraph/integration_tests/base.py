@@ -29,15 +29,19 @@ class TestingBase(unittest.TestCase):
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
 
-    def _get_stats(self, graph_filename):
+    @staticmethod
+    def _get_stats(graph_filename):
         stats_command = METAGRAPH + ' stats ' + graph_filename
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         return res
 
-    def _build_graph(self, input, output, k, repr, canonical=False, primary=False):
-        construct_command = '{exe} build {canonical} \
+    @staticmethod
+    def _build_graph(input, output, k, repr, canonical=False, primary=False, extra_params=''):
+        construct_command = '{exe} build -p {num_threads} {canonical} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            extra_params=extra_params,
             k=k,
             repr=repr,
             canonical='--canonical' if canonical else '',
@@ -50,9 +54,10 @@ class TestingBase(unittest.TestCase):
         assert res.returncode == 0
 
         if primary:
-            transform_command = '{exe} transform --to-fasta --primary-kmers \
+            transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
                     -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
                 k=k,
                 repr=repr,
                 outfile='{}.fasta.gz'.format(output),
@@ -63,9 +68,11 @@ class TestingBase(unittest.TestCase):
                                  stderr=PIPE)
             assert res.returncode == 0
 
-            construct_command = '{exe} build \
+            construct_command = '{exe} build -p {num_threads} {extra_params} \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
+                num_threads=NUM_THREADS,
+                extra_params=extra_params,
                 k=k,
                 repr=repr,
                 outfile=output,
@@ -76,11 +83,25 @@ class TestingBase(unittest.TestCase):
                                  stderr=PIPE)
             assert res.returncode == 0
 
-
-    def _annotate_graph(self, input, graph_path, output, anno_repr, primary=False):
-        annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
-                --anno-type {anno_repr} -o {outfile} {input}'.format(
+    @staticmethod
+    def _clean(graph, output, extra_params=''):
+        clean_command = '{exe} clean -p {num_threads} \
+                --to-fasta -o {outfile} {extra_params} {input}'.format(
             exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            outfile=output,
+            extra_params=extra_params,
+            input=graph
+        )
+        res = subprocess.run([clean_command], shell=True)
+        assert res.returncode == 0
+
+    @staticmethod
+    def _annotate_graph(input, graph_path, output, anno_repr, primary=False):
+        annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
+                --anno-type {anno_repr} -o {outfile} -p {num_threads} {input}'.format(
+            exe=METAGRAPH,
+            num_threads=NUM_THREADS,
             fwd_and_rev='--canonical' if primary else '',
             graph=graph_path,
             anno_repr=anno_repr,

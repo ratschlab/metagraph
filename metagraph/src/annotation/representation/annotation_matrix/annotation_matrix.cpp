@@ -87,7 +87,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
-    return matrix_->num_rows();;
+    return matrix_->num_rows();
 }
 
 template <class BinaryMatrixType, typename Label>

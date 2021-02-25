@@ -171,7 +171,8 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     assert(path.size() == 1);
     size_t k = this->graph_.get_k();
 
-    const char *endpoint = path.get_query_end() + path.get_offset();
+    const char *endpoint = path.get_query().data() + path.get_query().size()
+        + path.get_offset();
     assert(endpoint > this->query.data());
 
     // align as usual if a label can't be found via extension

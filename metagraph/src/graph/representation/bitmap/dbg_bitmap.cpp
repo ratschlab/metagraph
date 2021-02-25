@@ -97,6 +97,9 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
 size_t DBGBitmap::outdegree(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
+    if (complete_)
+        return alphabet().size();
+
     size_t outdegree = 0;
 
     const auto &kmer = node_to_kmer(node);
@@ -114,6 +117,9 @@ size_t DBGBitmap::outdegree(node_index node) const {
 
 bool DBGBitmap::has_single_outgoing(node_index node) const {
     assert(node > 0 && node <= num_nodes());
+
+    if (complete_)
+        return alphabet().size() == 1;
 
     bool outgoing_edge_detected = false;
 
@@ -136,6 +142,9 @@ bool DBGBitmap::has_single_outgoing(node_index node) const {
 
 bool DBGBitmap::has_multiple_outgoing(node_index node) const {
     assert(node > 0 && node <= num_nodes());
+
+    if (complete_)
+        return alphabet().size() > 1;
 
     bool outgoing_edge_detected = false;
 
@@ -175,57 +184,15 @@ void DBGBitmap::call_incoming_kmers(node_index node,
 size_t DBGBitmap::indegree(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
-    size_t indegree = 0;
+    if (complete_)
+        return alphabet().size();
 
-    const auto &kmer = node_to_kmer(node);
+    // k-mers are ordered co-lexicographically
+    auto first = node_to_kmer(node);
+    first.to_prev(k_, 0);
 
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos)
-            indegree++;
-    }
-
-    return indegree;
-}
-
-bool DBGBitmap::has_no_incoming(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-
-    const auto &kmer = node_to_kmer(node);
-
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos)
-            return false;
-    }
-
-    return true;
-}
-
-bool DBGBitmap::has_single_incoming(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-
-    bool incoming_edge_detected = false;
-
-    const auto &kmer = node_to_kmer(node);
-
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos) {
-            if (incoming_edge_detected)
-                return false;
-
-            incoming_edge_detected = true;
-        }
-    }
-
-    return incoming_edge_detected;
+    return kmers_.rank1(first.data() + alphabet().size())
+            - kmers_.rank1(first.data());
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,
