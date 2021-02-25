@@ -262,18 +262,6 @@ Examples:
 make build-metagraph env=docker alphabet=DNA
 ```
 
-### Developing with Docker Images
-
-To have a portable and consistent developer environment, docker containers can be used.
-
-The Dockerfile in the source root consists of the following 3 stages:
-1. `metagraph_dev_env`: contains all dependencies to build metagraph. Can also be used during development by mounting the code base and build dir on the host (this is done in `make build-metagraph env=docker`)
-2. `metagraph_bin`: based on `docker_dev_env` but contains the `metagraph` binary. It is more of an intermediary image and not really used per se.
-3. `metagraph`: "the final output", the image used in production. It contains a basic runtime environment for metagraph (no build tools) along with the metagraph binary. The binary is copied out of the `metagraph_bin` image. It also contains the python API code. This image is published on dockerhub.
-
-The just mentioned intermediate stages can be tagged using `make build-docker-dev-env` or `make build-docker-bin`.
-
-Note, that the official docker image is tagged as `ratschlab/metagraph`.
 
 ## License
 Metagraph is distributed under the GPLv3 License (see LICENSE).

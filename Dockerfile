@@ -2,6 +2,9 @@ ARG CODE_BASE="/opt/metagraph"
 
 FROM ubuntu:20.04 AS metagraph_dev_env
 
+# contains all dependencies to build metagraph. Can also be used during development by mounting the code base and
+# build dir on the host (this is done in `make build-metagraph env=docker`)
+
 RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install -y \
     autoconf \
     automake \
@@ -82,6 +85,9 @@ RUN make build-sdsl-lite \
 
 FROM ubuntu:20.04
 ARG CODE_BASE
+
+# the image used in production. It contains a basic runtime environment for metagraph without build tools along with
+# the metagraph binary and python API code. This image is published on dockerhub (`ratschlab/metagraph`).
 
 RUN apt-get update && apt-get install -y \
     libatomic1 \
