@@ -147,7 +147,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         this->config_.min_seed_length
     );
 
-    for (auto&& seed : this->BaseSeeder::get_seeds()) {
+    for (auto &seed : this->BaseSeeder::get_seeds()) {
         assert(seed.get_query().size() >= this->config_.min_seed_length);
 
         size_t i = seed.get_clipping();
@@ -184,8 +184,12 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     for (size_t i = 0; i < min_seed_length.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
             if (i) {
-                min_seed_length[i] = std::max(min_seed_length[i - 1] - 1,
-                                              min_seed_length[i]);
+                size_t new_min_seed_length = std::max(min_seed_length[i - 1] - 1,
+                                                      min_seed_length[i]);
+                if (new_min_seed_length > min_seed_length[i]) {
+                    min_seed_length[i] = new_min_seed_length;
+                    suffix_seeds[i].clear();
+                }
             }
 
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
@@ -195,6 +199,9 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(this->query_.data() + i, max_seed_length),
                     [&](node_index alt_node, size_t seed_length) {
+                        if (seed_length > min_seed_length[i])
+                            suffix_seeds[i].clear();
+
                         min_seed_length[i] = seed_length;
                         append_suffix_seed(i, alt_node, seed_length);
                     },
@@ -202,8 +209,12 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 );
 
                 if (i + 1 < min_seed_length.size()) {
-                    min_seed_length[i + 1] = std::max(min_seed_length[i + 1],
-                                                      min_seed_length[i]);
+                    size_t new_min_seed_length = std::max(min_seed_length[i + 1],
+                                                          min_seed_length[i]);
+                    if (new_min_seed_length > min_seed_length[i + 1]) {
+                        min_seed_length[i + 1] = new_min_seed_length;
+                        suffix_seeds[i + 1].clear();
+                    }
                 }
             }
         }
@@ -262,7 +273,10 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 continue;
             }
 
-            min_seed_length[j] = seed_length;
+            if (seed_length > min_seed_length[j]) {
+                min_seed_length[j] = seed_length;
+                suffix_seeds[j].clear();
+            }
 
             // clear out shorter seeds
             size_t s = seed_length;
@@ -292,6 +306,8 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
         if (pos_seeds.empty())
             continue;
+
+        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin()));
 
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
