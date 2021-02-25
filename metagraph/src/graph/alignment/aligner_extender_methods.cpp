@@ -297,16 +297,16 @@ bool update_column(const DeBruijnGraph &graph_,
     return updated;
 }
 
-template <typename NodeType, typename AlignNode, class Table, class StartSet>
-std::pair<Alignment<NodeType>, NodeType>
-backtrack(const Table &table_,
-          const Alignment<NodeType> &seed_,
-          const DeBruijnGraph &graph_,
-          score_t min_path_score,
-          AlignNode best_node,
-          StartSet &prev_starts,
-          size_t size,
-          std::string_view extend_window_) {
+template <typename NodeType, typename AlignNode, class Table, class StartSet, class Storage>
+void backtrack(const Table &table_,
+               const Alignment<NodeType> &seed_,
+               const DeBruijnGraph &graph_,
+               score_t min_path_score,
+               AlignNode best_node,
+               StartSet &prev_starts,
+               size_t size,
+               std::string_view extend_window_,
+               Storage &extensions) {
     typedef DefaultColumnExtender<NodeType> Extender;
 
     Cigar cigar;
@@ -349,7 +349,7 @@ backtrack(const Table &table_,
                     || last_op != seed_.get_cigar().back().first) {
                 // last op in the seed was skipped
                 // TODO: reconstruct the entire alignment. for now, throw this out
-                return {};
+                return;
             } else {
                 assert(seed_.get_score() == S[pos - offset]);
                 start_node = seed_.back();
@@ -409,7 +409,7 @@ backtrack(const Table &table_,
     }
 
     if (max_score < min_path_score)
-        return {};
+        return;
 
     if (pos > 1)
         cigar.append(Cigar::CLIPPED, pos - 1);
@@ -418,12 +418,11 @@ backtrack(const Table &table_,
     std::reverse(path.begin(), path.end());
     std::reverse(seq.begin(), seq.end());
 
-    return std::make_pair(
-        Alignment<NodeType>({ extend_window_.data() + pos, max_pos - pos },
-                            std::move(path), std::move(seq), score, std::move(cigar),
-                            0, seed_.get_orientation(), graph_.get_k() - 1),
-        start_node
-    );
+    extensions.emplace_back(Alignment<NodeType>(
+                                { extend_window_.data() + pos, max_pos - pos },
+                                std::move(path), std::move(seq), score, std::move(cigar),
+                                0, seed_.get_orientation(), graph_.get_k() - 1),
+                            start_node);
 }
 
 template <typename NodeType>
@@ -567,7 +566,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
     assert(starts.empty() || starts[0].second == best_start.second);
-    std::vector<std::pair<DBGAlignment, NodeType>> extensions;
 
     struct AlignNodeHash {
         uint64_t operator()(const AlignNode &x) const {
@@ -581,6 +579,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
 
+    std::vector<std::pair<DBGAlignment, NodeType>> extensions;
     for (const auto &[best_node, max_score] : starts) {
         if (prev_starts.count(best_node))
             continue;
@@ -598,15 +597,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         assert(OS[max_pos - offset] == Cigar::MATCH);
 
-        extensions.emplace_back(backtrack<NodeType>(table_, *seed_, graph_,
-                                                    min_path_score, best_node,
-                                                    prev_starts, size, extend_window_));
-        assert(extensions.back().first.is_valid(graph_, &config_));
-        if (extensions.back().first.empty())
-            extensions.pop_back();
-
-        if (extensions.size() == config_.num_alternative_paths)
-            break;
+        backtrack<NodeType>(table_, *seed_, graph_, min_path_score, best_node,
+                            prev_starts, size, extend_window_, extensions);
     }
 
     return extensions;
