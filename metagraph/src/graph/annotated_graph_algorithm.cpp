@@ -6,7 +6,6 @@
 #include "common/vector_map.hpp"
 #include "kmer/alphabets.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "graph/alignment/aligner_helper.hpp"
 #include "graph/representation/masked_graph.hpp"
 
 

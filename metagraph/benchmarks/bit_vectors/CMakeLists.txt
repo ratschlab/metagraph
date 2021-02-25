@@ -54,7 +54,6 @@ message(STATUS "Compile flags used:"
 
 include_directories(
   ${EXTERNAL_LIB_DIR}/benchmark/include
-  ${EXTERNAL_LIB_DIR}/libmaus2/include
   ${EXTERNAL_LIB_DIR}/DYNAMIC/include
   ${EXTERNAL_LIB_DIR}/sdsl-lite/include
   ${EXTERNAL_LIB_DIR}/hopscotch-map/include
@@ -64,7 +63,6 @@ include_directories(
   "../../src/"
 )
 link_directories(
-  ${EXTERNAL_LIB_DIR}/libmaus2/lib
   ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
 )
 

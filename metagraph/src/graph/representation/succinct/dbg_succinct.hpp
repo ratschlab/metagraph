@@ -82,13 +82,6 @@ class DBGSuccinct : public DeBruijnGraph {
             size_t min_match_length = 1,
             size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
-    // Find a range of BOSS nodes with a common suffix matching the maximal prefix
-    // of the string |str|.  Return a tuple containing the indices of the last
-    // outgoing edge from the first and the last BOSS nodes in the range, respectively,
-    // and the length of the prefix match.
-    std::tuple<boss::BOSS::edge_index, boss::BOSS::edge_index, size_t>
-    get_range_with_suffix_matching_longest_prefix(std::string_view str) const;
-
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()
     // returns true, or if the sequence is exhausted.

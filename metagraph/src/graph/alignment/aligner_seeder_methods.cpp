@@ -1,8 +1,9 @@
-#include "aligner_methods.hpp"
+#include "aligner_seeder_methods.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 namespace mtg {
@@ -51,7 +52,7 @@ ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
 }
 
 template <typename NodeType>
-void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     const DeBruijnGraph &graph = this->graph_;
     size_t k = graph.get_k();
 
@@ -64,7 +65,9 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
     bool orientation = this->orientation_;
 
     if (this->num_matching_ < config.min_exact_match * query.size())
-        return;
+        return {};
+
+    std::vector<Seed> seeds;
 
     for (size_t i = 0; i < query_nodes.size(); ++i) {
         if (query_nodes[i] != DeBruijnGraph::npos) {
@@ -73,14 +76,15 @@ void ExactSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) con
             score_t match_score = partial_sum[i + k] - partial_sum[i];
 
             if (match_score > config.min_cell_score) {
-                Seed seed(std::string_view(query.data() + i, k), { query_nodes[i] },
-                          match_score, i, orientation);
-
-                assert(seed.is_valid(graph, &config));
-                callback(std::move(seed));
+                seeds.emplace_back(std::string_view(query.data() + i, k),
+                                   std::vector<NodeType>{ query_nodes[i] },
+                                   match_score, i, orientation);
+                assert(seeds.back().is_valid(graph, &config));
             }
         }
     }
+
+    return seeds;
 }
 
 template <class BOSSEdgeRange>
@@ -130,164 +134,179 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 }
 
 template <class BaseSeeder>
-void SuffixSeeder<BaseSeeder>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
+    // this method assumes that seeds from the BaseSeeder are exact match only
+    static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
+
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
     );
-
-    this->BaseSeeder::call_seeds([&](Seed&& seed) {
-        suffix_seeds[seed.get_clipping()].emplace_back(std::move(seed));
-    });
-
-    auto push_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
-        std::string_view seed_seq(this->query_.data() + i, seed_length);
-        DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
-
-        if (match_score > this->config_.min_cell_score) {
-            suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
-                                         match_score, i, this->orientation_,
-                                         this->graph_.get_k() - seed_length);
-            assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
-        }
-    };
 
     std::vector<size_t> min_seed_length(
         this->query_.size() - this->config_.min_seed_length + 1,
         this->config_.min_seed_length
     );
 
-    size_t last_seed_size = this->config_.min_seed_length;
-    for (size_t i = 0; i < this->query_nodes_.size(); ++i) {
-        if (this->query_nodes_[i]) {
-            min_seed_length[i] = this->graph_.get_k();
-            last_seed_size = this->graph_.get_k();
-        } else {
-            last_seed_size = std::max(last_seed_size - 1, this->config_.min_seed_length);
-            min_seed_length[i] = std::max(min_seed_length[i], last_seed_size);
-        }
+    for (auto&& seed : this->BaseSeeder::get_seeds()) {
+        assert(seed.get_query().size() >= this->config_.min_seed_length);
+
+        size_t i = seed.get_clipping();
+        assert(i + seed.size() <= min_seed_length.size());
+
+        for (size_t j = 0; j < seed.size(); ++j)
+            min_seed_length[i + j] = this->graph_.get_k();
+
+        if (i + seed.size() < min_seed_length.size())
+            min_seed_length[i + seed.size()] = this->graph_.get_k();
+
+        suffix_seeds[i].emplace_back(std::move(seed));
     }
 
-    last_seed_size = min_seed_length[0];
-    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+    // when a seed is found, append it to the seed vector
+    auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
+        assert(i < suffix_seeds.size());
+
+        std::string_view seed_seq(this->query_.data() + i, seed_length);
+        DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
+
+        if (match_score <= this->config_.min_cell_score)
+            return;
+
+        assert(seed_length == min_seed_length[i]);
+        suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
+                                     match_score, i, this->orientation_,
+                                     this->graph_.get_k() - seed_length);
+        assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
+    };
+
+    // find sub-k matches in the forward orientation
+    // size_t last_seed_size = min_seed_length[0];
+    for (size_t i = 0; i < min_seed_length.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
+            if (i) {
+                min_seed_length[i] = std::max(min_seed_length[i - 1] - 1,
+                                              min_seed_length[i]);
+            }
+
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
-            last_seed_size = std::max(last_seed_size, min_seed_length[i]);
-            bool found = false;
-            if (max_seed_length >= last_seed_size) {
+            if (max_seed_length >= min_seed_length[i]) {
                 dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(this->query_.data() + i, max_seed_length),
                     [&](node_index alt_node, size_t seed_length) {
-                        found = true;
-                        last_seed_size = seed_length;
-                        push_suffix_seed(i, alt_node, seed_length);
+                        min_seed_length[i] = seed_length;
+                        append_suffix_seed(i, alt_node, seed_length);
                     },
-                    last_seed_size
+                    min_seed_length[i]
                 );
-            }
 
-            min_seed_length[i] = std::max(min_seed_length[i], last_seed_size);
-
-            if (!found) {
-                last_seed_size = std::max(last_seed_size - 1,
-                                          this->config_.min_seed_length);
+                if (i + 1 < min_seed_length.size()) {
+                    min_seed_length[i + 1] = std::max(min_seed_length[i + 1],
+                                                      min_seed_length[i]);
+                }
             }
-        } else {
-            last_seed_size = min_seed_length[i];
         }
     }
 
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
     if (canonical) {
+        // find sub-k matches in the reverse complement
         std::string query_rc(this->query_);
         reverse_complement(query_rc.begin(), query_rc.end());
 
+        // matching is done query prefix -> node suffix, so the query index of
+        // a match to the reverse complement is not known beforehand
         // e.g.,
         // k = 6;
         // rev: rev_end_pos = 8
         //     j
-        //     ****--
+        //     ****--      <-- start position in forward depends on match length
         // GCTAGCATCTGAGAGGGGA fwd
         // TCCCCTCTCAGATGCTAGC rc
         //          --****
-        //            i
+        //            i    <-- match returned from call
         for (size_t i = 0; i + this->config_.min_seed_length <= query_rc.size(); ++i) {
+            // initial estimate of the max seed length
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
-            size_t j = query_rc.size() - i - max_seed_length;
-            while (j < query_rc.size() - i - this->config_.min_seed_length + 1
-                    && j < this->query_nodes_.size()
-                    && this->query_nodes_[j]) {
-                ++j;
+
+            // the reverse complement of the sub-k match will fall somewhere in this range
+            size_t j_min = query_rc.size() - i - max_seed_length;
+            size_t j_max = query_rc.size() - i - this->config_.min_seed_length;
+
+            // skip over positions which have better matches
+            while (min_seed_length[j_min] > max_seed_length && j_min <= j_max) {
+                ++j_min;
+                --max_seed_length;
             }
 
-            assert(query_rc.size() > i + j);
-            assert(query_rc.size() - i - j <= max_seed_length);
-            max_seed_length = query_rc.size() - i - j;
-
-            if (max_seed_length < this->config_.min_seed_length)
+            if (j_min > j_max)
                 continue;
 
-            auto index_range = dbg_succ_.get_range_with_suffix_matching_longest_prefix(
-                { query_rc.data() + i, max_seed_length }
-            );
+            const auto &boss = dbg_succ_.get_boss();
 
-            size_t seed_length = std::get<2>(index_range);
+            auto encoded = boss.encode({ query_rc.data() + i, max_seed_length });
+            auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
 
-            if (seed_length < this->config_.min_seed_length)
+            size_t seed_length = end - encoded.begin();
+            size_t j = query_rc.size() - i - seed_length;
+
+            assert(seed_length < this->config_.min_seed_length
+                || j < min_seed_length.size());
+
+            if (seed_length < this->config_.min_seed_length
+                    || seed_length < min_seed_length[j]) {
                 continue;
+            }
 
-            j = query_rc.size() - i - seed_length;
-            if (j < this->query_nodes_.size() && this->query_nodes_[j])
-                continue;
+            min_seed_length[j] = seed_length;
 
-            if (seed_length < min_seed_length[j])
-                continue;
-
+            // clear out shorter seeds
             size_t s = seed_length;
-            for (size_t m = j; m < min_seed_length.size() && s > min_seed_length[m]; ++m) {
+            for (size_t m = j + 1;
+                    m < min_seed_length.size() && s > min_seed_length[m];
+                    ++m) {
+                assert(suffix_seeds[m].empty()
+                    || min_seed_length[m] == this->graph_.get_k()
+                                                - suffix_seeds[m][0].get_offset());
                 min_seed_length[m] = s--;
                 suffix_seeds[m].clear();
             }
 
-            // e.g., match: $$$ATG, want ATG$$$
-            suffix_to_prefix(dbg_succ_, index_range, [&](node_index prefix_node) {
-                push_suffix_seed(j, canonical->reverse_complement(prefix_node),
-                                 seed_length);
+            // e.g., match: ***ATG, want ATG***
+            suffix_to_prefix(dbg_succ_, std::make_tuple(first, last, seed_length),
+                             [&](node_index prefix_node) {
+                append_suffix_seed(
+                    j, canonical->reverse_complement(prefix_node), seed_length
+                );
             });
         }
     }
 
-    last_seed_size = min_seed_length[0];
+    // aggregate all seeds
+    std::vector<Seed> output_seeds;
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
-        if (pos_seeds.size()) {
-            if (!pos_seeds[0].get_offset()) {
-                assert(pos_seeds.size() == 1);
-                callback(std::move(pos_seeds[0]));
-                last_seed_size = std::max(this->graph_.get_k() - 1,
-                                          this->config_.min_seed_length);
-            } else {
-                size_t seed_length = this->graph_.get_k() - pos_seeds[0].get_offset();
-                if (seed_length >= last_seed_size) {
-                    last_seed_size = seed_length;
-                    if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
-                        for (auto&& seed : pos_seeds) {
-                            callback(std::move(seed));
-                        }
-                    }
-                } else {
-                    last_seed_size = std::max(last_seed_size - 1,
-                                              this->config_.min_seed_length);
+        if (pos_seeds.empty())
+            continue;
+
+        if (!pos_seeds[0].get_offset()) {
+            assert(min_seed_length[i] == this->graph_.get_k());
+            assert(pos_seeds.size() == 1);
+            output_seeds.emplace_back(std::move(pos_seeds[0]));
+        } else {
+            assert(min_seed_length[i] == this->graph_.get_k() - pos_seeds[0].get_offset());
+            if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
+                for (auto&& seed : pos_seeds) {
+                    output_seeds.emplace_back(std::move(seed));
                 }
             }
-        } else {
-            last_seed_size = std::max(last_seed_size - 1,
-                                      this->config_.min_seed_length);
         }
     }
+
+    return output_seeds;
 }
 
 template <class BaseSeeder>
@@ -300,11 +319,11 @@ const DBGSuccinct& SuffixSeeder<BaseSeeder>
 }
 
 template <typename NodeType>
-void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const {
+auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     size_t k = this->graph_.get_k();
 
     if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
-        return;
+        return {};
 
     std::vector<uint8_t> query_node_flags(this->query_nodes_.size(), 0);
     for (size_t i = 0; i < query_node_flags.size(); ++i) {
@@ -314,6 +333,8 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
             query_node_flags[i] = 2 | get_mem_terminator()[this->query_nodes_[i]];
         }
     }
+
+    std::vector<Seed> seeds;
 
     // find start of MEM
     auto it = query_node_flags.begin();
@@ -352,15 +373,16 @@ void MEMSeeder<NodeType>::call_seeds(std::function<void(Seed&&)> callback) const
         assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
         if (match_score > this->config_.min_cell_score) {
-            Seed seed(std::string_view(begin_it, mem_length),
-                      { node_begin_it, node_end_it },
-                      match_score, i,this->orientation_);
-            assert(seed.is_valid(this->graph_, &this->config_));
-            callback(std::move(seed));
+            seeds.emplace_back(std::string_view(begin_it, mem_length),
+                               std::vector<NodeType>{ node_begin_it, node_end_it },
+                               match_score, i,this->orientation_);
+            assert(seeds.back().is_valid(this->graph_, &this->config_));
         }
 
         it = next;
     }
+
+    return seeds;
 }
 
 

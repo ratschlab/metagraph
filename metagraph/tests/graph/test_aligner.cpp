@@ -4,7 +4,6 @@
 #include "test_aligner_helpers.hpp"
 #include "../test_helpers.hpp"
 
-#include "graph/alignment/aligner_methods.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
