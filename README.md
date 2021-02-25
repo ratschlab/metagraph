@@ -7,10 +7,10 @@
 If docker is available on your system, you can immediately get started using
 e.g.
 ```
-docker run -v ${DATA_DIR_HOST}:/data ratschlab/metagraph build -v -k 10 /data/transcripts_1000.fa -o /data/transcripts_1000
+docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph build -v -k 10 /mnt/transcripts_1000.fa -o /data/transcripts_1000
 ```
 
-where you'd need to replace `${DATA_DIR_HOST}` with a directory on a host system. This directory is then mapped under 
+where you'd need to replace `${DATA_DIR_HOST}` with a directory on the host system. This directory is then mapped under 
 `/data` in the container.
 
 See also section [Developing with Docker Images](#developing-with-docker-images)
@@ -251,15 +251,15 @@ Stats for both
 
 The `Makefile` in the top level source directory can be used to build and test `metagraph` more conveniently. The following
 arguments are supported:
-* `env`: environment in which to compile/run, if empty on the host, if `docker` in a docker container
+* `env`: environment in which to compile/run (`""`: on the host, `docker`: in a docker container)
 * `alphabet`: compiling metagraph for a certain alphabet (e.g. `DNA` or `Protein`)
 * `additional_cmake_args`: additional arguments to pass to cmake.
 
 Examples:
 
 ```
-# compiles metagraph in a docker container for the `Protein` alphabet
-make build-metagraph env=docker alphabet=Protein
+# compiles metagraph in a docker container for the `DNA` alphabet
+make build-metagraph env=docker alphabet=DNA
 ```
 
 ### Developing with Docker Images

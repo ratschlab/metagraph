@@ -35,14 +35,14 @@ else
 	BUILD_DIR_STATIC := $(BUILD_DIR_STATIC_HOST)
 endif
 
-DATA_DIR := /data
+DATA_DIR := /mnt
 
 DOCKER_OPTS := -it -u `id -u ${USER}`:$(DOCKER_GRP) \
 			   -v $(BUILD_DIR_HOST_DOCKER):${BUILD_DIR} \
                -v $(BUILD_DIR_STATIC_HOST_DOCKER):${BUILD_DIR_STATIC} \
                -v $(CCACHE_FOR_DOCKER):/opt/ccache_docker \
                -v  $(CODE_BASE_HOST):$(CODE_BASE) \
-               -v $(DATA_DIR_HOST):/data
+               -v $(DATA_DIR_HOST):$(DATA_DIR)
 
 DOCKER_BASE_CMD := docker run --rm $(DOCKER_OPTS) $(IMG_NAME_DEV)
 
