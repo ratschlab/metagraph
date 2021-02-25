@@ -23,7 +23,7 @@ class IExtender {
 
     virtual ~IExtender() {}
 
-    virtual std::vector<std::pair<DBGAlignment, NodeType>>
+    virtual std::vector<DBGAlignment>
     get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &seed) = 0;
@@ -58,7 +58,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual std::vector<std::pair<DBGAlignment, NodeType>>
+    virtual std::vector<DBGAlignment>
     get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
     virtual void initialize(const DBGAlignment &seed) override;

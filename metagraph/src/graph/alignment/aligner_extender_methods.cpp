@@ -297,16 +297,18 @@ bool update_column(const DeBruijnGraph &graph_,
     return updated;
 }
 
-template <typename NodeType, typename AlignNode, class Table, class StartSet, class Storage>
+template <typename NodeType, typename AlignNode, class Table, class StartSet>
 void backtrack(const Table &table_,
                const Alignment<NodeType> &seed_,
                const DeBruijnGraph &graph_,
+               const DBGAlignerConfig &config_,
                score_t min_path_score,
                AlignNode best_node,
                StartSet &prev_starts,
                size_t size,
                std::string_view extend_window_,
-               Storage &extensions) {
+               std::string_view query,
+               std::vector<Alignment<NodeType>> &extensions) {
     typedef DefaultColumnExtender<NodeType> Extender;
 
     Cigar cigar;
@@ -418,16 +420,37 @@ void backtrack(const Table &table_,
     std::reverse(path.begin(), path.end());
     std::reverse(seq.begin(), seq.end());
 
-    extensions.emplace_back(Alignment<NodeType>(
-                                { extend_window_.data() + pos, max_pos - pos },
-                                std::move(path), std::move(seq), score, std::move(cigar),
-                                0, seed_.get_orientation(), graph_.get_k() - 1),
-                            start_node);
+    Alignment<NodeType> extension(
+        { extend_window_.data() + pos, max_pos - pos },
+        std::move(path), std::move(seq), score, std::move(cigar),
+        0, seed_.get_orientation(), graph_.get_k() - 1
+    );
+
+    std::ignore = config_;
+    assert(extension.is_valid(graph_, &config_));
+    extension.extend_query_end(query.data() + query.size());
+
+    if (start_node) {
+        auto next_path = seed_;
+        next_path.append(std::move(extension));
+        next_path.trim_offset();
+        assert(next_path.is_valid(graph_, &config_));
+
+        DEBUG_LOG("Alignment (extended): {}", next_path);
+        extensions.emplace_back(std::move(next_path));
+    } else {
+        extension.extend_query_begin(query.data());
+        extension.trim_offset();
+        assert(extension.is_valid(graph_, &config_));
+
+        DEBUG_LOG("Alignment (trim seed): {}", extension);
+        extensions.emplace_back(std::move(extension));
+    }
 }
 
 template <typename NodeType>
 auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
-        -> std::vector<std::pair<DBGAlignment, NodeType>> {
+        -> std::vector<DBGAlignment> {
     const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
     size_t start = align_start - query_.data();
     size_t size = query_.size() - start + 1;
@@ -579,7 +602,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
 
-    std::vector<std::pair<DBGAlignment, NodeType>> extensions;
+    std::vector<DBGAlignment> extensions;
     for (const auto &[best_node, max_score] : starts) {
         if (prev_starts.count(best_node))
             continue;
@@ -597,8 +620,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         assert(OS[max_pos - offset] == Cigar::MATCH);
 
-        backtrack<NodeType>(table_, *seed_, graph_, min_path_score, best_node,
-                            prev_starts, size, extend_window_, extensions);
+        backtrack<NodeType>(table_, *seed_, graph_, config_, min_path_score, best_node,
+                            prev_starts, size, extend_window_, query_, extensions);
     }
 
     return extensions;

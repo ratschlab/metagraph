@@ -124,33 +124,9 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             callback(std::move(seed));
         }
 
-        for (auto&& [extension, start_node] : extensions) {
+        for (auto&& extension : extensions) {
             assert(extension.is_valid(graph_, &config_));
-            extension.extend_query_end(query.data() + query.size());
-
-            if (extension.get_clipping() || start_node != seed.back()) {
-                // if the extension starts at a different position
-                // from the seed end, then it's a new alignment
-                assert(start_node == DeBruijnGraph::npos);
-                assert(extension.get_clipping()
-                    || extension.get_cigar().front().first == Cigar::MATCH
-                    || extension.get_cigar().front().first == Cigar::MISMATCH);
-                extension.extend_query_begin(query.data());
-                extension.trim_offset();
-                assert(extension.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment (trim seed): {}", extension);
-                callback(std::move(extension));
-
-            } else {
-                assert(extension.get_offset() == graph_.get_k() - 1);
-                auto next_path = seed;
-                next_path.append(std::move(extension));
-                next_path.trim_offset();
-                assert(next_path.is_valid(graph_, &config_));
-
-                DEBUG_LOG("Alignment (extended): {}", next_path);
-                callback(std::move(next_path));
-            }
+            callback(std::move(extension));
         }
     }
 }
