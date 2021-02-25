@@ -53,24 +53,14 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     for (auto&& seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
 
-        if (seed.get_query().data() + seed.get_query().size()
-                == query.data() + query.size()) {
-            if (seed.get_score() >= min_path_score) {
-                seed.trim_offset();
-                assert(seed.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment: {}", seed);
-                callback(std::move(seed));
-            }
-
-            continue;
-        }
-
         // check if this seed has been explored before in an alignment and discard
         // it if so
         if (filter_seeds) {
             size_t found_count = 0;
-            std::pair<size_t, size_t> idx_range { seed.get_clipping(),
-                                                  seed.get_clipping() + graph_.get_k() };
+            std::pair<size_t, size_t> idx_range {
+                seed.get_clipping(),
+                seed.get_clipping() + graph_.get_k() - seed.get_offset()
+            };
             for (node_index node : seed) {
                 auto emplace = visited_nodes_.emplace(node, idx_range);
                 auto &range = emplace.first.value();
@@ -84,7 +74,9 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     ++found_count;
                 }
 
-                ++idx_range.first;
+                if (idx_range.second - idx_range.first == graph_.get_k())
+                    ++idx_range.first;
+
                 ++idx_range.second;
             }
 
@@ -94,27 +86,45 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             }
         }
 
+        if (seed.get_query().data() + seed.get_query().size()
+                == query.data() + query.size()) {
+            if (seed.get_score() >= min_path_score) {
+                seed.trim_offset();
+                assert(seed.is_valid(graph_, &config_));
+                DEBUG_LOG("Alignment: {}", seed);
+                callback(std::move(seed));
+            }
+
+            continue;
+        }
+
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
         extender.initialize(seed);
         auto extensions = extender.get_extensions(min_path_score);
-        for (auto&& [extension, start_node] : extensions) {
-            if (extension.empty()) {
-                // no good extension found
-                assert(extensions.size() == 1);
-                assert(start_node == DeBruijnGraph::npos);
 
-                if (seed.get_score() >= min_path_score) {
-                    seed.extend_query_end(query.data() + query.size());
-                    seed.trim_offset();
-                    assert(seed.is_valid(graph_, &config_));
-                    DEBUG_LOG("Alignment (seed): {}", seed);
-                    callback(std::move(seed));
+        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
+        // table to allow for seed filtration
+        if (filter_seeds) {
+            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+                auto &range = emplace.first.value();
+                if (!emplace.second) {
+                    range.first = std::min(range.first, begin);
+                    range.second = std::max(range.second, end);
                 }
+            });
+        }
 
-                continue;
-            }
+        if (extensions.empty() && seed.get_score() >= min_path_score) {
+            seed.extend_query_end(query.data() + query.size());
+            seed.trim_offset();
+            assert(seed.is_valid(graph_, &config_));
+            DEBUG_LOG("Alignment (seed): {}", seed);
+            callback(std::move(seed));
+        }
 
+        for (auto&& [extension, start_node] : extensions) {
             assert(extension.is_valid(graph_, &config_));
             extension.extend_query_end(query.data() + query.size());
 
@@ -130,30 +140,17 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 assert(extension.is_valid(graph_, &config_));
                 DEBUG_LOG("Alignment (trim seed): {}", extension);
                 callback(std::move(extension));
-                continue;
+
+            } else {
+                assert(extension.get_offset() == graph_.get_k() - 1);
+                auto next_path = seed;
+                next_path.append(std::move(extension));
+                next_path.trim_offset();
+                assert(next_path.is_valid(graph_, &config_));
+
+                DEBUG_LOG("Alignment (extended): {}", next_path);
+                callback(std::move(next_path));
             }
-
-            assert(extension.get_offset() == graph_.get_k() - 1);
-            auto next_path = seed;
-            next_path.append(std::move(extension));
-            next_path.trim_offset();
-            assert(next_path.is_valid(graph_, &config_));
-
-            DEBUG_LOG("Alignment (extended): {}", next_path);
-            callback(std::move(next_path));
-        }
-
-        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
-        // table to allow for seed filtration
-        if (filter_seeds) {
-            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-                auto &range = emplace.first.value();
-                if (!emplace.second) {
-                    range.first = std::min(range.first, begin);
-                    range.second = std::max(range.second, end);
-                }
-            });
         }
     }
 }

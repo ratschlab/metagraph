@@ -73,7 +73,10 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DBGAlignerConfig &config_;
     std::string_view query_;
 
-    typedef std::tuple<NodeType, char, size_t> AlignNode;
+    typedef std::tuple<NodeType,
+                       char /* last character of the node label */,
+                       size_t /* copy number */,
+                       size_t /* distance from origin */> AlignNode;
 
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<NodeId> PrevVec;

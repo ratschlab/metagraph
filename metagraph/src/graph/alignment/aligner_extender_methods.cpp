@@ -466,7 +466,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     AlignNode start_node{ graph_.max_index() + 1,
                           seed_->get_sequence()[seed_->get_sequence().size() - 2],
-                          0 };
+                          0, 0 };
 
     typedef std::pair<AlignNode, score_t> Ref;
     Ref best_start{ start_node, S[0] };
@@ -490,6 +490,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             DEBUG_LOG("Alignment node limit reached, stopping extension");
             break;
         }
+
+        size_t next_distance_from_origin = std::get<3>(prev) + 1;
 
         for (const auto &[next, c] : get_outgoing(prev)) {
             auto &column_pair = table_[next];
@@ -542,7 +544,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             converged = !updated || has_converged(column_pair);
 
-            AlignNode cur{ next, c, depth };
+            AlignNode cur{ next, c, depth, next_distance_from_origin };
             if (OS[max_pos - offset] == Cigar::MATCH) {
                 starts.emplace_back(cur, *max_it);
 
@@ -591,9 +593,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
-            if (extensions.empty())
-                extensions.emplace_back();
-
             continue;
         }
 
@@ -620,6 +619,7 @@ void DefaultColumnExtender<NodeType>
     for (const auto &[node, columns] : table_) {
         size_t start = query_.size();
         size_t end = 0;
+        size_t start_distance_from_origin = 0;
         for (const auto &column : columns.first) {
             const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = column;
 
@@ -627,12 +627,31 @@ void DefaultColumnExtender<NodeType>
             auto rit = std::find_if(S.rbegin(), S.rend(), [](score_t s) { return s > 0; });
             size_t start_c = (it - S.begin()) + offset;
             size_t end_c = (S.rend() - rit) + offset;
-            start = std::min(start, start_c ? start_c - 1 : start_c);
+
+            size_t prev_distance_from_origin = std::get<3>(prev);
+
+            if (start_c)
+                --start_c;
+
+            if (start_c < start) {
+                start = start_c;
+                start_distance_from_origin = prev_distance_from_origin
+                    + (OS[it - S.begin()] != Cigar::INSERTION);
+            }
+
             end = std::max(end, end_c);
         }
 
-        if (start < end)
-            callback(node, window_start + start + 1 - graph_.get_k(), window_start + end);
+        if (start < end) {
+            assert(start_distance_from_origin);
+            --start_distance_from_origin;
+
+            size_t start_pos = window_start + start + 1 - graph_.get_k();
+            if (start_distance_from_origin < seed_->get_offset())
+                start_pos += seed_->get_offset() - start_distance_from_origin;
+
+            callback(node, start_pos, window_start + end);
+        }
     }
 }
 
