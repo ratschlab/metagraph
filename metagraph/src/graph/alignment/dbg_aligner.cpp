@@ -50,7 +50,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                   std::not_fn(LocalAlignmentLess<node_index>()));
     }
 
-    for (auto &seed : seeds) {
+    for (auto&& seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query().data() + seed.get_query().size()
@@ -96,21 +96,22 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
-        bool extended = false;
         extender.initialize(seed);
-        for (auto&& [extension, start_node] : extender.get_extensions(min_path_score)) {
+        auto extensions = extender.get_extensions(min_path_score);
+        for (auto&& [extension, start_node] : extensions) {
             if (extension.empty()) {
-                if (!start_node && !extended) {
-                    // no good extension found
-                    if (seed.get_score() >= min_path_score) {
-                        seed.extend_query_end(query.data() + query.size());
-                        seed.trim_offset();
-                        assert(seed.is_valid(graph_, &config_));
-                        DEBUG_LOG("Alignment (seed): {}", seed);
-                        callback(std::move(seed));
-                    }
-                    extended = true;
+                // no good extension found
+                assert(extensions.size() == 1);
+                assert(start_node == DeBruijnGraph::npos);
+
+                if (seed.get_score() >= min_path_score) {
+                    seed.extend_query_end(query.data() + query.size());
+                    seed.trim_offset();
+                    assert(seed.is_valid(graph_, &config_));
+                    DEBUG_LOG("Alignment (seed): {}", seed);
+                    callback(std::move(seed));
                 }
+
                 continue;
             }
 
@@ -140,10 +141,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
             DEBUG_LOG("Alignment (extended): {}", next_path);
             callback(std::move(next_path));
-            extended = true;
         }
-
-        // if !extended, then the seed was not extended because of early cutoff
 
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
         // table to allow for seed filtration

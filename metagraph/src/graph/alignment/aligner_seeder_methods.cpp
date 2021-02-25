@@ -147,7 +147,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         this->config_.min_seed_length
     );
 
-    for (auto &seed : this->BaseSeeder::get_seeds()) {
+    for (auto&& seed : this->BaseSeeder::get_seeds()) {
         assert(seed.get_query().size() >= this->config_.min_seed_length);
 
         size_t i = seed.get_clipping();

@@ -38,7 +38,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
         auto &p_op_row = profile_op_.emplace(c, query_.size() + 9).first.value();
 
         const auto &row = config_.get_row(c);
-        const auto &op_row = Cigar::get_op_row(c);
+        const auto &op_row = kCharToOp[c];
 
         // the first cell in a DP table row is one position before the last matched
         // character, so we need to shift the indices of profile_score_ and profile_op_
@@ -312,7 +312,7 @@ backtrack(const Table &table_,
     Cigar cigar;
     std::vector<NodeType> path;
     std::string seq;
-    NodeType start_node = 0;
+    NodeType start_node = DeBruijnGraph::npos;
 
     assert(table_.count(std::get<0>(best_node)));
     const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
@@ -340,7 +340,6 @@ backtrack(const Table &table_,
         if (last_op == Cigar::CLIPPED || S[pos - offset] == 0) {
             assert(S[pos - offset] == 0);
             max_score = score;
-            start_node = DeBruijnGraph::npos;
             break;
         } else if (pos == 1 && last_op != Cigar::DELETION) {
             score -= S[pos - offset];
@@ -592,8 +591,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
-            extensions.emplace_back();
-            break;
+            if (extensions.empty())
+                extensions.emplace_back();
+
+            continue;
         }
 
         assert(OS[max_pos - offset] == Cigar::MATCH);
