@@ -52,6 +52,11 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
+    assert(seed.size());
+    assert(seed.get_cigar().size());
+    assert(seed.get_cigar().back().first == Cigar::MATCH
+        || seed.get_cigar().back().first == Cigar::MISMATCH);
+
     seed_ = &seed;
     reset();
 }
@@ -433,9 +438,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     extend_window_ = { align_start, size - 1 };
     DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
-
-    assert(seed_->get_cigar().back().first == Cigar::MATCH
-        || seed_->get_cigar().back().first == Cigar::MISMATCH);
 
     auto &first_column = table_.emplace(
         graph_.max_index() + 1,

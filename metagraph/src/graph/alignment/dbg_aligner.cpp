@@ -99,16 +99,18 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         bool extended = false;
         extender.initialize(seed);
         for (auto&& [extension, start_node] : extender.get_extensions(min_path_score)) {
-            if (!start_node && !extended && extension.empty()) {
-                // no good extension found
-                if (seed.get_score() >= min_path_score) {
-                    seed.extend_query_end(query.data() + query.size());
-                    seed.trim_offset();
-                    assert(seed.is_valid(graph_, &config_));
-                    DEBUG_LOG("Alignment (seed): {}", seed);
-                    callback(std::move(seed));
+            if (extension.empty()) {
+                if (!start_node && !extended) {
+                    // no good extension found
+                    if (seed.get_score() >= min_path_score) {
+                        seed.extend_query_end(query.data() + query.size());
+                        seed.trim_offset();
+                        assert(seed.is_valid(graph_, &config_));
+                        DEBUG_LOG("Alignment (seed): {}", seed);
+                        callback(std::move(seed));
+                    }
+                    extended = true;
                 }
-                extended = true;
                 continue;
             }
 
