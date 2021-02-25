@@ -337,7 +337,7 @@ backtrack(const Table &table_,
         assert(last_op == Cigar::MATCH || last_op == Cigar::MISMATCH);
         last_op = OS[pos - offset];
 
-        if (last_op == Cigar::CLIPPED) {
+        if (last_op == Cigar::CLIPPED || S[pos - offset] == 0) {
             assert(S[pos - offset] == 0);
             max_score = score;
             start_node = DeBruijnGraph::npos;
@@ -348,8 +348,9 @@ backtrack(const Table &table_,
                     || std::get<0>(best_node) != seed_.back()
                     || std::get<2>(best_node)
                     || last_op != seed_.get_cigar().back().first) {
-                start_node = DeBruijnGraph::npos;
-                max_score = score;
+                // last op in the seed was skipped
+                // TODO: reconstruct the entire alignment. for now, throw this out
+                return {};
             } else {
                 assert(seed_.get_score() == S[pos - offset]);
                 start_node = seed_.back();
@@ -601,6 +602,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                                                     min_path_score, best_node,
                                                     prev_starts, size, extend_window_));
         assert(extensions.back().first.is_valid(graph_, &config_));
+        if (extensions.back().first.empty())
+            extensions.pop_back();
 
         if (extensions.size() == config_.num_alternative_paths)
             break;

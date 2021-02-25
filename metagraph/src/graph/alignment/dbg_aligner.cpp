@@ -120,6 +120,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             if (extension.get_clipping() || start_node != seed.back()) {
                 // if the extension starts at a different position
                 // from the seed end, then it's a new alignment
+                assert(start_node == DeBruijnGraph::npos);
+                assert(extension.get_clipping()
+                    || extension.get_cigar().front().first == Cigar::MATCH
+                    || extension.get_cigar().front().first == Cigar::MISMATCH);
                 extension.extend_query_begin(query.data());
                 extension.trim_offset();
                 assert(extension.is_valid(graph_, &config_));
