@@ -20,7 +20,6 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 const uint8_t kCountBits = 8;
 const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
 
@@ -29,10 +28,10 @@ template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
-                                          uint64_t buffer_size)
+                                          uint64_t buffer_size_bytes)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
-        buffer_size_(buffer_size),
+        buffer_size_bytes_(buffer_size_bytes),
         cached_columns_(std::max(num_columns_cached, (size_t)1),
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
@@ -562,19 +561,19 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
             bitmatrix_.emplace_back();
             // Work with the full uncompressed bitmap if it takes less space
             // than the buffer in its builder.
-            if (num_rows_ < kNumElementsReservedInBitmapBuilder * 64) {
+            if (num_rows_ < buffer_size_bytes_ * 8) {
                 vector = new bitmap_vector(num_rows_, 0);
 
             } else if (swap_dir_.size()) {
                 // For large bitmaps, use the efficient builder, using only
                 // space proportional to the number of bits set in the bitmap.
                 vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
-                                                     buffer_size_, swap_dir_);
+                                                     buffer_size_bytes_ / 8, swap_dir_);
             } else {
                 // For large bitmaps, use the efficient builder, using only
                 // space proportional to the number of bits set in the bitmap.
                 vector = new bitmap_builder_set(num_rows_, get_num_threads(),
-                                                kNumElementsReservedInBitmapBuilder);
+                                                buffer_size_bytes_ / 8);
             }
         } else {
             // otherwise, decompress the existing column and initialize a bitmap

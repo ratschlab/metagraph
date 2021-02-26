@@ -9,16 +9,14 @@ const uint64_t kStreamBufferSize = 100'000;
 
 bitmap_builder_set_disk::bitmap_builder_set_disk(uint64_t size,
                                                  size_t num_threads,
-                                                 uint64_t buffer_size_in_bytes,
+                                                 uint64_t buffer_size,
                                                  const std::string &swap_dir)
       : size_(size),
-        swap_dir_(swap_dir),
-        chunks_tmp_dir_(utils::create_temp_dir(swap_dir, "bitmap_chunks")),
-        set_bit_positions_(num_threads, buffer_size_in_bytes / sizeof(uint64_t),
-                           chunks_tmp_dir_, -1, 16) {}
+        tmp_dir_(utils::create_temp_dir(swap_dir, "bitmap")),
+        set_bit_positions_(num_threads, buffer_size, tmp_dir_, -1, 16) {}
 
 bitmap_builder_set_disk::~bitmap_builder_set_disk() {
-    utils::remove_temp_dir(chunks_tmp_dir_);
+    utils::remove_temp_dir(tmp_dir_);
 }
 
 bitmap_builder_set_disk::InitializationData
@@ -26,10 +24,7 @@ bitmap_builder_set_disk::get_initialization_data() {
     if (merged_)
         throw std::runtime_error("ERROR: Trying to flush the bitmap twice");
 
-    // create temp dir for the merged result
-    auto tmp_dir = utils::create_temp_dir(swap_dir_, "bitmap");
-
-    mtg::common::EliasFanoEncoderBuffered<uint64_t> encoder(tmp_dir/"merged",
+    mtg::common::EliasFanoEncoderBuffered<uint64_t> encoder(tmp_dir_/"merged",
                                                             kStreamBufferSize);
     auto &merged = set_bit_positions_.data();
     uint64_t num_set_bits = 0;
@@ -43,11 +38,10 @@ bitmap_builder_set_disk::get_initialization_data() {
     set_bit_positions_.clear();
 
     auto call_indexes = [&](auto callback) {
-        mtg::common::EliasFanoDecoder<uint64_t> decoder(tmp_dir/"merged", true);
+        mtg::common::EliasFanoDecoder<uint64_t> decoder(tmp_dir_/"merged", true);
         while (std::optional<uint64_t> next = decoder.next()) {
             callback(next.value());
         }
-        utils::remove_temp_dir(tmp_dir);
     };
 
     merged_ = true;

@@ -28,6 +28,8 @@ class bitmap_builder {
         const std::function<void(const std::function<void(uint64_t)> &callback)> call_ones;
     };
 
+    // Generally, can only be called once. The returned InitializationData
+    // may become invalid after the bitmap_builder object is destroyed.
     virtual InitializationData get_initialization_data() = 0;
 };
 
@@ -55,6 +57,8 @@ class bitmap_builder_set : public bitmap_builder {
         set_bit_positions_.insert(begin, end);
     }
 
+    // Can be called multiple times. The returned InitializationData
+    // becomes invalid after the bitmap_builder_set object is destroyed.
     virtual InitializationData get_initialization_data() {
         return { size(), num_set_bits(),
                  [&](auto callback) { call_ones(callback); } };
@@ -81,7 +85,7 @@ class bitmap_builder_set_disk : public bitmap_builder {
   public:
     bitmap_builder_set_disk(uint64_t size,
                             size_t num_threads,
-                            uint64_t buffer_size_in_bytes,
+                            uint64_t buffer_size,
                             const std::string &swap_dir);
 
     ~bitmap_builder_set_disk();
@@ -91,13 +95,13 @@ class bitmap_builder_set_disk : public bitmap_builder {
         set_bit_positions_.insert(begin, end);
     }
 
-    // can only be called once
+    // Can only be called once. The returned InitializationData becomes
+    // invalid after the bitmap_builder_set_disk object is destroyed.
     virtual InitializationData get_initialization_data();
 
   private:
     const uint64_t size_;
-    const std::filesystem::path swap_dir_;
-    const std::filesystem::path chunks_tmp_dir_;
+    const std::filesystem::path tmp_dir_;
     mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
     bool merged_ = false;
 };
