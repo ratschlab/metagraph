@@ -96,13 +96,13 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
-// number of shared set bits divided by the size of the bitmaps
+// Compute the number of shared set bits divided by the size of the bitmaps
 double intersection_ratio(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
     assert(first.size() == second.size());
     return static_cast<double>(::inner_prod(first, second)) / first.size();
 }
 
-// Estimation of the number of shared set bits divided by the bitmap size.
+// Estimate the number of shared set bits divided by the bitmap size.
 // |first| and |second| are assumed to have the same origin (starting position),
 // but one of them may be shorter than the other.
 // The result is equivalent to resizing the longest vector to even the sizes
@@ -216,10 +216,9 @@ inline bool first_closest(const P &first, const P &second) {
                     < std::min(std::get<0>(second), std::get<1>(second)));
 }
 
-// input: columns, where each column `T` is either `sdsl::bit_vector` or
-// `std::pair<uint32_t, std::vector<uint32>>` storing column size and positions
-// of its set bits
-// output: partition -- a set of column pairs greedily matched
+// Input: columns, where each column `T` is either `sdsl::bit_vector` or
+// `SparseColumn` storing the column size and the positions of its set bits.
+// Output: a set of greedily matched column pairs.
 template <class T>
 Partition greedy_matching(const std::vector<T> &columns, size_t num_threads) {
     if (!columns.size())
@@ -267,20 +266,20 @@ Partition greedy_matching(const std::vector<T> &columns, size_t num_threads) {
     return partition;
 }
 
-void merge(const sdsl::bit_vector &first, sdsl::bit_vector *second) {
+void union_merge(const sdsl::bit_vector &first, sdsl::bit_vector *second) {
     assert(second);
     assert(first.size() == second->size());
     *second |= first;
 }
 
-void merge(const SparseColumn &first, SparseColumn *second) {
+void union_merge(const SparseColumn &first, SparseColumn *second) {
     assert(second);
 
-    const auto &[size_first, col_first] = first;
-    const auto &[size_second, col_second] = *second;
+    const auto &col_first = first.set_bits;
+    const auto &col_second = second->set_bits;
 
     SparseColumn merged;
-    merged.size = std::min(size_first, size_second);
+    merged.size = std::min(first.size, second->size);
     merged.set_bits.reserve(col_first.size() + col_second.size());
 
     auto first_end = std::lower_bound(col_first.begin(), col_first.end(), merged.size);
@@ -331,7 +330,7 @@ LinkageMatrix agglomerative_greedy_linkage(std::vector<T>&& columns, size_t num_
             // merge into new clusters
             cluster_centers[g] = std::move(columns[groups[g].at(0)]);
             for (size_t i = 1; i < groups[g].size(); ++i) {
-                merge(columns[groups[g][i]], &cluster_centers[g]);
+                union_merge(columns[groups[g][i]], &cluster_centers[g]);
                 columns[groups[g][i]] = T();
             }
 

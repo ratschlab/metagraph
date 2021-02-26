@@ -97,9 +97,10 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                     [&](uint64_t i) { set_bits.push_back(i); }
                 );
 
-                common::logger->trace(
-                    "Subsampled {} out of {} set bits, subsampled size {} / {}, column {}",
-                    set_bits.size(), column->num_set_bits(), size, column->size(), label);
+                common::logger->trace("Subsampled set bits: {:.2e}/{:.2e}"
+                                      ", total size: {:.2e}/{:.2e}, column: {}",
+                                      (double)set_bits.size(), (double)column->num_set_bits(),
+                                      (double)size, (double)column->size(), label);
             }
         });
     };
@@ -316,10 +317,10 @@ int transform_annotation(Config *config) {
 
         binmat::LinkageMatrix linkage_matrix
             = config->fast
-                ? cluster_columns<sdsl::bit_vector>(files, input_anno_type,
-                                                    config->num_rows_subsampled)
-                : cluster_columns<binmat::SparseColumn>(files, input_anno_type,
-                                                        config->num_rows_subsampled);
+                ? cluster_columns<binmat::SparseColumn>(files, input_anno_type,
+                                                        config->num_rows_subsampled)
+                : cluster_columns<sdsl::bit_vector>(files, input_anno_type,
+                                                    config->num_rows_subsampled);
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
