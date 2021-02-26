@@ -578,7 +578,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             assert(match_score_begin_[max_pos]
                 == config_.match_score(extend_window_.substr(max_pos)));
-            score_t score_rest = *max_it + match_score_begin_[max_pos];
+
+            score_t score_rest = ninf;
+            for (size_t i = 0; i < S.size(); ++i) {
+                score_rest = std::max(score_rest, S[i] + match_score_begin_[i + offset]);
+            }
 
             assert(xdrop_cutoff == best_start.second - config_.xdrop);
 

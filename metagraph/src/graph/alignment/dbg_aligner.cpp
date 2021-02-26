@@ -39,16 +39,11 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              IExtender<node_index> &extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
-    std::vector<DBGAlignment> seeds = seeder.get_seeds();
-
-    // The visited_nodes_ table is not used for filtration with the ManualSeeder,
-    // so sort the seeds to give higher-scoring candidates greater priority
-    // (this leads to subsequent alignments having greater min_path_score bounds)
     bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
-    if (!filter_seeds) {
-        std::sort(seeds.begin(), seeds.end(),
-                  std::not_fn(LocalAlignmentLess<node_index>()));
-    }
+
+    std::vector<DBGAlignment> seeds = seeder.get_seeds();
+    std::sort(seeds.begin(), seeds.end(), std::not_fn(LocalAlignmentLess<node_index>()));
+
 
     for (auto&& seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
