@@ -634,10 +634,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         assert(extensions.size() < 2
             || extensions.back().get_score() <= extensions[extensions.size() - 2].get_score());
-    }
 
-    if (extensions.size() > config_.num_alternative_paths)
-        extensions.resize(config_.num_alternative_paths);
+        if (extensions.size() == config_.num_alternative_paths)
+            break;
+    }
 
     return extensions;
 }
