@@ -83,24 +83,23 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                 }
             } else {
                 static_assert(std::is_same_v<T, binmat::SparseColumn>);
-                // allocate the same space as for bitmap
-                const uint64_t max_bits = num_rows_subsampled / 32;
 
-                uint32_t &size = subvector->first;
-                std::vector<uint32_t> &set_bits = subvector->second;
+                auto &size = subvector->size;
+                auto &set_bits = subvector->set_bits;
 
-                size = std::min(column->num_set_bits() <= max_bits
+                size = std::min(column->num_set_bits() <= num_rows_subsampled
                                     ? column->size()
-                                    : column->select1(max_bits),
-                                (uint64_t)std::numeric_limits<uint32_t>::max());
+                                    : column->select1(num_rows_subsampled),
+                                (uint64_t)std::numeric_limits<std::decay_t<decltype(size)>>::max());
 
                 set_bits.reserve(column->rank1(size));
                 column->call_ones_in_range(0, size,
                     [&](uint64_t i) { set_bits.push_back(i); }
                 );
 
-                common::logger->trace("Subsampled size: {}, set bits: {}, column {}",
-                                      size, set_bits.size(), label);
+                common::logger->trace(
+                    "Subsampled {} out of {} set bits, subsampled size {} / {}, column {}",
+                    set_bits.size(), column->num_set_bits(), size, column->size(), label);
             }
         });
     };

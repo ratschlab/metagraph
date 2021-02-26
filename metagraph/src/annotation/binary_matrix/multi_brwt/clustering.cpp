@@ -280,17 +280,16 @@ void merge(const SparseColumn &first, SparseColumn *second) {
     const auto &[size_second, col_second] = *second;
 
     SparseColumn merged;
-    auto &[size_merged, col_merged] = merged;
-    size_merged = std::min(size_first, size_second);
-    col_merged.reserve(col_first.size() + col_second.size());
+    merged.size = std::min(size_first, size_second);
+    merged.set_bits.reserve(col_first.size() + col_second.size());
 
-    auto first_end = std::lower_bound(col_first.begin(), col_first.end(), size_merged);
-    auto second_end = std::lower_bound(col_second.begin(), col_second.end(), size_merged);
+    auto first_end = std::lower_bound(col_first.begin(), col_first.end(), merged.size);
+    auto second_end = std::lower_bound(col_second.begin(), col_second.end(), merged.size);
     std::set_union(col_first.begin(), first_end,
                    col_second.begin(), second_end,
-                   std::back_inserter(col_merged));
+                   std::back_inserter(merged.set_bits));
 
-    second->swap(merged);
+    std::swap(*second, merged);
 }
 
 uint64_t count_set_bits(const sdsl::bit_vector &v) {
@@ -298,7 +297,7 @@ uint64_t count_set_bits(const sdsl::bit_vector &v) {
 }
 
 uint64_t count_set_bits(const SparseColumn &v) {
-    return v.second.size();
+    return v.set_bits.size();
 }
 
 template <class T>
