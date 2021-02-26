@@ -44,7 +44,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
     std::sort(seeds.begin(), seeds.end(), std::not_fn(LocalAlignmentLess<node_index>()));
 
-
     for (auto&& seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
 

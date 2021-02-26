@@ -619,14 +619,25 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         if (max_pos < 2 && std::get<0>(best_node) == seed_->back()
                 && !std::get<2>(best_node)) {
-            continue;
+            if (seed_->get_score() >= min_path_score) {
+                DEBUG_LOG("Alignment (seed): {}", *seed_);
+                extensions.emplace_back(*seed_);
+                extensions.back().extend_query_end(query_.data() + query_.size());
+                extensions.back().trim_offset();
+                assert(extensions.back().is_valid(graph_, &config_));
+            }
+        } else {
+            assert(OS[max_pos - offset] == Cigar::MATCH);
+            backtrack<NodeType>(table_, *seed_, graph_, config_, min_path_score, best_node,
+                                prev_starts, size, extend_window_, query_, extensions);
         }
 
-        assert(OS[max_pos - offset] == Cigar::MATCH);
-
-        backtrack<NodeType>(table_, *seed_, graph_, config_, min_path_score, best_node,
-                            prev_starts, size, extend_window_, query_, extensions);
+        assert(extensions.size() < 2
+            || extensions.back().get_score() <= extensions[extensions.size() - 2].get_score());
     }
+
+    if (extensions.size() > config_.num_alternative_paths)
+        extensions.resize(config_.num_alternative_paths);
 
     return extensions;
 }
