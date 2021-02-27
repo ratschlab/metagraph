@@ -197,14 +197,14 @@ bool spell_path(const DeBruijnGraph &graph,
 struct LocalAlignmentLess {
     template <typename NodeType>
     bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
-        // 1) score is less, or
-        // 2) more of the query is covered, or
-        // 3) if it is in the reverse orientation, or
-        // 4) if the starting point is later in the query
-        return std::make_tuple(-a.get_score(), a.get_query().size(),
-                               a.get_orientation(), a.get_clipping())
-            > std::make_tuple(-b.get_score(), b.get_query().size(),
-                              b.get_orientation(), b.get_clipping());
+        // 1) score is higher, or
+        // 2) less of the query is covered, or
+        // 3) if it is in the forward orientation, or
+        // 4) if the starting point is earlier in the query
+        return std::make_tuple(a.get_score(), b.get_query().size(),
+                               b.get_orientation(), b.get_clipping())
+            > std::make_tuple(b.get_score(), a.get_query().size(),
+                              a.get_orientation(), a.get_clipping());
     }
 };
 

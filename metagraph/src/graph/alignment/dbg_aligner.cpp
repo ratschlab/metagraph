@@ -42,7 +42,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
 
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
-    std::sort(seeds.begin(), seeds.end(), std::not_fn(LocalAlignmentLess()));
+    std::sort(seeds.begin(), seeds.end(), LocalAlignmentLess());
 
     for (DBGAlignment &seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
