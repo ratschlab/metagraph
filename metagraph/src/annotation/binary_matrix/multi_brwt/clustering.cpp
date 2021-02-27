@@ -1,5 +1,7 @@
 #include "clustering.hpp"
 
+#include <algorithm>
+
 #include <ips4o.hpp>
 #include <progress_bar.hpp>
 
@@ -94,9 +96,47 @@ std::vector<uint64_t> inverted_arrangement(const VectorPtrs &vectors) {
     return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
+// Compute the number of shared set bits divided by the size of the bitmaps
+double intersection_ratio(const sdsl::bit_vector &first, const sdsl::bit_vector &second) {
+    assert(first.size() == second.size());
+    return static_cast<double>(::inner_prod(first, second)) / first.size();
+}
+
+// Estimate the number of shared set bits divided by the bitmap size.
+// |first| and |second| are assumed to have the same origin (starting position),
+// but one of them may be shorter than the other.
+// The result is equivalent to resizing the longest vector to even the sizes
+// and computing the intersection ratio as usual.
+double intersection_ratio(const SparseColumn &first, const SparseColumn &second) {
+    const auto &[size_1, col_1] = first;
+    const auto &[size_2, col_2] = second;
+    auto it_1 = col_1.begin();
+    auto it_2 = col_2.begin();
+
+    if (!size_1 || !size_2)
+        throw std::runtime_error("Vector size must be non-zero");
+
+    uint64_t prod = 0;
+
+    while (it_1 != col_1.end() && it_2 != col_2.end()) {
+        assert(*it_1 < size_1 && *it_2 < size_2);
+        if (*it_1 < *it_2) {
+            ++it_1;
+        } else if (*it_1 > *it_2) {
+            ++it_2;
+        } else {
+            prod++;
+            ++it_1;
+            ++it_2;
+        }
+    }
+
+    return static_cast<double>(prod) / std::min(size_1, size_2);
+}
+
+template <class T>
 std::vector<std::tuple<uint32_t, uint32_t, float>>
-correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
-                       size_t num_threads) {
+correlation_similarity(const std::vector<T> &cols, size_t num_threads) {
     if (cols.size() > std::numeric_limits<uint32_t>::max()) {
         std::cerr << "ERROR: too many columns" << std::endl;
         exit(1);
@@ -115,7 +155,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
     for (uint64_t j = 1; j < cols.size(); ++j) {
         for (uint64_t i = 0; i < cols.size(); ++i) {
             if (i < j) {
-                float sim = inner_prod(cols[i], cols[j]);
+                float sim = intersection_ratio(cols[i], cols[j]);
                 similarities[(j - 1) * j / 2 + i] = std::tie(i, j, sim);
                 ++progress_bar;
             }
@@ -176,10 +216,11 @@ inline bool first_closest(const P &first, const P &second) {
                     < std::min(std::get<0>(second), std::get<1>(second)));
 }
 
-// input: columns
-// output: partition, for instance -- a set of column pairs
-Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
-                          size_t num_threads) {
+// Input: columns, where each column `T` is either `sdsl::bit_vector` or
+// `SparseColumn` storing the column size and the positions of its set bits.
+// Output: a set of greedily matched column pairs.
+template <class T>
+Partition greedy_matching(const std::vector<T> &columns, size_t num_threads) {
     if (!columns.size())
         return {};
 
@@ -225,9 +266,41 @@ Partition greedy_matching(const std::vector<sdsl::bit_vector> &columns,
     return partition;
 }
 
-LinkageMatrix
-agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
-                             size_t num_threads) {
+void union_merge(const sdsl::bit_vector &first, sdsl::bit_vector *second) {
+    assert(second);
+    assert(first.size() == second->size());
+    *second |= first;
+}
+
+void union_merge(const SparseColumn &first, SparseColumn *second) {
+    assert(second);
+
+    const auto &col_first = first.set_bits;
+    const auto &col_second = second->set_bits;
+
+    SparseColumn merged;
+    merged.size = std::min(first.size, second->size);
+    merged.set_bits.reserve(col_first.size() + col_second.size());
+
+    auto first_end = std::lower_bound(col_first.begin(), col_first.end(), merged.size);
+    auto second_end = std::lower_bound(col_second.begin(), col_second.end(), merged.size);
+    std::set_union(col_first.begin(), first_end,
+                   col_second.begin(), second_end,
+                   std::back_inserter(merged.set_bits));
+
+    std::swap(*second, merged);
+}
+
+uint64_t count_set_bits(const sdsl::bit_vector &v) {
+    return sdsl::util::cnt_one_bits(v);
+}
+
+uint64_t count_set_bits(const SparseColumn &v) {
+    return v.set_bits.size();
+}
+
+template <class T>
+LinkageMatrix agglomerative_greedy_linkage(std::vector<T>&& columns, size_t num_threads) {
     if (columns.empty())
         return LinkageMatrix(0, 4);
 
@@ -246,7 +319,7 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
         assert(groups.size() > 0);
         assert(groups.size() < columns.size());
 
-        std::vector<sdsl::bit_vector> cluster_centers(groups.size());
+        std::vector<T> cluster_centers(groups.size());
         std::vector<uint64_t> cluster_ids(groups.size());
 
         ProgressBar progress_bar(groups.size(), "Merging clusters",
@@ -255,12 +328,13 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {
             // merge into new clusters
-            cluster_centers[g] = sdsl::bit_vector(columns[0].size(), 0);
-            for (size_t i : groups[g]) {
-                cluster_centers[g] |= columns[i];
+            cluster_centers[g] = std::move(columns[groups[g].at(0)]);
+            for (size_t i = 1; i < groups[g].size(); ++i) {
+                union_merge(columns[groups[g][i]], &cluster_centers[g]);
+                columns[groups[g][i]] = T();
             }
 
-            uint64_t num_set_bits = sdsl::util::cnt_one_bits(cluster_centers[g]);
+            uint64_t num_set_bits = count_set_bits(cluster_centers[g]);
 
             #pragma omp critical
             {
@@ -290,6 +364,13 @@ agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&& columns,
 
     return linkage_matrix;
 }
+
+template
+LinkageMatrix agglomerative_greedy_linkage(std::vector<sdsl::bit_vector>&&, size_t);
+
+template
+LinkageMatrix agglomerative_greedy_linkage(std::vector<SparseColumn>&&, size_t);
+
 
 LinkageMatrix agglomerative_linkage_trivial(size_t num_columns) {
     if (!num_columns)
