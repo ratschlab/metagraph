@@ -693,7 +693,6 @@ QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
 
 
 template class Alignment<>;
-template struct LocalAlignmentLess<>;
 template class QueryAlignment<>;
 
 } // namespace align

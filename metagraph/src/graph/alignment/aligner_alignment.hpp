@@ -194,8 +194,8 @@ bool spell_path(const DeBruijnGraph &graph,
                 std::string &seq,
                 size_t offset = 0);
 
-template <typename NodeType = uint64_t>
 struct LocalAlignmentLess {
+    template <typename NodeType>
     bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
         // 1) score is less, or
         // 2) more of the query is covered, or

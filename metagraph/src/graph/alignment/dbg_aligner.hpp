@@ -51,12 +51,12 @@ class ISeedAndExtendAligner : public IDBGAligner {
 };
 
 
-template <class AlignmentCompare = LocalAlignmentLess<>>
+template <class AlignmentCompare = LocalAlignmentLess>
 class SeedAndExtendAlignerCore;
 
 template <class Seeder = ExactSeeder<>,
           class Extender = DefaultColumnExtender<>,
-          class AlignmentCompare = LocalAlignmentLess<>>
+          class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public ISeedAndExtendAligner {
   public:
     typedef IDBGAligner::node_index node_index;

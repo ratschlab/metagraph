@@ -76,7 +76,7 @@ auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
             score_t match_score = partial_sum[i + k] - partial_sum[i];
 
             if (match_score > config.min_cell_score) {
-                seeds.emplace_back(std::string_view(query.data() + i, k),
+                seeds.emplace_back(query.substr(i, k),
                                    std::vector<NodeType>{ query_nodes[i] },
                                    match_score, i, orientation);
                 assert(seeds.back().is_valid(graph, &config));
@@ -166,7 +166,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         assert(i < suffix_seeds.size());
 
-        std::string_view seed_seq(this->query_.data() + i, seed_length);
+        std::string_view seed_seq = this->query_.substr(i, seed_length);
         DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
 
         if (match_score <= this->config_.min_cell_score)
@@ -197,7 +197,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                                                 this->query_.size() - i });
             if (max_seed_length >= min_seed_length[i]) {
                 dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
-                    std::string_view(this->query_.data() + i, max_seed_length),
+                    this->query_.substr(i, max_seed_length),
                     [&](node_index alt_node, size_t seed_length) {
                         if (seed_length > min_seed_length[i])
                             suffix_seeds[i].clear();
