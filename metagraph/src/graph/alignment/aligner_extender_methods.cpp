@@ -534,28 +534,20 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             max_i = std::min(max_i + 1, size);
 
             size_t depth = column.size();
-            if (!depth)
-                total_size += column_vector_size;
-
             size_t cur_size = max_i - min_i;
 
-            auto &next_column = column.emplace_back(
-                ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
-                ScoreVec(cur_size, ninf),
-                OpVec(cur_size, Cigar::CLIPPED), OpVec(cur_size, Cigar::CLIPPED),
-                OpVec(cur_size, Cigar::CLIPPED),
-                prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
-                min_i /* offset */, 0 /* max_pos */
-            );
+            Scores next_column(ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
+                               ScoreVec(cur_size, ninf), OpVec(cur_size, Cigar::CLIPPED),
+                               OpVec(cur_size, Cigar::CLIPPED),
+                               OpVec(cur_size, Cigar::CLIPPED),
+                               prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
+                               min_i /* offset */, 0 /* max_pos */);
             sanitize(next_column);
 
-            total_size += get_column_size(next_column);
-            ++num_columns;
-
-            bool updated = update_column<NodeType>(graph_, config_, column_prev,
-                                                   next_column, c, start, size,
-                                                   xdrop_cutoff, profile_score_,
-                                                   profile_op_, *seed_);
+            bool updated = update_column<NodeType>(
+                graph_, config_, column_prev, next_column, c, start, size,
+                xdrop_cutoff, profile_score_, profile_op_, *seed_
+            );
             sanitize(next_column);
 
             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
@@ -564,30 +556,40 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             max_pos = (max_it - S.begin()) + offset;
             assert(max_pos < size);
 
-            converged = !updated || has_converged(column_pair);
+            converged = !updated || has_converged(column_pair, next_column);
 
-            AlignNode cur{ next, c, depth, next_distance_from_origin };
-            if (OS[max_pos - offset] == Cigar::MATCH) {
-                starts.emplace_back(cur, *max_it);
-
-                if (*max_it > best_start.second) {
-                    best_start.first = cur;
-                    best_start.second = *max_it;
-                }
+            const score_t *__restrict__ match = &match_score_begin_[offset];
+            bool extendable = false;
+            for (size_t i = 0; i < S.size() && !extendable; ++i) {
+                if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
+                    extendable = true;
             }
 
-            assert(match_score_begin_[max_pos]
-                == config_.match_score(extend_window_.substr(max_pos)));
-
-            score_t score_rest = ninf;
-            for (size_t i = 0; i < S.size(); ++i) {
-                score_rest = std::max(score_rest, S[i] + match_score_begin_[i + offset]);
+            bool add_to_table = false;
+            AlignNode cur{ next, c, depth, next_distance_from_origin };
+            if (OS[max_pos - offset] == Cigar::MATCH && *max_it > best_start.second) {
+                best_start.first = cur;
+                best_start.second = *max_it;
+                add_to_table = true;
             }
 
             assert(xdrop_cutoff == best_start.second - config_.xdrop);
 
-            if (*max_it >= xdrop_cutoff && score_rest >= min_path_score)
+            if (*max_it >= xdrop_cutoff && extendable) {
                 stack.emplace(cur, *max_it);
+                add_to_table = true;
+            }
+
+            if (add_to_table) {
+                total_size += get_column_size(next_column) + (!depth * column_vector_size);
+                ++num_columns;
+                if (OS[max_pos - offset] == Cigar::MATCH)
+                    starts.emplace_back(cur, *max_it);
+
+                column.emplace_back(std::move(next_column));
+            } else if (!depth) {
+                table_.erase(next);
+            }
         }
     }
 
@@ -686,16 +688,17 @@ void DefaultColumnExtender<NodeType>
 }
 
 template <typename NodeType>
-bool DefaultColumnExtender<NodeType>::has_converged(const Column &column) {
+bool DefaultColumnExtender<NodeType>::has_converged(const Column &column,
+                                                    const Scores &next) {
     if (column.second)
         return true;
 
-    if (column.first.size() <= 1)
+    if (column.first.empty())
         return false;
 
-    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = column.first.back();
+    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = next;
     const auto &[S_b, E_b, F_b, OS_b, OE_b, OF_b, prev_b, PS_b, PF_b, offset_b, max_pos_b]
-        = column.first.at(column.first.size() - 2);
+        = column.first.back();
 
     return offset == offset_b && max_pos == max_pos_b
         && std::get<0>(prev) == std::get<0>(prev_b)
