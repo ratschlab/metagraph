@@ -37,7 +37,7 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _build_graph(input, output, k, repr, mode='basic', extra_params=''):
-        if not output.startswith(graph_file_extension[repr]):
+        if not output.endswith(graph_file_extension[repr]):
             output += graph_file_extension[repr]
 
         assert mode in ['basic', 'primary', 'canonical']
