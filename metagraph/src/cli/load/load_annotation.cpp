@@ -14,6 +14,8 @@ namespace cli {
 
 using mtg::common::logger;
 
+const uint64_t kBytesInGigabyte = 1'000'000'000;
+
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
@@ -62,13 +64,16 @@ std::unique_ptr<annot::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
                       size_t column_compressed_num_columns_cached,
                       bool row_compressed_sparse,
-                      uint64_t num_rows) {
+                      uint64_t num_rows,
+                      const std::string &swap_dir,
+                      double memory_available_gb) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
-                new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached)
+                new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached,
+                                              swap_dir, memory_available_gb * kBytesInGigabyte)
             );
             break;
         }
