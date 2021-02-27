@@ -354,6 +354,61 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('density: 0.5', params_str[2])
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
+    def test_simple_with_disk_swap(self):
+
+        graph_repr = 'succinct'
+        anno_repr = 'column'
+
+        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+                --graph {repr} -k 20 -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            repr=graph_repr,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        )
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 46960', params_str[1])
+        self.assertEqual('canonical mode: no', params_str[2])
+
+        # build annotation
+        annotate_command = '{exe} annotate --anno-header -v -i {graph} \
+                --disk-swap {tmp_dir} --mem-cap-gb 1e-6 \
+                --anno-type {anno_repr} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
+            anno_repr=anno_repr,
+            tmp_dir=self.tempdir.name,
+            outfile=self.tempdir.name + '/annotation',
+            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        )
+        res = subprocess.run([annotate_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        # check annotation
+        anno_stats_command = '{exe} stats -a {annotation}'.format(
+            exe=METAGRAPH,
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
+        )
+        res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('labels:  100', params_str[0])
+        self.assertEqual('objects: 46960', params_str[1])
+        self.assertEqual('density: 0.0185072', params_str[2])
+        self.assertEqual('representation: ' + anno_repr, params_str[3])
+
 
 if __name__ == '__main__':
     unittest.main()
