@@ -810,7 +810,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tpreallocated buffer size in Gb [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
@@ -1019,7 +1019,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tbuffer size in GB (per column in construction) [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
