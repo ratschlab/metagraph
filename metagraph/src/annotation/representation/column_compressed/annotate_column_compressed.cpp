@@ -478,6 +478,7 @@ void ColumnCompressed<Label>::flush() const {
     std::lock_guard<std::mutex> lock(bitmap_conversion_mu_);
 
     if (!flushed_) {
+        // the columns are flushed automatically on erasing from cache
         const_cast<ColumnCompressed*>(this)->cached_columns_.Clear();
         flushed_ = true;
     }
@@ -564,14 +565,14 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
             if (num_rows_ < buffer_size_bytes_ * 8) {
                 vector = new bitmap_vector(num_rows_, 0);
 
+            // For large bitmaps, use a more space efficient builder that
+            // requires only 64 bits per each 1-bit in the bitmap.
             } else if (swap_dir_.size()) {
-                // For large bitmaps, use the efficient builder, using only
-                // space proportional to the number of bits set in the bitmap.
+                // use a fixed size buffer and disk swap
                 vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
                                                      buffer_size_bytes_ / 8, swap_dir_);
             } else {
-                // For large bitmaps, use the efficient builder, using only
-                // space proportional to the number of bits set in the bitmap.
+                // all in RAM, the buffer is automatically resized for large bitmaps
                 vector = new bitmap_builder_set(num_rows_, get_num_threads(),
                                                 buffer_size_bytes_ / 8);
             }

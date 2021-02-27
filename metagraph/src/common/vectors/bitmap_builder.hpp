@@ -81,6 +81,11 @@ class bitmap_builder_set : public bitmap_builder {
 };
 
 
+/**
+ * A class for building a bitmap from positions of its set bits (ones).
+ * The positions may be not distinct and can be passed in arbitrary order.
+ * Keeps a buffer of a fixed size and writes temporary data to disk.
+ */
 class bitmap_builder_set_disk : public bitmap_builder {
   public:
     bitmap_builder_set_disk(uint64_t size,
@@ -105,6 +110,5 @@ class bitmap_builder_set_disk : public bitmap_builder {
     mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
     bool merged_ = false;
 };
-
 
 #endif // __BITMAP_BUILDER_HPP__

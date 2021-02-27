@@ -26,7 +26,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
-    // |swap_dir| specifies a location on disk for temp buffer chunks during
+    // |swap_dir| specifies a location on disk for tempprary buffers during the
     // column construction. If empty, no swap is used and all is stored in RAM.
     // |buffer_size_bytes| sets the buffer size per column (1 GiB by default)
     ColumnCompressed(uint64_t num_rows = 0,
@@ -113,8 +113,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     uint64_t num_rows_;
 
-    std::string swap_dir_;
-    uint64_t buffer_size_bytes_;
+    const std::string swap_dir_;
+    const uint64_t buffer_size_bytes_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
     mutable binmat::ColumnMajor annotation_matrix_view_;
