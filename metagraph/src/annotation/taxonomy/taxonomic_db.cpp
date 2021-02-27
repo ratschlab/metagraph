@@ -240,7 +240,8 @@ void TaxonomyDB::kmer_to_taxid_map_update(const std::vector<std::string> &filena
     std::mutex taxo_mutex;
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (const auto &file: filenames) {
+    for (uint64_t i = 0; i < filenames.size(); ++i) {
+        const auto &file = filenames[i];
         std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
                 cli::initialize_annotation(file, *config);
         if (!annot->load(file)) {
