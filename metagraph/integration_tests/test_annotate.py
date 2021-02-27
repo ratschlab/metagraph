@@ -354,8 +354,7 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('density: 0.5', params_str[2])
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
-    def test_simple_with_disk_swap(self):
-
+    def test_annotate_with_disk_swap(self):
         graph_repr = 'succinct'
         anno_repr = 'column'
 
