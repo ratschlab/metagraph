@@ -30,8 +30,6 @@ int merge_graph(Config *config) {
     std::vector<std::shared_ptr<graph::DBGSuccinct>> dbg_graphs;
     std::vector<const graph::boss::BOSS*> graphs;
 
-    config->canonical = true;
-
     for (const auto &file : files) {
         logger->info("Opening file '{}'", file);
 
@@ -42,7 +40,13 @@ int merge_graph(Config *config) {
         if (get_verbose())
             print_boss_stats(*graphs.back());
 
-        config->canonical &= dbg_graphs.back()->is_canonical_mode();
+        if (file == files.front())
+            config->graph_mode = dbg_graphs.back()->get_mode();
+
+        if (config->graph_mode != dbg_graphs.back()->get_mode()) {
+            logger->error("Input graphs are in different modes and thus incompatible for merge");
+            exit(1);
+        }
     }
 
     logger->info("Graphs are loaded in {} sec", timer.elapsed());
@@ -107,7 +111,7 @@ int merge_graph(Config *config) {
     logger->info("Graphs merged in {} sec", timer.elapsed());
 
     // graph output
-    graph::DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
+    graph::DBGSuccinct(graph, config->graph_mode).serialize(config->outfbase);
 
     return 0;
 }

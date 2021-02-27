@@ -33,5 +33,5 @@ do
         echo $x complete
         continue
     fi
-    echo "${metagraph} build -p $threads -v -k $K -o ${outbase} --canonical --count-kmers ${kmc_file}; ${metagraph} clean --to-fasta -p ${threads} --prune-tips $(($K * 2)) --prune-unitigs 0 --fallback 3 --unitigs --count-bins-q '0 0.2 0.4 0.6 0.8 1.0' -o ${outbase}.clean ${outbase}.dbg; rm ${outbase}.dbg* ${outbase}.edgemask" | bsub -J gtex_clean_k${K} -oo ${outbase}.lsf.log -We 20:00 -n $threads -R "rusage[mem=${pmem}]" -R "span[hosts=1]" -M ${mem}
+    echo "${metagraph} build -p $threads -v -k $K -o ${outbase} --mode canonical --count-kmers ${kmc_file}; ${metagraph} clean --to-fasta -p ${threads} --prune-tips $(($K * 2)) --prune-unitigs 0 --fallback 3 --unitigs --count-bins-q '0 0.2 0.4 0.6 0.8 1.0' -o ${outbase}.clean ${outbase}.dbg; rm ${outbase}.dbg* ${outbase}.edgemask" | bsub -J gtex_clean_k${K} -oo ${outbase}.lsf.log -We 20:00 -n $threads -R "rusage[mem=${pmem}]" -R "span[hosts=1]" -M ${mem}
 done

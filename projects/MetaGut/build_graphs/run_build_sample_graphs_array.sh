@@ -21,4 +21,4 @@ N=10000
 echo "fq1=\"\$(sed -n \${LSB_JOBINDEX}p ${metadata})\"; \:
 uuid=\"\$(basename \${fq1} | cut -f 1 -d ',')\"; \
 if [ -f ${outdir}/\${uuid}.dbg ]; then exit 0; fi; \
-${metagraph} build -v -p $threads -k $K -o ${outdir}/\${uuid} --canonical --count-kmers \${fq1}" | bsub -J contigs_k${K}[5000-$N]%400 -o ${logdir}/graph_build%I.lsf.log -We 20:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+${metagraph} build -v -p $threads -k $K -o ${outdir}/\${uuid} --mode canonical --count-kmers \${fq1}" | bsub -J contigs_k${K}[5000-$N]%400 -o ${logdir}/graph_build%I.lsf.log -We 20:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"

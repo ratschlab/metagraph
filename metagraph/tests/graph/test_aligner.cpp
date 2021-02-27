@@ -1375,12 +1375,12 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     std::string reference_rc = "TTGGCCTCGAAAGTTTTT";
     std::string query_rc     = "TTGGCCTCGAAAGCCCCC";
 
-    for (bool use_wrapper : { false, true }) {
-        auto dbg_succ = std::make_shared<DBGSuccinct>(k, !use_wrapper);
+    for (auto mode : { DeBruijnGraph::PRIMARY, DeBruijnGraph::CANONICAL }) {
+        auto dbg_succ = std::make_shared<DBGSuccinct>(k, mode);
         dbg_succ->add_sequence(reference_rc);
 
         std::shared_ptr<DeBruijnGraph> graph;
-        if (use_wrapper) {
+        if (mode == DeBruijnGraph::PRIMARY) {
             graph = std::make_shared<CanonicalDBG>(*dbg_succ);
         } else {
             graph = dbg_succ;
@@ -1420,7 +1420,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
         // TODO: sub-k seeds which are sink tips in the underlying graph currently can't be found
-        if (!use_wrapper)
+        if (mode != DeBruijnGraph::PRIMARY)
             check_extend(graph, aligner.get_config(), paths, query);
     }
 }
@@ -1435,7 +1435,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     std::string query_rc =     "TTGGCCTCGAAAACTTTT";
     //                                      X
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DBGMode::CANONICAL);
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
@@ -1572,7 +1572,7 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
 
-    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
     auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
 

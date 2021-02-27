@@ -45,7 +45,7 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                          bool verbose = false,
                                          sdsl::int_vector<> *weights = nullptr) {
-        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights).first;
+        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights);
     }
 
   private:

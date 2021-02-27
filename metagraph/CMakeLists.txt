@@ -103,6 +103,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(
     -Wno-exit-time-destructors
   )
+
+  if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+     add_compile_options(
+      -Wno-suggest-destructor-override
+      -Wno-deprecated-copy
+      -Wno-deprecated-declarations
+     )
+  endif()
 endif()
 
 if(APPLE)
