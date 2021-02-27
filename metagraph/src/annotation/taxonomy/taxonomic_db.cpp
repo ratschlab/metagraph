@@ -196,9 +196,6 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
     logger->trace("Starting rmq preprocessing..");
     rmq_preprocessing(tree_linearization);
     logger->trace("Finished rmq preprocessing in '{}' sec", timer.elapsed());
-
-//    taxonomic_map = std::make_shared<sdsl::int_vector<>>(1000000, 0);
-    taxonomic_map = new sdsl::int_vector<>(1LL<<20, 0);
 }
 
 NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) const {
@@ -235,65 +232,61 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, Norma
         return false;
     }
 
-    cerr << "accession_version=" << accession_version << std::endl;
-    cerr << "lookup_table.at(accession_version)=" << lookup_table.at(accession_version) << std::endl;
-    cerr << "normalized_taxid.at(lookup_table.at(accession_version))=" << normalized_taxid.at(lookup_table.at(accession_version)) << std::endl;
-    cerr << std::endl;
     taxid = normalized_taxid.at(lookup_table.at(accession_version));
     return true;
 }
 
 void TaxonomyDB::kmer_to_taxid_map_update(const std::vector<std::string> &filenames, cli::Config *config) {
-    ThreadPool thread_pool(get_num_threads(), 1);
     std::mutex taxo_mutex;
-    auto &taxo = *taxonomic_map;
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (const auto &file: filenames) {
-        std::cerr << "processing file=" << file << "\n";
         std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
                 cli::initialize_annotation(file, *config);
-        std::cerr << "init annot\n";
         if (!annot->load(file)) {
             logger->error("Cannot load annotations from file '{}'", file);
             exit(1);
         }
-        std::cerr << "load annot labels_sz=" << annot->get_all_labels().size() << "\n";
         for (const auto &label: annot->get_all_labels()) {
-            std::cerr << "inside label = " << label << "\n";
-//            thread_pool.enqueue([&]() {
-                AccessionVersion accession_version = get_accession_version_from_label(label);
-                std::cerr << "accession_version=" << accession_version << std::endl;
-                uint64_t taxid;
-                if(!get_normalized_taxid(accession_version, taxid)) {
-                    continue;
-//                    return;
+            AccessionVersion accession_version = get_accession_version_from_label(label);
+            uint64_t taxid;
+            if(!get_normalized_taxid(accession_version, taxid)) {
+                continue;
+            }
+            annot->call_objects(label, [&](const auto &index) {
+                if (index <= 0) {
+                    return;
                 }
-                std::cerr << "~~~~~~ label = " << label << std::endl;
-                annot->call_objects(label, [&](const auto &index) {
-                    if (index <= 0) {
-                        return;
+                if (index >= taxonomic_map.size()) {
+                    taxo_mutex.lock();
+                    uint64_t new_size = taxonomic_map.size();
+                    while (index >= new_size) {
+                        new_size = new_size * 2 + 1;
                     }
-                    while (index >= taxo.size()) {
-                        taxo_mutex.lock();
-                        std::cerr << "bft taxo size = " << taxo.size() << std::endl;
-                        uint64_t double_taxo_size = 2 * taxo.size();
-                        taxo.resize(double_taxo_size);
-                        std::cerr << "aft taxo size = " << taxo.size() << std::endl;
-                        taxo_mutex.unlock();
+                    sdsl::int_vector<> aux_taxonomic_map = taxonomic_map;
+                    taxonomic_map.resize(new_size);
+                    for(uint64_t i = 0; i < taxonomic_map.size(); ++i) {
+                        taxonomic_map[i] = 0;
                     }
-                    if (taxo[index] == 0) {
-//                        std::lock_guard<std::mutex> lock(taxo_mutex);
-                        taxo[index] = taxid;
-                    } else {
-                        auto lca = find_lca(std::vector<uint64_t>{taxo[index], taxid});
-//                        std::lock_guard<std::mutex> lock(taxo_mutex);
-                        taxo[index] = lca;
+                    for(uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
+                        taxonomic_map[i] = aux_taxonomic_map[i];
                     }
-                });
-                std::cerr << " <<<<<<<< finished  label=" << label << std::endl;
-//            });
+                    taxo_mutex.unlock();
+                }
+
+                if (taxonomic_map[index] == 0) {
+                    taxo_mutex.lock();
+                    taxonomic_map[index] = taxid;
+                    taxo_mutex.unlock();
+                } else {
+                    auto lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
+                    taxo_mutex.lock();
+                    taxonomic_map[index] = lca;
+                    taxo_mutex.unlock();
+                }
+            });
         }
     }
-    thread_pool.join();
 }
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {
@@ -331,14 +324,14 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     assert(node_parents.size());
     serialize_number_number_map(f, node_parents);
 
-    auto &taxo = *taxonomic_map;
+//    auto &taxo = *taxonomic_map;
     // Denormalize taxids in taxonomic map.
-    for (size_t i = 0; i < taxo.size(); ++i) {
-        if (taxo[i]) {
-            taxo[i] = denormalized_taxid[taxo[i]];
+    for (size_t i = 0; i < taxonomic_map.size(); ++i) {
+        if (taxonomic_map[i]) {
+            taxonomic_map[i] = denormalized_taxid[taxonomic_map[i]];
         }
     }
-    taxo.serialize(f);
+    taxonomic_map.serialize(f);
 
     f.close();
     logger->trace("Finished exporting metagraph taxonomic data after '{}' sec", timer.elapsed());

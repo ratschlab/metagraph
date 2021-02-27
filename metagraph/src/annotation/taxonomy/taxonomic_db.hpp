@@ -72,8 +72,8 @@ class TaxonomyDB {
     /**
     * taxonomic_map returns the taxid LCA for a given kmer.
     */
-//    std::shared_ptr<sdsl::int_vector<>> taxonomic_map = nullptr;
-    sdsl::int_vector<> *taxonomic_map;
+    sdsl::int_vector<> taxonomic_map;
+
     /*  *
      * Reads and returns the taxonomic tree
      *
