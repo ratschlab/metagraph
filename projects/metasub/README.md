@@ -39,12 +39,12 @@ bsub -J contigs_k15[1-4173]%600 \
 
 ### Build graph
 ```bash
-$METAGRAPH build --canonical --complete --graph bitmap \
+$METAGRAPH build --mode canonical --complete --graph bitmap \
     -o graph_17_complete_canonical.bitmapdbg -k 17
 ```
 
 ```bash
-$METAGRAPH build --canonical --complete --graph bitmap \
+$METAGRAPH build --mode canonical --complete --graph bitmap \
     -o graph_15_complete_canonical.bitmapdbg -k 15
 ```
 

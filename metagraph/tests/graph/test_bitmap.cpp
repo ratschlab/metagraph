@@ -23,8 +23,8 @@ const kmer::KmerExtractor2Bit kmer_extractor;
 
 
 TEST(DBGBitmapComplete, InitializeComplete) {
-    for (bool canonical : { false, true }) {
-        DBGBitmap graph(12, canonical);
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        DBGBitmap graph(12, mode);
         ASSERT_TRUE(graph.is_complete());
         EXPECT_EQ(std::string(12, 'A'), graph.get_node_sequence(1));
         EXPECT_EQ(1u, graph.kmer_to_node(std::string(12, 'A')));
@@ -47,9 +47,9 @@ TEST(DBGBitmapComplete, InitializeComplete) {
 }
 
 TEST(DBGBitmapComplete, SerializeComplete) {
-    for (bool canonical : { false, true }) {
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
         {
-            DBGBitmap graph(12, canonical);
+            DBGBitmap graph(12, mode);
 
             graph.serialize(test_dump_basename);
         }
@@ -69,8 +69,8 @@ TEST(DBGBitmapComplete, SerializeComplete) {
 }
 
 TEST(DBGBitmapComplete, InsertSequence) {
-    for (bool canonical : { false, true }) {
-        DBGBitmap graph(12, canonical);
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        DBGBitmap graph(12, mode);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -85,8 +85,8 @@ TEST(DBGBitmapComplete, InsertSequence) {
 }
 
 TEST(DBGBitmapComplete, ReverseComplement) {
-    for (bool canonical : { false, true }) {
-        DBGBitmap graph(12, canonical);
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        DBGBitmap graph(12, mode);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
 
@@ -105,8 +105,8 @@ TEST(DBGBitmapComplete, ReverseComplement) {
 }
 
 TEST(DBGBitmapComplete, CheckGraph) {
-    for (bool canonical : { false, true }) {
-        DBGBitmap graph(12, canonical);
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        DBGBitmap graph(12, mode);
 
         const std::string alphabet = "ACGT";
 
@@ -135,7 +135,7 @@ TEST(DBGBitmapComplete, CheckGraph) {
 
 TEST(DBGBitmapComplete, Serialize) {
     {
-        DBGBitmap graph(12, false);
+        DBGBitmap graph(12, DeBruijnGraph::BASIC);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -151,7 +151,7 @@ TEST(DBGBitmapComplete, Serialize) {
     }
 
     {
-        DBGBitmap graph(2, false);
+        DBGBitmap graph(2, DeBruijnGraph::BASIC);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -166,7 +166,7 @@ TEST(DBGBitmapComplete, Serialize) {
     }
 
     {
-        DBGBitmap graph(12, true);
+        DBGBitmap graph(12, DeBruijnGraph::CANONICAL);
 
         ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
         ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
@@ -182,7 +182,7 @@ TEST(DBGBitmapComplete, Serialize) {
     }
 
     {
-        DBGBitmap graph(2, true);
+        DBGBitmap graph(2, DeBruijnGraph::CANONICAL);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 

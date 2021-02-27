@@ -21,7 +21,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
     static std::unique_ptr<IBOSSChunkConstructor>
     initialize(size_t k,
-               bool canonical_mode = false,
+               bool both_strands = false,
                uint8_t bits_per_count = 0,
                const std::string &filter_suffix = "",
                size_t num_threads = 1,

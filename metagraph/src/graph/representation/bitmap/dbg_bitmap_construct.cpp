@@ -27,10 +27,10 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
   private:
     BitmapChunkConstructor(size_t k,
-                           bool canonical_mode = false,
-                           const std::string &filter_suffix = "",
-                           size_t num_threads = 1,
-                           double memory_preallocated = 0);
+                           DeBruijnGraph::Mode mode,
+                           const std::string &filter_suffix,
+                           size_t num_threads,
+                           double memory_preallocated);
 
     void add_sequence(std::string_view sequence, uint64_t count) {
         kmer_collector_.add_sequence(sequence, count);
@@ -46,12 +46,13 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
 
     size_t get_k() const { return kmer_collector_.get_k(); }
 
-    bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
+    DeBruijnGraph::Mode get_mode() const { return mode_; }
 
     DBGBitmap::Chunk build_chunk();
 
-    sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
+    sdsl::int_vector<> get_weights(uint8_t bits_per_count);
 
+    DeBruijnGraph::Mode mode_;
     KmerCollector kmer_collector_;
 };
 
@@ -70,25 +71,28 @@ encode_filter_suffix(const std::string &filter_suffix) {
 template <typename KmerCollector>
 BitmapChunkConstructor<KmerCollector>
 ::BitmapChunkConstructor(size_t k,
-                         bool canonical_mode,
+                         DeBruijnGraph::Mode mode,
                          const std::string &filter_suffix,
                          size_t num_threads,
                          double memory_preallocated)
-      : kmer_collector_(k,
-                        canonical_mode,
+      : mode_(mode),
+        kmer_collector_(k,
+                        mode == DeBruijnGraph::CANONICAL
+                            ? KmerCollector::BOTH
+                            : KmerCollector::BASIC,
                         encode_filter_suffix<KmerExtractor2Bit>(filter_suffix),
                         num_threads,
                         memory_preallocated) {}
 
 DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
-                                           bool canonical_mode,
+                                           DeBruijnGraph::Mode mode,
                                            uint8_t bits_per_count,
                                            const std::string &filter_suffix,
                                            size_t num_threads,
                                            double memory_preallocated) {
     constructor_.reset(
         IBitmapChunkConstructor::initialize(k,
-                                            canonical_mode,
+                                            mode,
                                             bits_per_count,
                                             filter_suffix,
                                             num_threads,
@@ -143,7 +147,7 @@ DBGBitmap* DBGBitmapConstructor
 ::build_graph_from_chunks(uint64_t size,
                           uint64_t num_kmers,
                           const std::function<DBGBitmap::Chunk(void)> &next_chunk,
-                          bool canonical_mode) {
+                          DeBruijnGraph::Mode mode) {
     auto graph = std::make_unique<DBGBitmap>(2);
 
 
@@ -161,7 +165,7 @@ DBGBitmap* DBGBitmapConstructor
         num_kmers
     );
 
-    graph->canonical_mode_ = canonical_mode;
+    graph->mode_ = mode;
     graph->complete_ = false;
 
     assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::bits_per_char));
@@ -173,7 +177,7 @@ DBGBitmap* DBGBitmapConstructor
 
 DBGBitmap* DBGBitmapConstructor
 ::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                          bool canonical_mode,
+                          DeBruijnGraph::Mode mode,
                           bool verbose) {
     if (chunk_filenames.empty())
         return new DBGBitmap(2);
@@ -234,7 +238,7 @@ DBGBitmap* DBGBitmapConstructor
             ++progress_bar;
             return chunk;
         },
-        canonical_mode
+        mode
     );
 }
 
@@ -274,12 +278,12 @@ using KmerMultsetVector32 = kmer::KmerCollector<KMER,
 
 IBitmapChunkConstructor*
 IBitmapChunkConstructor::initialize(size_t k,
-                                    bool canonical_mode,
+                                    DeBruijnGraph::Mode mode,
                                     uint8_t bits_per_count,
                                     const std::string &filter_suffix,
                                     size_t num_threads,
                                     double memory_preallocated) {
-#define OTHER_ARGS k, canonical_mode, filter_suffix, num_threads, memory_preallocated
+#define OTHER_ARGS k, mode, filter_suffix, num_threads, memory_preallocated
 
     if (!bits_per_count) {
         return initialize_bitmap_chunk_constructor<KmerSet>(OTHER_ARGS);
@@ -297,7 +301,7 @@ IBitmapChunkConstructor::initialize(size_t k,
 void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     auto chunk = constructor_->build_chunk();
     graph->k_ = constructor_->get_k();
-    graph->canonical_mode_ = constructor_->is_canonical_mode();
+    graph->mode_ = constructor_->get_mode();
     graph->kmers_ = decltype(graph->kmers_)(
         [&](const auto &index_callback) {
             index_callback(0);

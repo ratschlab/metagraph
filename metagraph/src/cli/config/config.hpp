@@ -7,6 +7,7 @@
 
 #include "kmer/kmer_collector_config.hpp"
 #include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 namespace mtg {
@@ -22,7 +23,6 @@ class Config {
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
     bool forward_and_reverse = false;
-    bool canonical = false;
     bool complete = false;
     bool dynamic = false;
     bool mark_dummy_kmers = false;
@@ -48,7 +48,6 @@ class Config {
     bool suppress_unlabeled = false;
     bool clear_dummy = false;
     bool count_dummy = false;
-    bool canonical_mode = false;
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
@@ -205,12 +204,15 @@ class Config {
     };
 
     AnnotationType anno_type = ColumnCompressed;
-    GraphType graph_type = SUCCINCT;
-
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
 
+    GraphType graph_type = SUCCINCT;
     static GraphType string_to_graphtype(const std::string &string);
+
+    graph::DeBruijnGraph::Mode graph_mode = graph::DeBruijnGraph::BASIC;
+    static std::string graphmode_to_string(graph::DeBruijnGraph::Mode mode);
+    static graph::DeBruijnGraph::Mode string_to_graphmode(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);
