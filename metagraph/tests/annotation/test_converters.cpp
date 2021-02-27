@@ -212,7 +212,7 @@ TEST(RowDiff, succ) {
         uint32_t idx = max_depth / 2;
         ASSERT_EQ(5, succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[idx][i], succ[i]) << max_depth << " " << i;;
+            EXPECT_EQ(expected_succ[idx][i], succ[i]) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
