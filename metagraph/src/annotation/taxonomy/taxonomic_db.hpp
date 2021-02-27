@@ -6,6 +6,7 @@
 
 #include "annotation/representation/base/annotation.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "cli/config/config.hpp"
 
 
 namespace mtg {
@@ -71,9 +72,9 @@ class TaxonomyDB {
     /**
     * taxonomic_map returns the taxid LCA for a given kmer.
     */
-    std::shared_ptr<sdsl::int_vector<>> taxonomic_map = nullptr;
-
-    /**
+//    std::shared_ptr<sdsl::int_vector<>> taxonomic_map = nullptr;
+    sdsl::int_vector<> *taxonomic_map;
+    /*  *
      * Reads and returns the taxonomic tree
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
@@ -91,15 +92,6 @@ class TaxonomyDB {
      */
     void read_lookup_table(const std::string &lookup_table_filepath,
                            const tsl::hopscotch_set<AccessionVersion> &input_accessions);
-
-    /**
-     * Reads the fasta headers and returns all the relevant accession versions.
-     *
-     * @param [input] fasta_headers_filepath path to a ".fasta.fai" file.
-     * @param [output] input_accessions contains all the accession version in the fasta input.
-     */
-    void get_input_accessions(const std::string &fasta_headers_filepath,
-                              tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
      * Computes the rmq data in "this->rmq_data". Beside this, calculates
@@ -132,11 +124,11 @@ class TaxonomyDB {
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
      * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
-     * @param [input] fasta_headers_filepath path to a ".fasta.fai" file.
+     * @param [input] input_accessions contains all the accession version in the annotation matrix input.
      */
     TaxonomyDB(const std::string &taxo_tree_filepath,
                const std::string &lookup_table_filepath,
-               const std::string &fasta_headers_filepath);
+               const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
      * Iterate the annotation matrix (kmer-OX labels-OY) for updating the LCA taxid
@@ -154,19 +146,27 @@ class TaxonomyDB {
                                size_t mem_bytes);
 
     /**
+     * Iterate the annotation matrix (kmer-OX labels-OY) from the received set of files
+     * for updating the LCA taxid per kmer. The new data is stored in "this->taxonomic_map".
+     *
+     * @param [input] anno_graph - the annotation matrix object.
+     */
+    void kmer_to_taxid_map_update(const std::vector<std::string> &files, cli::Config *config);
+
+    /**
      * Exports 'taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath);
-    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids);
+    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids) const;
 
-    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid);
-    std::string get_accession_version_from_label(const std::string &label);
+    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) const;
+    static std::string get_accession_version_from_label(const std::string &label);
 
   private:
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
-    uint64_t num_external_get_taxid_calls = 0;
-    uint64_t num_external_get_taxid_calls_failed = 0;
+    static uint64_t num_external_get_taxid_calls;
+    static uint64_t num_external_get_taxid_calls_failed;
 };
 
 }

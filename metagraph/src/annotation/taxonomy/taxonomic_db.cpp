@@ -7,12 +7,15 @@
 #include <cmath>
 #include <sdsl/int_vector.hpp>
 
+#include "cli/config/config.hpp"
 #include "common/serialization.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "cli/load/load_annotation.hpp"
 
 #include "common/logger.hpp"
 
@@ -23,6 +26,9 @@ namespace annot {
 using mtg::common::logger;
 
 typedef TaxonomyDB::NormalizedTaxId NormalizedTaxId;
+
+uint64_t TaxonomyDB::num_external_get_taxid_calls = 0;
+uint64_t TaxonomyDB::num_external_get_taxid_calls_failed = 0;
 
 void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                                    std::vector<NormalizedTaxId> &tree_linearization) {
@@ -137,20 +143,6 @@ std::string TaxonomyDB::get_accession_version_from_label(const std::string &labe
     return  utils::split_string(label, "|")[3];
 }
 
-void TaxonomyDB::get_input_accessions(const std::string &fasta_headers_filepath,
-                                      tsl::hopscotch_set<AccessionVersion> &input_accessions) {
-    std::ifstream f(fasta_headers_filepath);
-    std::string line;
-
-    while (getline(f, line) ) {
-        std::string fasta_label = utils::split_string(line, "\t")[0];
-        std::string accession_version = get_accession_version_from_label(fasta_label);
-        input_accessions.insert(accession_version);
-    }
-    assert(input_accessions.size());
-    f.close();
-}
-
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
                                    const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
@@ -169,7 +161,7 @@ void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
 
 TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
                        const std::string &lookup_table_filepath,
-                       const std::string &fasta_headers_filepath) {
+                       const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
 
     if (!std::filesystem::exists(taxo_tree_filepath)) {
         logger->error("Can't open taxonomic tree file '{}'.", taxo_tree_filepath);
@@ -179,18 +171,8 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
         logger->error("Can't open taxonomic lookup table file '{}'.", lookup_table_filepath);
         std::exit(1);
     }
-    if (!std::filesystem::exists(fasta_headers_filepath)) {
-        logger->error("Can't open fasta headers file '{}'.", fasta_headers_filepath);
-        std::exit(1);
-    }
 
     Timer timer;
-    logger->trace("Parsing fasta headers...");
-    tsl::hopscotch_set<AccessionVersion> input_accessions;
-    get_input_accessions(fasta_headers_filepath, input_accessions);
-    logger->trace("Finished parsing fasta headers in '{}' sec", timer.elapsed());
-
-    timer.reset();
     logger->trace("Parsing lookup table..");
     read_lookup_table(lookup_table_filepath, input_accessions);
     logger->trace("Finished parsing tookup table in '{}' sec", timer.elapsed());
@@ -214,9 +196,12 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
     logger->trace("Starting rmq preprocessing..");
     rmq_preprocessing(tree_linearization);
     logger->trace("Finished rmq preprocessing in '{}' sec", timer.elapsed());
+
+//    taxonomic_map = std::make_shared<sdsl::int_vector<>>(1000000, 0);
+    taxonomic_map = new sdsl::int_vector<>(1LL<<20, 0);
 }
 
-NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) {
+NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) const {
     uint64_t left_idx = node_to_linearization_idx[taxids[0]];
     uint64_t right_idx = node_to_linearization_idx[taxids[0]];
     for (const auto &taxid: taxids) {
@@ -238,76 +223,77 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
     return right_lca;
 }
 
-bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) {
+bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) const {
     num_external_get_taxid_calls += 1;
     if (! lookup_table.count(accession_version)) {
+        // accession_version not in the lookup_table
         num_external_get_taxid_calls_failed += 1;
         return false;
     }
-    taxid = normalized_taxid[lookup_table[accession_version]];
+    if (! normalized_taxid.count(lookup_table.at(accession_version))) {
+        // taxid (corresponding to the current accession_version) not in the taxonomic tree.
+        return false;
+    }
+
+    cerr << "accession_version=" << accession_version << std::endl;
+    cerr << "lookup_table.at(accession_version)=" << lookup_table.at(accession_version) << std::endl;
+    cerr << "normalized_taxid.at(lookup_table.at(accession_version))=" << normalized_taxid.at(lookup_table.at(accession_version)) << std::endl;
+    cerr << std::endl;
+    taxid = normalized_taxid.at(lookup_table.at(accession_version));
     return true;
 }
 
-void TaxonomyDB::run_taxo_columns_update(const annot::MultiLabelEncoded<AccessionVersion> &annotation,
-                                         const std::vector<AccessionVersion> &columns) {
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
-    auto &taxo = *taxonomic_map;
+void TaxonomyDB::kmer_to_taxid_map_update(const std::vector<std::string> &filenames, cli::Config *config) {
+    ThreadPool thread_pool(get_num_threads(), 1);
     std::mutex taxo_mutex;
-
-    for (const auto &label: columns) {
-        thread_pool.enqueue([&]() {
-          std::string accession_version = get_accession_version_from_label(label);
-          uint64_t taxid;
-          if(!get_normalized_taxid(accession_version, taxid)) {
-              return;
-          }
-          annotation.call_objects(label, [&](const auto &index) {
-            if (taxo[index] == 0) {
-                std::lock_guard<std::mutex> lock(taxo_mutex);
-                taxo[index] = taxid;
-            } else {
-                auto lca = find_lca(std::vector<uint64_t>{taxo[index], taxid});
-                std::lock_guard<std::mutex> lock(taxo_mutex);
-                taxo[index] = lca;
-            }
-          });
-        });
+    auto &taxo = *taxonomic_map;
+    for (const auto &file: filenames) {
+        std::cerr << "processing file=" << file << "\n";
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
+                cli::initialize_annotation(file, *config);
+        std::cerr << "init annot\n";
+        if (!annot->load(file)) {
+            logger->error("Cannot load annotations from file '{}'", file);
+            exit(1);
+        }
+        std::cerr << "load annot labels_sz=" << annot->get_all_labels().size() << "\n";
+        for (const auto &label: annot->get_all_labels()) {
+            std::cerr << "inside label = " << label << "\n";
+//            thread_pool.enqueue([&]() {
+                AccessionVersion accession_version = get_accession_version_from_label(label);
+                std::cerr << "accession_version=" << accession_version << std::endl;
+                uint64_t taxid;
+                if(!get_normalized_taxid(accession_version, taxid)) {
+                    continue;
+//                    return;
+                }
+                std::cerr << "~~~~~~ label = " << label << std::endl;
+                annot->call_objects(label, [&](const auto &index) {
+                    if (index <= 0) {
+                        return;
+                    }
+                    while (index >= taxo.size()) {
+                        taxo_mutex.lock();
+                        std::cerr << "bft taxo size = " << taxo.size() << std::endl;
+                        uint64_t double_taxo_size = 2 * taxo.size();
+                        taxo.resize(double_taxo_size);
+                        std::cerr << "aft taxo size = " << taxo.size() << std::endl;
+                        taxo_mutex.unlock();
+                    }
+                    if (taxo[index] == 0) {
+//                        std::lock_guard<std::mutex> lock(taxo_mutex);
+                        taxo[index] = taxid;
+                    } else {
+                        auto lca = find_lca(std::vector<uint64_t>{taxo[index], taxid});
+//                        std::lock_guard<std::mutex> lock(taxo_mutex);
+                        taxo[index] = lca;
+                    }
+                });
+                std::cerr << " <<<<<<<< finished  label=" << label << std::endl;
+//            });
+        }
     }
     thread_pool.join();
-}
-
-void TaxonomyDB::taxonomic_update(const graph::AnnotatedDBG &anno_graph) {
-    Timer timer_update_taxonomic_map;
-    taxonomic_map = std::make_shared<sdsl::int_vector<>>(anno_graph.get_graph().max_index(), 0);
-
-    auto &annotation = anno_graph.get_annotation();
-    run_taxo_columns_update(annotation, annotation.get_all_labels());
-    logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
-}
-
-void TaxonomyDB::taxonomic_update_fast(const graph::AnnotatedDBG &anno_graph,
-                                       size_t max_col_in_ram) {
-    Timer timer_update_taxonomic_map;
-    taxonomic_map = std::make_shared<sdsl::int_vector<>>(anno_graph.get_graph().max_index(), 0);
-    auto &annotation = anno_graph.get_annotation();
-    const std::vector<AccessionVersion> &all_labels = annotation.get_all_labels();
-
-    for (uint64_t i = 0; i < all_labels.size(); ) {
-        logger->trace("Loading columns for batch-conversion...");
-        std::vector<AccessionVersion> current_labels;
-        size_t no_columns = 0;
-        for ( ; i < all_labels.size(); ++i) {
-            no_columns += 1;
-            if (no_columns > max_col_in_ram) {
-                break;
-            }
-            current_labels.push_back(all_labels[i]);
-        }
-        logger->trace("Running taxonomic_update on {}-batch column", no_columns);
-        run_taxo_columns_update(annotation, current_labels);
-    }
-
-    logger->trace("Finished taxonomic updates in '{}' sec", timer_update_taxonomic_map.elapsed());
 }
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {

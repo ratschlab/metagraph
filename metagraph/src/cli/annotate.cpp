@@ -4,7 +4,6 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
-#include "annotation/taxonomy/taxonomic_db.hpp"
 #include "seq_io/formats.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "seq_io/kmc_parser.hpp"
@@ -271,19 +270,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     thread_pool.join();
 
-    if (config.taxonomic_tree.size()) {
-        if (config.separately) {
-            logger->error("TaxonomicDB cannot be constructed on separated files (flag '--separately')");
-            exit(1);
-        }
-        annot::TaxonomyDB taxonomy(config.taxonomic_tree, config.lookup_table, config.fasta_header_delimiter);
-        if (config.fast) {
-            taxonomy.taxonomic_update_fast(*anno_graph, config.memory_available);
-        } else {
-            taxonomy.taxonomic_update(*anno_graph);
-        }
-        taxonomy.export_to_file(config.outfbase + ".taxo");
-    }
     anno_graph->get_annotation().serialize(annotator_filename);
 }
 

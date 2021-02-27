@@ -73,8 +73,10 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
-    } else if (!strcmp(argv[1], "taxo_class")) {
-        identity = TAXO_CLASSIFY;
+    } else if (!strcmp(argv[1], "transform_anno_tax")) {
+        identity = TRANSFORM_ANNO_TAX;
+    } else if (!strcmp(argv[1], "tax_class")) {
+        identity = TAX_CLASSIFY;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -813,7 +815,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
-            fprintf(stderr, "\ttaxo_class\tgiven a taxonomic tree, classify sequences to LCA taxid\n\n");
+            fprintf(stderr, "\ttax_class\tgiven a taxonomic tree, classify sequences to LCA taxid\n\n");
             return;
         }
         case BUILD: {
@@ -1044,9 +1046,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
-            fprintf(stderr, "\t   --taxonomic-tree [STR] \tpath to the taxonomic tree (\"nodes.dmp\") corresponding to the input data []\n");
-            fprintf(stderr, "\t   --lookup-table [STR] \tpath to the lookup table (\"*.accession2taxid\") corresponding to the input data []\n");
-            fprintf(stderr, "\t   --header-delimiter [STR] \tpath to the fasta headers file (\"*.fasta.fai\") corresponding to the input files []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
@@ -1183,8 +1182,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
-        case TAXO_CLASSIFY: {
-            fprintf(stderr, "Usage: %s taxo_class -i <GRAPH> --taxonomic-tree <TAXONOMIC_DB> FILE1 [[FILE2] ...]\n"
+        case TRANSFORM_ANNO_TAX: {
+            fprintf(stderr, "Usage: %s transform_anno_tax --taxonomic-tree <nodes.dmp> --lookup-table <*.accession2taxid> -o <TAXONOMIC_DB-basename> ANNOT1 [[ANNOT2] ...] [options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
+            break;
+        }
+        case TAX_CLASSIFY: {
+            fprintf(stderr, "Usage: %s tax_class -i <GRAPH> --taxonomic-tree <TAXONOMIC_DB-basename> FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for taxonomic classify:\n");

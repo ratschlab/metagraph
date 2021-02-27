@@ -171,7 +171,8 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
-        TAXO_CLASSIFY,
+        TRANSFORM_ANNO_TAX,
+        TAX_CLASSIFY,
     };
     IdentityType identity = NO_IDENTITY;
 
