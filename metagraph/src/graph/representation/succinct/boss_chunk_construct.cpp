@@ -954,13 +954,13 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                           both_strands
                             // collect both forward and rev-compl k-mers
                             ? (filter_suffix.empty()
-                                // collect only canonical k-mers, the rev-compl
+                                // store only canonical k-mers, the rev-compl
                                 // k-mers will be reconstructed later
                                 ? KmerCollector::Mode::CANONICAL_ONLY
-                                // can't do the same for chunk, so collect all
-                                // from the beginning
+                                // can't do the same for a single chunk, so
+                                // collect all k-mers from the beginning
                                 : KmerCollector::Mode::BOTH)
-                            // collect only the k-mers from input
+                            // collect only the k-mers from the input
                             : KmerCollector::Mode::BASIC,
                           encode_filter_suffix_boss(filter_suffix),
                           num_threads,

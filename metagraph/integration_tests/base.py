@@ -49,7 +49,7 @@ class TestingBase(unittest.TestCase):
             extra_params=extra_params,
             k=k,
             repr=repr,
-            mode='--mode basic' if mode == 'basic' else 'canonical',
+            mode='basic' if mode == 'basic' else 'canonical',
             outfile=output,
             input=input
         )

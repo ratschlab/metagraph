@@ -82,8 +82,8 @@ int build_graph(Config *config) {
                 config->forward_and_reverse = false;
                 break;
             case DeBruijnGraph::PRIMARY:
-                logger->error("Passed --fwd-and-reverse but primary graph by"
-                              " definition cannot contain both strands.");
+                logger->error("Passed '--fwd-and-reverse', but primary graphs"
+                              " by definition can't contain both strands.");
                 exit(1);
         }
     }
