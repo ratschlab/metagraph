@@ -139,10 +139,10 @@ bool update_column(const DeBruijnGraph &graph_,
     assert(del_end + 1 >= match_end);
 
 
-    const score_t *__restrict__ sprev = &S_prev[offset - offset_prev];
-    const score_t *__restrict__ fprev = &F_prev[offset - offset_prev];
-    const int8_t *__restrict__ profile = &profile_score_.find(c)->second[start + offset];
-    const Cigar::Operator *__restrict__ profile_o = &profile_op_.find(c)->second[start + offset];
+    const score_t *sprev = &S_prev[offset - offset_prev];
+    const score_t *fprev = &F_prev[offset - offset_prev];
+    const int8_t *profile = &profile_score_.find(c)->second[start + offset];
+    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
 
     std::fill(PS.begin() + match_begin, PS.begin() + match_end, Extender::PREV);
     std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
@@ -558,7 +558,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             converged = !updated || has_converged(column_pair, next_column);
 
-            const score_t *__restrict__ match = &match_score_begin_[offset];
+            const score_t *match = &match_score_begin_[offset];
             bool extendable = false;
             for (size_t i = 0; i < S.size() && !extendable; ++i) {
                 if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
