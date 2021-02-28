@@ -24,12 +24,7 @@ class Cigar {
     };
 
     typedef uint32_t LengthType;
-    typedef std::array<Operator, 128> OperatorTableRow;
-    typedef std::array<OperatorTableRow, 128> OperatorTable;
     typedef std::pair<Operator, LengthType> value_type;
-
-    static OperatorTable char_to_op;
-    static const OperatorTableRow& get_op_row(char a) { return char_to_op[a]; }
 
     Cigar(Operator op = Operator::CLIPPED, LengthType num = 0)
           : cigar_(num ? 1 : 0, std::make_pair(op, num)) { }
@@ -37,7 +32,7 @@ class Cigar {
     // See section 1.4 in https://samtools.github.io/hts-specs/SAMv1.pdf for
     // a specification of the CIGAR string format.
     // e.g., 3=1X2I3D for 3 matches, 1 mismatch, 2 insertions, 3 deletions
-    explicit Cigar(const std::string &cigar_str);
+    Cigar(std::string_view cigar_str);
 
     size_t size() const { return cigar_.size(); }
     bool empty() const { return cigar_.empty(); }
@@ -104,14 +99,18 @@ class Cigar {
     // character of the reference sequence after clipping is trimmed
     bool is_valid(std::string_view reference, std::string_view query) const;
 
-    static char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
+    static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:
     static constexpr char op_str_[] = "SX=DIN";
     std::vector<value_type> cigar_;
-
-    static OperatorTable initialize_opt_table();
 };
+
+
+typedef std::array<std::array<Cigar::Operator, 128>, 128> OperatorTable;
+OperatorTable initialize_opt_table();
+static const OperatorTable kCharToOp = initialize_opt_table();
+
 
 } // namespace align
 } // namespace graph

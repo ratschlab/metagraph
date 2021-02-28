@@ -76,7 +76,7 @@ auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
             score_t match_score = partial_sum[i + k] - partial_sum[i];
 
             if (match_score > config.min_cell_score) {
-                seeds.emplace_back(std::string_view(query.data() + i, k),
+                seeds.emplace_back(query.substr(i, k),
                                    std::vector<NodeType>{ query_nodes[i] },
                                    match_score, i, orientation);
                 assert(seeds.back().is_valid(graph, &config));
@@ -166,7 +166,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         assert(i < suffix_seeds.size());
 
-        std::string_view seed_seq(this->query_.data() + i, seed_length);
+        std::string_view seed_seq = this->query_.substr(i, seed_length);
         DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
 
         if (match_score <= this->config_.min_cell_score)
@@ -184,8 +184,12 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     for (size_t i = 0; i < min_seed_length.size(); ++i) {
         if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
             if (i) {
-                min_seed_length[i] = std::max(min_seed_length[i - 1] - 1,
-                                              min_seed_length[i]);
+                size_t new_min_seed_length = std::max(min_seed_length[i - 1] - 1,
+                                                      min_seed_length[i]);
+                if (new_min_seed_length > min_seed_length[i]) {
+                    min_seed_length[i] = new_min_seed_length;
+                    suffix_seeds[i].clear();
+                }
             }
 
             size_t max_seed_length = std::min({ this->config_.max_seed_length,
@@ -193,8 +197,11 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                                                 this->query_.size() - i });
             if (max_seed_length >= min_seed_length[i]) {
                 dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
-                    std::string_view(this->query_.data() + i, max_seed_length),
+                    this->query_.substr(i, max_seed_length),
                     [&](node_index alt_node, size_t seed_length) {
+                        if (seed_length > min_seed_length[i])
+                            suffix_seeds[i].clear();
+
                         min_seed_length[i] = seed_length;
                         append_suffix_seed(i, alt_node, seed_length);
                     },
@@ -202,8 +209,12 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 );
 
                 if (i + 1 < min_seed_length.size()) {
-                    min_seed_length[i + 1] = std::max(min_seed_length[i + 1],
-                                                      min_seed_length[i]);
+                    size_t new_min_seed_length = std::max(min_seed_length[i + 1],
+                                                          min_seed_length[i]);
+                    if (new_min_seed_length > min_seed_length[i + 1]) {
+                        min_seed_length[i + 1] = new_min_seed_length;
+                        suffix_seeds[i + 1].clear();
+                    }
                 }
             }
         }
@@ -212,6 +223,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
     if (canonical) {
         // find sub-k matches in the reverse complement
+        // TODO: find sub-k seeds which are sink tips in the underlying graph
         std::string query_rc(this->query_);
         reverse_complement(query_rc.begin(), query_rc.end());
 
@@ -237,7 +249,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
             size_t j_max = query_rc.size() - i - this->config_.min_seed_length;
 
             // skip over positions which have better matches
-            while (min_seed_length[j_min] > max_seed_length && j_min <= j_max) {
+            while (j_min <= j_max && min_seed_length[j_min] > max_seed_length) {
                 ++j_min;
                 --max_seed_length;
             }
@@ -261,7 +273,10 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 continue;
             }
 
-            min_seed_length[j] = seed_length;
+            if (seed_length > min_seed_length[j]) {
+                min_seed_length[j] = seed_length;
+                suffix_seeds[j].clear();
+            }
 
             // clear out shorter seeds
             size_t s = seed_length;
@@ -291,6 +306,8 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
         if (pos_seeds.empty())
             continue;
+
+        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin()));
 
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
@@ -360,23 +377,23 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
         size_t mem_length = (next - it) + k - 1;
         assert(i + mem_length <= this->query_.size());
 
-        const char *begin_it = this->query_.data() + i;
-        const char *end_it = begin_it + mem_length;
+        if (mem_length >= this->config_.min_seed_length) {
+            const char *begin_it = this->query_.data() + i;
+            const char *end_it = begin_it + mem_length;
 
-        assert(end_it >= begin_it + this->config_.min_seed_length);
+            score_t match_score = this->partial_sum_[end_it - this->query_.data()]
+                                        - this->partial_sum_[i];
 
-        score_t match_score = this->partial_sum_[end_it - this->query_.data()]
-                                    - this->partial_sum_[i];
+            auto node_begin_it = this->query_nodes_.begin() + i;
+            auto node_end_it = node_begin_it + (next - it);
+            assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
 
-        auto node_begin_it = this->query_nodes_.begin() + i;
-        auto node_end_it = node_begin_it + (next - it);
-        assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos) == node_end_it);
-
-        if (match_score > this->config_.min_cell_score) {
-            seeds.emplace_back(std::string_view(begin_it, mem_length),
-                               std::vector<NodeType>{ node_begin_it, node_end_it },
-                               match_score, i,this->orientation_);
-            assert(seeds.back().is_valid(this->graph_, &this->config_));
+            if (match_score > this->config_.min_cell_score) {
+                seeds.emplace_back(std::string_view(begin_it, mem_length),
+                                   std::vector<NodeType>{ node_begin_it, node_end_it },
+                                   match_score, i,this->orientation_);
+                assert(seeds.back().is_valid(this->graph_, &this->config_));
+            }
         }
 
         it = next;

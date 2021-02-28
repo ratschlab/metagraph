@@ -11,7 +11,6 @@
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
-#include "aligner_dp_table.hpp"
 
 
 namespace mtg {
@@ -29,6 +28,22 @@ class Alignment {
   public:
     typedef NodeType node_index;
     typedef DBGAlignerConfig::score_t score_t;
+
+    Alignment(std::string_view query,
+              std::vector<NodeType>&& nodes = {},
+              std::string&& sequence = "",
+              score_t score = 0,
+              Cigar&& cigar = Cigar(),
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0)
+          : query_(query),
+            nodes_(std::move(nodes)),
+            sequence_(std::move(sequence)),
+            score_(score),
+            cigar_(Cigar::CLIPPED, clipping),
+            orientation_(orientation),
+            offset_(offset) { cigar_.append(std::move(cigar)); }
 
     // Used for constructing seeds
     Alignment(std::string_view query = {},
@@ -48,6 +63,7 @@ class Alignment {
         assert(nodes.empty() || clipping || is_exact_match());
     }
 
+    // Used for constructing exact match seeds
     Alignment(std::string_view query,
               std::vector<NodeType>&& nodes,
               std::string&& sequence,
@@ -55,16 +71,6 @@ class Alignment {
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0);
-
-    // TODO: construct multiple alignments from the same starting point
-    Alignment(const DPTable<NodeType> &dp_table,
-              const DBGAlignerConfig &config,
-              std::string_view query_view,
-              typename DPTable<NodeType>::const_iterator column,
-              size_t start_pos,
-              size_t offset,
-              NodeType *start_node,
-              const Alignment &seed);
 
     void append(Alignment&& other);
 
@@ -160,22 +166,6 @@ class Alignment {
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
   private:
-    Alignment(std::string_view query,
-              std::vector<NodeType>&& nodes = {},
-              std::string&& sequence = "",
-              score_t score = 0,
-              Cigar&& cigar = Cigar(),
-              size_t clipping = 0,
-              bool orientation = false,
-              size_t offset = 0)
-          : query_(query),
-            nodes_(std::move(nodes)),
-            sequence_(std::move(sequence)),
-            score_(score),
-            cigar_(Cigar::CLIPPED, clipping),
-            orientation_(orientation),
-            offset_(offset) { cigar_.append(std::move(cigar)); }
-
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
     std::string_view query_;
@@ -199,11 +189,36 @@ std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment
     return out;
 }
 
-template <typename NodeType = uint64_t>
+bool spell_path(const DeBruijnGraph &graph,
+                const std::vector<uint64_t> &path,
+                std::string &seq,
+                size_t offset = 0);
+
 struct LocalAlignmentLess {
+    template <typename NodeType>
     bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
-        return std::make_pair(-a.get_score(), a.get_query().size())
-                > std::make_pair(-b.get_score(), b.get_query().size());
+        // 1) score is less, or
+        // 2) more of the query is covered, or
+        // 3) if it is in the reverse orientation, or
+        // 4) if the starting point is later in the query
+        return std::make_tuple(b.get_score(), a.get_query().size(),
+                               a.get_orientation(), a.get_clipping())
+            > std::make_tuple(a.get_score(), b.get_query().size(),
+                              b.get_orientation(), b.get_clipping());
+    }
+};
+
+struct LocalAlignmentGreater {
+    template <typename NodeType>
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+        // 1) score is higher, or
+        // 2) less of the query is covered, or
+        // 3) if it is in the forward orientation, or
+        // 4) if the starting point is earlier in the query
+        return std::make_tuple(a.get_score(), b.get_query().size(),
+                               b.get_orientation(), b.get_clipping())
+            > std::make_tuple(b.get_score(), a.get_query().size(),
+                              a.get_orientation(), a.get_clipping());
     }
 };
 

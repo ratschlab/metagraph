@@ -50,7 +50,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 ::add_alignment(DBGAlignment&& alignment) {
     if (path_queue_.size() < config_.num_alternative_paths) {
         path_queue_.emplace(std::move(alignment));
-    } else if (alignment.get_score() > path_queue_.minimum().get_score()) {
+    } else if (!AlignmentCompare()(alignment, path_queue_.minimum())) {
         path_queue_.update(path_queue_.begin(), std::move(alignment));
     }
 }

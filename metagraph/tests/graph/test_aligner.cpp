@@ -512,16 +512,16 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
+TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "AAAACTTTTTT";
     std::string reference_2 = "AAAATTGGGGG";
     std::string query =       "AAAATTTTTTT";
-    //                             X
+    //                             D
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3), -3, -1);
     config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
@@ -531,11 +531,10 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     EXPECT_NE(paths[0], paths[1]);
     auto path = paths[0];
 
-    EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query, reference_1), path.get_score());
-    EXPECT_EQ("4=1X6=", path.get_cigar().to_string());
-    EXPECT_EQ(10u, path.get_num_matches());
+    EXPECT_EQ(query.size() - k + 2, path.size());
+    EXPECT_EQ(reference_1 + "T", path.get_sequence());
+    EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
+    EXPECT_EQ(11u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
@@ -559,7 +558,6 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
     config.num_alternative_paths = 2;
-    config.queue_size = 100;
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
@@ -607,41 +605,6 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
-}
-
-TYPED_TEST(DBGAlignerTest, align_multiple_misalignment_bandwidth) {
-    size_t k = 4;
-    std::string reference = "AAAGCGGACCCTTTCCGTTAT";
-    std::string query =     "AAAGGGGACCCTTTTCGTTAT";
-    //                           X         X
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-
-    for (uint64_t bandwidth : std::vector<uint64_t>{ 2, 5, 10, std::numeric_limits<uint64_t>::max()}) {
-        auto config_bandwidth = config;
-        config_bandwidth.bandwidth = bandwidth;
-
-        DBGAligner<> aligner(*graph, config_bandwidth);
-        auto paths = aligner.align(query);
-
-        ASSERT_EQ(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(query.size() - k + 1, path.size());
-        EXPECT_EQ(reference, path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-        EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
-        EXPECT_EQ(19u, path.get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-        check_extend(graph, aligner.get_config(), paths, query);
-    }
 }
 
 TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
@@ -714,7 +677,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
     //                            IIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
@@ -740,7 +703,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
-    size_t k = 4;
+    size_t k = 5;
     std::string reference = "TTTCCGGTTGTTA";
     std::string query =     "TTTCCGCAAAAAAAAATTGTTA";
     //                             XIIIIIIIII
@@ -1027,6 +990,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGAGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
     EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
+             || path.get_cigar().to_string() == "45=5I1=2I7=1X39="
              || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
              || path.get_cigar().to_string() == "44=3I1=4I8=1X39="
              || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
@@ -1050,6 +1014,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
         "TTTGTGGCTAGAGCTCGAGATCGCGCGGCCACAATTGACAAATGA" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC"
     ) + config.gap_opening_penalty + score_t(6) * config.gap_extension_penalty, path.get_score());
     EXPECT_TRUE(path.get_cigar().to_string() == "45=7I8=1X39="
+             || path.get_cigar().to_string() == "45=5I1=2I7=1X39="
              || path.get_cigar().to_string() == "44=2I1=5I8=1X39="
              || path.get_cigar().to_string() == "44=3I1=4I8=1X39="
              || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
@@ -1291,7 +1256,6 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
             config.xdrop = xdrop;
             config.min_exact_match = discovery_fraction;
             config.max_nodes_per_seq_char = 10.0;
-            config.queue_size = 20;
             config.num_alternative_paths = 2;
             config.min_path_score = 0;
             config.min_cell_score = 0;
@@ -1308,6 +1272,26 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
             }
         }
     }
+}
+
+TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
+    size_t k = 31;
+    std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAGGTCTTCGCCTGTGTAGATCTCGGTGGTCG";
+    std::string query =     "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTTCCTGGTGGTGTAGATC";
+
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    check_extend(graph, aligner.get_config(), paths, query);
+
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
@@ -1354,7 +1338,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         auto graph = std::make_shared<DBGSuccinct>(k);
         graph->add_sequence(reference);
 
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
         config.min_seed_length = 1;
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
@@ -1388,29 +1372,93 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     std::string query =     "GGGGGCTTTCGAGGCCAA";
     //                       SSSSS
 
-    auto graph = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::CANONICAL);
-    graph->add_sequence(reference);
+    std::string reference_rc = "TTGGCCTCGAAAGTTTTT";
+    std::string query_rc     = "TTGGCCTCGAAAGCCCCC";
 
+    for (auto mode : { DeBruijnGraph::PRIMARY, DeBruijnGraph::CANONICAL }) {
+        auto dbg_succ = std::make_shared<DBGSuccinct>(k, mode);
+        dbg_succ->add_sequence(reference_rc);
+
+        std::shared_ptr<DeBruijnGraph> graph;
+        if (mode == DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<CanonicalDBG>(*dbg_succ);
+        } else {
+            graph = dbg_succ;
+        }
+
+        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+        config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
+        config.min_path_score = std::numeric_limits<score_t>::min() + 100;
+        config.max_seed_length = k;
+        config.min_seed_length = 13;
+        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        auto paths = aligner.align(query);
+        ASSERT_EQ(1ull, paths.size());
+        auto path = paths[0];
+
+        EXPECT_EQ(1u, path.size()); // includes dummy k-mers
+        if (path.get_sequence() == reference.substr(5)) {
+            EXPECT_EQ(config.score_sequences(query.substr(5), reference.substr(5)),
+                      path.get_score());
+            EXPECT_EQ("5S13=", path.get_cigar().to_string());
+            EXPECT_EQ(5u, path.get_clipping());
+            EXPECT_EQ(0u, path.get_end_clipping());
+        } else {
+            ASSERT_EQ(reference_rc.substr(0, 13), path.get_sequence());
+            EXPECT_EQ(config.score_sequences(query_rc.substr(0, 13),
+                                             reference_rc.substr(0, 13)),
+                      path.get_score());
+            EXPECT_EQ("13=5S", path.get_cigar().to_string());
+            EXPECT_EQ(0u, path.get_clipping());
+            EXPECT_EQ(5u, path.get_end_clipping());
+        }
+        EXPECT_EQ(5u, path.get_offset());
+        EXPECT_EQ(13u, path.get_num_matches());
+        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_TRUE(path.is_valid(*graph, &config));
+        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+        // TODO: sub-k seeds which are sink tips in the underlying graph currently can't be found
+        if (mode != DeBruijnGraph::PRIMARY)
+            check_extend(graph, aligner.get_config(), paths, query);
+    }
+}
+
+TYPED_TEST(DBGAlignerTest, align_both_directions) {
+    size_t k = 7;
+    std::string reference =    "AAAAGCTTTCGAGGCCAA";
+    std::string query =        "AAAAGTTTTCGAGGCCAA";
+    //                               X
+
+    std::string reference_rc = "TTGGCCTCGAAAGCTTTT";
+    std::string query_rc =     "TTGGCCTCGAAAACTTTT";
+    //                                      X
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
-    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     config.max_seed_length = k;
-    config.min_seed_length = 13;
-    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+    DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(1u, path.size()); // includes dummy k-mers
-    EXPECT_EQ(reference.substr(5), path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query.substr(5), reference.substr(5)), path.get_score());
-    EXPECT_EQ("5S13=", path.get_cigar().to_string());
-    EXPECT_EQ(13u, path.get_num_matches());
+    EXPECT_EQ(12u, path.size());
+
+    if (path.get_sequence() == reference) {
+        EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
+        EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
+    } else {
+        ASSERT_EQ(reference_rc, path.get_sequence());
+        EXPECT_EQ(config.score_sequences(query_rc, reference_rc), path.get_score());
+        EXPECT_EQ("12=1X5=", path.get_cigar().to_string());
+    }
+
+    EXPECT_EQ(17u, path.get_num_matches());
     EXPECT_FALSE(path.is_exact_match());
-    EXPECT_EQ(5u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
-    EXPECT_EQ(5u, path.get_offset());
+    EXPECT_EQ(0u, path.get_offset());
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
@@ -1446,37 +1494,6 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
-
-#if ! _PROTEIN_GRAPH
-TYPED_TEST(DBGAlignerTest, align_both_directions) {
-    size_t k = 7;
-    std::string reference = "AAAAGCTTTCGAGGCCAA";
-    std::string query =     "AAAAGTTTTCGAGGCCAA";
-    //                            X
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_seed_length = k;
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query);
-    ASSERT_EQ(1ull, paths.size());
-    auto path = paths[0];
-
-    EXPECT_EQ(12u, path.size());
-    EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
-    EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
-    EXPECT_EQ(17u, path.get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
-    EXPECT_EQ(0u, path.get_clipping());
-    EXPECT_EQ(0u, path.get_end_clipping());
-    EXPECT_EQ(0u, path.get_offset());
-    EXPECT_TRUE(path.is_valid(*graph, &config));
-    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-    check_extend(graph, aligner.get_config(), paths, query);
-}
-#endif
 
 TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     size_t k = 5;
@@ -1542,51 +1559,12 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(47u, path.size());
-    EXPECT_EQ(reference_1, path.get_sequence());
-    EXPECT_EQ("22=3I2=3X9=3D4=1I1=1X2I3=2I1=1I7=1D1=2D2=1X3=1X6=6S",
-              path.get_cigar().to_string());
     EXPECT_TRUE(path.is_valid(*graph, &config));
+    EXPECT_EQ(52u, path.get_score())
+        << path.get_score() << " " << path.get_cigar().to_string();
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
-}
-
-TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
-    size_t k = 18;
-    std::string reference = "TTGGCCTCGAAAG" "TTTTT";
-    std::string query =     "GGGGG" "CTTTCGAGGCCAA";
-    std::string ref_rev =   "AAAAA" "CTTTCGAGGCCAA";
-
-    auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
-    dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
-
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
-    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-    config.min_seed_length = 13;
-
-    for (size_t max_seed_length : { k, k + 100 }) {
-        config.max_seed_length = max_seed_length;
-        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
-        auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(1u, path.size()); // includes dummy k-mers
-        EXPECT_EQ(ref_rev.substr(5), path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query.substr(5), ref_rev.substr(5)), path.get_score());
-        EXPECT_EQ("5S13=", path.get_cigar().to_string());
-        EXPECT_EQ(13u, path.get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
-        EXPECT_EQ(5u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(5u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-    }
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
