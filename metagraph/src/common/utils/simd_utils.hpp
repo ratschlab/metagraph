@@ -238,10 +238,7 @@ inline uint64_t haddall_epi64(__m256i v) {
 }
 
 
-/**
- * Helpers for aligner
- */
-
+// Helper for Bloom filter
 // Bit reduce packed 64-bit numbers to 32 bits
 inline __m128i cvtepi64_epi32(__m256i v) {
     return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(
@@ -250,12 +247,25 @@ inline __m128i cvtepi64_epi32(__m256i v) {
     ));
 }
 
-inline __m256i rshiftpushback_epi32(__m256i v, uint32_t a) {
-    return _mm256_insert_epi32(
-        _mm256_permutevar8x32_epi32(v, _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0)),
-        a,
-        7
-    );
+
+/**
+ * Helpers for aligner
+ */
+
+// Drop-in replacement for _mm_loadu_si64
+inline __m128i mm_loadu_si64(const void *mem_addr) {
+    return _mm_loadl_epi64((const __m128i*)mem_addr);
+}
+
+// Drop-in replacement for _mm_storeu_si64
+inline void mm_storeu_si64(void *mem_addr, __m128i a) {
+    _mm_storel_epi64((__m128i*)mem_addr, a);
+}
+
+inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
+    __m128i orig = mm_loadu_si64((__m128i*)mem_addr);
+    a = _mm_blendv_epi8(orig, a, mask);
+    mm_storeu_si64(mem_addr, a);
 }
 
 #if defined(__AVX512VL__) && defined(__AVX512F__)
@@ -307,6 +317,6 @@ inline __m256d fmafast_pd(__m256d a, __m256d b, __m256d c) {
     return _mm256_add_pd(_mm256_mul_pd(a, b), c);
 }
 
-#endif
+#endif // __AVX2__
 
 #endif // __SIMD_UTILS_HPP__

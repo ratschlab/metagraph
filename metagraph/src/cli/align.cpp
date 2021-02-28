@@ -32,8 +32,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
 
     DBGAlignerConfig aligner_config;
 
-    aligner_config.queue_size = config.alignment_queue_size;
-    aligner_config.bandwidth = config.alignment_vertical_bandwidth;
     aligner_config.num_alternative_paths = config.alignment_num_alternative_paths;
     aligner_config.min_seed_length = config.alignment_min_seed_length;
     aligner_config.max_seed_length = config.alignment_max_seed_length;
@@ -60,7 +58,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
-    logger->trace("\t Priority queue size: {}", aligner_config.queue_size);
     logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
     logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
     logger->trace("\t Max num seeds per locus: {}", aligner_config.max_num_seeds_per_locus);
@@ -70,7 +67,6 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
     logger->trace("\t Min DP table cell score: {}", int64_t(aligner_config.min_cell_score));
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
-    logger->trace("\t Bandwidth: {}", aligner_config.bandwidth);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
 
@@ -114,7 +110,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
         dbg = &graph;
     }
 
-    assert(dbg.get_mode() != DeBruijnGraph::PRIMARY
+    assert(dbg->get_mode() != DeBruijnGraph::PRIMARY
             && "primary graphs must be wrapped into canonical");
 
     size_t k = dbg->get_k();

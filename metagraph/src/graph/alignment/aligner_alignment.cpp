@@ -44,201 +44,6 @@ Alignment<NodeType>::Alignment(std::string_view query,
 }
 
 template <typename NodeType>
-Alignment<NodeType>::Alignment(const DPTable<NodeType> &dp_table,
-                               const DBGAlignerConfig &config,
-                               std::string_view query_view,
-                               typename DPTable<NodeType>::const_iterator column,
-                               size_t start_pos,
-                               size_t offset,
-                               NodeType *start_node,
-                               const Alignment &seed)
-      : orientation_(seed.get_orientation()), offset_(offset) {
-    assert(start_node);
-
-    auto i = start_pos;
-    size_t shift = column->second.start_index;
-    assert(i >= shift);
-    assert(i - shift < column->second.scores.size());
-    score_ = column->second.scores.at(i - shift);
-    Cigar::Operator op = column->second.ops.at(i - shift);
-    NodeType prev_node;
-    switch (column->second.prev_nodes.at(i - shift)) {
-        case 0: { prev_node = SequenceGraph::npos; } break;
-        case 0xFF: { prev_node = column->first; } break;
-        default: {
-            prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i - shift));
-        }
-    }
-
-    NodeType prev_gap_node;
-    switch (column->second.gap_prev_nodes.at(i - shift)) {
-        case 0: { prev_gap_node = SequenceGraph::npos; } break;
-        case 0xFF: { prev_gap_node = column->first; } break;
-        default: {
-            prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i - shift));
-        }
-    }
-
-    if (op == Cigar::DELETION)
-        prev_node = prev_gap_node;
-
-    uint32_t gap_count = op == Cigar::DELETION ? column->second.gap_count.at(i - shift) - 1 : 0;
-
-    if (!i && prev_node == SequenceGraph::npos)
-        return;
-
-    // use config to recompute CIGAR score in DEBUG mode
-    score_t score_track = score_;
-    Cigar::Operator last_op = Cigar::CLIPPED;
-
-    score_t gap_diff = config.gap_opening_penalty - config.gap_extension_penalty;
-
-    // TODO: If there is a cyclic part of the graph in which the optimal
-    //       alignment involves an insertion, then a score which was previously
-    //       from a insertion may be replaced with a match. This will cause
-    //       subsequent insertion scores to be wrong since they're no longer
-    //       extensions. The only way to fix this is to store a separate vector
-    //       to keep partial alignments ending in insertions.
-    //       Until this is fixed, the score checking asserts have been commented out.
-
-    std::vector<typename DPTable<NodeType>::const_iterator> out_columns;
-    while (prev_node != SequenceGraph::npos) {
-        auto prev_column = dp_table.find(prev_node);
-        assert(prev_column != dp_table.end());
-        assert(i || op == Cigar::DELETION);
-
-        switch (op) {
-            case Cigar::MATCH:
-            case Cigar::MISMATCH: {
-                --i;
-                out_columns.emplace_back(column);
-
-                if (last_op == Cigar::DELETION)
-                    score_track -= gap_diff;
-
-                // assert(column->second.scores.at(i + 1) >= score_track);
-                score_track -= config.get_row(column->second.last_char)[query_view[i]];
-                // assert(prev_column->second.scores.at(i) >= score_track);
-
-            } break;
-            case Cigar::DELETION: {
-                out_columns.emplace_back(column);
-
-                score_track -= config.gap_extension_penalty;
-
-            } break;
-            case Cigar::INSERTION: {
-                assert(column == prev_column);
-                --i;
-
-                assert(i >= shift);
-                assert(i - shift < column->second.scores.size());
-
-                // assert(column->second.prev_nodes.at(i + 1) == 0xFF);
-                // assert(column->second.scores.at(i + 1) >= score_track);
-
-                if (column->second.ops.at(i - shift) == Cigar::DELETION) {
-                    logger->error("INSERTION after DELETION: {}", query_view);
-                    exit(1);
-                }
-
-                score_track -= column->second.ops.at(i - shift) == Cigar::INSERTION
-                    ? config.gap_extension_penalty
-                    : config.gap_opening_penalty;
-                // assert(column->second.scores.at(i) >= score_track);
-
-            } break;
-            case Cigar::CLIPPED: { assert(false); }
-        }
-
-        cigar_.append(op);
-
-        last_op = op;
-
-        column = prev_column;
-        shift = prev_column->second.start_index;
-        assert(i >= shift);
-        assert(i - shift < column->second.scores.size());
-        if (gap_count) {
-            --gap_count;
-        } else {
-            op = column->second.ops.at(i - shift);
-
-            if (op == Cigar::DELETION)
-                gap_count = column->second.gap_count.at(i - shift) - 1;
-        }
-        switch (column->second.prev_nodes.at(i - shift)) {
-            case 0: { prev_node = SequenceGraph::npos; } break;
-            case 0xFF: { prev_node = column->first; } break;
-            default: {
-                prev_node = column->second.select_prev_node(column->second.prev_nodes.at(i - shift));
-            }
-        }
-
-        switch (column->second.gap_prev_nodes.at(i - shift)) {
-            case 0: { prev_gap_node = SequenceGraph::npos; } break;
-            case 0xFF: { prev_gap_node = column->first; } break;
-            default: {
-                prev_gap_node = column->second.select_prev_node(column->second.gap_prev_nodes.at(i - shift));
-            }
-        }
-
-        if (op == Cigar::DELETION)
-            prev_node = prev_gap_node;
-    }
-
-    const auto &score_col = column->second.scores;
-
-    if (last_op == Cigar::DELETION)
-        score_track -= gap_diff;
-
-    score_t correction = score_col.at(i - shift) - score_track;
-
-    // assert(correction >= 0);
-
-    if (correction > 0)
-        logger->trace("Fixing outdated score: {} -> {}", score_, score_ + correction);
-
-    score_ -= score_col.at(i - shift) - correction;
-
-    *start_node = column->first;
-
-    if (i > std::numeric_limits<Cigar::LengthType>::max())
-        throw std::runtime_error("Error: clipping length can't be stored in CIGAR");
-
-    cigar_.append(Cigar::CLIPPED, i);
-    assert(cigar_.size());
-
-    query_ = { query_view.data() + i, start_pos - i };
-
-    std::reverse(cigar_.begin(), cigar_.end());
-
-    nodes_.resize(out_columns.size());
-    std::transform(out_columns.rbegin(),
-                   out_columns.rend(),
-                   nodes_.begin(),
-                   [](const auto &iter) { return iter->first; });
-
-    sequence_.assign(out_columns.size(), 'N');
-    std::transform(out_columns.rbegin(),
-                   out_columns.rend(),
-                   sequence_.begin(),
-                   [](const auto &iter) { return iter->second.last_char; });
-
-    if (correction < 0) {
-        logger->warn(
-            "Correcting score: {} -> {}\nQuery: {}\nTarget: {}\nSeed: {}\nExtension: {}",
-            score_,
-            score_ + correction,
-            seed.get_sequence() + std::string(query_view),
-            seed.get_sequence() + sequence_,
-            seed.get_cigar().to_string(),
-            cigar_.to_string()
-        );
-    }
-}
-
-template <typename NodeType>
 void Alignment<NodeType>::append(Alignment&& other) {
     assert(query_.data() + query_.size() == other.query_.data());
     assert(orientation_ == other.orientation_);
@@ -779,11 +584,10 @@ std::shared_ptr<const std::string> Alignment<NodeType>
     return query_sequence;
 }
 
-template <typename NodeType>
 bool spell_path(const DeBruijnGraph &graph,
-                const std::vector<NodeType> &path,
+                const std::vector<DeBruijnGraph::node_index> &path,
                 std::string &seq,
-                size_t offset = 0) {
+                size_t offset) {
     assert(offset < graph.get_k());
 
     if (path.empty())
@@ -792,7 +596,7 @@ bool spell_path(const DeBruijnGraph &graph,
     if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) {
         std::cerr << "ERROR: path has invalid nodes\n";
 
-        for (NodeType node : path) {
+        for (DeBruijnGraph::node_index node : path) {
             std::cerr << node << " ";
         }
 
@@ -889,7 +693,6 @@ QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
 
 
 template class Alignment<>;
-template struct LocalAlignmentLess<>;
 template class QueryAlignment<>;
 
 } // namespace align

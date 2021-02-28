@@ -36,110 +36,92 @@ template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
              const ISeeder<node_index> &seeder,
-             IExtender<node_index>&& extender,
+             IExtender<node_index> &extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
-    for (auto &seed : seeder.get_seeds()) {
-        bool inserted = false;
-        std::pair<size_t, size_t> idx_range {
-            seed.get_clipping(),
-            seed.get_clipping() + seed.get_query().size()
-        };
-        for (node_index node : seed) {
-            auto emplace = visited_nodes_.emplace(node, idx_range);
-            auto &range = emplace.first.value();
-            if (emplace.second) {
-                inserted = true;
-            } else if (range.first > idx_range.first || range.second < idx_range.second) {
-                range.first = std::min(range.first, idx_range.first);
-                range.second = std::max(range.second, idx_range.second);
-                inserted = true;
+    bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
+
+    std::vector<DBGAlignment> seeds = seeder.get_seeds();
+    std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
+
+    for (DBGAlignment &seed : seeds) {
+        score_t min_path_score = get_min_path_score(seed);
+
+        // check if this seed has been explored before in an alignment and discard
+        // it if so
+        if (filter_seeds) {
+            size_t found_count = 0;
+            std::pair<size_t, size_t> idx_range {
+                seed.get_clipping(),
+                seed.get_clipping() + graph_.get_k() - seed.get_offset()
+            };
+            for (node_index node : seed) {
+                auto emplace = visited_nodes_.emplace(node, idx_range);
+                auto &range = emplace.first.value();
+                if (emplace.second) {
+                } else if (range.first > idx_range.first || range.second < idx_range.second) {
+                    DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
+                    range.first = std::min(range.first, idx_range.first);
+                    range.second = std::max(range.second, idx_range.second);
+                    DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
+                } else {
+                    ++found_count;
+                }
+
+                if (idx_range.second - idx_range.first == graph_.get_k())
+                    ++idx_range.first;
+
+                ++idx_range.second;
+            }
+
+            if (found_count == seed.size()) {
+                DEBUG_LOG("Skipping seed: {}", seed);
+                continue;
             }
         }
-
-        if (!inserted) {
-#ifndef NDEBUG
-            mtg::common::logger->trace("Skipping seed: {}", seed);
-#endif
-            continue;
-        }
-
-#ifndef NDEBUG
-        mtg::common::logger->trace("Seed: {}", seed);
-#endif
-        score_t min_path_score = get_min_path_score(seed);
 
         if (seed.get_query().data() + seed.get_query().size()
                 == query.data() + query.size()) {
             if (seed.get_score() >= min_path_score) {
                 seed.trim_offset();
                 assert(seed.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                mtg::common::logger->trace("Alignment: {}", seed);
-#endif
+                DEBUG_LOG("Alignment: {}", seed);
                 callback(std::move(seed));
             }
 
             continue;
         }
 
-        bool extended = false;
+        DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
+
         extender.initialize(seed);
-        extender([&](DBGAlignment&& extension, auto start_node) {
-            if (!start_node && !extended) {
-                // no good extension found
-                if (seed.get_score() >= min_path_score) {
-                    seed.extend_query_end(query.data() + query.size());
-                    seed.trim_offset();
-                    assert(seed.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                    mtg::common::logger->trace("Alignment: {}", seed);
-#endif
-                    callback(std::move(seed));
+        auto extensions = extender.get_extensions(min_path_score);
+
+        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
+        // table to allow for seed filtration
+        if (filter_seeds) {
+            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+                auto &range = emplace.first.value();
+                if (!emplace.second) {
+                    range.first = std::min(range.first, begin);
+                    range.second = std::max(range.second, end);
                 }
-                extended = true;
-                return;
-            }
+            });
+        }
 
+        if (extensions.empty() && seed.get_score() >= min_path_score) {
+            seed.extend_query_end(query.data() + query.size());
+            seed.trim_offset();
+            assert(seed.is_valid(graph_, &config_));
+            DEBUG_LOG("Alignment (seed): {}", seed);
+            callback(std::move(seed));
+        }
+
+        for (auto&& extension : extensions) {
             assert(extension.is_valid(graph_, &config_));
-            extension.extend_query_end(query.data() + query.size());
-
-            if (extension.get_clipping() || start_node != seed.back()) {
-                // if the extension starts at a different position
-                // from the seed end, then it's a new alignment
-                extension.extend_query_begin(query.data());
-                extension.trim_offset();
-                assert(extension.is_valid(graph_, &config_));
-#ifndef NDEBUG
-                mtg::common::logger->trace("Alignment: {}", extension);
-#endif
-                callback(std::move(extension));
-                return;
-            }
-
-            assert(extension.get_offset() == graph_.get_k() - 1);
-            auto next_path = seed;
-            next_path.append(std::move(extension));
-            next_path.trim_offset();
-            assert(next_path.is_valid(graph_, &config_));
-
-#ifndef NDEBUG
-            mtg::common::logger->trace("Alignment: {}", next_path);
-#endif
-            callback(std::move(next_path));
-            extended = true;
-        }, min_path_score);
-
-        // if !extended, then the seed was not extended because of early cutoff
-
-        extender.call_explored_nodes([&](node_index node, size_t begin, size_t end) {
-            auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-            auto &range = emplace.first.value();
-            if (!emplace.second) {
-                range.first = std::min(range.first, begin);
-                range.second = std::max(range.second, end);
-            }
-        });
+            callback(std::move(extension));
+        }
     }
 }
 
@@ -153,29 +135,24 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(query, seeder, std::move(extender),
-                   alignment_callback, get_min_path_score);
+        align_core(query, seeder, extender, alignment_callback, get_min_path_score);
     });
 }
 
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_best_direction(DBGQueryAlignment &paths,
-                       const ISeeder<node_index> &forward_seeder,
-                       const ISeeder<node_index> &reverse_seeder,
-                       IExtender<node_index>&& forward_extender,
-                       IExtender<node_index>&& reverse_extender) const {
+                       const ISeeder<node_index> &seeder,
+                       const ISeeder<node_index> &seeder_rc,
+                       IExtender<node_index>&& extender,
+                       IExtender<node_index>&& extender_rc) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-        align_core(forward, forward_seeder, std::move(forward_extender),
-                   alignment_callback, get_min_path_score);
-
-        align_core(reverse, reverse_seeder, std::move(reverse_extender),
-                   alignment_callback, get_min_path_score);
-
+        align_core(forward, seeder, extender, alignment_callback, get_min_path_score);
+        align_core(reverse, seeder_rc, extender_rc, alignment_callback, get_min_path_score);
     });
 }
 
@@ -183,40 +160,35 @@ template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(DBGQueryAlignment &paths,
                         const ISeeder<node_index> &forward_seeder,
+                        const ISeeder<node_index> &reverse_seeder,
                         IExtender<node_index>&& forward_extender,
                         IExtender<node_index>&& reverse_extender,
-                        const SeederGenerator &seeder_generator) const {
+                        const AlignCoreGenerator &rev_comp_core_generator) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
-    std::vector<DBGAlignment> reverse_seeds;
-
     align_aggregate(paths, [&](const auto &alignment_callback,
                                const auto &get_min_path_score) {
-#ifndef NDEBUG
-        mtg::common::logger->trace("Aligning forwards");
-#endif
+        auto get_forward_alignments = [&](std::string_view query,
+                                          std::string_view query_rc,
+                                          const ISeeder<node_index> &seeder,
+                                          IExtender<node_index> &extender) {
+            std::vector<DBGAlignment> rc_of_alignments;
 
-        // First get forward alignments
-        align_core(forward, forward_seeder, std::move(forward_extender),
-            [&](DBGAlignment&& path) {
+            DEBUG_LOG("Extending in forwards direction");
+            align_core(query, seeder, extender, [&](DBGAlignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
-                // If the alignment starts from the beginning of the query,
-                // there's no sequence left for aligning backwards.
-                if (!path.get_clipping()) {
-                    if (path.get_score() >= min_path_score)
-                        alignment_callback(std::move(path));
+                if (path.get_score() >= min_path_score)
+                    alignment_callback(DBGAlignment(path));
 
+                if (!path.get_clipping())
                     return;
-                }
 
                 auto rev = path;
-                rev.reverse_complement(graph_, reverse);
+                rev.reverse_complement(graph_, query_rc);
                 if (rev.empty()) {
-#ifndef NDEBUG
-                    mtg::common::logger->trace("Alignment cannot be reversed, returning");
-#endif
+                    DEBUG_LOG("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
                         alignment_callback(std::move(path));
 
@@ -231,52 +203,32 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
                 // Pass the reverse complement of the forward alignment
                 // as a seed for extension
-                reverse_seeds.emplace_back(std::move(rev));
-            },
-            [&](const auto&) {
-                // ignore the min path score for the forward alignment,
-                // since it may have a score that is too low before it is
-                // extended backwards
-                return config_.min_cell_score;
-            }
+                rc_of_alignments.emplace_back(std::move(rev));
+            }, [&](const auto&) { return config_.min_cell_score; });
+
+            return rc_of_alignments;
+        };
+
+        std::vector<DBGAlignment> rc_of_reverse = get_forward_alignments(
+            reverse, forward, reverse_seeder, reverse_extender
+        );
+        std::vector<DBGAlignment> rc_of_forward = get_forward_alignments(
+            forward, reverse, forward_seeder, forward_extender
         );
 
-#ifndef NDEBUG
-        mtg::common::logger->trace("Aligning backwards");
-#endif
+        auto extend_reverse = [&](std::string_view query_rc,
+                                  const ISeeder<node_index> &seeder,
+                                  std::vector<DBGAlignment>&& rc_of_alignments) {
+            DEBUG_LOG("Extending in reverse direction");
+            rev_comp_core_generator(query_rc, seeder, std::move(rc_of_alignments),
+                                    [&](const auto &seeder_rc, auto&& extender_rc) {
+                align_core(query_rc, seeder_rc, extender_rc,
+                           alignment_callback, get_min_path_score);
+            });
+        };
 
-        // Then use the reverse complements of the forward alignments as seeds
-        seeder_generator(forward_seeder, std::move(reverse_seeds),
-                         [&](const auto &reverse_seeder) {
-            align_core(reverse, reverse_seeder, std::move(reverse_extender),
-                [&](DBGAlignment&& path) {
-                    // If the path originated from a backwards alignment (forward
-                    // alignment of a reverse complement) and did not skip the first
-                    // characters (so it is unable to be reversed), change back
-                    // to the forward orientation
-                    if (path.get_orientation()) {
-                        auto forward_path = path;
-                        forward_path.reverse_complement(graph_, forward);
-                        if (!forward_path.empty()) {
-                            path = std::move(forward_path);
-#ifndef NDEBUG
-                        } else {
-                            mtg::common::logger->trace(
-                                "Backwards alignment cannot be reversed, returning");
-#endif
-                        }
-
-                        // for (node_index node : forward_path) {
-                        //     visited_nodes_.emplace(node);
-                        // }
-                    }
-
-                    assert(path.is_valid(graph_, &config_));
-                    alignment_callback(std::move(path));
-                },
-                get_min_path_score
-            );
-        });
+        extend_reverse(forward, reverse_seeder, std::move(rc_of_reverse));
+        extend_reverse(reverse, forward_seeder, std::move(rc_of_forward));
     });
 }
 

@@ -109,8 +109,6 @@ class Config {
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
-    size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
@@ -124,7 +122,7 @@ class Config {
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
-    double alignment_max_nodes_per_seq_char = 10.0;
+    double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
     std::vector<double> count_slice_quantiles;

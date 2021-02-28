@@ -1,14 +1,10 @@
 #ifndef __DBG_ALIGNER_METHODS_HPP__
 #define __DBG_ALIGNER_METHODS_HPP__
 
-#include <queue>
-
-#include <priority_deque.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "aligner_alignment.hpp"
-#include "aligner_dp_table.hpp"
 #include "common/aligned_vector.hpp"
-#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -24,20 +20,18 @@ class IExtender {
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::node_index node_index;
     typedef typename DBGAlignment::score_t score_t;
-    typedef std::function<void(DBGAlignment&&, NodeType)> ExtensionCallback;
-    typedef std::function<void(NodeType,
-                               size_t /* query idx begin */,
-                               size_t /* query idx end */)> ExploredNodeCallback;
 
     virtual ~IExtender() {}
 
-    virtual void
-    operator()(ExtensionCallback callback,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
+    virtual std::vector<DBGAlignment>
+    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
     virtual void initialize(const DBGAlignment &seed) = 0;
 
-    virtual void call_explored_nodes(const ExploredNodeCallback &callback) const = 0;
+    virtual void
+    call_visited_nodes(const std::function<void(NodeType,
+                                                size_t /* range begin */,
+                                                size_t /* range end */)> &callback) const = 0;
 
   protected:
     virtual void reset() = 0;
@@ -51,13 +45,12 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef typename IExtender<NodeType>::score_t score_t;
-    typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
-    typedef typename IExtender<NodeType>::ExploredNodeCallback ExploredNodeCallback;
 
-    typedef std::tuple<NodeType, score_t, bool /* converged */> ColumnRef;
-    typedef boost::container::priority_deque<ColumnRef,
-                                             std::vector<ColumnRef>,
-                                             utils::LessSecond> ColumnQueue;
+    enum NodeId : uint8_t {
+        NONE,
+        PREV,
+        CUR
+    };
 
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
@@ -65,62 +58,43 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual void
-    operator()(ExtensionCallback callback,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) override;
+    virtual std::vector<DBGAlignment>
+    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
     virtual void initialize(const DBGAlignment &seed) override;
 
-    const DPTable<NodeType>& get_dp_table() const { return dp_table; }
-
-    virtual void call_explored_nodes(const ExploredNodeCallback &callback) const override {
-        for (const auto &pair : dp_table) {
-            const auto &[node, column] = pair;
-            callback(node, column.start_index, column.start_index + column.scores.size() - 8);
-        }
-    }
+    virtual void
+    call_visited_nodes(const std::function<void(NodeType,
+                                                size_t /* range begin */,
+                                                size_t /* range end */)> &callback) const override;
 
   protected:
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
-    std::string_view query;
+    std::string_view query_;
 
-    // keep track of which columns to use next
-    ColumnQueue columns_to_update;
+    typedef std::tuple<NodeType,
+                       char /* last character of the node label */,
+                       size_t /* copy number */,
+                       size_t /* distance from origin */> AlignNode;
 
-    DPTable<NodeType> dp_table;
+    typedef AlignedVector<score_t> ScoreVec;
+    typedef AlignedVector<NodeId> PrevVec;
+    typedef AlignedVector<Cigar::Operator> OpVec;
+    typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
+                       OpVec, OpVec, OpVec, AlignNode,
+                       PrevVec, PrevVec,
+                       size_t /* offset */,
+                       size_t /* max_pos */> Scores;
+    typedef std::pair<std::vector<Scores>, bool> Column;
 
-    virtual void reset() override { dp_table.clear(); }
+    tsl::hopscotch_map<NodeType, Column> table_;
 
-    virtual std::pair<typename DPTable<NodeType>::iterator, bool>
-    emplace_node(NodeType node,
-                 NodeType incoming_node,
-                 char c,
-                 size_t size,
-                 size_t best_pos = 0,
-                 size_t last_priority_pos = 0,
-                 size_t begin = 0,
-                 size_t end = std::numeric_limits<size_t>::max());
+    virtual void reset() override { table_.clear(); }
 
-    virtual bool add_seed();
+    virtual const DBGAlignment& get_seed() const override { return *seed_; }
 
-    virtual const DBGAlignment& get_seed() const override { return *path_; }
-
-    virtual void check_and_push(ColumnRef&& next_column);
-
-    void extend_main(ExtensionCallback callback, score_t min_path_score);
-
-    void update_columns(NodeType incoming_node,
-                        const std::deque<std::pair<NodeType, char>> &out_columns,
-                        score_t min_path_score);
-
-    virtual std::deque<std::pair<NodeType, char>>
-    fork_extension(NodeType /* fork after this node */, ExtensionCallback, score_t);
-
-    inline bool ram_limit_reached() const {
-        return static_cast<double>(dp_table.num_bytes()) / 1024 / 1024
-            > config_.max_ram_per_alignment;
-    }
+    virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const;
 
   private:
     // compute perfect match scores for all suffixes
@@ -128,27 +102,20 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     std::vector<score_t> partial_sums_;
 
     // a quick lookup table of char pair match/mismatch scores for the current query
-    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score;
-    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op;
+    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
+    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // the initial seed
-    const DBGAlignment *path_;
+    const DBGAlignment *seed_;
 
     std::string_view extend_window_;
 
-    // max size of a column
-    size_t size;
-
     // start of the partial sum table
-    const score_t *match_score_begin;
-    NodeType start_node;
-    score_t start_score;
-    score_t score_cutoff;
-    size_t begin;
-    size_t end;
-    score_t xdrop_cutoff;
-    bool overlapping_range_;
-    size_t max_num_nodes;
+    const score_t *match_score_begin_;
+
+    static bool has_converged(const Column &column, const Scores &next);
+
+    static void sanitize(Scores &scores);
 };
 
 } // namespace align

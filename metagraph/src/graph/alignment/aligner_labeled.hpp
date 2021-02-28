@@ -66,7 +66,7 @@ class LabeledColumnExtender;
 
 template <class BaseSeeder = ExactSeeder<>,
           class Extender = LabeledColumnExtender<>,
-          class AlignmentCompare = LocalAlignmentLess<>>
+          class AlignmentCompare = LocalAlignmentLess>
 class LabeledDBGAligner : public ILabeledDBGAligner {
   public:
     typedef IDBGAligner::node_index node_index;
@@ -105,7 +105,6 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   public:
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::score_t score_t;
-    typedef typename IExtender<NodeType>::ExtensionCallback ExtensionCallback;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
@@ -114,20 +113,13 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     virtual ~LabeledColumnExtender() {}
 
-    virtual void
-    operator()(ExtensionCallback callback,
-               score_t min_path_score = std::numeric_limits<score_t>::min()) override;
-
     virtual void initialize(const DBGAlignment &path) override;
 
     void set_target_column(uint64_t target_column) { target_column_ = target_column; }
 
   protected:
-    typedef std::deque<std::pair<NodeType, char>> Edges;
-
-    virtual Edges fork_extension(NodeType node,
-                                 ExtensionCallback callback,
-                                 score_t min_path_score) override;
+    typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
+    virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const override;
 
   private:
     const AnnotatedDBG &anno_graph_;
@@ -142,14 +134,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     // alternative seed used to replace a suffix seed
     DBGAlignment alt_seed_;
 
-    // Extension to an input suffix seed s.t.
-    // input_seed.append(seed_extension_) results in alt_seed_
-    DBGAlignment seed_extension_;
-
-    // the last node of the input suffix seed
-    NodeType old_start_;
-
-    tsl::hopscotch_map<NodeType, Edges> cached_edge_sets_;
+    mutable tsl::hopscotch_map<NodeType, std::vector<std::pair<NodeType, char>>> cached_edge_sets_;
 };
 
 
@@ -186,23 +171,34 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
                 assert(!is_reverse_complement);
 
-                std::string_view reverse = paths.get_query(true);
-
-                auto build_rev_comp_seeder = [&](const auto &forward_seeder,
-                                                 auto&& rev_comp_seeds,
-                                                 const auto &callback) {
-                    callback(LabeledSeeder<ManualSeeder<node_index>>(
-                        dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
-                        std::move(rev_comp_seeds)
-                    ));
+                auto build_rev_comp_alignment_core = [&](std::string_view reverse,
+                                                         const auto &forward_seeder,
+                                                         auto&& rev_comp_seeds,
+                                                         const auto &callback) {
+                    callback(
+                        LabeledSeeder<ManualSeeder<node_index>>(
+                            dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
+                            std::move(rev_comp_seeds)
+                        ),
+                        Extender(anno_graph_, config_, reverse)
+                    );
                 };
 
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
-                aligner_core.align_both_directions(paths, seeder, std::move(extender),
-                                                   build_extender(reverse, seeder),
-                                                   build_rev_comp_seeder);
+                std::string_view reverse = paths.get_query(true);
+                Seeder seeder_rc = build_seeder(target_column,
+                                                reverse,
+                                                !is_reverse_complement,
+                                                map_sequence_to_nodes(graph_, reverse),
+                                                signature);
+
+                aligner_core.align_both_directions(paths, seeder, seeder_rc,
+                                                   std::move(extender),
+                                                   build_extender(reverse, seeder_rc),
+                                                   build_rev_comp_alignment_core);
+
             } else if (config_.forward_and_reverse_complement) {
                 assert(!is_reverse_complement);
 

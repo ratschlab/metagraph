@@ -135,29 +135,8 @@ LabeledColumnExtender<NodeType>
         anno_graph_(anno_graph),
         main_target_column_(target_column) {}
 
-
-template <typename NodeType>
-void LabeledColumnExtender<NodeType>::operator()(ExtensionCallback callback,
-                                                 score_t min_path_score) {
-    DefaultColumnExtender<NodeType>::operator()([&](DBGAlignment&& extension,
-                                                    NodeType start_node) {
-        if (seed_extension_.size() && start_node == seed_extension_.back()
-                && !extension.get_clipping()) {
-            DBGAlignment new_path = seed_extension_;
-            new_path.append(std::move(extension));
-            callback(std::move(new_path), old_start_);
-        } else {
-            callback(std::move(extension), start_node);
-        }
-    }, min_path_score);
-}
-
 template <typename NodeType>
 void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
-    alt_seed_ = DBGAlignment();
-    seed_extension_ = DBGAlignment();
-    old_start_ = NodeType();
-
     DefaultColumnExtender<NodeType>::initialize(path);
 
     if (!path.get_offset()) {
@@ -173,55 +152,54 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 
     const char *endpoint = path.get_query().data() + path.get_query().size()
         + path.get_offset();
-    assert(endpoint > this->query.data());
+    assert(endpoint > this->query_.data());
 
     // align as usual if a label can't be found via extension
-    if (endpoint > this->query.data() + this->query.size())
+    if (endpoint > this->query_.data() + this->query_.size())
         return;
 
-    std::string_view subquery(this->query.data(), endpoint - this->query.data());
+    std::string_view subquery(this->query_.data(), endpoint - this->query_.data());
 
-    alt_seed_ = path;
-    DefaultColumnExtender<> path_extender(this->graph_, this->config_, subquery);
-    path_extender.initialize(alt_seed_);
+    DefaultColumnExtender<NodeType> path_extender(this->graph_, this->config_, subquery);
+    path_extender.initialize(path);
 
     bool extended = false;
-    path_extender([&](DBGAlignment&& rest, NodeType start_node) {
-        if (start_node && !extended && !rest.get_clipping()
-                && alt_seed_.get_sequence().size() + rest.get_sequence().size() == k) {
-            extended = true;
-            seed_extension_ = DBGAlignment(rest);
-            alt_seed_.append(std::move(rest));
-            alt_seed_.trim_offset();
-            assert(alt_seed_.is_valid(this->graph_, &this->config_));
-            assert(!alt_seed_.get_offset());
+    for (auto&& extension : path_extender.get_extensions()) {
+        if (extension.get_sequence().size() == k) {
+            if (path.get_orientation() == extension.get_orientation()) {
+                if (path.get_clipping() == extension.get_clipping()) {
+                    extended = true;
+                    alt_seed_ = std::move(extension);
+                    break;
+                }
+            // TODO:
+            // } else if (path.get_clipping() == extension.get_end_clipping()
+                    // && graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+            }
         }
-    });
+    }
 
     if (extended) {
         auto labels = anno_graph_.get_top_labels(alt_seed_.get_sequence(), 1, 1.0);
         if (labels.size()) {
-            old_start_ = path.back();
             DefaultColumnExtender<NodeType>::initialize(alt_seed_);
             target_column_ = anno_graph_.get_annotation().get_label_encoder().encode(
                 labels[0].first
             );
-        } else {
-            alt_seed_ = DBGAlignment();
-            seed_extension_ = DBGAlignment();
         }
     }
 }
 
 template <typename NodeType>
-auto LabeledColumnExtender<NodeType>::fork_extension(NodeType node,
-                                                     ExtensionCallback callback,
-                                                     score_t min_path_score) -> Edges {
-    if (target_column_ == ILabeledDBGAligner::kNTarget)
-        return DefaultColumnExtender<NodeType>::fork_extension(node, callback, min_path_score);
+auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const
+        -> std::vector<std::pair<NodeType, char>> {
+    if (target_column_ == ILabeledDBGAligner::kNTarget
+            || std::get<0>(node) == this->graph_.max_index() + 1) {
+        return DefaultColumnExtender<NodeType>::get_outgoing(node);
+    }
 
-    if (cached_edge_sets_.count(node))
-        return cached_edge_sets_[node];
+    if (cached_edge_sets_.count(std::get<0>(node)))
+        return cached_edge_sets_[std::get<0>(node)];
 
     typedef std::tuple<NodeType /* parent */,
                        NodeType /* child */,
@@ -234,21 +212,22 @@ auto LabeledColumnExtender<NodeType>::fork_extension(NodeType node,
         process_seq_path(this->graph_, seq, path, [&](AnnotatedDBG::row_index row, size_t i) {
             if (seq[i + k - 1] != boss::BOSS::kSentinel) {
                 anno_rows_to_id[row].emplace_back(
-                    i ? path[i - 1] : node, path[i], seq[i + k - 1], i
+                    i ? path[i - 1] : std::get<0>(node), path[i], seq[i + k - 1], i
                 );
             }
         });
     };
 
     // prefetch the next unitig
-    call_hull_sequences(this->graph_, node,
+    call_hull_sequences(this->graph_, std::get<0>(node),
         [&](std::string_view seq, const std::vector<NodeType> &path) {
             assert(path.size());
-            assert(this->graph_.traverse(node, seq[this->graph_.get_k() - 1]) == path[0]);
+            assert(this->graph_.traverse(std::get<0>(node),
+                                         seq[this->graph_.get_k() - 1]) == path[0]);
             push_path(seq, path);
         },
         [&](std::string_view seq, const auto &path, size_t depth, size_t fork_count) {
-            bool result = fork_count || depth > this->query.size()
+            bool result = fork_count || depth > this->query_.size()
                 || (path.size() && cached_edge_sets_.count(path.back()));
 
             if (result && depth == 1)
@@ -270,17 +249,14 @@ auto LabeledColumnExtender<NodeType>::fork_extension(NodeType node,
 
     anno_rows = std::vector<AnnotatedDBG::row_index>();
 
-    Edges edges;
+    std::vector<std::pair<NodeType, char>> edges;
     for (AnnotatedDBG::row_index row : rows_with_target) {
         for (const auto &[parent_node, child_node, c, i] : anno_rows_to_id[row]) {
             assert(c != boss::BOSS::kSentinel);
             assert(this->graph_.traverse(parent_node, c) == child_node);
 
-            if (!this->dp_table.count(child_node) && this->ram_limit_reached())
-                continue;
-
             if (!i) {
-                assert(parent_node == node);
+                assert(parent_node == std::get<0>(node));
                 edges.emplace_back(child_node, c);
             } else {
                 cached_edge_sets_[parent_node].emplace_back(child_node, c);
@@ -288,7 +264,7 @@ auto LabeledColumnExtender<NodeType>::fork_extension(NodeType node,
         }
     }
 
-    cached_edge_sets_[node] = edges;
+    cached_edge_sets_[std::get<0>(node)] = edges;
     return edges;
 }
 
