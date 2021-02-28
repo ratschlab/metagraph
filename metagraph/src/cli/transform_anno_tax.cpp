@@ -7,6 +7,7 @@
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotation/taxonomy/taxonomic_db.hpp"
 #include "cli/load/load_annotation.hpp"
+#include <filesystem>
 
 
 namespace mtg {
@@ -14,9 +15,32 @@ namespace cli {
 
 using mtg::common::logger;
 
+std::vector<std::string> get_anno_filenames(const std::vector<std::string> &paths) {
+    std::vector<std::string> filenames;
+
+    for(const auto &path: paths) {
+        if (! filesystem::is_directory(path)) {
+            if (!utils::ends_with(path, ".annodbg")) {
+                logger->warn("File {} is not an '.annodbg' file.", path);
+                continue;
+            }
+            filenames.push_back(path);
+            continue;
+        }
+        logger->trace("Looking for anno files in directory: '{}'", path);
+        for (auto &rec_file: filesystem::recursive_directory_iterator(path)) {
+            if (utils::ends_with(rec_file.path().string(), ".annodbg")) {
+                logger->trace("Found anno file '{}'", rec_file.path().string());
+                filenames.push_back(rec_file.path().string());
+            }
+        }
+    }
+    return filenames;
+}
+
 int transform_anno_taxo(Config *config) {
     assert(config);
-    const auto &filenames = config->fnames;
+    const auto &filenames = get_anno_filenames(config->fnames);
     uint64_t mem_bytes = config->memory_available * 1e9;
 
     tsl::hopscotch_set<std::string> all_labels;
