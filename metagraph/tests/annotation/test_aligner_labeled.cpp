@@ -5,12 +5,12 @@
 #include "../test_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "graph/alignment/aligner_labeled.hpp"
-#include "seq_io/sequence_io.hpp"
-
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace {
@@ -137,7 +137,7 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
-    for (DBGMode mode : { DBGMode::CANONICAL, DBGMode::CANONICAL_WRAPPER }) {
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
             k, sequences, labels, mode

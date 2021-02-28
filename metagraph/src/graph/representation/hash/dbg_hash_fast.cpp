@@ -50,11 +50,11 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
 
   public:
     DBGHashFastImpl(size_t k,
-                    bool canonical_mode,
+                    Mode mode,
                     bool packed_serialization,
                     size_t reserve = 0)
           : k_(k),
-            canonical_mode_(canonical_mode),
+            mode_(mode),
             packed_serialization_(packed_serialization),
             kIgnoreLastCharMask(~(KmerWord((1llu << kBitsPerChar) - 1)
                                         << static_cast<int>(kBitsPerChar * (k - 1)))) {
@@ -152,7 +152,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     }
 
     size_t get_k() const { return k_; }
-    bool is_canonical_mode() const { return canonical_mode_; }
+    Mode get_mode() const { return mode_; }
 
     uint64_t num_nodes() const {
         uint64_t nnodes = 0;
@@ -222,7 +222,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     }
 
     size_t k_;
-    bool canonical_mode_;
+    Mode mode_;
 
     KmerIndex kmers_;
     std::vector<Flags> bits_;
@@ -296,7 +296,7 @@ void DBGHashFastImpl<KMER>::add_sequence(std::string_view sequence,
 
     add_seq(sequence);
 
-    if (canonical_mode_) {
+    if (mode_ == CANONICAL) {
         std::string rev_comp(sequence.begin(), sequence.end());
         reverse_complement(rev_comp.begin(), rev_comp.end());
 
@@ -332,7 +332,7 @@ template <typename KMER>
 void DBGHashFastImpl<KMER>::map_to_nodes(std::string_view sequence,
                                          const std::function<void(node_index)> &callback,
                                          const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
@@ -464,7 +464,7 @@ void DBGHashFastImpl<KMER>::serialize(std::ostream &out) const {
 
     std::for_each(bits_.begin(), bits_.end(), serializer);
 
-    serialize_number(out, canonical_mode_);
+    serialize_number(out, static_cast<int>(mode_));
 }
 
 template <typename KMER>
@@ -503,7 +503,7 @@ bool DBGHashFastImpl<KMER>::load(std::istream &in) {
             flags = deserializer.operator()<Flags>();
         }
 
-        canonical_mode_ = load_number(in);
+        mode_ = static_cast<Mode>(load_number(in));
 
         return in.good();
 
@@ -515,7 +515,7 @@ bool DBGHashFastImpl<KMER>::load(std::istream &in) {
 template <typename KMER>
 bool DBGHashFastImpl<KMER>::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
-            || is_canonical_mode() != other.is_canonical_mode()
+            || get_mode() != other.get_mode()
             || num_nodes() != other.num_nodes())
         return false;
 
@@ -528,7 +528,7 @@ bool DBGHashFastImpl<KMER>::operator==(const DeBruijnGraph &other) const {
         return true;
 
     assert(k_ == other_hash.k_);
-    assert(canonical_mode_ == other_hash.canonical_mode_);
+    assert(mode_ == other_hash.mode_);
     assert(kmers_.size() == other_hash.kmers_.size());
 
     return kmers_ == other_hash.kmers_;
@@ -569,7 +569,7 @@ void DBGHashFastImpl<KMER>::call_nodes(const std::function<void(node_index)> &ca
 
 std::unique_ptr<DBGHashFast::DBGHashFastInterface>
 DBGHashFast::initialize_graph(size_t k,
-                              bool canonical_mode,
+                              Mode mode,
                               bool packed_serialization) {
     if (k < 1 || k > 256 / KmerExtractor2Bit::bits_per_char) {
         logger->error("For hash graph, k must be between 1 and {}",
@@ -579,15 +579,15 @@ DBGHashFast::initialize_graph(size_t k,
 
     if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return std::make_unique<DBGHashFastImpl<KmerExtractor2Bit::Kmer64>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
         return std::make_unique<DBGHashFastImpl<KmerExtractor2Bit::Kmer128>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     } else {
         return std::make_unique<DBGHashFastImpl<KmerExtractor2Bit::Kmer256>>(
-            k, canonical_mode, packed_serialization
+            k, mode, packed_serialization
         );
     }
 }
@@ -601,8 +601,8 @@ bool DBGHashFast::load(std::istream &in) {
         auto k = load_number(in);
         in.seekg(pos, in.beg);
 
-        // the actual value of |canonical| will be set in load
-        hash_dbg_ = initialize_graph(k, false, false);
+        // the actual value of |mode| will be set in load
+        hash_dbg_ = initialize_graph(k, BASIC, false);
         return hash_dbg_->load(in) && in.good();
     } catch (...) {
         return false;

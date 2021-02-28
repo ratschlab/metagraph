@@ -181,7 +181,7 @@ TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
             chunk.serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
                 { test_data_dir + "/1" }
-            ).first;
+            );
 
             first.merge(second, num_threads);
 
@@ -209,7 +209,7 @@ TEST(BOSSMerge, ParallelMergeTwoPaths) {
             chunk.serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
                 { test_data_dir + "/1" }
-            ).first;
+            );
 
             first.merge(second, num_threads);
 
@@ -238,7 +238,7 @@ TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
             chunk.serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
                 { test_data_dir + "/1" }
-            ).first;
+            );
 
             first.merge(second, num_threads);
 
@@ -271,7 +271,7 @@ TEST(BOSSMerge, ParallelMergeThreeGraphs) {
             chunk.serialize(test_data_dir + "/1");
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
                 { test_data_dir + "/1" }
-            ).first;
+            );
 
             first.merge(second, num_threads);
             first.merge(third, num_threads);
@@ -317,7 +317,7 @@ TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
                 { test_data_dir + "/1",
                   test_data_dir + "/2",
                   test_data_dir + "/3", }
-            ).first;
+            );
 
             first.merge(second, num_threads);
             first.merge(third, num_threads);
@@ -359,7 +359,7 @@ TEST(BOSSMerge, ParallelDumpedChunkedMergeThreeGraphs) {
 
             BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
                 files
-            ).first;
+            );
             ASSERT_TRUE(chunked_merged);
 
             first.merge(second, num_threads);
@@ -405,7 +405,7 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
         chunk.serialize(test_data_dir + "/1");
         BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
-        ).first;
+        );
 
         BOSS result(k);
         for (size_t i = 0; i < graphs.size(); ++i) {

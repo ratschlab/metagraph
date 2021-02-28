@@ -26,7 +26,7 @@ process_seq_path(const DeBruijnGraph &graph,
                 );
             }
         }
-    } else if (!graph.is_canonical_mode()) {
+    } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
         for (size_t i = 0; i < query_nodes.size(); ++i) {
             if (query_nodes[i] != DeBruijnGraph::npos)
                 callback(AnnotatedDBG::graph_to_anno_index(query_nodes[i]), i);

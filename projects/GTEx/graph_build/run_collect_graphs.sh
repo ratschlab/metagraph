@@ -20,5 +20,5 @@ threads=2
 pmem=$(($mem / $threads))
 graphdir=${basedir}/gtex/graphs/output_k${K}_trimmed_clean_graph_chunked
 
-/usr/bin/time -v ${metagraph} concatenate -v --canonical --len-suffix $level -i ${graphdir}/graph_merged_k${K} -o ${graphdir}/graph_merged_k${K}
+/usr/bin/time -v ${metagraph} concatenate -v --mode canonical --len-suffix $level -i ${graphdir}/graph_merged_k${K} -o ${graphdir}/graph_merged_k${K}
 

@@ -45,6 +45,6 @@ do
         echo $tissue graph already exists
     else
         echo submitting $tissue
-        echo "cat ${seqdir}_all_files.txt | /usr/bin/time -v ${metagraph} build -v --parallel ${threads} --canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) --container vector_disk --tmp-dir $tmpdir --disk-cap-gb 500 -o ${outdir}/graph_merged_${tissue}_k${K} 2>&1 | tee ${outdir}/build_${tissue}_k${K}.log" | bsub -G ms_raets -J tc_g_${tissue} -oo ${outdir}/build_${tissue}_k${K}.lsf.log -We 12:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+        echo "cat ${seqdir}_all_files.txt | /usr/bin/time -v ${metagraph} build -v --parallel ${threads} --mode canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) --container vector_disk --tmp-dir $tmpdir --disk-cap-gb 500 -o ${outdir}/graph_merged_${tissue}_k${K} 2>&1 | tee ${outdir}/build_${tissue}_k${K}.log" | bsub -G ms_raets -J tc_g_${tissue} -oo ${outdir}/build_${tissue}_k${K}.lsf.log -We 12:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
     fi
 done

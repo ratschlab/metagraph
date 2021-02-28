@@ -83,7 +83,7 @@ void call_annotations(const std::string &file,
                         total_seqs, fmt::join(labels, "><"), timer.elapsed());
                 }
             },
-            !graph.is_canonical_mode(),
+            graph.get_mode() != graph::DeBruijnGraph::CANONICAL, // |call_both_from_canonical|
             min_count,
             max_count
         );
@@ -201,7 +201,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     auto anno_graph = initialize_annotated_dbg(graph, config);
 
     bool forward_and_reverse = config.forward_and_reverse;
-    if (anno_graph->get_graph().is_canonical_mode()) {
+    if (anno_graph->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL) {
         logger->trace("Annotating canonical graph");
         forward_and_reverse = false;
     }

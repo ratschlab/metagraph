@@ -183,7 +183,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
             Extender extender = build_extender(this_query, seeder);
 
-            if (graph_.is_canonical_mode()) {
+            if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
                 assert(!is_reverse_complement);
 
                 std::string_view reverse = paths.get_query(true);

@@ -12,7 +12,7 @@ NAME=$2
 for a in /cluster/work/grlab/projects/metagenome/raw_data/huber_virology/$NAME\_*.fastq.gz; do
     echo $a
     SNAME=$(basename $a .fastq.gz)
-    $METAGRAPH build -k $K --canonical -o k$K/$SNAME --count-kmers $a $FLAGS
+    $METAGRAPH build -k $K --mode canonical -o k$K/$SNAME --count-kmers $a $FLAGS
     $METAGRAPH clean \
         --prune-tips $((2*K)) \
         --prune-unitigs 0 \
@@ -22,7 +22,7 @@ for a in /cluster/work/grlab/projects/metagenome/raw_data/huber_virology/$NAME\_
         -o k$K/$SNAME.contigs k$K/$SNAME.dbg $FLAGS
 done
 
-$METAGRAPH build -k $K k$K/$NAME\_*.contigs.fasta.gz -o k$K/$NAME $FLAGS
+$METAGRAPH build -k $K --mode primary k$K/$NAME\_*.contigs.fasta.gz -o k$K/$NAME $FLAGS
 $METAGRAPH assemble --unitigs $FLAGS k$K/$NAME.dbg -o k$K/$NAME.unitigs
 
 $METAGRAPH annotate -i k$K/$NAME.dbg k$K/$NAME\_*.contigs.fasta.gz -o k$K/$NAME --anno-filename $FLAGS

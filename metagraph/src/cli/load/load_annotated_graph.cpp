@@ -24,9 +24,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                                                        const Config &config) {
     uint64_t max_index = graph->max_index();
 
-    // TODO: check and wrap into canonical only if the graph is primary
-    if (config.canonical && !graph->is_canonical_mode())
-        graph = std::make_shared<CanonicalDBG>(graph, true);
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        graph = std::make_shared<CanonicalDBG>(graph);
+        logger->trace("Primary graph was wrapped into canonical");
+    }
 
     std::shared_ptr<AnnotatedDBG::Annotator> annotation_temp{
         (config.infbase_annotators.size()

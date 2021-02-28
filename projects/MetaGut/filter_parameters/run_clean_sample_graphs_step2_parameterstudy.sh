@@ -26,5 +26,5 @@ do
         continue
     fi
 
-    echo "/usr/bin/time -v $metagraph build -k $K -o ${outgraph%.dbg} --canonical -v ${inseq} && $metagraph assemble --unitigs -o ${outseq%.fasta.gz} $outgraph" | bsub -J mg_clean -o ${logfname} -We 8:00 -n 1 -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+    echo "/usr/bin/time -v $metagraph build -k $K -o ${outgraph%.dbg} --mode canonical -v ${inseq} && $metagraph assemble --unitigs -o ${outseq%.fasta.gz} $outgraph" | bsub -J mg_clean -o ${logfname} -We 8:00 -n 1 -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
 done

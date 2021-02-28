@@ -90,15 +90,12 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
 
 template <template <class ... Types> class Aligner, class Graph>
 std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &config) {
-    const DeBruijnGraph *dbg;
+    size_t k;
     if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
-        dbg = &graph.get_graph();
+        k = graph.get_graph().get_k();
     } else {
-        dbg = &graph;
+        k = graph.get_k();
     }
-
-    size_t k = dbg->get_k();
-    assert(!config.canonical || dbg->is_canonical_mode());
 
     return build_aligner<Aligner, Graph>(graph, initialize_aligner_config(k, config));
 }
@@ -116,6 +113,9 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
     } else {
         dbg = &graph;
     }
+
+    assert(dbg.get_mode() != DeBruijnGraph::PRIMARY
+            && "primary graphs must be wrapped into canonical");
 
     size_t k = dbg->get_k();
 
@@ -160,13 +160,14 @@ template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, Annotated
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           std::shared_ptr<DBGSuccinct> dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
+
+    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
 
     std::ostream *out = config.outfbase.size()
         ? new std::ofstream(config.outfbase)
@@ -285,14 +286,14 @@ void map_sequences_in_file(const std::string &file,
 
 std::string sequence_to_gfa_path(const std::string &seq,
                                  const size_t seq_id,
-                                 const std::shared_ptr<DeBruijnGraph> &graph,
+                                 const DeBruijnGraph &graph,
                                  const tsl::ordered_set<uint64_t> &is_unitig_end_node,
                                  const Config *config) {
-    auto path_nodes = map_sequence_to_nodes(*graph, seq);
+    auto path_nodes = map_sequence_to_nodes(graph, seq);
 
     std::string nodes_on_path;
     std::string cigars_on_path;
-    const size_t overlap = graph->get_k() - 1;
+    const size_t overlap = graph.get_k() - 1;
 
     for (size_t i = 0; i < path_nodes.size() - 1; ++i) {
         if (config->output_compacted && !is_unitig_end_node.count(path_nodes[i])) {
@@ -306,7 +307,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
     // this unitig is not completely covered by the query sequence.
     while (config->output_compacted && !is_unitig_end_node.count(last_node_to_print)) {
         uint64_t unique_next_node;
-        graph->adjacent_outgoing_nodes(
+        graph.adjacent_outgoing_nodes(
             last_node_to_print,
             [&](uint64_t node) { unique_next_node = node; }
         );
@@ -324,12 +325,12 @@ std::string sequence_to_gfa_path(const std::string &seq,
 
 void gfa_map_files(const Config *config,
                    const std::vector<std::string> &files,
-                   const std::shared_ptr<DeBruijnGraph> graph) {
+                   const DeBruijnGraph &graph) {
     logger->trace("Starting GFA mapping:");
 
     tsl::ordered_set<uint64_t> is_unitig_end_node;
 
-    graph->call_unitigs(
+    graph.call_unitigs(
         [&](const auto &, const auto &path) {
             is_unitig_end_node.insert(path.back());
         },
@@ -338,7 +339,6 @@ void gfa_map_files(const Config *config,
 
     std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa", ".path") + ".path.gfa");
 
-    std::mutex print_mutex;
     for (const std::string &file : files) {
         logger->trace("Loading sequences from FASTA file '{}' to append gfa paths.", file);
 
@@ -349,14 +349,9 @@ void gfa_map_files(const Config *config,
         }
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) shared(gfa_file)
         for (size_t i = 0; i < seq_queries.size(); ++i) {
-            std::string path_string_gfa = sequence_to_gfa_path(
-                    seq_queries[i],
-                    i + 1,
-                    graph,
-                    is_unitig_end_node,
-                    config
-            );
-            std::lock_guard<std::mutex> lock(print_mutex);
+            std::string path_string_gfa
+                = sequence_to_gfa_path(seq_queries[i], i + 1, graph, is_unitig_end_node, config);
+            #pragma omp critical
             gfa_file << path_string_gfa;
         }
     }
@@ -410,11 +405,11 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    // initialize aligner
+    // initialize graph
     auto graph = load_critical_dbg(config->infbase);
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
-        gfa_map_files(config, files, graph);
+        gfa_map_files(config, files, *graph);
         return 0;
     }
 
@@ -428,6 +423,10 @@ int align_to_graph(Config *config) {
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
+        } else if (config->alignment_length != graph->get_k()
+                && !dynamic_cast<const DBGSuccinct*>(graph.get())) {
+            logger->error("Matching k-mers shorter than k only supported for succinct graphs");
+            exit(1);
         }
 
         logger->trace("Map sequences against the de Bruijn graph with k={}",
@@ -437,13 +436,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file '{}'", file);
 
-            map_sequences_in_file(file,
-                                  *graph,
-                                  std::dynamic_pointer_cast<DBGSuccinct>(graph),
-                                  *config,
-                                  timer,
-                                  &thread_pool,
-                                  &print_mutex);
+            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
         }
 
         thread_pool.join();
@@ -496,7 +489,7 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,aln_graph=graph](SeqBatch batch, uint64_t size) mutable {
-                if (config->canonical && !graph->is_canonical_mode())
+                if (graph->get_mode() == DeBruijnGraph::PRIMARY)
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 
                 std::unique_ptr<IDBGAligner> aligner;
@@ -510,9 +503,7 @@ int align_to_graph(Config *config) {
                 }
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string sout = format_alignment(
-                        header, paths, *aln_graph, *config
-                    );
+                    std::string sout = format_alignment(header, paths, *aln_graph, *config);
 
                     std::lock_guard<std::mutex> lock(print_mutex);
                     *out << sout;

@@ -15,6 +15,6 @@ metagraph=/cluster/home/akahles/git/software/metagraph_clean/metagraph/build/met
 
 for F in {\\\$,A,C,G,T}{\\\$,A,C,G,T}
 do
-    echo "/usr/bin/time -v ${metagraph} build -v --parallel ${threads} --canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) -o ${outdir}/graph_merged_k${K} --suffix $F ${seqdir}/*.fasta.gz 2>&1 | tee ${outdir}/build_k${K}_$F.log" | bsub -J ms_g_${F} -o ${outdir}/build_k${K}_$F.lsf.log -We 8:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+    echo "/usr/bin/time -v ${metagraph} build -v --parallel ${threads} --mode canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) -o ${outdir}/graph_merged_k${K} --suffix $F ${seqdir}/*.fasta.gz 2>&1 | tee ${outdir}/build_k${K}_$F.log" | bsub -J ms_g_${F} -o ${outdir}/build_k${K}_$F.lsf.log -We 8:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
 done
 

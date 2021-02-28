@@ -1317,7 +1317,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
     std::vector<std::string> seqs;
     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DBGMode::CANONICAL_WRAPPER);
+    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
 
     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
@@ -1429,7 +1429,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     std::string query =     "GGGGGCTTTCGAGGCCAA";
     //                       SSSSS
 
-    auto graph = std::make_shared<DBGSuccinct>(k, true);
+    auto graph = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::CANONICAL);
     graph->add_sequence(reference);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
@@ -1495,7 +1495,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     std::string query =     "AAAAGTTTTCGAGGCCAA";
     //                            X
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference }, DBGMode::CANONICAL);
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_seed_length = k;
     DBGAligner<> aligner(*graph, config);
@@ -1599,9 +1599,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical_wrapper) {
     std::string query =     "GGGGG" "CTTTCGAGGCCAA";
     std::string ref_rev =   "AAAAA" "CTTTCGAGGCCAA";
 
-    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ, true);
+    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
@@ -1635,9 +1635,9 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
 
-    auto dbg_succ = std::make_shared<DBGSuccinct>(k);
+    auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ, true);
+    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();

@@ -282,7 +282,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
         auto callback = [&](std::string&& kmer, node_index node) {
             assert(node == full_dbg.kmer_to_node(kmer));
 
-            if (full_dbg.is_canonical_mode())
+            if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL)
                 full_dbg.map_to_nodes(kmer, [&](node_index cn) { node = cn; });
 
             added_nodes.emplace_back(std::move(kmer), node);
@@ -331,7 +331,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         auto callback = [&](std::string_view sequence,
                             const std::vector<node_index> &path) {
             added_paths.emplace_back(sequence, path);
-            if (full_dbg.is_canonical_mode()) {
+            if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL) {
                 added_paths.back().second.resize(0);
                 full_dbg.map_to_nodes(sequence,
                     [&](node_index cn) { added_paths.back().second.push_back(cn); }
@@ -399,7 +399,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                             call_hull_sequences(full_dbg, prev_node, callback, halt);
                     }
                 );
-                if (batch_graph.is_canonical_mode()) {
+                if (batch_graph.get_mode() == DeBruijnGraph::CANONICAL) {
                     // In canonical graphs, (incoming to forward) is equivalent
                     // to (outgoing from rev-comp), so the following code invokes
                     // backward expansion.
@@ -430,7 +430,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
             }
         }
 
-        if (batch_graph.is_canonical_mode()) {
+        if (batch_graph.get_mode() == DeBruijnGraph::CANONICAL) {
             std::string last_kmer = contig.substr(0, full_dbg.get_k());
             reverse_complement(last_kmer);
             node_index last_node = batch_graph.kmer_to_node(last_kmer);
@@ -501,13 +501,13 @@ std::unique_ptr<AnnotatedDBG>
 construct_query_graph(const AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      bool canonical,
                       const Config *config) {
     const auto &full_dbg = anno_graph.get_graph();
     const auto &full_annotation = anno_graph.get_annotation();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
-    canonical |= full_dbg.is_canonical_mode();
+    assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
+            && "primary graphs must be wrapped into canonical");
 
     size_t sub_k = full_dbg.get_k();
     size_t max_hull_forks = 0;
@@ -538,8 +538,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
     Timer timer;
 
     // construct graph storing all k-mers in query
-    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k(),
-                                                       canonical && max_hull_forks);
+    auto graph_init = std::make_shared<DBGHashOrdered>(full_dbg.get_k());
     size_t max_input_sequence_length = 0;
 
     logger->trace("[Query graph construction] Building the batch graph...");
@@ -585,7 +584,8 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                    contigs.emplace_back(contig, std::vector<node_index>{});
                                },
                                get_num_threads(),
-                               canonical);  // pull only primary contigs when building canonical query graph
+                               // pull only primary contigs when building canonical query graph
+                               full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
     logger->trace("[Query graph construction] Contig extraction took {} sec", timer.elapsed());
     timer.reset();
@@ -612,7 +612,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
         timer.reset();
 
         add_nodes_with_suffix_matches(*dbg_succ, sub_k, max_num_nodes_per_suffix,
-                                      &contigs, canonical);
+                                      &contigs, full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
         logger->trace("[Query graph construction] Found {} suffix-matching k-mers, took {} sec",
                       contigs.size() - original_size, timer.elapsed());
@@ -645,13 +645,15 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     // restrict nodes to those in the full graph
     if (sub_k < full_dbg.get_k()) {
-        BOSSConstructor constructor(full_dbg.get_k() - 1, canonical, 0, "", num_threads);
+        BOSSConstructor constructor(full_dbg.get_k() - 1,
+                                    full_dbg.get_mode() == DeBruijnGraph::CANONICAL,
+                                    0, "", num_threads);
         add_to_graph(constructor, contigs, full_dbg.get_k());
 
-        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), canonical);
+        graph = std::make_shared<DBGSuccinct>(new BOSS(&constructor), full_dbg.get_mode());
 
     } else {
-        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), canonical);
+        graph = std::make_shared<DBGHashOrdered>(full_dbg.get_k(), full_dbg.get_mode());
         add_to_graph(*graph, contigs, full_dbg.get_k());
     }
 
@@ -874,7 +876,6 @@ void QueryExecutor
                 }
             },
             get_num_threads(),
-            anno_graph_.get_graph().is_canonical_mode() || config_.canonical,
             aligner_config_ && config_.batch_align ? &config_ : NULL
         );
 

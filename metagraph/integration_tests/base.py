@@ -13,7 +13,7 @@ TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
                         'hash': '.orhashdbg',
-                        # 'hashfast': '.hashfastdbg',
+                        'hashfast': '.hashfastdbg',
                         'hashstr': '.hashstrdbg'}
 
 anno_file_extension = {'column': '.column.annodbg',
@@ -36,15 +36,20 @@ class TestingBase(unittest.TestCase):
         return res
 
     @staticmethod
-    def _build_graph(input, output, k, repr, canonical=False, primary=False, extra_params=''):
-        construct_command = '{exe} build -p {num_threads} {canonical} {extra_params} \
+    def _build_graph(input, output, k, repr, mode='basic', extra_params=''):
+        if not output.endswith(graph_file_extension[repr]):
+            output += graph_file_extension[repr]
+
+        assert mode in ['basic', 'primary', 'canonical']
+
+        construct_command = '{exe} build -p {num_threads} --mode {mode} {extra_params} \
                 --graph {repr} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             extra_params=extra_params,
             k=k,
             repr=repr,
-            canonical='--canonical' if canonical else '',
+            mode='basic' if mode == 'basic' else 'canonical',
             outfile=output,
             input=input
         )
@@ -53,7 +58,7 @@ class TestingBase(unittest.TestCase):
                              stderr=PIPE)
         assert res.returncode == 0
 
-        if primary:
+        if mode == 'primary':
             transform_command = '{exe} transform -p {num_threads} --to-fasta --primary-kmers \
                     -o {outfile} {input}'.format(
                 exe=METAGRAPH,
@@ -68,7 +73,7 @@ class TestingBase(unittest.TestCase):
                                  stderr=PIPE)
             assert res.returncode == 0
 
-            construct_command = '{exe} build -p {num_threads} {extra_params} \
+            construct_command = '{exe} build --mode primary -p {num_threads} {extra_params} \
                     --graph {repr} -k {k} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 num_threads=NUM_THREADS,
@@ -97,12 +102,11 @@ class TestingBase(unittest.TestCase):
         assert res.returncode == 0
 
     @staticmethod
-    def _annotate_graph(input, graph_path, output, anno_repr, primary=False):
-        annotate_command = '{exe} annotate {fwd_and_rev} --anno-header -i {graph} \
+    def _annotate_graph(input, graph_path, output, anno_repr):
+        annotate_command = '{exe} annotate --anno-header -i {graph} \
                 --anno-type {anno_repr} -o {outfile} -p {num_threads} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
-            fwd_and_rev='--canonical' if primary else '',
             graph=graph_path,
             anno_repr=anno_repr,
             outfile=output,

@@ -21,7 +21,7 @@ do
     then
         echo chunk $FF exists
     else
-        echo "/usr/bin/time -v ${metagraph} build -v --parallel ${threads} --canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) -o ${outdir}/graph_merged_k${K} --suffix $F ${seqdir}/*.fasta.gz 2>&1 | tee ${outdir}/build_k${K}_$F.log" | bsub -J mg_g_${F} -oo ${outdir}/build_k${K}_$F.lsf.log -We 36:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+        echo "/usr/bin/time -v ${metagraph} build -v --parallel ${threads} --mode canonical -k ${K} --mem-cap-gb $((${mem} / 2000)) -o ${outdir}/graph_merged_k${K} --suffix $F ${seqdir}/*.fasta.gz 2>&1 | tee ${outdir}/build_k${K}_$F.log" | bsub -J mg_g_${F} -oo ${outdir}/build_k${K}_$F.lsf.log -We 36:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
     fi
 done
 

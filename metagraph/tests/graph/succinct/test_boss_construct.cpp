@@ -330,6 +330,9 @@ TEST(BOSSConstruct, ConstructionFromChunks) {
     }
 }
 
+template <typename KMER, class Container>
+using Collector = typename mtg::kmer::KmerCollector<KMER, KmerExtractorBOSS, Container>;
+
 // TODO: k is node length
 template <typename KMER>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
@@ -342,7 +345,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix
+        k, Collector<KMER, common::SortedSet<typename KMER::WordType>>::BASIC, kmers, suffix
     );
     delete reads;
 }
@@ -437,7 +440,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                 callback(read, 1);
             }
         },
-        k, false, kmers, suffix
+        k, Collector<KMER, Container>::BASIC, kmers, suffix
     );
     delete reads;
 }
