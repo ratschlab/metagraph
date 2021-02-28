@@ -9,7 +9,6 @@
 #include "common/elias_fano_file_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
-#include "common/vectors/vector_algorithm.hpp"
 #include "graph/annotated_dbg.hpp"
 
 const uint64_t BLOCK_SIZE = 1 << 25;
@@ -26,9 +25,35 @@ using mtg::graph::boss::BOSS;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
+using rd_succ_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 template <typename T>
 using Encoder = common::EliasFanoEncoder<T>;
 
+
+// convert index
+inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
+    return graph::AnnotatedSequenceGraph::graph_to_anno_index(i);
+}
+
+void route_at_forks(const graph::DBGSuccinct &graph,
+                    const std::string &rd_succ_filename) {
+    ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
+                             "Route forks", std::cerr, !common::get_verbose());
+
+    // the last outgoing edges are always the row-diff successors
+    sdsl::bit_vector rd_succ_bv(graph.num_nodes(), 0);
+    graph.get_boss().get_last().call_ones([&](uint64_t i) {
+        if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
+            assert(to_row(graph_idx) < graph.num_nodes());
+            rd_succ_bv[to_row(graph_idx)] = 1;
+        }
+        ++progress_bar;
+    });
+    std::ofstream f(rd_succ_filename, ios::binary);
+    rd_succ_bv_type(std::move(rd_succ_bv)).serialize(f);
+    logger->trace("RowDiff successors are assigned for forks and written to {}",
+                  rd_succ_filename);
+}
 
 void build_pred_succ(const std::string &graph_fname,
                      const std::string &outfbase,
@@ -50,6 +75,9 @@ void build_pred_succ(const std::string &graph_fname,
         logger->error("Cannot load graph from {}", graph_fname);
         std::exit(1);
     }
+
+    // assign row-diff successors at forks
+    route_at_forks(graph, outfbase + ".rd_succ");
 
     const BOSS &boss = graph.get_boss();
 
@@ -84,9 +112,7 @@ void build_pred_succ(const std::string &graph_fname,
                 assert(next);
                 if (!dummy[next]) {
                     do {
-                        succ_buf.push_back(
-                            graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                                graph.boss_to_kmer_index(next)));
+                        succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
                         succ_boundary_buf.push_back(0);
                     } while (--next && !boss.get_last(next));
                 }
@@ -101,9 +127,7 @@ void build_pred_succ(const std::string &graph_fname,
                         // dummy predecessors are ignored
                         if (!dummy[pred]) {
                             uint64_t node_index = graph.boss_to_kmer_index(pred);
-                            pred_buf.push_back(
-                                graph::AnnotatedSequenceGraph::graph_to_anno_index(node_index)
-                            );
+                            pred_buf.push_back(to_row(node_index));
                             pred_boundary_buf.push_back(0);
                         }
                     }
@@ -145,37 +169,19 @@ void assign_anchors(const std::string &graph_fname,
     }
 
     const BOSS &boss = graph.get_boss();
-    const uint64_t num_rows = graph.num_nodes();
-
-    // the last outgoing edges are always the row-diff successors
-    sdsl::bit_vector rd_succ(num_rows, 0);
-    boss.get_last().call_ones([&](uint64_t i) {
-        if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
-            uint64_t anno_index
-                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
-            assert(anno_index < num_rows);
-            rd_succ[anno_index] = 1;
-        }
-    });
-    const std::string rd_succ_filename = outfbase + ".rd_succ";
-    std::ofstream f(rd_succ_filename, ios::binary);
-    anchor_bv_type(rd_succ).serialize(f);
-    logger->trace("RowDiff successors are written to {}", rd_succ_filename);
-    rd_succ = sdsl::bit_vector();
-
     sdsl::bit_vector anchors_bv;
     sdsl::bit_vector dummy; // TODO: don't compute dummy
     boss.row_diff_traverse(num_threads, max_length, &anchors_bv, &dummy);
+
+    const uint64_t num_rows = graph.num_nodes();
 
     // anchors_bv uses BOSS edges as indices, so we need to map it to annotation indices
     sdsl::bit_vector term(num_rows, 0);
     for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
         if (anchors_bv[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
-            uint64_t anno_index
-                = graph::AnnotatedSequenceGraph::graph_to_anno_index(graph_idx);
-            assert(anno_index < num_rows);
-            term[anno_index] = 1;
+            assert(to_row(graph_idx) < num_rows);
+            term[to_row(graph_idx)] = 1;
         }
     }
     anchors_bv = sdsl::bit_vector();
@@ -370,7 +376,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::ifstream f(anchors_fname, std::ios::binary);
         anchor.load(f);
     }
-    anchor_bv_type rd_succ;
+    rd_succ_bv_type rd_succ;
     {
         const std::string rd_succ_filename = pred_succ_fprefix + ".rd_succ";
         std::ifstream f(rd_succ_filename, std::ios::binary);
