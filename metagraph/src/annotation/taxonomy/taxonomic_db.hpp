@@ -112,12 +112,6 @@ class TaxonomyDB {
     void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                         std::vector<NormalizedTaxId> &tree_linearization);
 
-    /**
-     * Update kmers' LCA in "this->taxonomic_map" according to the received set of columns.
-     */
-    void run_taxo_columns_update(const annot::MultiLabelEncoded<AccessionVersion> &annotation,
-                                 const std::vector<AccessionVersion> &columns);
-
   public:
     /**
      * Constructs a TaxonomyDB
@@ -129,21 +123,6 @@ class TaxonomyDB {
     TaxonomyDB(const std::string &taxo_tree_filepath,
                const std::string &lookup_table_filepath,
                const tsl::hopscotch_set<AccessionVersion> &input_accessions);
-
-    /**
-     * Iterate the annotation matrix (kmer-OX labels-OY) for updating the LCA taxid
-     * per kmer. The new data is stored in "this->taxonomic_map".
-     *
-     * @param [input] anno_graph - the annotation matrix object.
-     */
-    void taxonomic_update(const graph::AnnotatedDBG &anno_graph);
-
-    /**
-     * Similar to taxonomic_update, but use annotation columns batches for rounds of
-     * updates of RAM size.
-     */
-    void taxonomic_update_fast(const graph::AnnotatedDBG &anno_graph,
-                               size_t mem_bytes);
 
     /**
      * Iterate the annotation matrix (kmer-OX labels-OY) from the received set of files
