@@ -7,7 +7,8 @@
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
-
+#include <stdio.h>
+#include <stdlib.h>
 
 
 namespace mtg {
@@ -21,6 +22,41 @@ const std::string input_filepath = test_data_dir + "taxo_input.fa";
 
 tsl::hopscotch_set<std::string> get_all_labels_from_file(const std::string &filepath) {
     tsl::hopscotch_set<std::string> labels;
+
+    ifstream f(filepath.c_str());
+    if (!f.good()) {
+        std::cerr << "No file at path " + filepath << std::endl;
+
+        std::cerr << "pwd \n";
+        int result = system("pwd");
+        std::cerr << "result = " << result << std::endl;
+
+        std::cerr << "ls . \n";
+         result = system("ls -la .");
+        std::cerr << "result = " << result << std::endl;
+
+        std::cerr << "ls .. \n";
+         result = system("ls -la ..");
+        std::cerr << "result = " << result << std::endl;
+
+        std::cerr << "ls ../tests \n";
+         result = system("ls -la ../tests");
+        std::cerr << "result = " << result << std::endl;
+
+        std::cerr << "ls ../tests/data \n";
+         result = system("ls -la ../tests/data");
+        std::cerr << "result = " << result << std::endl;
+
+        std::cerr << "ls ../tests/data/taxo_data \n";
+         result = system("ls -la ../tests/data/taxo_data");
+        std::cerr << "result = " << result << std::endl;
+
+         result = system(("ls -la " + test_data_dir).c_str());
+        std::cerr << "result = " << result << std::endl;
+        return labels;
+    }
+
+
     seq_io::FastaParser fasta_parser(filepath);
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         labels.insert(annot::TaxonomyDB::get_accession_version_from_label(kseq.name.s));
