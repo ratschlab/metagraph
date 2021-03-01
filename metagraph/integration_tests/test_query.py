@@ -92,8 +92,9 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename, ex
     assert(res.returncode == 0)
 
     if target_anno == 'row_diff':
-        annotate_command += ' --optimize'
-        res = subprocess.run([annotate_command], shell=True)
+        res = subprocess.run([annotate_command + ' --row-diff-stage 1'], shell=True)
+        assert(res.returncode == 0)
+        res = subprocess.run([annotate_command + ' --row-diff-stage 2'], shell=True)
         assert(res.returncode == 0)
 
         os.remove(output_filename + anno_file_extension[anno_repr])

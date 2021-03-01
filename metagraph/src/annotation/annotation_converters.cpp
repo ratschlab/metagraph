@@ -1119,6 +1119,38 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
+fs::path get_count_filename(fs::path vector_fname,
+                            const std::string &extension,
+                            fs::path out_dir,
+                            fs::path fallback_filename) {
+    if (vector_fname.extension() != extension) {
+        if (!vector_fname.empty()) {
+            logger->warn(
+                "The output filename {} does not have the expected extension"
+                " '{}'. The name of the row count vector will be derived"
+                " from the first column in batch.", vector_fname, extension);
+        }
+
+        // fix the name, set to the fallback value
+        vector_fname = out_dir/fs::path(fallback_filename)
+                                .filename()
+                                .replace_extension()
+                                .replace_extension(extension);
+
+        logger->info("The name of the row count vector was automatically"
+                     " derived from the first column in batch and set to {}",
+                     vector_fname);
+
+        if (fs::exists(vector_fname)) {
+            logger->warn("Found row count vector {}, will be overwritten",
+                         vector_fname);
+            fs::remove(vector_fname);
+        }
+    }
+
+    return vector_fname;
+}
+
 void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
@@ -1126,12 +1158,15 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path out_dir,
                          fs::path swap_dir,
                          RowDiffStage construction_stage,
-                         fs::path row_reduction_fname) {
+                         fs::path count_vector_fname) {
     if (out_dir.empty())
         out_dir = "./";
 
-    build_pred_succ(graph_fname, graph_fname, get_num_threads());
-    assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
+    if (construction_stage != RowDiffStage::COUNT_LABELS) {
+        build_pred_succ(graph_fname, graph_fname, get_num_threads());
+        // TODO: assign anchors only on the last stage
+        assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
+    }
 
     if (construction_stage == RowDiffStage::CONVERT)
         optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
@@ -1159,43 +1194,31 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             mem_bytes_left -= file_size;
             file_batch.push_back(files[i]);
 
-            // derive name from first file in batch
-            if (construction_stage == RowDiffStage::COMPUTE_REDUCTION
-                    && row_reduction_fname.extension() != ".row_reduction") {
-                if (!row_reduction_fname.empty()) {
-                    logger->warn(
-                        "The output filename {} does not have extension '.row_reduction'."
-                        " The name of the row reduction vector will be derived"
-                        " from the first column in batch.", row_reduction_fname);
-                }
-                row_reduction_fname = out_dir/fs::path(file_batch.back())
-                                                .filename()
-                                                .replace_extension()
-                                                .replace_extension(".row_reduction");
-
-                logger->info("The name of the row reduction vector was automatically"
-                             " derived from the first column in batch and set to {}",
-                             row_reduction_fname);
-
-                if (fs::exists(row_reduction_fname)) {
-                    logger->warn("Found row reduction vector {}, will be overwritten",
-                                 row_reduction_fname);
-                    fs::remove(row_reduction_fname);
-                }
+            // get a file name of the count vector or derive from the first file in batch
+            if (construction_stage == RowDiffStage::COUNT_LABELS) {
+                count_vector_fname = get_count_filename(count_vector_fname, ".row_count",
+                                                        out_dir, file_batch.front());
+            } else if (construction_stage == RowDiffStage::COMPUTE_REDUCTION) {
+                count_vector_fname = get_count_filename(count_vector_fname, ".row_reduction",
+                                                        out_dir, file_batch.front());
             }
         }
 
         Timer timer;
-        logger->trace("Annotations for row-diff transform in batch: {}",
+        logger->trace("Annotations in batch: {}",
                       file_batch.size());
 
-        convert_batch_to_row_diff(
-                graph_fname, graph_fname + kRowDiffAnchorExt
-                    + (construction_stage == RowDiffStage::COMPUTE_REDUCTION ? ".unopt" : ""),
-                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES,
-                construction_stage == RowDiffStage::COMPUTE_REDUCTION);
+        if (construction_stage == RowDiffStage::COUNT_LABELS) {
+            count_labels_per_row(file_batch, count_vector_fname);
+        } else {
+            convert_batch_to_row_diff(
+                    graph_fname, graph_fname + kRowDiffAnchorExt
+                        + (construction_stage == RowDiffStage::COMPUTE_REDUCTION ? ".unopt" : ""),
+                    file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
+                    construction_stage == RowDiffStage::COMPUTE_REDUCTION);
+        }
 
-        logger->trace("Batch transformed in {} sec", timer.elapsed());
+        logger->trace("Batch processed in {} sec", timer.elapsed());
     }
 }
 

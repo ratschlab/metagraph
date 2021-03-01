@@ -30,6 +30,113 @@ template <typename T>
 using Encoder = common::EliasFanoEncoder<T>;
 
 
+void count_labels_per_row(const std::vector<std::string> &source_files,
+                          const std::string &row_count_fname) {
+    if (source_files.empty())
+        return;
+
+    const uint32_t num_threads = get_num_threads();
+
+    uint64_t num_rows = 0;
+
+    std::vector<annot::ColumnCompressed<>> sources(source_files.size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < source_files.size(); ++i) {
+        if (!sources[i].load(source_files[i])) {
+            logger->error("Can't load source annotations from {}", source_files[i]);
+            std::exit(1);
+        }
+
+        if (!sources[i].num_labels())
+            continue;
+
+        #pragma omp critical
+        {
+            if (!num_rows) {
+                num_rows = sources[i].num_objects();
+            } else if (num_rows != sources[i].num_objects()) {
+                logger->error("Annotations have different number of rows");
+                std::exit(1);
+            }
+        }
+    }
+    logger->trace("Done loading {} annotations", sources.size());
+
+    if (!num_rows) {
+        logger->warn("Input annotations have no rows");
+        return;
+    }
+
+    // initializing the row count vector
+    const bool new_vector = !fs::exists(row_count_fname);
+    logger->trace("Row count vector: {}", row_count_fname);
+    if (new_vector) {
+        // create an empty vector
+        sdsl::int_vector_buffer(row_count_fname,
+                                std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
+        logger->trace("Initialized new row count vector {}", row_count_fname);
+    } else {
+        logger->trace("Row count vector {} already exists and will be updated",
+                      row_count_fname);
+    }
+    sdsl::int_vector_buffer row_count(row_count_fname,
+                                      std::ios::in | std::ios::out, BLOCK_SIZE);
+
+    // total number of set bits in the original rows
+    std::vector<uint32_t> row_count_block;
+    // buffer for writing previous block while populating next row_count_block
+    std::vector<uint32_t> row_count_block_other;
+
+    ThreadPool async_writer(1, 1);
+
+    ProgressBar progress_bar(num_rows, "Count row labels", std::cerr, !common::get_verbose());
+    uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
+
+    for (uint64_t block_begin = 0; block_begin < num_rows; block_begin += BLOCK_SIZE) {
+        uint64_t block_size = next_block_size;
+        next_block_size = std::min(BLOCK_SIZE, num_rows - (block_begin + block_size));
+
+        row_count_block.assign(block_size, 0);
+
+        // process the current block
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        for (size_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
+            for (size_t j = 0; j < sources[l_idx].num_labels(); ++j) {
+                const bit_vector &source_col
+                        = *sources[l_idx].get_matrix().data()[j];
+                source_col.call_ones_in_range(block_begin, block_begin + block_size,
+                    [&](uint64_t i) {
+                        __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
+                    }
+                );
+            }
+        }
+
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+        async_writer.join();
+        row_count_block_other.swap(row_count_block);
+
+        async_writer.enqueue([&,block_begin]() {
+            for (size_t i = 0; i < row_count_block_other.size(); ++i) {
+                if (uint32_t c = row_count_block_other[i]) {
+                    if (new_vector) {
+                        row_count.push_back(c);
+                    } else {
+                        row_count[block_begin + i] += c;
+                    }
+                }
+            }
+        });
+
+        progress_bar += block_size;
+    }
+
+    async_writer.join();
+}
+
+
 // convert index
 inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
     return graph::AnnotatedSequenceGraph::graph_to_anno_index(i);

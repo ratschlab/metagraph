@@ -48,14 +48,13 @@ int transform_annotation(Config *config) {
 
     if (config->anno_type == Config::RowDiff && !files.size()) {
         // Only prepare for the row-diff transform:
+        //      Compute number of labels per row (if stage 0),
         //      Generate pred/succ/anchors (if stage 1) or optimize anchors (if stage 2).
         logger->trace("Passed no columns to transform. Only preparations will be performed.");
         auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
         convert_to_row_diff({}, config->infbase, config->memory_available * 1e9,
                             config->max_path_length, out_dir, config->tmp_dir,
-                            !config->optimize
-                                ? RowDiffStage::COMPUTE_REDUCTION
-                                : RowDiffStage::CONVERT);
+                            static_cast<RowDiffStage>(config->row_diff_stage));
         logger->trace("Done");
         return 0;
     }
@@ -405,9 +404,7 @@ int transform_annotation(Config *config) {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
                                     config->max_path_length, out_dir, config->tmp_dir,
-                                    !config->optimize
-                                        ? RowDiffStage::COMPUTE_REDUCTION
-                                        : RowDiffStage::CONVERT,
+                                    static_cast<RowDiffStage>(config->row_diff_stage),
                                     config->outfbase);
                 break;
             }
