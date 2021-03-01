@@ -1125,7 +1125,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          uint32_t max_path_length,
                          fs::path out_dir,
                          fs::path swap_dir,
-                         bool optimize,
+                         RowDiffStage construction_stage,
                          fs::path row_reduction_fname) {
     if (out_dir.empty())
         out_dir = "./";
@@ -1133,7 +1133,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     build_pred_succ(graph_fname, graph_fname, get_num_threads());
     assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
 
-    if (optimize)
+    if (construction_stage == RowDiffStage::CONVERT)
         optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
 
     if (!files.size())
@@ -1142,15 +1142,15 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
+        // TODO: minus anchor bitmap
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
             // also add some space for buffers for each column
             uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
             if (file_size > mem_bytes) {
-                logger->warn(
-                        "Not enough memory to process {}, requires {} MB, skipped",
-                        files[i], file_size / 1e6);
+                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
+                             files[i], file_size / 1e6);
                 continue;
             }
             if (file_size > mem_bytes_left)
@@ -1160,7 +1160,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             file_batch.push_back(files[i]);
 
             // derive name from first file in batch
-            if (!optimize && row_reduction_fname.extension() != ".row_reduction") {
+            if (construction_stage == RowDiffStage::COMPUTE_REDUCTION
+                    && row_reduction_fname.extension() != ".row_reduction") {
                 if (!row_reduction_fname.empty()) {
                     logger->warn(
                         "The output filename {} does not have extension '.row_reduction'."
@@ -1189,8 +1190,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         convert_batch_to_row_diff(
-                graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES, !optimize);
+                graph_fname, graph_fname + kRowDiffAnchorExt
+                    + (construction_stage == RowDiffStage::COMPUTE_REDUCTION ? ".unopt" : ""),
+                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES,
+                construction_stage == RowDiffStage::COMPUTE_REDUCTION);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
