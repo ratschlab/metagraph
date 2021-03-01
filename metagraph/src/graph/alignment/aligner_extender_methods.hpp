@@ -100,6 +100,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     tsl::hopscotch_map<NodeType, Column> table_;
 
+    // the initial seed
+    const DBGAlignment *seed_;
+
     virtual void reset() override { table_.clear(); }
 
     virtual const DBGAlignment& get_seed() const override { return *seed_; }
@@ -118,9 +121,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     // a quick lookup table of char pair match/mismatch scores for the current query
     tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
-
-    // the initial seed
-    const DBGAlignment *seed_;
 
     std::string_view extend_window_;
 

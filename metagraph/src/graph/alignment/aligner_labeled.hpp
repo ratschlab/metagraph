@@ -141,7 +141,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   private:
     const AnnotatedDBG &anno_graph_;
 
-    std::vector<uint64_t> target_columns_;
+    mutable std::vector<uint64_t> target_columns_;
 
     size_t initial_target_columns_size_;
 

@@ -180,7 +180,48 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     uint64_t target_column = target_columns_.at(target_column_idx);
 
     if (target_column == ILabeledDBGAligner::kNTarget) {
-        return DefaultColumnExtender<NodeType>::get_outgoing(node);
+        assert(this->seed_->get_offset());
+        assert(this->seed_->get_offset() + 1 >= std::get<3>(node));
+        size_t next_offset = this->seed_->get_offset() + 1 - std::get<3>(node);
+
+        if (next_offset)
+            return DefaultColumnExtender<NodeType>::get_outgoing(node);
+
+        AnnotatedDBG::row_index row;
+        if (const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_)) {
+            row = AnnotatedDBG::graph_to_anno_index(canonical->get_base_node(std::get<0>(node)));
+        } else if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL) {
+            row = AnnotatedDBG::graph_to_anno_index(std::get<0>(node));
+        } else {
+            this->graph_.map_to_nodes(this->graph_.get_node_sequence(std::get<0>(node)), [&](NodeType node_canonical) {
+                row = AnnotatedDBG::graph_to_anno_index(node_canonical);
+            });
+        }
+
+        auto annotation = anno_graph_.get_annotation().get_matrix().get_row(row);
+        if (annotation.empty()) {
+            // no labels found for this node, return nothing
+            cached_edge_sets_[std::get<0>(node)] = {};
+            return {};
+        }
+
+        target_column_idx = target_columns_.size();
+        for (uint64_t target : annotation) {
+            auto find = std::find(target_columns_.begin(), target_columns_.end(), target);
+            if (find != target_columns_.end()) {
+                target_column_idx = std::min(
+                    target_column_idx,
+                    static_cast<size_t>(find - target_columns_.begin())
+                );
+            }
+        }
+
+        // TODO: find a way to pick all of them
+        if (target_column_idx == target_columns_.size())
+            target_columns_.emplace_back(annotation[0]);
+
+        target_column = target_columns_[target_column_idx];
+        align_node_to_target_[node] = target_column_idx;
     }
 
     if (cached_edge_sets_.count(std::get<0>(node))) {
