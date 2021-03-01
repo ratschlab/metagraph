@@ -124,81 +124,70 @@ auto ILabeledDBGAligner
     return std::make_pair(std::move(query_nodes), std::move(target_columns));
 }
 
+template <typename NodeType>
+LabeledColumnExtender<NodeType>
+::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
+                        const DBGAlignerConfig &config,
+                        std::string_view query)
+      : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
+        anno_graph_(anno_graph),
+        initial_target_columns_size_(0) {}
 
 template <typename NodeType>
 LabeledColumnExtender<NodeType>
 ::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                         const DBGAlignerConfig &config,
                         std::string_view query,
-                        uint64_t target_column)
+                        uint64_t initial_target_column)
       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
         anno_graph_(anno_graph),
-        main_target_column_(target_column) {}
+        target_columns_({ initial_target_column }),
+        initial_target_columns_size_(1) {}
 
 template <typename NodeType>
 void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
+    target_columns_.resize(initial_target_columns_size_);
+    assert(target_columns_.size() <= 1);
     DefaultColumnExtender<NodeType>::initialize(path);
+    cached_edge_sets_.clear();
+    align_node_to_target_.clear();
+
+    AlignNode start_node{ this->graph_.max_index() + 1, '\0', 0, 0 };
 
     if (!path.get_offset()) {
-        target_column_ = main_target_column_;
-        return;
-    }
+        align_node_to_target_[start_node] = 0;
+        if (target_columns_.empty())
+            target_columns_.push_back(ILabeledDBGAligner::kNTarget);
 
-    target_column_ = ILabeledDBGAligner::kNTarget;
+    } else if (target_columns_.empty()) {
+        align_node_to_target_[start_node] = 0;
+        target_columns_.push_back(ILabeledDBGAligner::kNTarget);
 
-    // the path is a suffix match
-    assert(path.size() == 1);
-    size_t k = this->graph_.get_k();
-
-    const char *endpoint = path.get_query().data() + path.get_query().size()
-        + path.get_offset();
-    assert(endpoint > this->query_.data());
-
-    // align as usual if a label can't be found via extension
-    if (endpoint > this->query_.data() + this->query_.size())
-        return;
-
-    std::string_view subquery(this->query_.data(), endpoint - this->query_.data());
-
-    DefaultColumnExtender<NodeType> path_extender(this->graph_, this->config_, subquery);
-    path_extender.initialize(path);
-
-    bool extended = false;
-    for (auto&& extension : path_extender.get_extensions()) {
-        if (extension.get_sequence().size() == k) {
-            if (path.get_orientation() == extension.get_orientation()) {
-                if (path.get_clipping() == extension.get_clipping()) {
-                    extended = true;
-                    alt_seed_ = std::move(extension);
-                    break;
-                }
-            // TODO:
-            // } else if (path.get_clipping() == extension.get_end_clipping()
-                    // && graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-            }
-        }
-    }
-
-    if (extended) {
-        auto labels = anno_graph_.get_top_labels(alt_seed_.get_sequence(), 1, 1.0);
-        if (labels.size()) {
-            DefaultColumnExtender<NodeType>::initialize(alt_seed_);
-            target_column_ = anno_graph_.get_annotation().get_label_encoder().encode(
-                labels[0].first
-            );
-        }
+    } else {
+        align_node_to_target_[start_node] = 1;
+        target_columns_.push_back(ILabeledDBGAligner::kNTarget);
     }
 }
 
 template <typename NodeType>
 auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const -> Edges {
-    if (target_column_ == ILabeledDBGAligner::kNTarget
-            || std::get<0>(node) == this->graph_.max_index() + 1) {
+    assert(align_node_to_target_.count(node));
+
+    if (std::get<0>(node) == this->graph_.max_index() + 1)
+        return DefaultColumnExtender<NodeType>::get_outgoing(node);
+
+    uint64_t target_column_idx = align_node_to_target_[node];
+    uint64_t target_column = target_columns_.at(target_column_idx);
+
+    if (target_column == ILabeledDBGAligner::kNTarget) {
         return DefaultColumnExtender<NodeType>::get_outgoing(node);
     }
 
-    if (cached_edge_sets_.count(std::get<0>(node)))
-        return cached_edge_sets_[std::get<0>(node)];
+    if (cached_edge_sets_.count(std::get<0>(node))) {
+        const auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
+        if (target_column_idx < edge_sets.size())
+            return edge_sets[target_column_idx];
+    }
 
     typedef std::tuple<NodeType /* parent */,
                        NodeType /* child */,
@@ -243,7 +232,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     }
 
     auto rows_with_target = anno_graph_.get_annotation().get_matrix().has_column(
-        anno_rows, target_column_
+        anno_rows, target_column
     );
 
     anno_rows = std::vector<AnnotatedDBG::row_index>();
@@ -258,12 +247,21 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 assert(parent_node == std::get<0>(node));
                 edges.emplace_back(child_node, c);
             } else {
-                cached_edge_sets_[parent_node].emplace_back(child_node, c);
+                auto &parent_edge_sets = cached_edge_sets_[parent_node];
+                if (target_column_idx >= parent_edge_sets.size())
+                    parent_edge_sets.resize(target_column_idx + 1);
+
+                cached_edge_sets_[parent_node][target_column_idx].emplace_back(
+                    child_node, c
+                );
             }
         }
     }
 
-    cached_edge_sets_[std::get<0>(node)] = edges;
+    auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
+    assert(target_column_idx >= edge_sets.size());
+    edge_sets.resize(target_column_idx + 1);
+    edge_sets[target_column_idx] = edges;
     return edges;
 }
 

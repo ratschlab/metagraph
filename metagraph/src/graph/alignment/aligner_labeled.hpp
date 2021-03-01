@@ -109,34 +109,47 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
                           std::string_view query,
-                          uint64_t target_column = ILabeledDBGAligner::kNTarget);
+                          uint64_t initial_target_column);
+
+    LabeledColumnExtender(const AnnotatedDBG &anno_graph,
+                          const DBGAlignerConfig &config,
+                          std::string_view query);
 
     virtual ~LabeledColumnExtender() {}
 
     virtual void initialize(const DBGAlignment &path) override;
 
-    void set_target_column(uint64_t target_column) { target_column_ = target_column; }
-
   protected:
     typedef std::vector<std::pair<NodeType, char>> Edges;
+    typedef typename DefaultColumnExtender<NodeType>::Column Column;
+    typedef typename DefaultColumnExtender<NodeType>::Scores Scores;
     typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
+    typedef typename DefaultColumnExtender<NodeType>::AlignNodeHash AlignNodeHash;
 
     virtual Edges get_outgoing(const AlignNode &node) const override;
+
+    virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode &node) override {
+        const AlignNode &prev = std::get<6>(scores);
+        assert(align_node_to_target_.count(prev));
+        align_node_to_target_[node] = align_node_to_target_[prev];
+
+        DefaultColumnExtender<NodeType>::add_scores_to_column(
+            column, std::move(scores), node
+        );
+    }
 
   private:
     const AnnotatedDBG &anno_graph_;
 
-    // default target column
-    uint64_t main_target_column_;
+    std::vector<uint64_t> target_columns_;
 
-    // Target column when extending the current seed. This is equal to main_target_column_
-    // for all but suffix seeds
-    uint64_t target_column_;
+    size_t initial_target_columns_size_;
 
     // alternative seed used to replace a suffix seed
     DBGAlignment alt_seed_;
 
-    mutable tsl::hopscotch_map<NodeType, Edges> cached_edge_sets_;
+    mutable tsl::hopscotch_map<NodeType, std::vector<Edges>> cached_edge_sets_;
+    mutable tsl::hopscotch_map<AlignNode, uint8_t, AlignNodeHash> align_node_to_target_;
 };
 
 
@@ -177,13 +190,11 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                          const auto &forward_seeder,
                                                          auto&& rev_comp_seeds,
                                                          const auto &callback) {
-                    callback(
-                        LabeledSeeder<ManualSeeder<node_index>>(
-                            dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
-                            std::move(rev_comp_seeds)
-                        ),
-                        Extender(anno_graph_, config_, reverse)
+                    LabeledSeeder<ManualSeeder<node_index>> seeder_rc(
+                        dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
+                        std::move(rev_comp_seeds)
                     );
+                    callback(seeder_rc, build_extender(reverse, seeder_rc));
                 };
 
                 // From a given seed, align forwards, then reverse complement and
@@ -268,7 +279,11 @@ inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         target_column = manual->get_target_column();
     }
 
-    return { anno_graph_, config_, query, target_column };
+    if (target_column != kNTarget) {
+        return { anno_graph_, config_, query, target_column };
+    } else {
+        return { anno_graph_, config_, query };
+    }
 }
 
 } // namespace align
