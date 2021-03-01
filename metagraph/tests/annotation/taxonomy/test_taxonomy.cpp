@@ -160,93 +160,92 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     tsl::hopscotch_set<std::string> labels_set = get_all_labels_from_file(input_filepath);
     annot::TaxonomyDB taxo(taxonomic_filepath, lookup_filepath, labels_set);
 
-    std::vector<std::string> sequences;
-    std::vector<std::string> labels;
+    std::vector<std::string> all_sequences;
+    std::vector<std::string> all_labels;
 
     /*
      * Tree configuration in '../tests/data/taxo_data/dumb_nodes.dmp'
      *
      *
-     *                        0(normalized891)
-     *                   2(n906)            \
-     *               5(n19)  26(n135)       63(n468)
+     *                        0(normalized650)
+     *                    5(n651)            \
+     *               47(n568) 48(n503)       2(n310)
      *
      *
-     *      For node  0 the normalized value is 891      ---> root
-     *      For node  2 the normalized value is 906
-     *      For node  5 the normalized value is 19       ---> SEQ1
-     *      For node 26 the normalized value is 135     ---> SEQ2
-     *      For node 63 the normalized value is 468     ---> SEQ3
+     *      For node  0 the normalized value is 650       ---> root
+     *      For node  5 the normalized value is 651
+     *      For node  2 the normalized value is 310       ---> SEQ1
+     *      For node 47 the normalized value is 568       ---> SEQ2
+     *      For node 48 the normalized value is 503       ---> SEQ3
      *
      */
 
-    int64_t k = 30;
-    int64_t SEQ1 = 0;
-    int64_t SEQ2 = 20;
-    int64_t SEQ3 = 50;
+    uint64_t k = 20;
+    uint64_t SEQ1 = 0;
+    uint64_t SEQ2 = 40;
+    uint64_t SEQ3 = 41;
 
-    get_sequences_and_labels_from_file(input_filepath, sequences, labels);
+    get_sequences_and_labels_from_file(input_filepath, all_sequences, all_labels);
     std::mutex taxo_mutex;
 
     ASSERT_TRUE(taxo.taxonomic_map.size() == 0);
 
     // Test the normalized taxids.
     uint64_t normalized_taxid;
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(labels[SEQ1]),
+    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ1]),
             normalized_taxid));
-    EXPECT_EQ(19, normalized_taxid);
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(labels[SEQ2]),
+    EXPECT_EQ(310, normalized_taxid);
+    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ2]),
         normalized_taxid));
-    EXPECT_EQ(135, normalized_taxid);
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(labels[SEQ3]),
+    EXPECT_EQ(568, normalized_taxid);
+    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ3]),
             normalized_taxid));
-    EXPECT_EQ(468, normalized_taxid);
+    EXPECT_EQ(503, normalized_taxid);
 
-//    Add sequence SEQ1 only to taxonomic_map.
-    auto anno_graph_seq =
-            build_anno_graph<DBGSuccinct>(k + 1,
-                                          std::vector<std::string>{sequences[SEQ1]},
-                                          std::vector<std::string>{labels[SEQ1]});
-    taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation(), taxo_mutex);
-    tsl::hopscotch_map<uint64_t, uint64_t> frequencies_taxid;
-    for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
-        if (taxo.taxonomic_map[i] > 0) {
-            ++frequencies_taxid[taxo.taxonomic_map[i]];
-        }
-    }
-    tsl::hopscotch_map<uint64_t, uint64_t> expected_freq_taxid = {{19, 969}};
-    EXPECT_EQ(expected_freq_taxid, frequencies_taxid);
+    struct query_taxo_map_update {
+        std::string test_id;
+        tsl::hopscotch_map<uint64_t, uint64_t> expected_freq_taxid;
+        std::vector<uint64_t> seq_list;
+    };
 
-//    Add sequences SEQ1 and SEQ2 to taxonomic_map.
-    anno_graph_seq =
-            build_anno_graph<DBGSuccinct>(k + 1,
-                                          std::vector<std::string>{sequences[SEQ1], sequences[SEQ2]},
-                                          std::vector<std::string>{labels[SEQ1], labels[SEQ2]});
-    taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation(), taxo_mutex);
-    frequencies_taxid.clear();
-    for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
-        if (taxo.taxonomic_map[i] > 0) {
-            ++frequencies_taxid[taxo.taxonomic_map[i]];
-        }
-    }
-    expected_freq_taxid = {{906, 486}, {135, 484}, {19, 969}};
-    EXPECT_EQ(expected_freq_taxid, frequencies_taxid);
+    std::vector<query_taxo_map_update> tests = {
+        {"test1", {{310, 979}}, {{SEQ1}}},
+        {"test2", {{650, 201}, {568, 778}, {310, 778}}, {{SEQ1, SEQ2}}},
+        {"test3", {
+                        {650, 217}, {651, 650}, {310, 762}, {568, 128}, {503, 171}},
+                        {{SEQ1, SEQ2, SEQ3}}
+        },
+        {"test4", {{651, 792}, {568, 187}, {503, 187}}, {{SEQ2, SEQ3}}},
+    };
 
-//    Add sequences SEQ1, SEQ2 and SEQ3 to taxonomic_map.
-    anno_graph_seq =
-            build_anno_graph<DBGSuccinct>(k + 1,
-                                          std::vector<std::string>{sequences[SEQ1], sequences[SEQ2], sequences[SEQ3]},
-                                          std::vector<std::string>{labels[SEQ1], labels[SEQ2], labels[SEQ3]});
-    taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation(), taxo_mutex);
-    frequencies_taxid.clear();
-    for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
-        if (taxo.taxonomic_map[i] > 0) {
-            ++frequencies_taxid[taxo.taxonomic_map[i]];
+    for (const auto &test: tests) {
+        // Clean taxonomic_map after the last test.
+        for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
+            taxo.taxonomic_map[i] = 0;
         }
+        taxo.taxonomic_map.resize(0);
+
+        std::vector<std::string> test_sequences;
+        std::vector<std::string> test_labels;
+        for (const auto &seq: test.seq_list) {
+            test_sequences.push_back(all_sequences[seq]);
+            test_labels.push_back(all_labels[seq]);
+        }
+
+        auto anno_graph_seq =
+                build_anno_graph<DBGSuccinct>(k + 1, test_sequences, test_labels);
+
+        taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation(), taxo_mutex);
+        tsl::hopscotch_map<uint64_t, uint64_t> frequencies_taxid;
+        for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
+            if (taxo.taxonomic_map[i] > 0) {
+                ++frequencies_taxid[taxo.taxonomic_map[i]];
+            }
+        }
+
+        EXPECT_EQ(make_pair(test.test_id, test.expected_freq_taxid),
+                  make_pair(test.test_id, frequencies_taxid));
     }
-    expected_freq_taxid = {{906, 790}, {891, 656}, {19, 648},
-                            {468, 313}, {135, 502}};
-    EXPECT_EQ(expected_freq_taxid, frequencies_taxid);
 }
 
 }

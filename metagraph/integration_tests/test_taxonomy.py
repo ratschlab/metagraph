@@ -21,7 +21,7 @@ class TestTaxonomy(unittest.TestCase):
 
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_taxonomy(self):
-        k = 30
+        k = 20
         construct_command = '{exe} build -p {num_threads} \
                              -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
@@ -57,12 +57,13 @@ class TestTaxonomy(unittest.TestCase):
 
         res = subprocess.run(["ls -la " + self.tempdir.name], shell=True);
 
-        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxoDB}'.format(
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxoDB} --lca-coverage-threshold {lca_coverage}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAXO_DATA_DIR + '/taxo_query.fa',
-            taxoDB=self.tempdir.name + '/taxoDB.taxo'
+            taxoDB=self.tempdir.name + '/taxoDB.taxo',
+            lca_coverage=0.90
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 101448)
+        self.assertEqual(len(res.stdout), 64566)
