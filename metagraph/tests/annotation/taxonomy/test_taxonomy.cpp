@@ -209,7 +209,7 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     };
 
     std::vector<query_taxo_map_update> tests = {
-        {"test1", {{310, 979}}, {{SEQ1}}},
+        {"test1", {{310, 979}}, {SEQ1}},
         {"test2", {{650, 201}, {568, 778}, {310, 778}}, {{SEQ1, SEQ2}}},
         {"test3", {
                         {650, 217}, {651, 650}, {310, 762}, {568, 128}, {503, 171}},
