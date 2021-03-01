@@ -51,8 +51,8 @@ ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
         config_(config), num_top_labels_(num_top_labels) {}
 
 auto ILabeledDBGAligner
-::map_query_batch(const QueryGenerator &generate_query) const
-        -> std::pair<BatchMapping, BatchTargets> {
+::map_and_label_query_batch(const QueryGenerator &generate_query) const
+        -> std::pair<BatchMapping, BatchLabels> {
     BatchMapping query_nodes;
     VectorMap<AnnotatedDBG::row_index,
               std::vector<std::pair<size_t, size_t>>> row_to_query_idx;
@@ -87,7 +87,7 @@ auto ILabeledDBGAligner
     }
 
     // compute target columns and initialize signatures for each query
-    BatchTargets target_columns(num_queries);
+    BatchLabels target_columns(num_queries);
     for (size_t j = 0; j < column_counter.size(); ++j) {
         auto &counter = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
             column_counter[j].values_container()
@@ -191,8 +191,7 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 }
 
 template <typename NodeType>
-auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const
-        -> std::vector<std::pair<NodeType, char>> {
+auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const -> Edges {
     if (target_column_ == ILabeledDBGAligner::kNTarget
             || std::get<0>(node) == this->graph_.max_index() + 1) {
         return DefaultColumnExtender<NodeType>::get_outgoing(node);
@@ -249,7 +248,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const
 
     anno_rows = std::vector<AnnotatedDBG::row_index>();
 
-    std::vector<std::pair<NodeType, char>> edges;
+    Edges edges;
     for (AnnotatedDBG::row_index row : rows_with_target) {
         for (const auto &[parent_node, child_node, c, i] : anno_rows_to_id[row]) {
             assert(c != boss::BOSS::kSentinel);

@@ -32,15 +32,15 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
 
   protected:
     typedef std::vector<std::vector<node_index>> BatchMapping;
-    typedef std::vector<tsl::hopscotch_map<uint64_t, sdsl::bit_vector>> BatchTargets;
+    typedef std::vector<tsl::hopscotch_map<uint64_t, sdsl::bit_vector>> BatchLabels;
 
     const AnnotatedDBG &anno_graph_;
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
     size_t num_top_labels_;
 
-    std::pair<BatchMapping, BatchTargets>
-    map_query_batch(const QueryGenerator &generate_query) const;
+    std::pair<BatchMapping, BatchLabels>
+    map_and_label_query_batch(const QueryGenerator &generate_query) const;
 };
 
 template <class BaseSeeder>
@@ -118,8 +118,10 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     void set_target_column(uint64_t target_column) { target_column_ = target_column; }
 
   protected:
+    typedef std::vector<std::pair<NodeType, char>> Edges;
     typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
-    virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const override;
+
+    virtual Edges get_outgoing(const AlignNode &node) const override;
 
   private:
     const AnnotatedDBG &anno_graph_;
@@ -134,7 +136,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     // alternative seed used to replace a suffix seed
     DBGAlignment alt_seed_;
 
-    mutable tsl::hopscotch_map<NodeType, std::vector<std::pair<NodeType, char>>> cached_edge_sets_;
+    mutable tsl::hopscotch_map<NodeType, Edges> cached_edge_sets_;
 };
 
 
@@ -142,7 +144,7 @@ template <class BaseSeeder, class Extender, class AlignmentCompare>
 inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
-    auto mapped_batch = map_query_batch(generate_query);
+    auto mapped_batch = map_and_label_query_batch(generate_query);
 
     size_t num_queries = 0;
     generate_query([&](std::string_view header,
