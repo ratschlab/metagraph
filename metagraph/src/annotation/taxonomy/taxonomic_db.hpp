@@ -74,7 +74,7 @@ class TaxonomyDB {
     */
     sdsl::int_vector<> taxonomic_map;
 
-    /*  *
+    /**
      * Reads and returns the taxonomic tree
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
@@ -125,13 +125,14 @@ class TaxonomyDB {
                const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
-     * Iterate the annotation matrix (kmer-OX labels-OY) from the received set of files
-     * for updating the LCA taxid per kmer. The new data is stored in "this->taxonomic_map".
+     * Iterate the received annotation matrix (kmer-OX labels-OY) for updating the
+     * LCA taxid per kmer. The new data is stored in "this->taxonomic_map".
      *
-     * @param [input] anno_graph - the annotation matrix object.
+     * @param [input] annot - the annotation matrix object.
+     * @param [input] mutex - a mutex used for updating "this->taxonomic_map" in parallel
      */
-    void kmer_to_taxid_map_update(const std::vector<std::string> &files, cli::Config *config);
-
+    void kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot,
+                                  std::mutex &taxo_mutex);
     /**
      * Exports 'taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.

@@ -1,13 +1,15 @@
 #include "transform_anno_tax.hpp"
 
 #include "common/logger.hpp"
+#include "common/threads/threading.hpp"
 #include "config/config.hpp"
 
-#include <tsl/hopscotch_set.h>
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotation/taxonomy/taxonomic_db.hpp"
 #include "cli/load/load_annotation.hpp"
+
 #include <filesystem>
+#include <tsl/hopscotch_set.h>
 
 
 namespace mtg {
@@ -36,6 +38,23 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
         }
     }
     return filenames;
+}
+
+void call_taxonomy_map_updates(annot::TaxonomyDB &taxonomy,
+                               const std::vector<std::string> &filenames,
+                               cli::Config *config) {
+    std::mutex taxo_mutex;
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint64_t i = 0; i < filenames.size(); ++i) {
+        const auto &file = filenames[i];
+        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
+                cli::initialize_annotation(file, *config);
+        if (!annot->load(file)) {
+            logger->error("Cannot load annotations from file '{}'", file);
+            exit(1);
+        }
+        taxonomy.kmer_to_taxid_map_update(*annot, taxo_mutex);
+    }
 }
 
 int transform_anno_taxo(Config *config) {
@@ -80,7 +99,7 @@ int transform_anno_taxo(Config *config) {
             mem_bytes_left -= file_size;
             file_batch.push_back(filenames[i]);
         }
-        taxonomy.kmer_to_taxid_map_update(file_batch, config);
+        call_taxonomy_map_updates(taxonomy, file_batch, config);
     }
 
     taxonomy.export_to_file(config->outfbase + ".taxo");

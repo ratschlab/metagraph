@@ -7,15 +7,12 @@
 #include <cmath>
 #include <sdsl/int_vector.hpp>
 
-#include "cli/config/config.hpp"
 #include "common/serialization.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/unix_tools.hpp"
-#include "common/threads/threading.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
-#include "cli/load/load_annotation.hpp"
 
 #include "common/logger.hpp"
 
@@ -236,57 +233,46 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, Norma
     return true;
 }
 
-void TaxonomyDB::kmer_to_taxid_map_update(const std::vector<std::string> &filenames, cli::Config *config) {
-    std::mutex taxo_mutex;
-
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (uint64_t i = 0; i < filenames.size(); ++i) {
-        const auto &file = filenames[i];
-        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
-                cli::initialize_annotation(file, *config);
-        if (!annot->load(file)) {
-            logger->error("Cannot load annotations from file '{}'", file);
-            exit(1);
+void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot,
+                                          std::mutex &taxo_mutex) {
+    for (const auto &label: annot.get_all_labels()) {
+        AccessionVersion accession_version = get_accession_version_from_label(label);
+        uint64_t taxid;
+        if(!get_normalized_taxid(accession_version, taxid)) {
+            continue;
         }
-        for (const auto &label: annot->get_all_labels()) {
-            AccessionVersion accession_version = get_accession_version_from_label(label);
-            uint64_t taxid;
-            if(!get_normalized_taxid(accession_version, taxid)) {
-                continue;
+        annot.call_objects(label, [&](const auto &index) {
+            if (index <= 0) {
+                return;
             }
-            annot->call_objects(label, [&](const auto &index) {
-                if (index <= 0) {
-                    return;
+            if (index >= taxonomic_map.size()) {
+                taxo_mutex.lock();
+                uint64_t new_size = taxonomic_map.size();
+                while (index >= new_size) {
+                    new_size = new_size * 2 + 1;
                 }
-                if (index >= taxonomic_map.size()) {
-                    taxo_mutex.lock();
-                    uint64_t new_size = taxonomic_map.size();
-                    while (index >= new_size) {
-                        new_size = new_size * 2 + 1;
-                    }
-                    sdsl::int_vector<> aux_taxonomic_map = taxonomic_map;
-                    taxonomic_map.resize(new_size);
-                    for(uint64_t i = 0; i < taxonomic_map.size(); ++i) {
-                        taxonomic_map[i] = 0;
-                    }
-                    for(uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
-                        taxonomic_map[i] = aux_taxonomic_map[i];
-                    }
-                    taxo_mutex.unlock();
+                sdsl::int_vector<> aux_taxonomic_map = taxonomic_map;
+                taxonomic_map.resize(new_size);
+                for(uint64_t i = 0; i < taxonomic_map.size(); ++i) {
+                    taxonomic_map[i] = 0;
                 }
+                for(uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
+                    taxonomic_map[i] = aux_taxonomic_map[i];
+                }
+                taxo_mutex.unlock();
+            }
 
-                if (taxonomic_map[index] == 0) {
-                    taxo_mutex.lock();
-                    taxonomic_map[index] = taxid;
-                    taxo_mutex.unlock();
-                } else {
-                    auto lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
-                    taxo_mutex.lock();
-                    taxonomic_map[index] = lca;
-                    taxo_mutex.unlock();
-                }
-            });
-        }
+            if (taxonomic_map[index] == 0) {
+                taxo_mutex.lock();
+                taxonomic_map[index] = taxid;
+                taxo_mutex.unlock();
+            } else {
+                auto lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
+                taxo_mutex.lock();
+                taxonomic_map[index] = lca;
+                taxo_mutex.unlock();
+            }
+        });
     }
 }
 
