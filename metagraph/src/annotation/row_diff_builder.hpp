@@ -17,6 +17,7 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
 void build_pred_succ(const std::string &graph_filename,
                      const std::string &outfbase,
+                     const std::filesystem::path &count_vectors_dir,
                      uint32_t num_threads);
 
 void assign_anchors(const std::string &graph_filename,

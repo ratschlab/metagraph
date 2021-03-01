@@ -1163,7 +1163,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         out_dir = "./";
 
     if (construction_stage != RowDiffStage::COUNT_LABELS) {
-        build_pred_succ(graph_fname, graph_fname, get_num_threads());
+        build_pred_succ(graph_fname, graph_fname, out_dir, get_num_threads());
         // TODO: assign anchors only on the last stage
         assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
     }

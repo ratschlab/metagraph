@@ -120,12 +120,11 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
         async_writer.enqueue([&,block_begin]() {
             for (size_t i = 0; i < row_count_block_other.size(); ++i) {
-                if (uint32_t c = row_count_block_other[i]) {
-                    if (new_vector) {
-                        row_count.push_back(c);
-                    } else {
-                        row_count[block_begin + i] += c;
-                    }
+                uint32_t c = row_count_block_other[i];
+                if (new_vector) {
+                    row_count.push_back(c);
+                } else if (c) {
+                    row_count[block_begin + i] += c;
                 }
             }
         });
@@ -194,28 +193,75 @@ void sum_and_call_counts(const fs::path &dir,
     }
 }
 
-void route_at_forks(const graph::DBGSuccinct &graph,
-                    const std::string &rd_succ_filename) {
-    ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
-                             "Route forks", std::cerr, !common::get_verbose());
+rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
+                               const std::string &rd_succ_filename,
+                               const std::filesystem::path &count_vectors_dir) {
+    logger->info("Assigning row-diff successors at forks...");
 
-    // the last outgoing edges are always the row-diff successors
     sdsl::bit_vector rd_succ_bv(graph.num_nodes(), 0);
-    graph.get_boss().get_last().call_ones([&](uint64_t i) {
-        if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
-            assert(to_row(graph_idx) < graph.num_nodes());
-            rd_succ_bv[to_row(graph_idx)] = 1;
+
+    bool optimize_forks = false;
+    for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
+        if (utils::ends_with(p.path(), ".row_count"))
+            optimize_forks = true;
+    }
+    // TODO: add the support for custom successors at forks and enable
+    if (false && optimize_forks) {
+        logger->info("RowDiff successors will be set to the adjacent nodes with"
+                     " the largest number of labels");
+
+        const bit_vector &last = graph.get_boss().get_last();
+        graph::DeBruijnGraph::node_index graph_idx
+            = graph::AnnotatedSequenceGraph::anno_to_graph_index(0);
+
+        std::vector<uint32_t> outgoing_counts;
+
+        sum_and_call_counts(count_vectors_dir, ".row_count", [&](int32_t count) {
+            outgoing_counts.push_back(count);
+            if (last[graph.kmer_to_boss_index(graph_idx)]) {
+                // pick the node with the largest count
+                size_t max_pos = std::max_element(outgoing_counts.rbegin(),
+                                                  outgoing_counts.rend())
+                                 - outgoing_counts.rbegin();
+                rd_succ_bv[to_row(graph_idx - max_pos)] = true;
+                outgoing_counts.resize(0);
+            }
+            graph_idx++;
+        });
+
+        if (to_row(graph_idx) != graph.num_nodes()) {
+            logger->error("Size the count vectors is incompatible with the"
+                          " graph: {} != {}", to_row(graph_idx), graph.num_nodes());
+            exit(1);
         }
-        ++progress_bar;
-    });
+
+    } else {
+        logger->info("No count vectors could be found in {}. The last outgoing"
+                     " edges will be selected for assigning RowDiff successors",
+                     count_vectors_dir);
+        ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
+                                 "Route forks", std::cerr, !common::get_verbose());
+        // the last outgoing edges are always the row-diff successors
+        graph.get_boss().get_last().call_ones([&](uint64_t i) {
+            if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
+                assert(to_row(graph_idx) < graph.num_nodes());
+                rd_succ_bv[to_row(graph_idx)] = 1;
+            }
+            ++progress_bar;
+        });
+    }
+
+    rd_succ_bv_type rd_succ(std::move(rd_succ_bv));
     std::ofstream f(rd_succ_filename, ios::binary);
-    rd_succ_bv_type(std::move(rd_succ_bv)).serialize(f);
+    rd_succ.serialize(f);
     logger->trace("RowDiff successors are assigned for forks and written to {}",
                   rd_succ_filename);
+    return rd_succ;
 }
 
 void build_pred_succ(const std::string &graph_fname,
                      const std::string &outfbase,
+                     const std::filesystem::path &count_vectors_dir,
                      uint32_t num_threads) {
     if (fs::exists(outfbase + ".succ")
             && fs::exists(outfbase + ".succ_boundary")
@@ -236,7 +282,8 @@ void build_pred_succ(const std::string &graph_fname,
     }
 
     // assign row-diff successors at forks
-    route_at_forks(graph, outfbase + ".rd_succ");
+    rd_succ_bv_type rd_succ
+            = route_at_forks(graph, outfbase + ".rd_succ", count_vectors_dir);
 
     const BOSS &boss = graph.get_boss();
 
@@ -270,17 +317,19 @@ void build_pred_succ(const std::string &graph_fname,
                 BOSS::edge_index next = boss.fwd(boss_idx, d);
                 assert(next);
                 if (!dummy[next]) {
-                    do {
-                        succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
-                        succ_boundary_buf.push_back(0);
-                    } while (--next && !boss.get_last(next));
+                    while (!rd_succ[to_row(graph.boss_to_kmer_index(next))]) {
+                        next--;
+                        assert(!boss.get_last(next));
+                    }
+                    succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
+                    succ_boundary_buf.push_back(0);
                 }
             }
             succ_boundary_buf.push_back(1);
-            if (!dummy[boss_idx]) {
+            // compute predecessors only for row-diff successors
+            if (!dummy[boss_idx] && rd_succ[to_row(i)]) {
                 BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
                 BOSS::edge_index back_idx = boss.bwd(boss_idx);
-                // TODO: can be optimized, so we don't call incoming for each outgoing
                 boss.call_incoming_to_target(back_idx, d,
                     [&](BOSS::edge_index pred) {
                         // dummy predecessors are ignored
@@ -372,7 +421,7 @@ using CallOnes = std::function<void(const bit_vector &source_col,
                                     uint64_t row_idx_chunk,
                                     size_t source_idx,
                                     size_t col_idx,
-                                    const uint64_t *succ_begin, const uint64_t *succ_end,
+                                    const uint64_t *succ,
                                     const uint64_t *pred_begin, const uint64_t *pred_end)>;
 
 void read_next_block(sdsl::int_vector_buffer<>::iterator &it,
@@ -492,9 +541,10 @@ void traverse_anno_chunked(
                         = *col_annotations[l_idx].get_matrix().data()[j];
                 source_col.call_ones_in_range(chunk, chunk + block_size,
                     [&](uint64_t i) {
+                        assert(succ_chunk_idx[i - chunk + 1] >= succ_chunk_idx[i - chunk]);
+                        assert(succ_chunk_idx[i - chunk + 1] <= succ_chunk_idx[i - chunk] + 1);
                         call_ones(source_col, i, i - chunk, l_idx, j,
                                   succ_chunk.data() + succ_chunk_idx[i - chunk],
-                                  succ_chunk.data() + succ_chunk_idx[i - chunk + 1],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
                     }
@@ -534,17 +584,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     {
         std::ifstream f(anchors_fname, std::ios::binary);
         anchor.load(f);
-    }
-    rd_succ_bv_type rd_succ;
-    {
-        const std::string rd_succ_filename = pred_succ_fprefix + ".rd_succ";
-        std::ifstream f(rd_succ_filename, std::ios::binary);
-        rd_succ.load(f);
-    }
-    if (rd_succ.size() != anchor.size()) {
-        logger->error("The anchor and rd_succ bitmaps have different size: {} vs {}",
-                      anchor.size(), rd_succ.size());
-        exit(1);
     }
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
@@ -650,12 +689,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             },
             [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                     size_t source_idx, size_t j,
-                    const uint64_t *succ_begin, const uint64_t *,
+                    const uint64_t *succ,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
 
                 // add current bit if this node is an anchor
                 // or if the successor has zero bit
-                if (anchor[row_idx] || !source_col[*succ_begin]) {
+                if (anchor[row_idx] || !source_col[*succ]) {
                     // no reduction, we must keep the bit
                     // Push to the buffer only if it's the final stage of the
                     // row-diff transform, where we construct the full row-diff
@@ -674,10 +713,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     // reduction (no bit in row-diff)
                     __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                 }
-
-                // predecessors are checked only for the row-diff successors
-                if (!rd_succ[row_idx])
-                    return;
 
                 // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
