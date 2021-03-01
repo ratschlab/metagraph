@@ -81,7 +81,7 @@ COPY . ${CODE_BASE}
 WORKDIR ${CODE_BASE}
 RUN make build-sdsl-lite \
     && make build-metagraph alphabet=Protein \
-    && make build-metagraph
+    && make build-metagraph alphabet=DNA
 
 FROM ubuntu:20.04
 ARG CODE_BASE
