@@ -88,6 +88,16 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                        size_t /* max_pos */> Scores;
     typedef std::pair<std::vector<Scores>, bool> Column;
 
+    struct AlignNodeHash {
+        uint64_t operator()(const AlignNode &x) const {
+            uint64_t seed = hasher1(std::get<0>(x));
+            return seed ^ (hasher2(std::get<2>(x)) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+        }
+
+        std::hash<NodeType> hasher1;
+        std::hash<size_t> hasher2;
+    };
+
     tsl::hopscotch_map<NodeType, Column> table_;
 
     virtual void reset() override { table_.clear(); }
@@ -95,6 +105,10 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual const DBGAlignment& get_seed() const override { return *seed_; }
 
     virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const;
+
+    virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode&) {
+        column.first.emplace_back(std::move(scores));
+    }
 
   private:
     // compute perfect match scores for all suffixes

@@ -486,9 +486,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start + 1];
 
-    AlignNode start_node{ graph_.max_index() + 1,
-                          seed_->get_sequence()[seed_->get_sequence().size() - 2],
-                          0, 0 };
+    AlignNode start_node{ graph_.max_index() + 1, '\0', 0, 0 };
 
     typedef std::pair<AlignNode, score_t> Ref;
     Ref best_start{ start_node, S[0] };
@@ -581,12 +579,14 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
 
             if (add_to_table) {
-                total_size += get_column_size(next_column) + (!depth * column_vector_size);
-                ++num_columns;
                 if (OS[max_pos - offset] == Cigar::MATCH)
                     starts.emplace_back(cur, *max_it);
 
-                column.emplace_back(std::move(next_column));
+                total_size += get_column_size(next_column) + (!depth * column_vector_size);
+                ++num_columns;
+
+                add_scores_to_column(column_pair, std::move(next_column), cur);
+
             } else if (!depth) {
                 table_.erase(next);
             }
@@ -595,16 +595,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
     assert(starts.empty() || starts[0].second == best_start.second);
-
-    struct AlignNodeHash {
-        uint64_t operator()(const AlignNode &x) const {
-            uint64_t seed = hasher1(std::get<0>(x));
-            return seed ^ (hasher2(std::get<2>(x)) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
-        }
-
-        std::hash<NodeType> hasher1;
-        std::hash<size_t> hasher2;
-    };
 
     tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
 
