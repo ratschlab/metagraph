@@ -88,13 +88,37 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                        size_t /* max_pos */> Scores;
     typedef std::pair<std::vector<Scores>, bool> Column;
 
+    struct AlignNodeHash {
+        uint64_t operator()(const AlignNode &x) const {
+            uint64_t seed = hasher1(std::get<0>(x));
+            return seed ^ (hasher2(std::get<2>(x)) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+        }
+
+        std::hash<NodeType> hasher1;
+        std::hash<size_t> hasher2;
+    };
+
     tsl::hopscotch_map<NodeType, Column> table_;
+
+    // the initial seed
+    const DBGAlignment *seed_;
+
+    score_t xdrop_cutoff_;
+    size_t start_;
 
     virtual void reset() override { table_.clear(); }
 
     virtual const DBGAlignment& get_seed() const override { return *seed_; }
 
     virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const;
+
+    virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode&) {
+        column.first.emplace_back(std::move(scores));
+    }
+
+    static std::pair<size_t, size_t> get_band(const AlignNode &prev,
+                                              const Column &column_prev,
+                                              score_t xdrop_cutoff);
 
   private:
     // compute perfect match scores for all suffixes
@@ -105,17 +129,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
-    // the initial seed
-    const DBGAlignment *seed_;
-
-    std::string_view extend_window_;
-
-    // start of the partial sum table
-    const score_t *match_score_begin_;
-
     static bool has_converged(const Column &column, const Scores &next);
 
-    static void sanitize(Scores &scores);
+    static void sanitize(Scores &scores, score_t max_score);
 };
 
 } // namespace align
