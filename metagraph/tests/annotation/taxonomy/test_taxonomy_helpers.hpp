@@ -44,12 +44,12 @@ class TaxonomyTestDataGenerator {
     double no_deaths_in_the_first_x_time_percent = 0.1;
     double birth_rate = 0.5;
     double death_rate = 0.3;
-    double mutation_mean_time = 0.03;
-    double mutation_stddev_time = 0.01;
+    double mutation_mean_time = 0.15;
+    double mutation_stddev_time = 0.5;
     double extinct_tip_sampling_prob = 0.05;
     double extant_tip_sampling_prob = 1;
     double query_seq_error_rate = 0.001;
-    uint64_t simulation_time = 40;
+    uint64_t simulation_time = 30;
     uint64_t seq_length = 1000;
 
     std::vector<char> valid_nucleotides = {'T', 'C', 'A', 'G'};
