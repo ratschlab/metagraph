@@ -142,6 +142,58 @@ inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
     return graph::AnnotatedSequenceGraph::graph_to_anno_index(i);
 }
 
+template <class Callback>
+void sum_and_call_counts(const fs::path &dir,
+                         const std::string &file_extension,
+                         const Callback &callback) {
+    std::vector<sdsl::int_vector_buffer<>> vectors;
+    for (const auto &p : fs::directory_iterator(dir)) {
+        auto path = p.path();
+        if (utils::ends_with(path, file_extension)) {
+            logger->info("Found count vector {}", path);
+            vectors.emplace_back(path, std::ios::in);
+
+            if (vectors.back().size() != vectors.front().size()) {
+                logger->error("Count vectors have different sizes");
+                exit(1);
+            }
+            if (vectors.back().width() != 32) {
+                logger->error("Count vectors must have width 32, but {} has {}",
+                              path, vectors.back().width());
+                exit(1);
+            }
+        }
+    }
+
+    if (!vectors.size()) {
+        logger->error("Didn't find any count vectors to merge in {}", dir);
+        exit(1);
+    }
+
+    std::vector<int32_t> buf;
+
+    ProgressBar progress_bar(vectors.front().size(), "Sum counts",
+                             std::cerr, !common::get_verbose());
+
+    for (uint64_t i = 0; i < vectors.front().size(); i += BLOCK_SIZE) {
+        // adjust if the last block
+        buf.assign(std::min(BLOCK_SIZE, vectors.front().size() - i), 0);
+
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t j = 0; j < vectors.size(); ++j) {
+            for (uint64_t t = 0; t < buf.size(); ++t) {
+                __atomic_add_fetch(&buf[t], (int32_t)vectors[j][i + t], __ATOMIC_RELAXED);
+            }
+        }
+
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+        std::for_each(buf.begin(), buf.end(), callback);
+
+        progress_bar += buf.size();
+    }
+}
+
 void route_at_forks(const graph::DBGSuccinct &graph,
                     const std::string &rd_succ_filename) {
     ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
@@ -836,31 +888,6 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
 
     logger->info("Optimizing anchors...");
 
-    std::vector<sdsl::int_vector_buffer<>> row_reduction;
-    for (const auto &p : fs::directory_iterator(dir)) {
-        auto path = p.path();
-        if (utils::ends_with(path, row_reduction_extension)) {
-            logger->info("Found row reduction vector {}", path);
-            row_reduction.emplace_back(path, std::ios::in, BLOCK_SIZE);
-
-            if (row_reduction.back().size() != row_reduction.front().size()) {
-                logger->error("Row reduction vectors have different sizes");
-                exit(1);
-            }
-            if (row_reduction.back().width() != row_reduction.front().width()) {
-                logger->error("Row reduction vectors have different width: {} != {}",
-                              row_reduction.back().width(),
-                              row_reduction.front().width());
-                exit(1);
-            }
-        }
-    }
-
-    if (!row_reduction.size()) {
-        logger->error("Didn't find any row reduction vectors in {} to merge", dir);
-        exit(1);
-    }
-
     sdsl::bit_vector anchors;
     uint64_t num_anchors_old;
     {
@@ -870,43 +897,24 @@ void optimize_anchors_in_row_diff(const std::string &graph_fname,
         std::ifstream f(original_anchors_fname, ios::binary);
         old_anchors.load(f);
 
-        if (old_anchors.size() != row_reduction.front().size()) {
-            logger->error(
-                "Original anchors {}: {} and row reduction vectors: {} are incompatible",
-                original_anchors_fname, old_anchors.size(), row_reduction.front().size());
-            exit(1);
-        }
         num_anchors_old = old_anchors.num_set_bits();
         anchors = old_anchors.convert_to<sdsl::bit_vector>();
     }
 
-    std::vector<uint64_t> buf;
-    static_assert(sizeof(uint64_t) * 8 > ROW_REDUCTION_WIDTH);
-    const uint64_t MINUS_BIT = 1llu << (row_reduction.front().width() - 1);
+    uint64_t i = 0;
+    sum_and_call_counts(dir, row_reduction_extension, [&](int32_t count) {
+        // check if the reduction is negative
+        if (count < 0)
+            anchors[i] = true;
+        i++;
+    });
 
-    ProgressBar progress_bar(anchors.size(), "Assign extra anchors", std::cerr,
-                             !common::get_verbose());
-    for (uint64_t i = 0; i < anchors.size(); i += BLOCK_SIZE) {
-        // adjust if the last block
-        buf.assign(std::min(BLOCK_SIZE, anchors.size() - i), 0);
-
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-        for (size_t j = 0; j < row_reduction.size(); ++j) {
-            for (uint64_t t = 0; t < buf.size(); ++t) {
-                __atomic_add_fetch(&buf[t], row_reduction[j][i + t], __ATOMIC_RELAXED);
-            }
-        }
-
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-        for (uint64_t t = 0; t < buf.size(); ++t) {
-            // check if the reduction is negative
-            if (buf[t] & MINUS_BIT)
-                anchors[i + t] = true;
-        }
-
-        progress_bar += buf.size();
+    if (i != anchors.size()) {
+        logger->error("Sizes of the anchor bitmap and the reduction vectors"
+                      " are incompatible: {} != {}", anchors.size(), i);
+        exit(1);
     }
+
     anchor_bv_type ranchors(std::move(anchors));
 
     logger->trace("Number of anchors increased after optimization from {} to {}",
