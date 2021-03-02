@@ -273,8 +273,7 @@ template <class BaseMatrix>
 void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
     if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
         anchor_.serialize(f);
-        if (fork_succ_.size())
-            fork_succ_.serialize(f);
+        fork_succ_.serialize(f);
     }
     diffs_.serialize(f);
 }

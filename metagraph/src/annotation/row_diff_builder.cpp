@@ -219,6 +219,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         sdsl::bit_vector rd_succ_bv(last.size(), 0);
 
         sum_and_call_counts(count_vectors_dir, ".row_count", [&](int32_t count) {
+            // TODO: skip single outgoing
             outgoing_counts.push_back(count);
             if (last[graph.kmer_to_boss_index(graph_idx)]) {
                 // pick the node with the largest count
@@ -243,10 +244,6 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         logger->info("No count vectors could be found in {}. The last outgoing"
                      " edges will be selected for assigning RowDiff successors",
                      count_vectors_dir);
-        ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
-                                 "Route forks", std::cerr, !common::get_verbose());
-        // the last outgoing edges are always the row-diff successors
-        rd_succ = graph.get_boss().get_last().copy_to<rd_succ_bv_type>();
     }
 
     std::ofstream f(rd_succ_filename, ios::binary);
@@ -314,7 +311,7 @@ void build_pred_succ(const std::string &graph_fname,
                 BOSS::edge_index next = boss.fwd(boss_idx, d);
                 assert(next);
                 if (!dummy[next]) {
-                    while (!rd_succ[next]) {
+                    while (rd_succ.size() && !rd_succ[next]) {
                         next--;
                         assert(!boss.get_last(next));
                     }
@@ -324,7 +321,8 @@ void build_pred_succ(const std::string &graph_fname,
             }
             succ_boundary_buf.push_back(1);
             // compute predecessors only for row-diff successors
-            if (!dummy[boss_idx] && rd_succ[boss_idx]) {
+            if (!dummy[boss_idx]
+                    && rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
                 BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
                 BOSS::edge_index back_idx = boss.bwd(boss_idx);
                 boss.call_incoming_to_target(back_idx, d,
