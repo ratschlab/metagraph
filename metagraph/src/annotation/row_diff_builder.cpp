@@ -30,18 +30,13 @@ template <typename T>
 using Encoder = common::EliasFanoEncoder<T>;
 
 
-void count_labels_per_row(const std::vector<std::string> &source_files,
-                          const std::string &row_count_fname) {
-    if (source_files.empty())
-        return;
-
-    const uint32_t num_threads = get_num_threads();
-
-    uint64_t num_rows = 0;
+std::vector<annot::ColumnCompressed<>>
+load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
+    *num_rows = 0;
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < source_files.size(); ++i) {
         if (!sources[i].load(source_files[i])) {
             logger->error("Can't load source annotations from {}", source_files[i]);
@@ -53,9 +48,9 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
         #pragma omp critical
         {
-            if (!num_rows) {
-                num_rows = sources[i].num_objects();
-            } else if (num_rows != sources[i].num_objects()) {
+            if (!*num_rows) {
+                *num_rows = sources[i].num_objects();
+            } else if (*num_rows != sources[i].num_objects()) {
                 logger->error("Annotations have different number of rows");
                 std::exit(1);
             }
@@ -63,6 +58,16 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     }
     logger->trace("Done loading {} annotations", sources.size());
 
+    return sources;
+}
+
+void count_labels_per_row(const std::vector<std::string> &source_files,
+                          const std::string &row_count_fname) {
+    if (source_files.empty())
+        return;
+
+    uint64_t num_rows;
+    std::vector<annot::ColumnCompressed<>> sources = load_columns(source_files, &num_rows);
     if (!num_rows) {
         logger->warn("Input annotations have no rows");
         return;
@@ -100,7 +105,7 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
         row_count_block.assign(block_size, 0);
 
         // process the current block
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
             for (size_t j = 0; j < sources[l_idx].num_labels(); ++j) {
                 const bit_vector &source_col
@@ -195,14 +200,15 @@ void sum_and_call_counts(const fs::path &dir,
 
 rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                                const std::string &rd_succ_filename,
-                               const std::filesystem::path &count_vectors_dir) {
+                               const std::string &count_vectors_dir,
+                               const std::string &row_count_extension) {
     logger->info("Assigning row-diff successors at forks...");
 
     rd_succ_bv_type rd_succ;
 
     bool optimize_forks = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
-        if (utils::ends_with(p.path(), ".row_count"))
+        if (utils::ends_with(p.path(), row_count_extension))
             optimize_forks = true;
     }
 
@@ -218,7 +224,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
         sdsl::bit_vector rd_succ_bv(last.size(), false);
 
-        sum_and_call_counts(count_vectors_dir, ".row_count", [&](int32_t count) {
+        sum_and_call_counts(count_vectors_dir, row_count_extension, [&](int32_t count) {
             // TODO: skip single outgoing
             outgoing_counts.push_back(count);
             if (last[graph.kmer_to_boss_index(graph_idx)]) {
@@ -255,7 +261,8 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
 void build_pred_succ(const std::string &graph_fname,
                      const std::string &outfbase,
-                     const std::filesystem::path &count_vectors_dir,
+                     const std::string &count_vectors_dir,
+                     const std::string &row_count_extension,
                      uint32_t num_threads) {
     if (fs::exists(outfbase + ".succ")
             && fs::exists(outfbase + ".succ_boundary")
@@ -276,8 +283,8 @@ void build_pred_succ(const std::string &graph_fname,
     }
 
     // assign row-diff successors at forks
-    rd_succ_bv_type rd_succ
-            = route_at_forks(graph, outfbase + kRowDiffForkSuccExt, count_vectors_dir);
+    rd_succ_bv_type rd_succ = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
+                                             count_vectors_dir, row_count_extension);
 
     const BOSS &boss = graph.get_boss();
 
@@ -355,14 +362,15 @@ void build_pred_succ(const std::string &graph_fname,
 
 void assign_anchors(const std::string &graph_fname,
                     const std::string &outfbase,
+                    const std::filesystem::path &count_vectors_dir,
                     uint32_t max_length,
+                    const std::string &row_reduction_extension,
                     uint32_t num_threads) {
-    std::string anchor_filename = outfbase + kRowDiffAnchorExt + ".unopt";
+    std::string anchor_filename = outfbase + kRowDiffAnchorExt;
     if (fs::exists(anchor_filename)) {
-        logger->trace("Using existing {}", anchor_filename);
+        logger->trace("Using existing anchors {}", anchor_filename);
         return;
     }
-    logger->trace("Building and writing anchor bitmap to {}", anchor_filename);
 
     graph::DBGSuccinct graph(2);
     logger->trace("Loading graph...");
@@ -370,13 +378,46 @@ void assign_anchors(const std::string &graph_fname,
         logger->error("Cannot load graph from {}", graph_fname);
         std::exit(1);
     }
-
     const BOSS &boss = graph.get_boss();
+    const uint64_t num_rows = graph.num_nodes();
 
-    sdsl::bit_vector anchors_bv;
+    bool optimize_anchors = false;
+    for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
+        if (utils::ends_with(p.path(), row_reduction_extension))
+            optimize_anchors = true;
+    }
+
+    sdsl::bit_vector anchors_bv(boss.get_last().size(), false);
+
+    if (optimize_anchors) {
+        logger->trace("Making every row with negative reduction an anchor...");
+
+        uint64_t i = 0;
+        sum_and_call_counts(count_vectors_dir, row_reduction_extension, [&](int32_t count) {
+            // check if the reduction is negative
+            if (count < 0)
+                anchors_bv[graph.kmer_to_boss_index(
+                    graph::AnnotatedSequenceGraph::anno_to_graph_index(i))] = true;
+            i++;
+        });
+
+        if (i != num_rows) {
+            logger->error("Reduction vectors are incompatible with the graph size:"
+                          " {} != {}", i, num_rows);
+            exit(1);
+        }
+
+        logger->trace("Number of initial anchors (rows with negative reduction): {}",
+                      sdsl::util::cnt_one_bits(anchors_bv));
+    } else {
+        logger->warn("Didn't find any precomputed row reduction vectors in {}."
+                     " Anchors will be assigned from scratch.", count_vectors_dir);
+    }
+
+    // assign extra anchors and restrict the length of row-diff paths
+    logger->trace("Assigning required anchors...");
     {
         rd_succ_bv_type rd_succ;
-
         const std::string rd_succ_filename = outfbase + kRowDiffForkSuccExt;
         std::ifstream f(rd_succ_filename, ios::binary);
         if (!rd_succ.load(f)) {
@@ -384,7 +425,6 @@ void assign_anchors(const std::string &graph_fname,
                           rd_succ_filename);
             exit(1);
         }
-
         if (rd_succ.size()) {
             logger->info("RowDiff successors {} will be used to assign anchors",
                          rd_succ_filename);
@@ -395,25 +435,24 @@ void assign_anchors(const std::string &graph_fname,
         }
     }
 
-    const uint64_t num_rows = graph.num_nodes();
-
     // anchors_bv uses BOSS edges as indices, so we need to map it to annotation indices
-    sdsl::bit_vector term(num_rows, 0);
+    sdsl::bit_vector anchors(num_rows, false);
     for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
         if (anchors_bv[i]) {
             uint64_t graph_idx = graph.boss_to_kmer_index(i);
             assert(to_row(graph_idx) < num_rows);
-            term[to_row(graph_idx)] = 1;
+            anchors[to_row(graph_idx)] = 1;
         }
     }
-    anchors_bv = sdsl::bit_vector();
-    anchor_bv_type anchors(std::move(term));
-    logger->trace("Number of anchors before anchor optimization: {}",
-                  anchors.num_set_bits());
 
-    std::ofstream fterm(anchor_filename, ios::binary);
-    anchors.serialize(fterm);
-    logger->trace("Anchor nodes written to {}", anchor_filename);
+    anchors_bv = sdsl::bit_vector();
+    anchor_bv_type ranchors(std::move(anchors));
+
+    logger->trace("Final number of anchors in row-diff: {}", ranchors.num_set_bits());
+
+    std::ofstream f(anchor_filename, ios::binary);
+    ranchors.serialize(f);
+    logger->trace("Serialized anchors to {}", anchor_filename);
 }
 
 
@@ -557,8 +596,11 @@ void traverse_anno_chunked(
                     [&](uint64_t i) {
                         assert(succ_chunk_idx[i - chunk + 1] >= succ_chunk_idx[i - chunk]);
                         assert(succ_chunk_idx[i - chunk + 1] <= succ_chunk_idx[i - chunk] + 1);
-                        call_ones(source_col, i, i - chunk, l_idx, j,
-                                  succ_chunk.data() + succ_chunk_idx[i - chunk],
+                        const uint64_t *succ = succ_chunk_idx[i - chunk + 1]
+                                                > succ_chunk_idx[i - chunk]
+                                                ? succ_chunk.data() + succ_chunk_idx[i - chunk]
+                                                : NULL;
+                        call_ones(source_col, i, i - chunk, l_idx, j, succ,
                                   pred_chunk.data() + pred_chunk_idx[i - chunk],
                                   pred_chunk.data() + pred_chunk_idx[i - chunk + 1]);
                     }
@@ -582,7 +624,6 @@ void traverse_anno_chunked(
 
 
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
-                               const std::string &anchors_fname,
                                const std::vector<std::string> &source_files,
                                const fs::path &col_out_dir,
                                const fs::path &swap_dir,
@@ -592,31 +633,30 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     if (source_files.empty())
         return;
 
-    uint32_t num_threads = get_num_threads();
+    const uint32_t num_threads = get_num_threads();
+
+    uint64_t num_rows;
+    std::vector<annot::ColumnCompressed<>> sources = load_columns(source_files, &num_rows);
+    if (!num_rows) {
+        logger->warn("Input annotations have no rows");
+        return;
+    }
 
     anchor_bv_type anchor;
-    {
+    if (!compute_row_reduction) {
+        const std::string anchors_fname = pred_succ_fprefix + kRowDiffAnchorExt;
         std::ifstream f(anchors_fname, std::ios::binary);
-        anchor.load(f);
-    }
-
-    std::vector<annot::ColumnCompressed<>> sources(source_files.size());
-
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < source_files.size(); ++i) {
-        if (!sources[i].load(source_files[i])) {
-            logger->error("Can't load source annotations from {}", source_files[i]);
-            std::exit(1);
+        if (!anchor.load(f)) {
+            logger->error("Can't load anchors from {}", anchors_fname);
+            exit(1);
         }
-
-        if (sources[i].num_labels() && sources[i].num_objects() != anchor.size()) {
-            logger->error("Anchor vector {} and annotation {} are incompatible."
+        if (anchor.size() != num_rows) {
+            logger->error("Anchor vector {} is incompatible with annotations."
                           " Vector size: {}, number of rows: {}",
-                          anchors_fname, source_files[i], anchor.size(), sources[i].num_objects());
-            std::exit(1);
+                          anchors_fname, anchor.size(), num_rows);
+            exit(1);
         }
     }
-    logger->trace("Done loading {} annotations", sources.size());
 
     const fs::path tmp_path = utils::create_temp_dir(swap_dir, "col");
 
@@ -682,10 +722,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
                                                 std::ios::in | std::ios::out, BLOCK_SIZE);
 
-        if (!new_reduction_vector && row_reduction.size() != anchor.size()) {
-            logger->error("Incompatible sizes of '{}': {} and '{}': {}",
-                          row_reduction_fname, row_reduction.size(),
-                          anchors_fname, anchor.size());
+        if (!new_reduction_vector && row_reduction.size() != num_rows) {
+            logger->error("Count vector {} is incompatible with annotations."
+                          " Vector size: {}, number of rows: {}",
+                          row_reduction_fname, row_reduction.size(), num_rows);
             exit(1);
         }
     }
@@ -696,7 +736,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<uint32_t> row_nbits_block_other;
 
     traverse_anno_chunked(
-            anchor.size(), pred_succ_fprefix, sources,
+            num_rows, pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
                 if (compute_row_reduction)
                     row_nbits_block.assign(chunk_size, 0);
@@ -706,14 +746,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     const uint64_t *succ,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
 
-                // add current bit if this node is an anchor
-                // or if the successor has zero bit
-                if (anchor[row_idx] || !source_col[*succ]) {
-                    // no reduction, we must keep the bit
-                    // Push to the buffer only if it's the final stage of the
-                    // row-diff transform, where we construct the full row-diff
-                    // columns.
-                    if (!compute_row_reduction) {
+                if (compute_row_reduction) {
+                    if (succ && source_col[*succ]) {
+                        // reduction (no bit in row-diff)
+                        __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
+                    }
+                } else {
+                    // add current bit if this node is an anchor
+                    // or if the successor has zero bit
+                    if (anchor[row_idx] || !source_col[*succ]) {
+                        // no reduction, we must keep the bit
                         auto &v = set_rows_fwd[source_idx][j];
                         v.push_back(row_idx);
 
@@ -723,14 +765,11 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                             v.resize(0);
                         }
                     }
-                } else if (compute_row_reduction) {
-                    // reduction (no bit in row-diff)
-                    __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                 }
 
                 // check non-anchor predecessor nodes and add them if they are zero
                 for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                    if (!source_col[*pred_p] && !anchor[*pred_p]) {
+                    if (!source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
                         auto &v = set_rows_bwd[source_idx][j];
                         v.push_back(*pred_p);
 
@@ -782,6 +821,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     set_rows_fwd.clear(); // free up memory
     set_rows_bwd.clear();
+    anchor = anchor_bv_type();
 
     std::vector<LabelEncoder<std::string>> label_encoders;
     for (const auto &source : sources) {
@@ -863,7 +903,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                 common::merge_files<uint64_t>(filenames, call);
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, anchor.size(),
+            columns[j] = std::make_unique<bit_vector_sd>(call_ones, num_rows,
                                                          row_diff_bits[l_idx][j]);
         }
 
@@ -925,53 +965,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     logger->trace("Rows with negative row reduction: {} in vector {}",
                   num_larger_rows, row_reduction_fname);
-}
-
-void optimize_anchors_in_row_diff(const std::string &graph_fname,
-                                  const fs::path &dir,
-                                  const std::string &row_reduction_extension) {
-    if (fs::exists(graph_fname + kRowDiffAnchorExt)) {
-        logger->info("Found optimized anchors {}", graph_fname + kRowDiffAnchorExt);
-        return;
-    }
-
-    logger->info("Optimizing anchors...");
-
-    sdsl::bit_vector anchors;
-    uint64_t num_anchors_old;
-    {
-        anchor_bv_type old_anchors;
-        auto original_anchors_fname = graph_fname + kRowDiffAnchorExt + ".unopt";
-
-        std::ifstream f(original_anchors_fname, ios::binary);
-        old_anchors.load(f);
-
-        num_anchors_old = old_anchors.num_set_bits();
-        anchors = old_anchors.convert_to<sdsl::bit_vector>();
-    }
-
-    uint64_t i = 0;
-    sum_and_call_counts(dir, row_reduction_extension, [&](int32_t count) {
-        // check if the reduction is negative
-        if (count < 0)
-            anchors[i] = true;
-        i++;
-    });
-
-    if (i != anchors.size()) {
-        logger->error("Sizes of the anchor bitmap and the reduction vectors"
-                      " are incompatible: {} != {}", anchors.size(), i);
-        exit(1);
-    }
-
-    anchor_bv_type ranchors(std::move(anchors));
-
-    logger->trace("Number of anchors increased after optimization from {} to {}",
-                  num_anchors_old, ranchors.num_set_bits());
-
-    std::ofstream f(graph_fname + kRowDiffAnchorExt, ios::binary);
-    ranchors.serialize(f);
-    logger->trace("Serialized optimized anchors to {}", graph_fname + kRowDiffAnchorExt);
 }
 
 } // namespace annot

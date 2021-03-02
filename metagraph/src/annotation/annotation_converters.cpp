@@ -1162,14 +1162,28 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     if (out_dir.empty())
         out_dir = "./";
 
-    if (construction_stage != RowDiffStage::COUNT_LABELS) {
-        build_pred_succ(graph_fname, graph_fname, out_dir, get_num_threads());
-        // TODO: assign anchors only on the last stage
-        assign_anchors(graph_fname, graph_fname, max_path_length, get_num_threads());
-    }
+    if (construction_stage != RowDiffStage::COUNT_LABELS)
+        build_pred_succ(graph_fname, graph_fname, out_dir,
+                        ".row_count", get_num_threads());
 
-    if (construction_stage == RowDiffStage::CONVERT)
-        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
+    if (construction_stage == RowDiffStage::CONVERT) {
+        assign_anchors(graph_fname, graph_fname, out_dir, max_path_length,
+                       ".row_reduction", get_num_threads());
+
+        const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;
+        if (!fs::exists(anchors_fname)) {
+            logger->error("Can't find anchors bitmap at {}", anchors_fname);
+            exit(1);
+        }
+        uint64_t anchor_size = fs::file_size(anchors_fname);
+        if (anchor_size > mem_bytes) {
+            logger->warn("Anchor bitmap ({} MiB) is larger than the memory"
+                         " allocated ({} MiB). Reserve more RAM.",
+                         anchor_size >> 20, mem_bytes >> 20);
+            return;
+        }
+        mem_bytes -= anchor_size;
+    }
 
     if (!files.size())
         return;
@@ -1177,7 +1191,6 @@ void convert_to_row_diff(const std::vector<std::string> &files,
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
-        // TODO: minus anchor bitmap
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
@@ -1211,9 +1224,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         if (construction_stage == RowDiffStage::COUNT_LABELS) {
             count_labels_per_row(file_batch, count_vector_fname);
         } else {
-            convert_batch_to_row_diff(
-                    graph_fname, graph_fname + kRowDiffAnchorExt
-                        + (construction_stage == RowDiffStage::COMPUTE_REDUCTION ? ".unopt" : ""),
+            convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
                     construction_stage == RowDiffStage::COMPUTE_REDUCTION);
         }

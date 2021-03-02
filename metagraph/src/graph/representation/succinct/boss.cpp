@@ -1982,38 +1982,38 @@ void assert_forks_and_merges_visited(const BOSS &boss,
     constexpr bool async = true;
     // make sure that all forks have been covered
     call_zeros(visited, [&](edge_index edge) {
-      edge_index t = boss.succ_last(edge);
-      bool check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
-      assert(t);
-      assert(check);
+        edge_index t = boss.succ_last(edge);
+        bool check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
+        assert(t);
+        assert(check);
 
-      // make sure the next neighbouring edge has also not been visited
-      t = boss.fwd(t, boss.get_W(t) % boss.alph_size);
-      check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
-      assert(t);
-      assert(check);
-      assert(!fetch_bit(visited.data(), t, async));
+        // make sure the next neighbouring edge has also not been visited
+        t = boss.fwd(t, boss.get_W(t) % boss.alph_size);
+        check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(visited.data(), t, async));
     }, async);
 
     // make sure that all merges have been covered
     call_zeros(visited, [&](edge_index edge) {
-      edge_index t = boss.bwd(edge);
-      bool check = masked_pick_single_incoming(boss, &t, boss.get_W(t), subgraph_mask);
-      assert(t);
-      assert(check);
-      assert(!fetch_bit(visited.data(), t, async));
+        edge_index t = boss.bwd(edge);
+        bool check = masked_pick_single_incoming(boss, &t, boss.get_W(t), subgraph_mask);
+        assert(t);
+        assert(check);
+        assert(!fetch_bit(visited.data(), t, async));
     }, async);
 }
 
-void assert_no_leftovers(const BOSS& boss, const sdsl::bit_vector& visited) {
+void assert_no_leftovers(const BOSS &boss, const sdsl::bit_vector &visited) {
     bool leftover = false;
     call_zeros(visited, [&](edge_index edge) {
-      leftover = true;
-      TAlphabet d = boss.get_W(edge) % boss.alph_size;
-      std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\t";
-      edge = boss.fwd(edge, d);
-      d = boss.get_W(edge) % boss.alph_size;
-      std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\n";
+        leftover = true;
+        TAlphabet d = boss.get_W(edge) % boss.alph_size;
+        std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\t";
+        edge = boss.fwd(edge, d);
+        d = boss.get_W(edge) % boss.alph_size;
+        std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\n";
     }, true);
     std::cout << std::flush;
     assert(!leftover);
@@ -2658,7 +2658,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     }, num_threads, false, kmers_in_single_form, subgraph_mask, true);
 }
 
-// Reach all k-mers that merge into sink |edge| by following their diff paths.
+// Reach all k-mers that merge into anchor |edge| by following their diff paths.
 template <typename T>
 void traverse_diff_path_backward(const BOSS &boss,
                                  const bit_vector &rd_succ,
@@ -2671,26 +2671,17 @@ void traverse_diff_path_backward(const BOSS &boss,
     constexpr bool async = true;
 
     assert(max_length);
-    assert(!boss.get_W(edge) && fetch_bit(dummy->data(), edge, async));
-
-    assert(!fetch_bit(visited->data(), edge, async));
-    // mark as visited
-    set_bit(visited->data(), edge, async);
-    ++progress_bar;
+    assert(fetch_bit(terminal->data(), edge, async));
 
     std::vector<std::pair<edge_index, T /* next anchor dist */>> queue;
-
-    boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
-        [&](edge_index pred) {
-            // set distance to |max_length| to make it an anchor
-            queue.emplace_back(pred, max_length);
-        }
-    );
+    queue.emplace_back(edge, 0);
 
     while (queue.size()) {
         T dist_to_anchor;
         std::tie(edge, dist_to_anchor) = queue.back();
         queue.pop_back();
+
+        assert(boss.get_W(edge) && !fetch_bit(dummy->data(), edge, async));
 
         // mark as visited
         if (fetch_and_set_bit(visited->data(), edge, async))
@@ -2698,12 +2689,11 @@ void traverse_diff_path_backward(const BOSS &boss,
 
         ++progress_bar;
 
-        if (fetch_bit(dummy->data(), edge, async))
-            continue;
-
         if (dist_to_anchor == max_length) {
             // make this node an anchor
             set_bit(terminal->data(), edge, async);
+            dist_to_anchor = 0;
+        } else if (fetch_bit(terminal->data(), edge, async)) {
             dist_to_anchor = 0;
         }
 
@@ -2719,7 +2709,8 @@ void traverse_diff_path_backward(const BOSS &boss,
         // So, we propagate the diff path backward.
         boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
             [&](edge_index pred) {
-                queue.emplace_back(pred, dist_to_anchor + 1);
+                if (!fetch_bit(dummy->data(), pred, async))
+                    queue.emplace_back(pred, dist_to_anchor + 1);
             }
         );
     }
@@ -2729,7 +2720,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
                              size_t max_length,
                              const bit_vector &rd_succ,
                              sdsl::bit_vector *terminal) const {
-    // TODO: do it without using this extra |dummy| bitmap
+    // TODO: can we do it without using this extra |dummy| bitmap?
     sdsl::bit_vector dummy(W_->size(), false);
     dummy[0] = true;
     // keep track of the edges that have been reached
@@ -2748,13 +2739,36 @@ void BOSS::row_diff_traverse(size_t num_threads,
         }
     );
 
-    terminal->resize(W_->size());
-    sdsl::util::set_to_value(*terminal, false);
+    assert(terminal->size() == W_->size());
+
     // TODO: can we use |near_terminal| to mark visited?
     sdsl::bit_vector near_terminal(W_->size(), false);
 
     ProgressBar progress_bar(visited.size() - sdsl::util::cnt_one_bits(visited),
                              "Traverse graph", std::cerr, !common::get_verbose());
+
+    // anchor all sinks (incoming to X...X$)
+    //  ____.
+    #pragma omp parallel for num_threads(num_threads)
+    for (edge_index i = 2; i < W_->size(); ++i) {
+        if (!get_W(i)) {
+            // mark the dummy sink
+            set_bit(dummy.data(), i, async);
+
+            assert(!fetch_bit(visited.data(), i, async));
+            // mark as visited
+            set_bit(visited.data(), i, async);
+            ++progress_bar;
+
+            call_incoming_to_target(bwd(i), get_node_last_value(i),
+                [&](edge_index pred) {
+                    assert(!fetch_bit(dummy.data(), pred, async));
+                    // anchor the sink
+                    set_bit(terminal->data(), pred, async);
+                }
+            );
+        }
+    }
 
     ThreadPool thread_pool(std::max(num_threads, 1UL), TASK_POOL_SIZE);
 
@@ -2773,20 +2787,13 @@ void BOSS::row_diff_traverse(size_t num_threads,
     };
 
     // backward traversal
-    traverse_path = [&](edge_index sink) {
-        traverse_diff_path_backward(*this, rd_succ, sink, max_length, &visited,
+    traverse_path = [&](edge_index anchor) {
+        traverse_diff_path_backward(*this, rd_succ, anchor, max_length, &visited,
                                     terminal, &dummy, progress_bar);
     };
-    // run backward traversal from the dummy sink edges (X...X$), which
-    // are not marked as dummy yet.
-    //  ____.
-    call_zeros(dummy, [&](edge_index i) {
-        if (!get_W(i)) {
-            // mark the dummy sink
-            set_bit(dummy.data(), i, async);
-            enqueue_start(i);
-        }
-    }, async);
+
+    // run backward traversal from every anchor
+    call_ones(*terminal, enqueue_start, async);
 
     flush_batch();
     thread_pool.join();
@@ -2803,7 +2810,22 @@ void BOSS::row_diff_traverse(size_t num_threads,
         if (!fetch_and_set_bit(visited.data(), i, async)) {
             ++progress_bar;
             edge_index real_source = fwd(i, get_W(i) % alph_size);
-            masked_call_outgoing(*this, real_source, NULL, enqueue_start);
+            masked_call_outgoing(*this, real_source, NULL, [&](edge_index next) {
+                if (!fetch_bit(visited.data(), next, async))
+                    enqueue_start(next);
+            });
+        }
+    }, async);
+
+    // start traversal from the last anchors
+    //  .....V---->
+    call_ones(*terminal, [&](edge_index i) {
+        assert(fetch_bit(visited.data(), i, async));
+        if (TAlphabet d = get_W(i) % alph_size) {
+            masked_call_outgoing(*this, fwd(i, d), NULL, [&](edge_index next) {
+                if (!fetch_bit(visited.data(), next, async))
+                    enqueue_start(next);
+            });
         }
     }, async);
 

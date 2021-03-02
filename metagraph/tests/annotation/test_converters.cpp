@@ -240,14 +240,7 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
-    ASSERT_TRUE(std::filesystem::exists(dest_fname));
-    RowDiffColumnAnnotator annotator;
-    annotator.load(dest_fname);
-
-    ASSERT_EQ(0u, annotator.num_objects());
-    ASSERT_EQ(0u, annotator.num_relations());
-    ASSERT_EQ(0u, annotator.num_labels());
-
+    ASSERT_TRUE(!std::filesystem::exists(dest_fname));
     std::filesystem::remove_all(dst_dir);
 }
 

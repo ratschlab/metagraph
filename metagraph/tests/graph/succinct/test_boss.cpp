@@ -951,7 +951,7 @@ TEST(BOSS, CallSequencesRowDiff_EmptyGraph) {
         for (size_t k = 1; k < 30; ++k) {
             BOSS empty(k);
 
-            sdsl::bit_vector terminal;
+            sdsl::bit_vector terminal(empty.get_last().size(), false);
             empty.row_diff_traverse(num_threads, 1, empty.get_last(), &terminal);
             ASSERT_EQ(sdsl::bit_vector(2, false), terminal)
                 << "Empty graph must have no anchors";
@@ -1066,7 +1066,7 @@ TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
 
             ASSERT_EQ(2u, graph.num_edges());
 
-            sdsl::bit_vector terminal;
+            sdsl::bit_vector terminal(graph.get_last().size(), false);
             graph.row_diff_traverse(num_threads, 1, graph.get_last(), &terminal);
             ASSERT_EQ(graph.num_edges() + 1, terminal.size());
             ASSERT_EQ(sdsl::bit_vector({ 0, 0, 1 }), terminal);
@@ -1127,7 +1127,7 @@ TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
         constructor.add_sequences(std::vector<std::string>(sequences));
         BOSS graph(&constructor);
 
-        sdsl::bit_vector terminal;
+        sdsl::bit_vector terminal(graph.get_last().size(), false);
         graph.row_diff_traverse(num_threads, 100, graph.get_last(), &terminal);
         ASSERT_EQ(graph.num_edges() + 1, terminal.size());
         ASSERT_EQ(2, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
@@ -1203,7 +1203,7 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
                                         std::string(100, 'T')});
             BOSS graph(&constructor);
 
-            sdsl::bit_vector terminal;
+            sdsl::bit_vector terminal(graph.get_last().size(), false);
             graph.row_diff_traverse(num_threads, 1, graph.get_last(), &terminal);
             ASSERT_EQ(graph.num_edges() + 1, terminal.size());
             ASSERT_EQ(4, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
@@ -1219,7 +1219,7 @@ TEST(BOSS, CallSequenceRowDiff_FourPaths) {
     constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
     BOSS graph(&constructor);
     for (size_t num_threads : { 1, 4 }) {
-        sdsl::bit_vector terminal;
+        sdsl::bit_vector terminal(graph.get_last().size(), false);
         graph.row_diff_traverse(num_threads, 20, graph.get_last(), &terminal);
         ASSERT_EQ(graph.num_edges() + 1, terminal.size());
         ASSERT_EQ(4, std::accumulate(terminal.begin() + 1, terminal.end(), 0U));
