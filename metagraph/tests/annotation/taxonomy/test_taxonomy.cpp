@@ -150,6 +150,7 @@ TEST (TaxonomyTest, FindLca) {
         {"test4", 0, {1, 2, 5, 6}},
         {"test5", 2, {2}},
         {"test6", 3, {3, 6}},
+        {"test6b", 3, {6, 3}},
         {"test7", 1, {7, 8, 5}},
         {"test8", 1, {4, 5}},
         {"test9", 4, {7, 8}},
@@ -196,17 +197,25 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
     ASSERT_TRUE(taxo.taxonomic_map.size() == 0);
 
-    // Test the normalized taxids.
-    uint64_t normalized_taxid;
+    // Iterating a hopscotch_map on linux and on darwin returns the objects in a different order,
+    // Thus, the normalization ids are different. We need to compute all the normalized taxids.
+    uint64_t normalized_taxid_seq1;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ1]),
-            normalized_taxid));
-    EXPECT_EQ(310, normalized_taxid);
+        normalized_taxid_seq1));
+
+    uint64_t normalized_taxid_seq2;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ2]),
-        normalized_taxid));
-    EXPECT_EQ(568, normalized_taxid);
+        normalized_taxid_seq2));
+
+    uint64_t normalized_taxid_seq3;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ3]),
-            normalized_taxid));
-    EXPECT_EQ(503, normalized_taxid);
+        normalized_taxid_seq3));
+
+    uint64_t normalized_lca_seq23 = taxo.find_lca({normalized_taxid_seq2,
+                                                    normalized_taxid_seq3});
+    uint64_t normalized_lca_seq123 = taxo.find_lca({normalized_taxid_seq1,
+                                                    normalized_taxid_seq2,
+                                                    normalized_taxid_seq3});
 
     struct query_taxo_map_update {
         std::string test_id;
@@ -215,13 +224,25 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     };
 
     std::vector<query_taxo_map_update> tests = {
-        {"test1", {{310, 979}}, {SEQ1}},
-        {"test2", {{650, 201}, {568, 778}, {310, 778}}, {{SEQ1, SEQ2}}},
+        {"test1", {{normalized_taxid_seq1, 979}}, {SEQ1}},
+        {"test2", {
+                           {normalized_lca_seq123, 201},
+                           {normalized_taxid_seq2, 778},
+                           {normalized_taxid_seq1, 778}
+                   }, {{SEQ1, SEQ2}}},
         {"test3", {
-                        {650, 217}, {651, 650}, {310, 762}, {568, 128}, {503, 171}},
-                        {{SEQ1, SEQ2, SEQ3}}
+                           {normalized_lca_seq123, 217},
+                           {normalized_lca_seq23, 650},
+                           {normalized_taxid_seq1, 762},
+                           {normalized_taxid_seq2, 128},
+                           {normalized_taxid_seq3, 171}
+                   }, {{SEQ1, SEQ2, SEQ3}}
         },
-        {"test4", {{651, 792}, {568, 187}, {503, 187}}, {{SEQ2, SEQ3}}},
+        {"test4", {
+                           {normalized_lca_seq23, 792},
+                           {normalized_taxid_seq2, 187},
+                           {normalized_taxid_seq3, 187}
+                   }, {{SEQ2, SEQ3}}},
     };
 
     for (const auto &test: tests) {

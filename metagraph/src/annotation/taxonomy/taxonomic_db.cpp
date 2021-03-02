@@ -196,6 +196,10 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
 }
 
 NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) const {
+    if (taxids.empty()) {
+        logger->error("Can't find LCA for an empty taxid set.");
+        std::exit(1);
+    }
     uint64_t left_idx = node_to_linearization_idx[taxids[0]];
     uint64_t right_idx = node_to_linearization_idx[taxids[0]];
     for (const auto &taxid: taxids) {
