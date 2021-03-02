@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
     //console_sink->set_color(spdlog::level::trace, "\033[37m");
     spdlog::flush_every(std::chrono::seconds(1));
 
-    logger->trace("Metagraph started");
+    logger->trace("Metagraph started_");
 
     switch (config->identity) {
         case Config::BUILD:
