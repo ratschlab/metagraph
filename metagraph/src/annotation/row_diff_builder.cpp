@@ -25,7 +25,7 @@ using mtg::graph::boss::BOSS;
 namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
-using rd_succ_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
+using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
 using Encoder = common::EliasFanoEncoder<T>;
 
@@ -198,7 +198,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                                const std::filesystem::path &count_vectors_dir) {
     logger->info("Assigning row-diff successors at forks...");
 
-    sdsl::bit_vector rd_succ_bv(graph.num_nodes(), 0);
+    rd_succ_bv_type rd_succ;
 
     bool optimize_forks = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
@@ -216,6 +216,8 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
         std::vector<uint32_t> outgoing_counts;
 
+        sdsl::bit_vector rd_succ_bv(last.size(), 0);
+
         sum_and_call_counts(count_vectors_dir, ".row_count", [&](int32_t count) {
             outgoing_counts.push_back(count);
             if (last[graph.kmer_to_boss_index(graph_idx)]) {
@@ -223,7 +225,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                 size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                   outgoing_counts.rend())
                                  - outgoing_counts.rbegin();
-                rd_succ_bv[to_row(graph_idx - max_pos)] = true;
+                rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
                 outgoing_counts.resize(0);
             }
             graph_idx++;
@@ -235,6 +237,8 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
             exit(1);
         }
 
+        rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
+
     } else {
         logger->info("No count vectors could be found in {}. The last outgoing"
                      " edges will be selected for assigning RowDiff successors",
@@ -242,16 +246,9 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         ProgressBar progress_bar(graph.get_boss().get_last().num_set_bits(),
                                  "Route forks", std::cerr, !common::get_verbose());
         // the last outgoing edges are always the row-diff successors
-        graph.get_boss().get_last().call_ones([&](uint64_t i) {
-            if (uint64_t graph_idx = graph.boss_to_kmer_index(i)) {
-                assert(to_row(graph_idx) < graph.num_nodes());
-                rd_succ_bv[to_row(graph_idx)] = 1;
-            }
-            ++progress_bar;
-        });
+        rd_succ = graph.get_boss().get_last().copy_to<rd_succ_bv_type>();
     }
 
-    rd_succ_bv_type rd_succ(std::move(rd_succ_bv));
     std::ofstream f(rd_succ_filename, ios::binary);
     rd_succ.serialize(f);
     logger->trace("RowDiff successors are assigned for forks and written to {}",
@@ -267,7 +264,7 @@ void build_pred_succ(const std::string &graph_fname,
             && fs::exists(outfbase + ".succ_boundary")
             && fs::exists(outfbase + ".pred")
             && fs::exists(outfbase + ".pred_boundary")
-            && fs::exists(outfbase + ".rd_succ")) {
+            && fs::exists(outfbase + kRowDiffForkSuccExt)) {
         logger->trace("Using existing pred/succ files in {}.*", outfbase);
         return;
     }
@@ -283,7 +280,7 @@ void build_pred_succ(const std::string &graph_fname,
 
     // assign row-diff successors at forks
     rd_succ_bv_type rd_succ
-            = route_at_forks(graph, outfbase + ".rd_succ", count_vectors_dir);
+            = route_at_forks(graph, outfbase + kRowDiffForkSuccExt, count_vectors_dir);
 
     const BOSS &boss = graph.get_boss();
 
@@ -317,7 +314,7 @@ void build_pred_succ(const std::string &graph_fname,
                 BOSS::edge_index next = boss.fwd(boss_idx, d);
                 assert(next);
                 if (!dummy[next]) {
-                    while (!rd_succ[to_row(graph.boss_to_kmer_index(next))]) {
+                    while (!rd_succ[next]) {
                         next--;
                         assert(!boss.get_last(next));
                     }
@@ -327,7 +324,7 @@ void build_pred_succ(const std::string &graph_fname,
             }
             succ_boundary_buf.push_back(1);
             // compute predecessors only for row-diff successors
-            if (!dummy[boss_idx] && rd_succ[to_row(i)]) {
+            if (!dummy[boss_idx] && rd_succ[boss_idx]) {
                 BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
                 BOSS::edge_index back_idx = boss.bwd(boss_idx);
                 boss.call_incoming_to_target(back_idx, d,

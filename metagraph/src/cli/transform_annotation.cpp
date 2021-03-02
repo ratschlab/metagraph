@@ -506,8 +506,12 @@ int transform_annotation(Config *config) {
             const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
             if (!std::filesystem::exists(anchors_file)) {
                 logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                              " transform followed by anchor optimization.",
-                              anchors_file);
+                              " transform followed by anchor optimization.", anchors_file);
+                std::exit(1);
+            }
+            const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+            if (!std::filesystem::exists(fork_succ_file)) {
+                logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
                 std::exit(1);
             }
             if (config->anno_type == Config::RowDiffBRWT) {
@@ -538,6 +542,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Serializing to '{}'", config->outfbase);
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
                         .load_anchor(anchors_file);
+                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                        .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
             } else { // RowDiff<RowSparse>
@@ -550,6 +556,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
                         .load_anchor(anchors_file);
+                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
+                        .load_fork_succ(fork_succ_file);
                 logger->trace("Serializing to '{}'", config->outfbase);
                 row_sparse->serialize(config->outfbase);
             }
