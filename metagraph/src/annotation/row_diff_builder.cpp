@@ -205,8 +205,8 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         if (utils::ends_with(p.path(), ".row_count"))
             optimize_forks = true;
     }
-    // TODO: add the support for custom successors at forks and enable
-    if (false && optimize_forks) {
+
+    if (optimize_forks) {
         logger->info("RowDiff successors will be set to the adjacent nodes with"
                      " the largest number of labels");
 
@@ -216,7 +216,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
         std::vector<uint32_t> outgoing_counts;
 
-        sdsl::bit_vector rd_succ_bv(last.size(), 0);
+        sdsl::bit_vector rd_succ_bv(last.size(), false);
 
         sum_and_call_counts(count_vectors_dir, ".row_count", [&](int32_t count) {
             // TODO: skip single outgoing
@@ -232,9 +232,9 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
             graph_idx++;
         });
 
-        if (to_row(graph_idx) != graph.num_nodes()) {
+        if (graph_idx != graph.num_nodes() + 1) {
             logger->error("Size the count vectors is incompatible with the"
-                          " graph: {} != {}", to_row(graph_idx), graph.num_nodes());
+                          " graph: {} != {}", graph_idx - 1, graph.num_nodes());
             exit(1);
         }
 
@@ -372,9 +372,28 @@ void assign_anchors(const std::string &graph_fname,
     }
 
     const BOSS &boss = graph.get_boss();
+
     sdsl::bit_vector anchors_bv;
-    sdsl::bit_vector dummy; // TODO: don't compute dummy
-    boss.row_diff_traverse(num_threads, max_length, &anchors_bv, &dummy);
+    {
+        rd_succ_bv_type rd_succ;
+
+        const std::string rd_succ_filename = outfbase + kRowDiffForkSuccExt;
+        std::ifstream f(rd_succ_filename, ios::binary);
+        if (!rd_succ.load(f)) {
+            logger->error("Couldn't load row-diff successor bitmap from {}",
+                          rd_succ_filename);
+            exit(1);
+        }
+
+        if (rd_succ.size()) {
+            logger->info("RowDiff successors {} will be used to assign anchors",
+                         rd_succ_filename);
+            boss.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
+        } else {
+            logger->info("The last outgoing edges will be used to assign anchors");
+            boss.row_diff_traverse(num_threads, max_length, boss.get_last(), &anchors_bv);
+        }
+    }
 
     const uint64_t num_rows = graph.num_nodes();
 

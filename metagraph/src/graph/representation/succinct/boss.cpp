@@ -2433,10 +2433,11 @@ void update_terminal_bits(uint64_t max_length,
 
 /**
  * Traverses the path that can be visited starting from #edge.
- * A path ends when there are either no outgoing edges from the current node or if the
- * first node in a fork was already visited.
+ * A path ends when there are either no outgoing edges from the current node or
+ * if the row-diff successor in a fork has already been visited.
  */
 void call_row_diff_path(const BOSS &boss,
+                        const bit_vector &rd_succ,
                         edge_index edge,
                         uint32_t max_length,
                         sdsl::bit_vector *visited,
@@ -2456,7 +2457,7 @@ void call_row_diff_path(const BOSS &boss,
     std::vector<edge_index> path;
     path.reserve(100);
 
-    // traverse unvisited simple path, always pick the last outgoing according
+    // traverse unvisited simple path, always pick a successor according
     // to the routing in row-diff
     while (!fetch_and_set_bit(visited->data(), edge, async)) {
         assert(edge > 0);
@@ -2464,10 +2465,7 @@ void call_row_diff_path(const BOSS &boss,
 
         path.push_back(edge);
 
-        TAlphabet d = boss.get_W(edge) % boss.alph_size;
-        assert(d != boss.kSentinelCode && "all sinks must be visited before");
-        // make one traversal step (this will pick the last outgoing edge)
-        edge = boss.fwd(edge, d);
+        edge = boss.row_diff_successor(edge, rd_succ);
     }
 
     // mark terminal and near terminal nodes
@@ -2663,6 +2661,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 // Reach all k-mers that merge into sink |edge| by following their diff paths.
 template <typename T>
 void traverse_diff_path_backward(const BOSS &boss,
+                                 const bit_vector &rd_succ,
                                  edge_index edge,
                                  T max_length,
                                  sdsl::bit_vector *visited,
@@ -2708,14 +2707,14 @@ void traverse_diff_path_backward(const BOSS &boss,
             dist_to_anchor = 0;
         }
 
-        // stop if the edge is not the last outgoing for its source node
+        // stop if the edge is not the row-diff successor of its source node
         // AAAX - AAX$
         // ^^^^
         // AAAY - ****
-        if (!boss.get_last(edge))
+        if (!rd_succ[edge])
             continue;
 
-        // |edge| is the last outgoing edge. Thus, it is part of a diff
+        // |edge| is the row-diff successor. Thus, it is part of a diff
         // path, and all edges incoming to it will compute diff wrt to it.
         // So, we propagate the diff path backward.
         boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
@@ -2728,13 +2727,13 @@ void traverse_diff_path_backward(const BOSS &boss,
 
 void BOSS::row_diff_traverse(size_t num_threads,
                              size_t max_length,
-                             sdsl::bit_vector *terminal,
-                             sdsl::bit_vector *dummy) const {
-    dummy->resize((W_->size()));
-    sdsl::util::set_to_value(*dummy, false);
-    (*dummy)[0] = true;
+                             const bit_vector &rd_succ,
+                             sdsl::bit_vector *terminal) const {
+    // TODO: do it without using this extra |dummy| bitmap
+    sdsl::bit_vector dummy(W_->size(), false);
+    dummy[0] = true;
     // keep track of the edges that have been reached
-    sdsl::bit_vector visited = *dummy;
+    sdsl::bit_vector visited = dummy;
 
     constexpr bool async = true;
 
@@ -2743,7 +2742,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
     traverse_dummy_edges(*this, NULL, NULL, num_threads,
         [&](edge_index edge, size_t depth) {
             assert(depth <= get_k());
-            set_bit(dummy->data(), edge, async);
+            set_bit(dummy.data(), edge, async);
             if (depth < get_k())
                 set_bit(visited.data(), edge, async);
         }
@@ -2775,16 +2774,16 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // backward traversal
     traverse_path = [&](edge_index sink) {
-        traverse_diff_path_backward(*this, sink, max_length, &visited,
-                                    terminal, dummy, progress_bar);
+        traverse_diff_path_backward(*this, rd_succ, sink, max_length, &visited,
+                                    terminal, &dummy, progress_bar);
     };
     // run backward traversal from the dummy sink edges (X...X$), which
     // are not marked as dummy yet.
     //  ____.
-    call_zeros(*dummy, [&](edge_index i) {
+    call_zeros(dummy, [&](edge_index i) {
         if (!get_W(i)) {
             // mark the dummy sink
-            set_bit(dummy->data(), i, async);
+            set_bit(dummy.data(), i, async);
             enqueue_start(i);
         }
     }, async);
@@ -2794,13 +2793,13 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // forward traversal
     traverse_path = [&](edge_index start) {
-        call_row_diff_path(*this, start, max_length, &visited,
+        call_row_diff_path(*this, rd_succ, start, max_length, &visited,
                            terminal, &near_terminal, progress_bar);
     };
     // start traversal from the dummy source edges first ($X...X)
     // they are marked as |dummy| AND NOT |visited|
     //  .____
-    call_ones(*dummy, [&](edge_index i) {
+    call_ones(dummy, [&](edge_index i) {
         if (!fetch_and_set_bit(visited.data(), i, async)) {
             ++progress_bar;
             edge_index real_source = fwd(i, get_W(i) % alph_size);
@@ -2847,9 +2846,8 @@ void BOSS::row_diff_traverse(size_t num_threads,
             TAlphabet d = w % alph_size;
             sequence.push_back(d);
             path.push_back(edge);
+            assert(is_single_outgoing(edge));
             edge = fwd(edge, d);
-            masked_pick_single_outgoing(*this, &edge, nullptr);
-            assert(edge);
         } while (edge != start);
 
         // check the cycle's representative node to see if the cycle has already been

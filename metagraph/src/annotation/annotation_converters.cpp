@@ -1264,7 +1264,14 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
+        std::string fork_succ_file = utils::remove_suffix(graph_file, kRowDiffForkSuccExt) + kRowDiffForkSuccExt;
+        if (!std::filesystem::exists(fork_succ_file)) {
+            logger->error("Couldn't find fork successor bitmap at {}", fork_succ_file);
+            std::exit(1);
+        }
         const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchors_file);
+        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_fork_succ(fork_succ_file);
+
         row_diff_anno.serialize(out_file);
         return;
     }
