@@ -210,33 +210,24 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         assert(rows.size() == edges.size());
         auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
         for (size_t i = 0; i < rows.size(); ++i) {
-            if (annotation[i].size()) {
-                target_column_idx = target_columns_.size();
-                for (uint64_t target : annotation[i]) {
-                    target_column_idx = std::min(
-                        target_column_idx,
-                        static_cast<size_t>(std::find(target_columns_.begin(),
-                                                      target_columns_.end(),
-                                                      target) - target_columns_.begin())
-                    );
-                }
+            AlignNode next { edges[i].first, edges[i].second, 0, std::get<3>(node) + 1 };
+            auto find = this->table_.find(edges[i].first);
+            if (find != this->table_.end())
+                std::get<2>(next) = find->second.first.size();
 
-                // TODO: find a way to pick all of them?
+            for (uint64_t target : annotation[i]) {
+                target_column_idx = std::find(target_columns_.begin(),
+                                              target_columns_.end(),
+                                              target) - target_columns_.begin();
+
                 if (target_column_idx == target_columns_.size())
-                    target_columns_.emplace_back(annotation[i][0]);
-
-                target_column = target_columns_[target_column_idx];
-                assert(target_column != ILabeledDBGAligner::kNTarget);
-
-                AlignNode next { edges[i].first, edges[i].second, 0, std::get<3>(node) + 1 };
-                auto find = this->table_.find(edges[i].first);
-                if (find != this->table_.end())
-                    std::get<2>(next) = find->second.first.size();
+                    target_columns_.emplace_back(target);
 
                 assert(!align_node_to_target_.count(next));
                 align_node_to_target_[next] = target_column_idx;
 
-                out_edges.emplace_back(std::move(edges[i]));
+                out_edges.push_back(edges[i]);
+                ++std::get<2>(next);
             }
         }
 
