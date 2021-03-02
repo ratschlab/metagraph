@@ -117,8 +117,12 @@ auto ILabeledDBGAligner
     }
 
     for (size_t i = 0; i < target_columns.size(); ++i) {
-        if (target_columns[i].empty())
+        if (target_columns[i].empty()) {
+            assert(!query_nodes[i][0]);
+            assert(std::equal(query_nodes[i].begin() + 1, query_nodes[i].end(),
+                              query_nodes[i].begin()));
             target_columns[i][kNTarget] = sdsl::bit_vector(query_nodes[i].size(), true);
+        }
     }
 
     return std::make_pair(std::move(query_nodes), std::move(target_columns));
@@ -184,44 +188,59 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         assert(this->seed_->get_offset() + 1 >= std::get<3>(node));
         size_t next_offset = this->seed_->get_offset() + 1 - std::get<3>(node);
 
+        Edges edges = DefaultColumnExtender<NodeType>::get_outgoing(node);
         if (next_offset)
-            return DefaultColumnExtender<NodeType>::get_outgoing(node);
+            return edges;
 
-        AnnotatedDBG::row_index row;
-        if (const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_)) {
-            row = AnnotatedDBG::graph_to_anno_index(canonical->get_base_node(std::get<0>(node)));
-        } else if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-            row = AnnotatedDBG::graph_to_anno_index(std::get<0>(node));
-        } else {
-            this->graph_.map_to_nodes(this->graph_.get_node_sequence(std::get<0>(node)), [&](NodeType node_canonical) {
-                row = AnnotatedDBG::graph_to_anno_index(node_canonical);
-            });
+        Edges out_edges;
+        std::vector<AnnotatedDBG::row_index> rows;
+        rows.reserve(edges.size());
+        const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+        for (const auto &[next_node, c] : edges) {
+            if (canonical) {
+                rows.emplace_back(AnnotatedDBG::graph_to_anno_index(canonical->get_base_node(next_node)));
+            } else if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL) {
+                rows.emplace_back(AnnotatedDBG::graph_to_anno_index(next_node));
+            } else {
+                this->graph_.map_to_nodes(this->graph_.get_node_sequence(next_node), [&](NodeType next_canonical) {
+                    rows.emplace_back(AnnotatedDBG::graph_to_anno_index(next_canonical));
+                });
+            }
         }
+        assert(rows.size() == edges.size());
+        auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (annotation[i].size()) {
+                target_column_idx = target_columns_.size();
+                for (uint64_t target : annotation[i]) {
+                    target_column_idx = std::min(
+                        target_column_idx,
+                        static_cast<size_t>(std::find(target_columns_.begin(),
+                                                      target_columns_.end(),
+                                                      target) - target_columns_.begin())
+                    );
+                }
 
-        auto annotation = anno_graph_.get_annotation().get_matrix().get_row(row);
-        if (annotation.empty()) {
-            // no labels found for this node, return nothing
-            cached_edge_sets_[std::get<0>(node)] = {};
-            return {};
-        }
+                // TODO: find a way to pick all of them?
+                if (target_column_idx == target_columns_.size())
+                    target_columns_.emplace_back(annotation[i][0]);
 
-        target_column_idx = target_columns_.size();
-        for (uint64_t target : annotation) {
-            auto find = std::find(target_columns_.begin(), target_columns_.end(), target);
-            if (find != target_columns_.end()) {
-                target_column_idx = std::min(
-                    target_column_idx,
-                    static_cast<size_t>(find - target_columns_.begin())
-                );
+                target_column = target_columns_[target_column_idx];
+                assert(target_column != ILabeledDBGAligner::kNTarget);
+
+                AlignNode next { edges[i].first, edges[i].second, 0, std::get<3>(node) + 1 };
+                auto find = this->table_.find(edges[i].first);
+                if (find != this->table_.end())
+                    std::get<2>(next) = find->second.first.size();
+
+                assert(!align_node_to_target_.count(next));
+                align_node_to_target_[next] = target_column_idx;
+
+                out_edges.emplace_back(std::move(edges[i]));
             }
         }
 
-        // TODO: find a way to pick all of them
-        if (target_column_idx == target_columns_.size())
-            target_columns_.emplace_back(annotation[0]);
-
-        target_column = target_columns_[target_column_idx];
-        align_node_to_target_[node] = target_column_idx;
+        return out_edges;
     }
 
     if (cached_edge_sets_.count(std::get<0>(node))) {

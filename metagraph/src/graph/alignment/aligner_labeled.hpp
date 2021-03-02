@@ -131,7 +131,16 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode &node) override {
         const AlignNode &prev = std::get<6>(scores);
         assert(align_node_to_target_.count(prev));
-        align_node_to_target_[node] = align_node_to_target_[prev];
+
+        if (!align_node_to_target_.count(node)) {
+            align_node_to_target_[node] = align_node_to_target_[prev];
+#ifndef NDEBUG
+        } else {
+            assert(align_node_to_target_[prev] == align_node_to_target_[node]
+                || target_columns_.at(align_node_to_target_[prev])
+                    == ILabeledDBGAligner::kNTarget);
+#endif
+        }
 
         DefaultColumnExtender<NodeType>::add_scores_to_column(
             column, std::move(scores), node
