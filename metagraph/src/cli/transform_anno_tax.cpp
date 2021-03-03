@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <tsl/hopscotch_set.h>
 
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp" //delete?
 #include "annotation/taxonomy/taxonomic_db.hpp"
 #include "config/config.hpp"
 #include "cli/load/load_annotation.hpp"
