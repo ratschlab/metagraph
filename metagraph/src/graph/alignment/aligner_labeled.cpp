@@ -51,7 +51,7 @@ ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
 
 auto ILabeledDBGAligner
 ::map_and_label_query_batch(const QueryGenerator &generate_query) const
-        -> std::pair<BatchMapping, BatchLabels> {
+        -> std::tuple<BatchMapping, BatchMapping, BatchLabels, BatchLabels> {
     // exact k-mer matchings of each query sequence
     BatchMapping query_nodes;
 
@@ -141,7 +141,7 @@ auto ILabeledDBGAligner
         }
     }
 
-    return std::make_pair(std::move(query_nodes), std::move(target_columns));
+    return std::make_tuple(query_nodes, query_nodes, target_columns, target_columns);
 }
 
 template <typename NodeType>
@@ -151,42 +151,21 @@ LabeledColumnExtender<NodeType>
                         std::string_view query)
       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
         anno_graph_(anno_graph),
-        initial_target_columns_size_(0) {}
-
-template <typename NodeType>
-LabeledColumnExtender<NodeType>
-::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
-                        const DBGAlignerConfig &config,
-                        std::string_view query,
-                        uint64_t initial_target_column)
-      : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
-        anno_graph_(anno_graph),
-        target_columns_({ initial_target_column }),
-        initial_target_columns_size_(1) {}
+        target_columns_({ ILabeledDBGAligner::kNTarget }) {}
 
 template <typename NodeType>
 void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
-    target_columns_.resize(initial_target_columns_size_);
-    assert(target_columns_.size() <= 1);
     DefaultColumnExtender<NodeType>::initialize(path);
-    cached_edge_sets_.clear();
     align_node_to_target_.clear();
 
-    AlignNode start_node{ this->graph_.max_index() + 1, '\0', 0, 0 };
+    assert(path.target_column != std::numeric_limits<uint64_t>::max());
+    size_t target_column_idx = std::find(target_columns_.begin(), target_columns_.end(),
+                                         path.target_column) - target_columns_.begin();
 
-    if (!path.get_offset()) {
-        align_node_to_target_[start_node] = 0;
-        if (target_columns_.empty())
-            target_columns_.push_back(ILabeledDBGAligner::kNTarget);
+    align_node_to_target_[{ this->graph_.max_index() + 1, '\0', 0, 0 }] = target_column_idx;
 
-    } else if (target_columns_.empty()) {
-        align_node_to_target_[start_node] = 0;
-        target_columns_.push_back(ILabeledDBGAligner::kNTarget);
-
-    } else {
-        align_node_to_target_[start_node] = 1;
-        target_columns_.push_back(ILabeledDBGAligner::kNTarget);
-    }
+    if (target_column_idx == target_columns_.size())
+        target_columns_.push_back(path.target_column);
 }
 
 template <typename NodeType>

@@ -21,7 +21,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     typedef IDBGAligner::QueryGenerator QueryGenerator;
 
     // undefined target column
-    static constexpr uint64_t kNTarget = std::numeric_limits<uint64_t>::max();
+    static constexpr uint64_t kNTarget = std::numeric_limits<uint64_t>::max() - 1;
 
     ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
                        const DBGAlignerConfig &config,
@@ -40,7 +40,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     DBGAlignerConfig config_;
     size_t num_top_labels_;
 
-    std::pair<BatchMapping, BatchLabels>
+    std::tuple<BatchMapping, BatchMapping, BatchLabels, BatchLabels>
     map_and_label_query_batch(const QueryGenerator &generate_query) const;
 };
 
@@ -56,7 +56,16 @@ class LabeledSeeder : public BaseSeeder {
 
     virtual ~LabeledSeeder() {}
 
-    uint64_t get_target_column() const { return target_column_; }
+    virtual std::vector<Seed> get_seeds() const override {
+        std::vector<Seed> seeds = BaseSeeder::get_seeds();
+        for (Seed &seed : seeds) {
+            seed.target_column = !seed.get_offset()
+                ? target_column_
+                : ILabeledDBGAligner::kNTarget;
+        }
+
+        return seeds;
+    }
 
   private:
     uint64_t target_column_;
@@ -109,11 +118,6 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
-                          std::string_view query,
-                          uint64_t initial_target_column);
-
-    LabeledColumnExtender(const AnnotatedDBG &anno_graph,
-                          const DBGAlignerConfig &config,
                           std::string_view query);
 
     virtual ~LabeledColumnExtender() {}
@@ -153,8 +157,6 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     mutable std::vector<uint64_t> target_columns_;
 
-    size_t initial_target_columns_size_;
-
     // alternative seed used to replace a suffix seed
     DBGAlignment alt_seed_;
 
@@ -173,7 +175,8 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        const auto &[query_nodes, target_columns] = mapped_batch;
+        const auto &[query_nodes, query_nodes_rc, target_columns, target_columns_rc]
+            = mapped_batch;
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
@@ -182,29 +185,31 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         assert(config_.num_alternative_paths);
         assert(target_columns[num_queries].size());
 
-        for (const auto &[target_column, signature] : target_columns[num_queries]) {
+        const auto &nodes = query_nodes[num_queries];
+        // const auto &nodes_rc = query_nodes_rc[num_queries];
+        const auto &targets = target_columns[num_queries];
+        // const auto &targets_rc = target_columns_rc[num_queries];
+
+        for (const auto &[target_column, signature] : targets) {
             Seeder seeder = build_seeder(
                 target_column,
                 this_query, // use this_query since paths stores a copy
                 is_reverse_complement,
-                std::vector<node_index>(query_nodes[num_queries]),
+                std::vector<node_index>(nodes),
                 signature
             );
 
-            Extender extender = build_extender(this_query, seeder);
+            Extender extender(anno_graph_, config_, this_query);
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
                 assert(!is_reverse_complement);
 
                 auto build_rev_comp_alignment_core = [&](std::string_view reverse,
-                                                         const auto &forward_seeder,
+                                                         const auto &,
                                                          auto&& rev_comp_seeds,
                                                          const auto &callback) {
-                    LabeledSeeder<ManualSeeder<node_index>> seeder_rc(
-                        dynamic_cast<const Seeder&>(forward_seeder).get_target_column(),
-                        std::move(rev_comp_seeds)
-                    );
-                    callback(seeder_rc, build_extender(reverse, seeder_rc));
+                    callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)),
+                             Extender(anno_graph_, config_, reverse));
                 };
 
                 // From a given seed, align forwards, then reverse complement and
@@ -219,7 +224,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 aligner_core.align_both_directions(paths, seeder, seeder_rc,
                                                    std::move(extender),
-                                                   build_extender(reverse, seeder_rc),
+                                                   Extender(anno_graph_, config_, reverse),
                                                    build_rev_comp_alignment_core);
 
             } else if (config_.forward_and_reverse_complement) {
@@ -235,7 +240,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 aligner_core.align_best_direction(paths, seeder, seeder_rc,
                                                   std::move(extender),
-                                                  build_extender(reverse, seeder_rc));
+                                                  Extender(anno_graph_, config_, reverse));
             } else {
                 aligner_core.align_one_direction(paths, is_reverse_complement,
                                                  seeder, std::move(extender));
@@ -246,8 +251,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
         ++num_queries;
     });
-
-    assert(num_queries == mapped_batch.second.size());
 }
 
 template <class BaseSeeder, class Extender, class AlignmentCompare>
@@ -274,26 +277,6 @@ inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
     return Seeder(target_column, graph_, query, is_reverse_complement,
                   std::move(base_nodes), config_);
-}
-
-template <class BaseSeeder, class Extender, class AlignmentCompare>
-inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
-::build_extender(std::string_view query,
-                 const ISeeder<node_index> &seeder) const -> Extender {
-    typedef LabeledSeeder<ManualSeeder<node_index>> LabeledManualSeeder;
-    uint64_t target_column = kNTarget;
-
-    if (const auto *labeled_seeder = dynamic_cast<const Seeder*>(&seeder)) {
-        target_column = labeled_seeder->get_target_column();
-    } else if (const auto *manual = dynamic_cast<const LabeledManualSeeder*>(&seeder)) {
-        target_column = manual->get_target_column();
-    }
-
-    if (target_column != kNTarget) {
-        return { anno_graph_, config_, query, target_column };
-    } else {
-        return { anno_graph_, config_, query };
-    }
 }
 
 } // namespace align

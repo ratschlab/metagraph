@@ -165,6 +165,8 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
+    uint64_t target_column = std::numeric_limits<uint64_t>::max();
+
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
