@@ -18,5 +18,5 @@ basedir=/cluster/work/grlab/projects/metagenome/data
 graphdir=${basedir}/tcga/output_k${K}_trimmed_clean_graph_chunked/${tissue}
 metagraph=/cluster/home/akahles/git/software/metagraph_current_dev/metagraph/build/metagraph
 
-/usr/bin/time -v ${metagraph} concatenate -v -p 10 --canonical --len-suffix $level --clear-dummy -i ${graphdir}/graph_merged_k${K} -o ${graphdir}/graph_merged_k${K}
+/usr/bin/time -v ${metagraph} concatenate -v -p 10 --mode canonical --len-suffix $level --clear-dummy -i ${graphdir}/graph_merged_k${K} -o ${graphdir}/graph_merged_k${K}
 

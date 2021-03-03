@@ -184,18 +184,36 @@ jobs:
     runs-on: ubuntu-latest
     needs: [Linux]
     steps:
+      - uses: actions/checkout@v1
+
+      - name: checkout submodules
+        run: git submodule update --init --recursive
+
       - name: fetch static binary
         uses: actions/download-artifact@v2
         with:
           path: artifacts
+
+      - name: Tag name
+        id: tag_name
+        run: |
+          echo ::set-output name=TAG::${GITHUB_REF#refs/tags/}
+
+      - name: build source archive including submodules
+        run: |
+          mkdir -p artifacts/sources
+          tag=${{ steps.tag_name.outputs.TAG }}
+          bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${tag}-sources-with-submodules.tar.gz
+          bash .github/workflows/git-archive-all.sh --format zip artifacts/sources/${tag}-sources-with-submodules.zip
+
       - name: create release with static binaries
         uses: svenstaro/upload-release-action@v2
         with:
-          release_name: Release ${{ github.ref }}
+          release_name: Release ${{ steps.tag_name.outputs.TAG }}
           body: |
             The binaries are currently provided on an experimental basis.
             The Linux binaries are statically linked and hence don't require additional libraries to be installed.
-          file: 'artifacts/*/metagraph_*'
+          file: 'artifacts/*/*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref }}

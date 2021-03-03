@@ -39,7 +39,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
@@ -57,7 +57,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
@@ -73,7 +73,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
@@ -91,7 +91,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 1.73589', params_str[4])
 
@@ -117,7 +117,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 589774', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_clean_prune_tips(self, representation):
@@ -141,7 +141,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 589774', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 589774', params_str[3])
         self.assertEqual('avg weight: 2.49001', params_str[4])
 
@@ -167,7 +167,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 167395', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 167395', params_str[3])
         self.assertEqual('avg weight: 5.52732', params_str[4])
 
@@ -193,7 +193,7 @@ class TestCleanWeighted(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 167224', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 167224', params_str[3])
         self.assertEqual('avg weight: 5.52757', params_str[4])
 
@@ -209,14 +209,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 2.4635', params_str[4])
 
@@ -227,14 +227,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 2.4635', params_str[4])
 
@@ -244,14 +244,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers --count-width 2")
 
         res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
 
@@ -262,14 +262,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1185814', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1185814', params_str[3])
         self.assertEqual('avg weight: 1.72792', params_str[4])
 
@@ -278,7 +278,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -288,21 +288,21 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1180802', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
     def test_clean_prune_tips(self, representation):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -312,14 +312,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 1180802', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1180802', params_str[3])
         self.assertEqual('avg weight: 2.46882', params_str[4])
 
@@ -346,7 +346,7 @@ class TestCleanWeightedCanonical(TestingBase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331452', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 331452', params_str[3])
         self.assertEqual('avg weight: 5.52692', params_str[4])
 
@@ -355,7 +355,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -365,14 +365,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331452', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 331452', params_str[3])
         self.assertEqual('avg weight: 5.52692', params_str[4])
 
@@ -381,7 +381,7 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=TEST_DATA_DIR + '/transcripts_1000.fa',
                           output=self.tempdir.name + '/graph',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         clean_fasta = self.tempdir.name + '/contigs.fasta.gz'
@@ -391,14 +391,14 @@ class TestCleanWeightedCanonical(TestingBase):
 
         self._build_graph(input=clean_fasta,
                           output=self.tempdir.name + '/graph_clean',
-                          k=31, repr=representation, canonical=True,
+                          k=31, repr=representation, mode='canonical',
                           extra_params="--mask-dummy --count-kmers")
 
         res = self._get_stats(self.tempdir.name + '/graph_clean' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 31', params_str[0])
         self.assertEqual('nodes (k): 331266', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 331266', params_str[3])
         self.assertEqual('avg weight: 5.52728', params_str[4])
 

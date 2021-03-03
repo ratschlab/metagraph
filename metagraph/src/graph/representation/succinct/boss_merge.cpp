@@ -181,7 +181,7 @@ BOSS::Chunk merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
 
     size_t num_blocks = bins.front().size() - 1;
 
-    BOSS::Chunk result(graphs.at(0)->alph_size, graphs.at(0)->get_k(), false);
+    BOSS::Chunk result(graphs.at(0)->alph_size, graphs.at(0)->get_k());
 
     #pragma omp parallel for num_threads(num_threads) ordered
     for (size_t curr_idx = 0; curr_idx < num_blocks; ++curr_idx) {
@@ -257,7 +257,7 @@ BOSS::Chunk merge_blocks(const std::vector<const BOSS*> &Gv,
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
 
-    BOSS::Chunk chunk(Gv.at(0)->alph_size, Gv.at(0)->get_k(), false);
+    BOSS::Chunk chunk(Gv.at(0)->alph_size, Gv.at(0)->get_k());
 
     const size_t alph_size = Gv.at(0)->alph_size;
 

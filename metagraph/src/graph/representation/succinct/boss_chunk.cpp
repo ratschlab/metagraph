@@ -125,9 +125,8 @@ void initialize_chunk(uint64_t alph_size,
     assert(!weights || weights->size() == curpos);
 }
 
-BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
-                   const std::string &swap_dir)
-      : alph_size_(alph_size), k_(k), canonical_(canonical),
+BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
+      : alph_size_(alph_size), k_(k),
         dir_(utils::create_temp_dir(swap_dir, "graph_chunk")),
         W_(dir_ + "/W", std::ios::out, BUFFER_SIZE, get_W_width()),
         last_(dir_ + "/last", std::ios::out, BUFFER_SIZE),
@@ -146,11 +145,10 @@ BOSS::Chunk::~Chunk() {
 template <typename Array>
 BOSS::Chunk::Chunk(uint64_t alph_size,
                    size_t k,
-                   bool canonical,
                    const Array &kmers_with_counts,
                    uint8_t bits_per_count,
                    const std::string &swap_dir)
-      : Chunk(alph_size, k, canonical, swap_dir) {
+      : Chunk(alph_size, k, swap_dir) {
 
     weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
                                          std::ios::out, BUFFER_SIZE,
@@ -173,9 +171,9 @@ template <typename T>
 using CWQ = common::ChunkedWaitQueue<T>;
 
 #define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<__VA_ARGS__> &, \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, const CWQ<__VA_ARGS__> &, \
                                 uint8_t, const std::string &dir); \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<__VA_ARGS__> &, \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<__VA_ARGS__> &, \
                                 uint8_t, const std::string &dir);
 
 INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer64);
@@ -216,7 +214,6 @@ void BOSS::Chunk::extend(const Chunk &other) {
 
     if (alph_size_ != other.alph_size_
             || k_ != other.k_
-            || canonical_ != other.canonical_
             || W_.width() != other.W_.width()) {
         std::cerr << "ERROR: trying to concatenate incompatible graph chunks" << std::endl;
         exit(1);
@@ -271,7 +268,7 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     }
 }
 
-std::pair<BOSS*, bool>
+BOSS*
 BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                                     bool verbose,
                                     sdsl::int_vector<> *weights,
@@ -279,7 +276,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     assert(chunk_filenames.size());
 
     if (!chunk_filenames.size())
-        return std::make_pair(nullptr, false);
+        return nullptr;
 
     BOSS *graph = new BOSS();
 
@@ -289,7 +286,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
                                                         + kFileExtension;
 
-        Chunk graph_chunk(1, 0, false, swap_dir);
+        Chunk graph_chunk(1, 0, swap_dir);
         if (!graph_chunk.load(filename)) {
             std::cerr << "ERROR: File corrupted. Cannot load graph chunk "
                       << filename << std::endl;
@@ -313,7 +310,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 
     full_chunk.initialize_boss(graph, weights);
 
-    return std::make_pair(graph, full_chunk.canonical_);
+    return graph;
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {
@@ -345,7 +342,6 @@ bool BOSS::Chunk::load(const std::string &infbase) {
 
         alph_size_ = load_number(instream);
         k_ = load_number(instream);
-        canonical_ = load_number(instream);
 
         return k_ && alph_size_ && W_.size() == last_.size()
                                 && F_.size() == alph_size_
@@ -375,7 +371,6 @@ void BOSS::Chunk::serialize(const std::string &outbase) const {
     serialize_number_vector(outstream, F_);
     serialize_number(outstream, alph_size_);
     serialize_number(outstream, k_);
-    serialize_number(outstream, canonical_);
 }
 
 uint8_t BOSS::Chunk::get_W_width() const {

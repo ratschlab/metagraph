@@ -5,6 +5,7 @@
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -277,7 +278,8 @@ std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
     graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
     graph_stats["k"] = static_cast<uint64_t>(anno_graph.get_graph().get_k());
     graph_stats["nodes"] = anno_graph.get_graph().num_nodes();
-    graph_stats["is_canonical_mode"] = anno_graph.get_graph().is_canonical_mode();
+    graph_stats["is_canonical_mode"] = (anno_graph.get_graph().get_mode()
+                                            == graph::DeBruijnGraph::CANONICAL);
     root["graph"] = graph_stats;
 
     Json::Value annotation_stats;
@@ -326,9 +328,6 @@ int run_server(Config *config) {
     ThreadPool graph_loader(1, 1);
 
     logger->info("[Server] Loading graph...");
-
-    // TODO: set canonical only if the graph is primary
-    config->canonical = true;
 
     auto anno_graph = graph_loader.enqueue([&]() {
         auto graph = load_critical_dbg(config->infbase);

@@ -7,6 +7,7 @@
 
 #include "kmer/kmer_collector_config.hpp"
 #include "graph/representation/succinct/boss.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 namespace mtg {
@@ -22,7 +23,6 @@ class Config {
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
     bool forward_and_reverse = false;
-    bool canonical = false;
     bool complete = false;
     bool dynamic = false;
     bool mark_dummy_kmers = false;
@@ -48,7 +48,6 @@ class Config {
     bool suppress_unlabeled = false;
     bool clear_dummy = false;
     bool count_dummy = false;
-    bool canonical_mode = false;
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
@@ -74,7 +73,7 @@ class Config {
     unsigned int suffix_len = 0;
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
-    unsigned int memory_available = 1;
+    double memory_available = 1;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
@@ -110,8 +109,6 @@ class Config {
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
-    size_t alignment_queue_size = 20;
-    size_t alignment_vertical_bandwidth = std::numeric_limits<size_t>::max();
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
@@ -125,7 +122,7 @@ class Config {
     double max_count_quantile = 1.;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
-    double alignment_max_nodes_per_seq_char = 10.0;
+    double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
     std::vector<double> count_slice_quantiles;
@@ -205,12 +202,15 @@ class Config {
     };
 
     AnnotationType anno_type = ColumnCompressed;
-    GraphType graph_type = SUCCINCT;
-
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
 
+    GraphType graph_type = SUCCINCT;
     static GraphType string_to_graphtype(const std::string &string);
+
+    graph::DeBruijnGraph::Mode graph_mode = graph::DeBruijnGraph::BASIC;
+    static std::string graphmode_to_string(graph::DeBruijnGraph::Mode mode);
+    static graph::DeBruijnGraph::Mode string_to_graphmode(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);

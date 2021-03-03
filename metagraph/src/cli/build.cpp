@@ -71,8 +71,22 @@ int build_graph(Config *config) {
 
     Timer timer;
 
-    if (config->canonical)
-        config->forward_and_reverse = false;
+    if (config->forward_and_reverse) {
+        switch (config->graph_mode) {
+            case DeBruijnGraph::BASIC:
+                logger->warn("Building a graph from both strands is probably undesired."
+                              " To represent both strands, consider building in canonical"
+                              " or primary mode.");
+                break;
+            case DeBruijnGraph::CANONICAL:
+                config->forward_and_reverse = false;
+                break;
+            case DeBruijnGraph::PRIMARY:
+                logger->error("Passed '--fwd-and-reverse', but primary graphs"
+                              " by definition can't contain both strands.");
+                exit(1);
+        }
+    }
 
     if (config->complete) {
         if (config->graph_type != Config::GraphType::BITMAP) {
@@ -80,7 +94,7 @@ int build_graph(Config *config) {
             exit(1);
         }
 
-        graph.reset(new DBGBitmap(config->k, config->canonical));
+        graph.reset(new DBGBitmap(config->k, config->graph_mode));
 
     } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
         auto boss_graph = std::make_unique<boss::BOSS>(config->k - 1);
@@ -107,7 +121,7 @@ int build_graph(Config *config) {
 
             auto constructor = boss::IBOSSChunkConstructor::initialize(
                 boss_graph->get_k(),
-                config->canonical,
+                config->graph_mode == DeBruijnGraph::CANONICAL,
                 config->count_width,
                 suffix,
                 get_num_threads(),
@@ -145,12 +159,12 @@ int build_graph(Config *config) {
         if (config->count_kmers) {
             sdsl::int_vector<> kmer_counts;
             graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
             graph->add_extension(std::make_shared<NodeWeights>(std::move(kmer_counts)));
             assert(graph->get_extension<NodeWeights>()->is_compatible(*graph));
         } else {
             graph_data.initialize_boss(boss_graph.get());
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
         }
 
     } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
@@ -178,7 +192,7 @@ int build_graph(Config *config) {
             constructor.reset(
                 new DBGBitmapConstructor(
                     config->k,
-                    config->canonical,
+                    config->graph_mode,
                     config->count_width,
                     suffix,
                     get_num_threads(),
@@ -220,7 +234,7 @@ int build_graph(Config *config) {
             assert(chunk_filenames.size());
             timer.reset();
             graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
-                                                             config->canonical,
+                                                             config->graph_mode,
                                                              get_verbose()));
         }
 
@@ -229,29 +243,29 @@ int build_graph(Config *config) {
         switch (config->graph_type) {
 
             case Config::GraphType::SUCCINCT:
-                graph.reset(new DBGSuccinct(config->k, config->canonical));
+                graph.reset(new DBGSuccinct(config->k, config->graph_mode));
                 break;
 
             case Config::GraphType::HASH:
-                graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                graph.reset(new DBGHashOrdered(config->k, config->graph_mode));
                 break;
 
             case Config::GraphType::HASH_PACKED:
-                graph.reset(new DBGHashOrdered(config->k, config->canonical, true));
+                graph.reset(new DBGHashOrdered(config->k, config->graph_mode, true));
                 break;
 
             case Config::GraphType::HASH_FAST:
-                graph.reset(new DBGHashFast(config->k, config->canonical, true));
+                graph.reset(new DBGHashFast(config->k, config->graph_mode, true));
                 break;
 
             case Config::GraphType::HASH_STR:
-                if (config->canonical) {
+                if (config->graph_mode != DeBruijnGraph::BASIC) {
                     logger->warn("String hash-based de Bruijn graph"
-                                 " does not support canonical mode."
-                                 " Normal mode will be used instead.");
+                                 " currently supports only basic mode."
+                                 " Basic mode will be used.");
                 }
-                // TODO: implement canonical mode
-                graph.reset(new DBGHashString(config->k/*, config->canonical*/));
+                // TODO: implement other graph modes
+                graph.reset(new DBGHashString(config->k/*, config->graph_mode*/));
                 break;
 
             case Config::GraphType::BITMAP:
@@ -279,7 +293,8 @@ int build_graph(Config *config) {
             auto node_weights = graph->get_extension<NodeWeights>();
             assert(node_weights->is_compatible(*graph));
 
-            if (graph->is_canonical_mode())
+            // set counts for reverse complement k-mers as well
+            if (graph->get_mode() == DeBruijnGraph::CANONICAL)
                 config->forward_and_reverse = true;
 
             for (const auto &file : files) {
@@ -298,6 +313,9 @@ int build_graph(Config *config) {
                 logger->trace("Extracted all sequences from file '{}' in {} sec",
                               file, timer.elapsed());
             }
+
+            // set back to false
+            config->forward_and_reverse = false;
         }
     }
 
@@ -377,8 +395,8 @@ int concatenate_graph_chunks(Config *config) {
     std::unique_ptr<DeBruijnGraph> graph;
     switch (config->graph_type) {
         case Config::GraphType::SUCCINCT: {
-            auto p = boss::BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
-            auto dbg_succ = std::make_unique<DBGSuccinct>(p.first, p.second);
+            boss::BOSS *boss = boss::BOSS::Chunk::build_boss_from_chunks(chunk_files, get_verbose());
+            auto dbg_succ = std::make_unique<DBGSuccinct>(boss, config->graph_mode);
 
             logger->trace("Chunks concatenated in {} sec", timer.elapsed());
 
@@ -412,7 +430,7 @@ int concatenate_graph_chunks(Config *config) {
         }
         case Config::GraphType::BITMAP: {
             graph.reset(DBGBitmapConstructor::build_graph_from_chunks(
-                chunk_files, config->canonical, get_verbose()
+                chunk_files, config->graph_mode, get_verbose()
             ));
             break;
         }

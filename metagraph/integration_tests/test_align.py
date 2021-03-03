@@ -6,13 +6,13 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
+
 
 """Test graph construction and alignment"""
 
-METAGRAPH = './metagraph'
 DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
@@ -23,35 +23,25 @@ GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
 @unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
-class TestDNAAlign(unittest.TestCase):
+class TestDNAAlign(TestingBase):
     def setUp(self):
-        self.tempdir = TemporaryDirectory()
+        super().setUpClass()
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 1000000 --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -65,71 +55,24 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
         self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t*\t*\t0\t*\t*\t*')
         self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
-
-    @parameterized.expand(GRAPH_TYPES)
-    def test_simple_align_banded_all_graphs(self, representation):
-
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
-
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
-
-        stats_command = '{exe} align -i {graph} --align-vertical-bandwidth 10 --align-min-exact-match 0.0 {reads}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-            reads=TEST_DATA_DIR + '/genome_MT1.fq',
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().rstrip().split('\n')
-        self.assertEqual(len(params_str), 6)
-        self.assertEqual(params_str[0], 'MT-10/1\tAACAGAGAATAGTTTAAATTAGAATCTTAGCTTTGGGTGCTAATGGTGGAGTTAAAGACTTTTTCTCTGATTTGTCCTTGGAAAAAGGTTTTCATCTCCGGTTTACAAGACTGGTGTATTAGTTTATACTACAAGGACAGGCCCATTTGA\t+\tTAGAATCTTAG\t22\t11\t19S11=120S\t0')
-        self.assertEqual(params_str[1], 'MT-8/1\tAAAACTAACCCCCTAATAAAATTAATTAACCACTCATTCATCGACCTCCCCACCCCATCCAACATCTCCGCATGATGAAACTTCGGCTCACTCCTTGGCGCCTGCCTGATCCTCCAAATCACCACAGGACTATTCCTAGCCATGCACTAC\t+\tAAAACTAACCCCCTAATAAAATTAATTAACCACTCATTCATCGACCTCCCCACCCCATCCAACATCTCCGCATGATGAAACTTCGGCTCACTCCTTGGCGCCTGCCTGATCCTCCAAATCACCACAGGACTATTCCTAGCCATGCACTAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
-        self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t*\t*\t0\t*\t*\t*')
-        self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
+        last_split = params_str[5].split("\t");
+        self.assertEqual(last_split[0], "MT-11/1")
+        self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
+        self.assertEqual(last_split[4], "22")
 
     @parameterized.expand(['succinct'])
     def test_simple_align_json_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -144,26 +87,16 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_fwd_rev_comp_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -179,31 +112,25 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
         self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t-\tATTTATTAATGCAAACAGTACCTAACAAACCCACAGGTCCTAAACTACCAAACCTGCATTAAAAATTTCGGTTGGGGCGACCTCGGAGCAGAACCCAACCTCCGAGCAGTACATGCTAAGACTTCACCAGTCAAAGCGAACTACTATACT\t295\t149\t95=1X54=\t0')
         self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
+        last_split = params_str[5].split("\t");
+        self.assertEqual(last_split[0], "MT-11/1")
+        self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
+        self.assertEqual(last_split[4], "22")
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_canonical_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 --canonical -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation, mode='canonical',
+                          extra_params="--mask-dummy")
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 32782', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -219,31 +146,24 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
         self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t+\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTGGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t295\t149\t54=1X95=\t0')
         self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
+        last_split = params_str[5].split("\t");
+        self.assertEqual(last_split[0], "MT-11/1")
+        self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
+        self.assertEqual(last_split[4], "22")
 
     @parameterized.expand(['succinct'])
     def test_simple_align_canonical_subk_succinct(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 --canonical -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation, mode='canonical',
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 32782', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
         stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
@@ -264,47 +184,18 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_primary_all_graphs(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 --canonical -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT.primary',
+                          k=11, repr=representation, mode='primary',
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        primarize_command = '{exe} assemble --primary-kmers -o {outfile} {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-            outfile=self.tempdir.name + "/genome.MT.primary",
-        )
-
-        res = subprocess.run([primarize_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        construct_primary_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT.primary',
-            input=self.tempdir.name + "/genome.MT.primary.fasta.gz",
-        )
-
-        res = subprocess.run([construct_primary_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16391', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: primary', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --canonical --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -318,52 +209,26 @@ class TestDNAAlign(unittest.TestCase):
         self.assertEqual(params_str[2], 'MT-6/1\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t+\tATATGACTAGCTTACACAATAGCTTTTATAGTAAAGATACCTCTTTACGGACTCCACTTATGACTCCCTAAAGCCCATGTCGAAGCCCCCATCGCTGGGTCAATAGTACTTGCCGCAGTACTCTTAAAACTAGGCGGCTATGGTATAATA\t300\t150\t150=\t0')
         self.assertEqual(params_str[3], 'MT-4/1\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTCGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t+\tAGTATAGTAGTTCGCTTTGACTGGTGAAGTCTTAGCATGTACTGCTCGGAGGTTGGGTTCTGCTCCGAGGTCGCCCCAACCGAAATTTTTAATGCAGGTTTGGTAGTTTAGGACCTGTGGGTTTGTTAGGTACTGTTTGCATTAATAAAT\t295\t149\t54=1X95=\t0')
         self.assertEqual(params_str[4], 'MT-2/1\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t+\tTGTGTTAATTAATTAATGCTTGTAGGACATAATAATAACAATTGAATGTCTGCACAGCCACTTTCCACACAGACATCATAACAAAAAATTTCCACCAAACCCCCCCTCCCCCGCTTCTGGCCACAGCACTTAAACACATCTCTGCCAAAC\t300\t150\t150=\t0')
-        self.assertEqual(params_str[5], 'MT-11/1\tAACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA\t+\tTTCACTGATTT\t22\t11\t62S11=77S\t0')
+        last_split = params_str[5].split("\t");
+        self.assertEqual(last_split[0], "MT-11/1")
+        self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
+        self.assertEqual(last_split[4], "22")
 
     @parameterized.expand(['succinct'])
     def test_simple_align_primary_subk_succinct(self, representation):
 
-        construct_command = '{exe} build --graph {repr} -k 11 --canonical -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT.primary',
+                          k=11, repr=representation, mode='primary',
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        primarize_command = '{exe} assemble --primary-kmers -o {outfile} {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-            outfile=self.tempdir.name + "/genome.MT.primary",
-        )
-
-        res = subprocess.run([primarize_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        construct_primary_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT.primary',
-            input=self.tempdir.name + "/genome.MT.primary.fasta.gz",
-        )
-
-        res = subprocess.run([construct_primary_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16391', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: primary', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --canonical --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -382,26 +247,16 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_fwd_rev_comp_json_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -420,26 +275,16 @@ class TestDNAAlign(unittest.TestCase):
     @parameterized.expand(['succinct'])
     def test_simple_align_edit_distance_all_graphs(self, representation):
 
-        construct_command = '{exe} build --mask-dummy --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            repr=representation,
-            outfile=self.tempdir.name + '/genome.MT',
-            input=TEST_DATA_DIR + '/genome.MT.fa'
-        )
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
 
-        res = subprocess.run([construct_command], shell=True)
-        self.assertEqual(res.returncode, 0)
-
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 16438', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         stats_command = '{exe} align -o {output} --json --align-both-strands --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
@@ -457,9 +302,9 @@ class TestDNAAlign(unittest.TestCase):
 
 
 @unittest.skipUnless(PROTEIN_MODE, "These alignment tests are only for the Protein alphabet")
-class TestProteinAlign(unittest.TestCase):
+class TestProteinAlign(TestingBase):
     def setUp(self):
-        self.tempdir = TemporaryDirectory()
+        super().setUpClass()
 
     # TODO: test alignment for protein sequences
     # @parameterized.expand(GRAPH_TYPES)

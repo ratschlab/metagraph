@@ -41,6 +41,91 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
 }
 
+template <class T>
+binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
+                                      Config::AnnotationType anno_type,
+                                      uint64_t num_rows_subsampled) {
+    std::vector<uint64_t> row_indexes;
+    std::vector<std::unique_ptr<T>> subcolumn_ptrs;
+    std::vector<uint64_t> column_ids;
+    uint64_t num_rows = 0;
+
+    ThreadPool subsampling_pool(get_num_threads(), 1);
+
+    // Load columns from disk
+    auto on_column = [&](uint64_t i, const std::string &label,
+                         std::unique_ptr<bit_vector> &&column) {
+        subsampling_pool.enqueue([&, i, label, column{std::move(column)}]() {
+            T *subvector;
+            #pragma omp critical
+            {
+                if (row_indexes.empty()) {
+                    num_rows = column->size();
+                    if (std::is_same_v<T, sdsl::bit_vector>)
+                        row_indexes = binmat::sample_row_indexes(num_rows,
+                                                                 num_rows_subsampled);
+                } else if (column->size() != num_rows) {
+                    logger->error("Size of column {} is {} != {}", label,
+                                  column->size(), num_rows);
+                    exit(1);
+                }
+                subcolumn_ptrs.emplace_back(new T());
+                subvector = subcolumn_ptrs.back().get();
+                column_ids.push_back(i);
+                logger->trace("Column {}: {}", i, label);
+            }
+
+            if constexpr(std::is_same_v<T, sdsl::bit_vector>) {
+                *subvector = sdsl::bit_vector(row_indexes.size(), false);
+                for (size_t j = 0; j < row_indexes.size(); ++j) {
+                    if ((*column)[row_indexes[j]])
+                        (*subvector)[j] = true;
+                }
+            } else {
+                static_assert(std::is_same_v<T, binmat::SparseColumn>);
+
+                auto &size = subvector->size;
+                auto &set_bits = subvector->set_bits;
+
+                size = std::min(column->num_set_bits() <= num_rows_subsampled
+                                    ? column->size()
+                                    : column->select1(num_rows_subsampled),
+                                (uint64_t)std::numeric_limits<std::decay_t<decltype(size)>>::max());
+
+                set_bits.reserve(column->rank1(size));
+                column->call_ones_in_range(0, size,
+                    [&](uint64_t i) { set_bits.push_back(i); }
+                );
+
+                common::logger->trace("Subsampled set bits: {:.2e}/{:.2e}"
+                                      ", total size: {:.2e}/{:.2e}, column: {}",
+                                      (double)set_bits.size(), (double)column->num_set_bits(),
+                                      (double)size, (double)column->size(), label);
+            }
+        });
+    };
+    bool success;
+    if (anno_type == Config::ColumnCompressed) {
+        success = ColumnCompressed<>::merge_load(files, on_column, get_num_threads());
+    } else {
+        success = merge_load_row_diff(files, on_column, get_num_threads());
+    }
+    subsampling_pool.join();
+
+    if (!success) {
+        logger->error("Could not load annotations");
+        exit(1);
+    }
+
+    // arrange the columns in their original order
+    std::vector<T> subcolumns(subcolumn_ptrs.size());
+    for (size_t i = 0; i < column_ids.size(); ++i) {
+        subcolumns.at(column_ids[i]) = std::move(*subcolumn_ptrs[i]);
+    }
+
+    return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
+}
+
 int transform_annotation(Config *config) {
     assert(config);
 
@@ -231,72 +316,12 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation and sampling subcolumns of size {}",
                       config->num_rows_subsampled);
 
-        std::vector<uint64_t> row_indexes;
-        std::vector<std::unique_ptr<sdsl::bit_vector>> subcolumn_ptrs;
-        std::vector<uint64_t> column_ids;
-        uint64_t num_rows = 0;
-        std::mutex mu;
-
-        ThreadPool subsampling_pool(get_num_threads(), 1);
-
-        // Load columns from disk
-        bool success;
-        auto on_column = [&](uint64_t i, const std::string &label,
-                             std::unique_ptr<bit_vector> &&column) {
-            subsampling_pool.enqueue([&, i, label, column { std::move(column) }]() {
-                sdsl::bit_vector *subvector;
-                {
-                    std::lock_guard<std::mutex> lock(mu);
-                    if (row_indexes.empty()) {
-                        num_rows = column->size();
-                        row_indexes
-                                = binmat::sample_row_indexes(num_rows,
-                                                             config->num_rows_subsampled);
-                    } else if (column->size() != num_rows) {
-                        logger->error("Size of column {} is {} != {}", label,
-                                      column->size(), num_rows);
-                        exit(1);
-                    }
-                    subcolumn_ptrs.emplace_back(new sdsl::bit_vector());
-                    subvector = subcolumn_ptrs.back().get();
-                    column_ids.push_back(i);
-                    logger->trace("Column {}: {}", i, label);
-                }
-
-                *subvector = sdsl::bit_vector(row_indexes.size(), false);
-                for (size_t j = 0; j < row_indexes.size(); ++j) {
-                    if ((*column)[row_indexes[j]])
-                        (*subvector)[j] = true;
-                }
-            });
-        };
-        if (input_anno_type == Config::ColumnCompressed) {
-            success = ColumnCompressed<>::merge_load(files, on_column, get_num_threads());
-        } else {
-            success = merge_load_row_diff(files, on_column, get_num_threads());
-        }
-        subsampling_pool.join();
-
-        if (!success) {
-            logger->error("Cannot load annotations");
-            exit(1);
-        }
-
-        // arrange the columns in their original order
-        std::vector<std::unique_ptr<sdsl::bit_vector>> permuted(subcolumn_ptrs.size());
-        permuted.swap(subcolumn_ptrs);
-        for (size_t i = 0; i < column_ids.size(); ++i) {
-            subcolumn_ptrs[column_ids[i]] = std::move(permuted[i]);
-        }
-
-        std::vector<sdsl::bit_vector> subcolumns;
-        for (auto &col_ptr : subcolumn_ptrs) {
-            subcolumns.push_back(std::move(*col_ptr));
-        }
-
         binmat::LinkageMatrix linkage_matrix
-                = binmat::agglomerative_greedy_linkage(std::move(subcolumns),
-                                                       get_num_threads());
+            = config->fast
+                ? cluster_columns<binmat::SparseColumn>(files, input_anno_type,
+                                                        config->num_rows_subsampled)
+                : cluster_columns<sdsl::bit_vector>(files, input_anno_type,
+                                                    config->num_rows_subsampled);
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;

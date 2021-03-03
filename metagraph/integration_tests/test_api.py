@@ -17,16 +17,14 @@ PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 class TestAPIBase(TestingBase):
     @classmethod
-    def setUpClass(cls, fasta_path, canonical=False, primary=False):
+    def setUpClass(cls, fasta_path, mode='basic'):
         super().setUpClass()
 
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
-        cls._build_graph(fasta_path, graph_path, 6, 'succinct',
-                         canonical=canonical, primary=primary)
-        cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column',
-                            primary=primary)
+        cls._build_graph(fasta_path, graph_path, 6, 'succinct', mode=mode)
+        cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
@@ -34,7 +32,8 @@ class TestAPIBase(TestingBase):
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
         wait_time_sec = 1
-        print("Waiting {} sec for the server (PID {}) to start up".format(wait_time_sec, cls.server_process.pid), flush=True)
+        print("Waiting {} sec for the server (PID {}) to start up".format(
+            wait_time_sec, cls.server_process.pid), flush=True)
         time.sleep(wait_time_sec)
 
     @classmethod
@@ -59,8 +58,7 @@ class TestAPIBase(TestingBase):
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
     def setUp(self) -> None:
         self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
@@ -201,8 +199,7 @@ class TestAPIClient(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
@@ -268,8 +265,7 @@ class TestAPIJson(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
@@ -326,8 +322,7 @@ class TestAPIClientWithProperties(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa', mode=cls.mode)
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)

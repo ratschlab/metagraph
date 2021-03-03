@@ -15,6 +15,10 @@
 namespace mtg {
 namespace cli {
 
+using mtg::graph::boss::BOSS;
+using mtg::graph::DeBruijnGraph;
+
+
 const size_t Config::kDefaultIndexSuffixLen
     = 20 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
@@ -115,8 +119,8 @@ Config::Config(int argc, char *argv[]) {
             count_width = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fwd-and-reverse")) {
             forward_and_reverse = true;
-        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
-            canonical = true;
+        } else if (!strcmp(argv[i], "--mode")) {
+            graph_mode = string_to_graphmode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
             complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
@@ -170,7 +174,7 @@ Config::Config(int argc, char *argv[]) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
-            memory_available = atoi(get_value(i++));
+            memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
@@ -197,10 +201,6 @@ Config::Config(int argc, char *argv[]) {
             batch_align = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-queue-size")) {
-            alignment_queue_size = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-vertical-bandwidth")) {
-            alignment_vertical_bandwidth = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-match-score")) {
             alignment_match_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
@@ -429,7 +429,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
 #if _PROTEIN_GRAPH
-    if (canonical || forward_and_reverse) {
+    if (graph_mode != DeBruijnGraph::BASIC || forward_and_reverse) {
         std::cerr << "Error: reverse complement not defined for protein alphabets"
                   << std::endl;
         print_usage_and_exit = true;
@@ -612,9 +612,6 @@ Config::Config(int argc, char *argv[]) {
 }
 
 
-using mtg::graph::boss::BOSS;
-
-
 std::string Config::state_to_string(BOSS::State state) {
     switch (state) {
         case BOSS::State::STAT:
@@ -625,10 +622,8 @@ std::string Config::state_to_string(BOSS::State state) {
             return "small";
         case BOSS::State::FAST:
             return "fast";
-        default:
-            assert(false);
-            return "Never happens";
     }
+    throw std::runtime_error("Never happens");
 }
 
 BOSS::State Config::string_to_state(const std::string &string) {
@@ -671,10 +666,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
-        default:
-            assert(false);
-            return "Never happens";
     }
+    throw std::runtime_error("Never happens");
 }
 
 Config::AnnotationType Config::string_to_annotype(const std::string &string) {
@@ -732,6 +725,35 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
         exit(1);
     }
 }
+
+std::string Config::graphmode_to_string(DeBruijnGraph::Mode mode) {
+    switch (mode) {
+        case DeBruijnGraph::BASIC:
+            return "basic";
+        case DeBruijnGraph::CANONICAL:
+            return "canonical";
+        case DeBruijnGraph::PRIMARY:
+            return "primary";
+    }
+    throw std::runtime_error("Never happens");
+}
+
+DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
+    if (string == "basic") {
+        return DeBruijnGraph::BASIC;
+
+    } else if (string == "canonical") {
+        return DeBruijnGraph::CANONICAL;
+
+    } else if (string == "primary") {
+        return DeBruijnGraph::PRIMARY;
+
+    } else {
+        std::cerr << "Error: unknown graph mode" << std::endl;
+        exit(1);
+    }
+}
+
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt,\n"
@@ -797,9 +819,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
             fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
-#if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --fwd-and-reverse \tadd both forward and reverse complement sequences [off]\n");
-#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
@@ -807,7 +826,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
@@ -868,10 +887,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 #endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-#if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\t\ttreat the input graph as a canonical graph [off]\n");
-            fprintf(stderr, "\t   --primary-kmers\t\tindicate that the input graph has only primary k-mers [off]\n");
-#endif
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
@@ -882,7 +897,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
-            fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
@@ -891,10 +906,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [inf]\n");
-            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\t\tmaximum number of nodes to consider per sequence character [10.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -908,7 +921,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case COMPARE: {
@@ -935,7 +948,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --no-postprocessing \tdo not erase redundant dummy edges after concatenation [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -1018,6 +1031,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
@@ -1121,9 +1136,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
-            fprintf(stderr, "\t   --align-queue-size [INT]\t\t\tmaximum size of the priority queue for alignment [20]\n");
-            fprintf(stderr, "\t   --align-vertical-bandwidth [INT]\t\tmaximum width of a window to consider in alignment step [inf]\n");
-            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [10.0]\n");
+            fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");

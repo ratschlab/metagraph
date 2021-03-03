@@ -122,7 +122,7 @@ function build_and_clean_graph {
         for i in $(ls -p "${download_dir}/${sra_number}/"); do
           input_filenames="$input_filenames ${download_dir}/${sra_number}/$i"
         done
-        execute metagraph build -v -p 2 -k 31 --mem-cap-gb 5 --canonical --count-kmers -o "${HOME}/dbg/${sra_number}"  $input_filenames
+        execute metagraph build -v -p 2 -k 31 --mem-cap-gb 5 --mode canonical --count-kmers -o "${HOME}/dbg/${sra_number}"  $input_filenames
     fi
 
     if [ -f "${HOME}/dbg/${sra_number}pruned.fasta.gz" ]; then

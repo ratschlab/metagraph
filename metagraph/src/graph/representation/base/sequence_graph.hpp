@@ -138,11 +138,13 @@ class SequenceGraph {
 
 class DeBruijnGraph : public SequenceGraph {
   public:
+    enum Mode { BASIC = 0, CANONICAL, PRIMARY };
+
     virtual ~DeBruijnGraph() {}
 
     virtual size_t get_k() const = 0;
 
-    virtual bool is_canonical_mode() const = 0;
+    virtual Mode get_mode() const = 0;
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const = 0;

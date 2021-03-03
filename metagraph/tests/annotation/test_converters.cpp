@@ -198,7 +198,7 @@ TEST(RowDiff, succ) {
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
         ASSERT_EQ(expected_succ.size(), succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;;
+            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
