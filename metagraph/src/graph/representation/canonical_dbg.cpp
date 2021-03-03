@@ -524,7 +524,7 @@ void CanonicalDBG::reverse_complement(std::string &seq,
 
     std::vector<node_index> rev_path(path.size());
     std::transform(path.begin(), path.end(), rev_path.rbegin(), [&](node_index i) {
-        return reverse_complement(i);
+        return i ? reverse_complement(i) : i;
     });
     std::swap(path, rev_path);
 }
