@@ -177,6 +177,52 @@ binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
     }
 }
 
+std::vector<std::vector<uint64_t>>
+parse_linkage_matrix(const std::string &filename) {
+    std::ifstream in(filename);
+
+    std::vector<std::vector<uint64_t>> linkage;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::vector<std::string> parts = utils::split_string(line, " ");
+        if (parts.empty())
+            continue;
+
+        try {
+            if (parts.size() != 4)
+                throw std::runtime_error("Invalid format");
+
+            uint64_t first = std::stoi(parts.at(0));
+            uint64_t second = std::stoi(parts.at(1));
+            uint64_t merged = std::stoi(parts.at(3));
+
+            if (first == second || first >= merged || second >= merged) {
+                logger->error("Invalid format of the linkage matrix."
+                              " Indexes of parent clusters must be larger than"
+                              " indexes of the objects/clusters the include");
+                exit(1);
+            }
+
+            while (linkage.size() <= merged) {
+                linkage.push_back({});
+            }
+
+            linkage[merged].push_back(first);
+            linkage[merged].push_back(second);
+
+        } catch (const std::exception &e) {
+            logger->error("Possibly invalid format of the linkage matrix."
+                          " Each line must contain exactly 4 values:"
+                          " <cluster 1> <cluster 2> <dist> <cluster 3>"
+                          "\nException: {}", e.what());
+            exit(1);
+        }
+    }
+
+    return linkage;
+}
+
+
 int transform_annotation(Config *config) {
     assert(config);
 
@@ -396,12 +442,11 @@ int transform_annotation(Config *config) {
                 = initialize_annotation(files.at(0), *config);
 
         // The entire annotation is loaded in all cases except for transforms
-        // to BRWT with a hierarchical clustering of columns specified (linkage_file)
-        // or RbBRWT, for which the construction is done with streaming columns
-        // from disk.
-        if ((config->anno_type != Config::BRWT || !config->linkage_file.size())
-            && config->anno_type != Config::RbBRWT
-            && config->anno_type != Config::RowDiff) {
+        // to BRWT or RbBRWT, for which the construction is done with streaming
+        // columns from disk.
+        if (config->anno_type != Config::BRWT
+                && config->anno_type != Config::RbBRWT
+                && config->anno_type != Config::RowDiff) {
             logger->trace("Loading annotation from disk...");
             if (!annotation->merge_load(files)) {
                 logger->error("Cannot load annotations");
@@ -462,23 +507,23 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                auto brwt_annotator = config->linkage_file.size()
-                    ? convert_to_BRWT<MultiBRWTAnnotator>(
-                        files, config->linkage_file,
-                        config->parallel_nodes,
-                        get_num_threads(),
-                        config->tmp_dir)
-                    : (config->greedy_brwt
-                        ? convert_to_greedy_BRWT(
-                            std::move(*annotator),
-                            config->parallel_nodes,
-                            get_num_threads(),
-                            config->num_rows_subsampled)
-                        : convert_to_simple_BRWT(
-                            std::move(*annotator),
-                            config->arity_brwt,
-                            config->parallel_nodes,
-                            get_num_threads()));
+                if (!config->linkage_file.size()) {
+                    logger->trace("Generating new column linkage...");
+                    binmat::LinkageMatrix linkage_matrix
+                            = compute_linkage(files, input_anno_type, *config);
+                    config->linkage_file = config->outfbase + ".linkage";
+                    std::ofstream out(config->linkage_file);
+                    out << linkage_matrix.format(CSVFormat) << std::endl;
+                    logger->trace("Generated new linkage and saved to {}",
+                                  config->linkage_file);
+                }
+                std::vector<std::vector<uint64_t>> linkage
+                        = parse_linkage_matrix(config->linkage_file);
+                logger->trace("Linkage loaded from {}", config->linkage_file);
+
+                auto brwt_annotator = convert_to_BRWT<MultiBRWTAnnotator>(
+                        files, linkage, config->parallel_nodes,
+                        get_num_threads(), config->tmp_dir);
 
                 annotator.reset();
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -521,8 +566,8 @@ int transform_annotation(Config *config) {
 
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
-            && config->anno_type != Config::ColumnCompressed
-            && config->anno_type != Config::RowDiffRowSparse) {
+                && config->anno_type != Config::ColumnCompressed
+                && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
                     "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
                     "supported for row_diff");
@@ -540,28 +585,24 @@ int transform_annotation(Config *config) {
                 std::exit(1);
             }
             if (config->anno_type == Config::RowDiffBRWT) {
-                std::unique_ptr<RowDiffBRWTAnnotator> brwt_annotator;
-                if (config->linkage_file.empty()) { // load all columns in memory and compute linkage on the fly
-                    logger->trace("Loading annotation from disk...");
-                    auto row_diff_anno = std::make_unique<RowDiffColumnAnnotator>();
-                    if (!row_diff_anno->merge_load(files))
-                        std::exit(1);
-
-                    logger->trace("Annotation loaded in {} sec", timer.elapsed());
-                    brwt_annotator = config->greedy_brwt
-                            ? convert_to_greedy_BRWT(std::move(*row_diff_anno),
-                                                     config->parallel_nodes,
-                                                     get_num_threads(),
-                                                     config->num_rows_subsampled)
-                            : convert_to_simple_BRWT(std::move(*row_diff_anno),
-                                                     config->arity_brwt,
-                                                     config->parallel_nodes,
-                                                     get_num_threads());
-                } else {
-                    brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
-                            files, config->linkage_file, config->parallel_nodes,
-                            get_num_threads(), config->tmp_dir);
+                if (!config->linkage_file.size()) {
+                    logger->trace("Generating new column linkage...");
+                    binmat::LinkageMatrix linkage_matrix
+                            = compute_linkage(files, input_anno_type, *config);
+                    config->linkage_file = config->outfbase + ".linkage";
+                    std::ofstream out(config->linkage_file);
+                    out << linkage_matrix.format(CSVFormat) << std::endl;
+                    logger->trace("Generated new linkage and saved to {}",
+                                  config->linkage_file);
                 }
+                std::vector<std::vector<uint64_t>> linkage
+                        = parse_linkage_matrix(config->linkage_file);
+                logger->trace("Linkage loaded from {}", config->linkage_file);
+
+                auto brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
+                        files, linkage, config->parallel_nodes,
+                        get_num_threads(), config->tmp_dir);
+
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 logger->trace("Serializing to '{}'", config->outfbase);
