@@ -147,6 +147,9 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
+    std::string taxonomic_tree;
+    std::string lookup_table;
+    uint32_t max_path_length = 50;
     std::string linkage_file;
     std::string intersected_columns;
 
@@ -173,6 +176,7 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRANSFORM_ANNO_TAX,
     };
     IdentityType identity = NO_IDENTITY;
 

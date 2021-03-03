@@ -73,6 +73,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "transform_anno_tax")) {
+        identity = TRANSFORM_ANNO_TAX;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -257,6 +259,10 @@ Config::Config(int argc, char *argv[]) {
             separately = true;
         } else if (!strcmp(argv[i], "--sequentially")) {
             files_sequentially = true;
+        } else if (!strcmp(argv[i], "--taxonomic-tree")) {
+            taxonomic_tree = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--lookup-table")) {
+            lookup_table = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -831,6 +837,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
+            fprintf(stderr, "\ttransform_anno_tax\tgiven a taxonomic tree, create a mapping from kmer to LCA taxid, used further by 'tax_class'\n\n");
+
             return;
         }
         case BUILD: {
@@ -1208,6 +1216,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
+        case TRANSFORM_ANNO_TAX: {
+            fprintf(stderr, "Usage: %s transform_anno_tax --taxonomic-tree <nodes.dmp> --lookup-table <*.accession2taxid> -o <TAXONOMIC_DB-basename> ANNOT1 [[ANNOT2] ...] [options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [1]\n");
+            break;
+        }
     }
 
     fprintf(stderr, "\n\tGeneral options:\n");
