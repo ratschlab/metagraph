@@ -16,6 +16,7 @@
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
 #include "cli/transform_anno_tax.hpp"
+#include "cli/taxo_classify.hpp"
 
 using namespace mtg;
 using mtg::common::logger;
@@ -89,6 +90,9 @@ int main(int argc, char *argv[]) {
 
         case Config::TRANSFORM_ANNO_TAX:
             return cli::transform_anno_taxo(config.get());
+
+        case Config::TAX_CLASSIFY:
+            return cli::taxonomic_classification(config.get());
 
         case Config::NO_IDENTITY:
             assert(false);
