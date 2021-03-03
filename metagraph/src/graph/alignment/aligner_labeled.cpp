@@ -52,33 +52,47 @@ ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
 auto ILabeledDBGAligner
 ::map_and_label_query_batch(const QueryGenerator &generate_query) const
         -> std::pair<BatchMapping, BatchLabels> {
+    // exact k-mer matchings of each query sequence
     BatchMapping query_nodes;
+
+    // map from Annotation row indices to (i,j), indicating position j in query i
     VectorMap<AnnotatedDBG::row_index,
               std::vector<std::pair<size_t, size_t>>> row_to_query_idx;
 
-    size_t num_queries = 0;
+    // populate maps
     generate_query([&](std::string_view, std::string_view query, bool) {
+        size_t i = query_nodes.size();
+
+        // map query sequence to the graph
         query_nodes.emplace_back(map_sequence_to_nodes(graph_, query));
+
+        // update row_to_query_idx
         process_seq_path(graph_, query, query_nodes.back(),
-                         [&](AnnotatedDBG::row_index row, size_t i) {
-            row_to_query_idx[row].emplace_back(num_queries, i);
+                         [&](AnnotatedDBG::row_index row, size_t j) {
+            row_to_query_idx[row].emplace_back(i, j);
         });
-        ++num_queries;
     });
 
+    // extract rows from the row index map
     std::vector<AnnotatedDBG::row_index> rows;
     rows.reserve(row_to_query_idx.size());
     for (const auto &[row, mapping] : row_to_query_idx) {
         rows.push_back(row);
     }
 
+    // get annotations for each row
     auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
 
+    // we now have two maps
+    // 1) row indices -> column IDs
+    // 2) row indices -> (query i, query_i j) i.e., row -> the k-mer at batch[i][j]
+    // and wish to construct the following map
+    // query -> ( (col_1, col_1_signature), (col_2, col_2_signature), ... )
+
     // count labels for each query
-    std::vector<VectorMap<uint64_t, uint64_t>> column_counter(num_queries);
+    std::vector<VectorMap<uint64_t, uint64_t>> column_counter(query_nodes.size());
     for (size_t i = 0; i < annotation.size(); ++i) {
-        AnnotatedDBG::row_index row = rows[i];
-        for (const auto &[query_id, idx] : row_to_query_idx[row]) {
+        for (const auto &[query_id, idx] : row_to_query_idx[rows[i]]) {
             for (uint64_t column : annotation[i]) {
                 ++column_counter[query_id][column];
             }
@@ -86,37 +100,38 @@ auto ILabeledDBGAligner
     }
 
     // compute target columns and initialize signatures for each query
-    BatchLabels target_columns(num_queries);
-    for (size_t j = 0; j < column_counter.size(); ++j) {
+    BatchLabels target_columns(query_nodes.size());
+    for (size_t i = 0; i < column_counter.size(); ++i) {
         auto &counter = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
-            column_counter[j].values_container()
+            column_counter[i].values_container()
         );
 
-        std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
+        // pick the top columns for each query sequence
         size_t num_targets = std::min(counter.size(), num_top_labels_);
-        for (size_t i = 0; i < num_targets; ++i) {
-            if (!target_columns[j].count(counter[i].first)) {
-                target_columns[j].emplace(
-                    counter[i].first,
-                    sdsl::bit_vector(query_nodes[j].size(), false)
-                );
+
+        std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
+        if (num_targets < counter.size())
+            counter.resize(num_targets);
+
+        for (const auto &[column, count] : counter) {
+            if (!target_columns[i].count(column)) {
+                target_columns[i].emplace(column,
+                                          sdsl::bit_vector(query_nodes[i].size(), false));
             }
         }
     }
 
     // fill signatures for each query
-    size_t i = 0;
-    for (const auto &[row, mapping] : row_to_query_idx) {
-        for (const auto &[query_id, idx] : mapping) {
+    for (size_t i = 0; i < annotation.size(); ++i) {
+        for (const auto &[query_id, idx] : row_to_query_idx[rows[i]]) {
             for (uint64_t column : annotation[i]) {
                 if (target_columns[query_id].count(column))
                     target_columns[query_id][column][idx] = true;
             }
         }
-
-        ++i;
     }
 
+    // if any of the queries has no associated labels, mark them as such
     for (size_t i = 0; i < target_columns.size(); ++i) {
         if (target_columns[i].empty()) {
             assert(!query_nodes[i][0]);

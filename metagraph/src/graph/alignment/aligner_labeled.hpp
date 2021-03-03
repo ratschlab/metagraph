@@ -4,6 +4,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "dbg_aligner.hpp"
+#include "common/vector_map.hpp"
 
 namespace mtg {
 namespace graph {
@@ -32,7 +33,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
 
   protected:
     typedef std::vector<std::vector<node_index>> BatchMapping;
-    typedef std::vector<tsl::hopscotch_map<uint64_t, sdsl::bit_vector>> BatchLabels;
+    typedef std::vector<VectorMap<uint64_t, sdsl::bit_vector>> BatchLabels;
 
     const AnnotatedDBG &anno_graph_;
     const DeBruijnGraph &graph_;
