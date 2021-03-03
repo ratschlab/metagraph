@@ -33,9 +33,9 @@ do
     echo processing level $i: ${quantiles[$i]} to ${quantiles[$(($i + 1))]}
     out_filt_base=${tmp}/filtered.level${i}
 
-    # generate dbg 
+    # generate dbg
     echo building graph
-    $metagraph build -p 2 -k $K -o ${out_filt_base} --canonical --fwd-and-reverse --min-count-q ${quantiles[$i]} --max-count-q ${quantiles[$(($i + 1))]} ${kmc_file}
+    $metagraph build -p 2 -k $K -o ${out_filt_base} --mode canonical --min-count-q ${quantiles[$i]} --max-count-q ${quantiles[$(($i + 1))]} ${kmc_file}
 
     # extract sequence from graph
     echo extracting sequencinges:

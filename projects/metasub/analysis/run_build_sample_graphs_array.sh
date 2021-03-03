@@ -20,4 +20,4 @@ echo "fq1=\"\$(sed -n \${LSB_JOBINDEX}p ${metadata} | cut -f 41 -d ',' | cut -f 
 fq2=\"\$(sed -n \${LSB_JOBINDEX}p ${metadata} | cut -f 41 -d ',' | cut -f 2 -d ':')\"; \
 uuid=\"\$(sed -n \${LSB_JOBINDEX}p ${metadata} | cut -f 2 -d ',')\"; \
 if [ -f ${outdir}/\${uuid}.dbg ]; then exit 0; fi; \
-${metagraph} build -p $threads -k $K -o ${outdir}/\${uuid} --canonical --count-kmers \${fq1} \${fq2}" | bsub -J contigs_k${K}[2-$(($N + 1))]%400 -o ${outdir}.graph_build.lsf -We 20:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+${metagraph} build -p $threads -k $K -o ${outdir}/\${uuid} --mode canonical --count-kmers \${fq1} \${fq2}" | bsub -J contigs_k${K}[2-$(($N + 1))]%400 -o ${outdir}.graph_build.lsf -We 20:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"

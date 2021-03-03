@@ -80,7 +80,19 @@ int transform_graph(Config *config) {
         return 0;
     }
 
-    if (config->node_suffix_length) {
+    if (config->clear_dummy) {
+        logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
+        timer.reset();
+
+        // remove redundant dummy edges and mark all other dummy edges
+        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
+
+        logger->trace("The tree of source dummy edges traversed in {} sec", timer.elapsed());
+        timer.reset();
+    }
+
+    if (config->node_suffix_length
+            && config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
         size_t suffix_length = std::min((size_t)config->node_suffix_length,
                                         dbg_succ->get_boss().get_k());
 
@@ -102,17 +114,6 @@ int transform_graph(Config *config) {
         timer.reset();
     }
 
-    if (config->clear_dummy) {
-        logger->trace("Traverse the tree of source dummy edges and remove redundant ones...");
-        timer.reset();
-
-        // remove redundant dummy edges and mark all other dummy edges
-        dbg_succ->mask_dummy_kmers(get_num_threads(), true);
-
-        logger->trace("The tree of source dummy edges traversed in {} sec", timer.elapsed());
-        timer.reset();
-    }
-
     if (config->to_adj_list) {
         logger->trace("Converting graph to adjacency list...");
 
@@ -127,15 +128,29 @@ int transform_graph(Config *config) {
         return 0;
     }
 
-    logger->trace("Converting graph to state {}",
-                  Config::state_to_string(config->state));
-    timer.reset();
+    if (config->graph_mode == graph::DeBruijnGraph::PRIMARY
+            && dbg_succ->get_mode() == graph::DeBruijnGraph::BASIC) {
+        logger->info("Changing graph mode from basic to primary");
+        logger->warn("FYI: This doesn't rebuild the graph. Apply with caution"
+                     " and only to graphs constructed from primary contigs!");
+        // keep the graph state (representation) unchanged
+        config->state = dbg_succ->get_state();
+        graph::boss::BOSS* boss = dbg_succ->release_boss();
+        dbg_succ.reset(new graph::DBGSuccinct(boss, graph::DeBruijnGraph::PRIMARY));
+        logger->info("Graph mode changed to primary");
+    }
 
-    dbg_succ->switch_state(config->state);
+    if (config->state != dbg_succ->get_state()) {
+        logger->trace("Converting graph to state {}", Config::state_to_string(config->state));
+        timer.reset();
 
-    logger->trace("Conversion done in {} sec", timer.elapsed());
+        dbg_succ->switch_state(config->state);
+
+        logger->trace("Conversion done in {} sec", timer.elapsed());
+    }
 
     logger->trace("Serializing transformed graph...");
+    timer.reset();
     dbg_succ->serialize(config->outfbase);
     logger->trace("Serialization done in {} sec", timer.elapsed());
 

@@ -2,9 +2,25 @@
 
 ## Install
 
+### Docker
+
+If docker is available on your system, you can immediately get started using
+e.g.
+```
+docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph build -v -k 10 /mnt/transcripts_1000.fa -o /mnt/transcripts_1000
+```
+
+where you'd need to replace `${DATA_DIR_HOST}` with a directory on the host system. This directory is then mapped 
+under `/mnt` in the container.
+
+See also section [Developing with Docker Images](#developing-with-docker-images)
+
+
+## Install From Sources
+
 ### Prerequisites
 - cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
 - bzip2
 - HTSlib
 
@@ -176,7 +192,7 @@ Requires `N*R/8 + 6*N^2` bytes of RAM, where `N` is the number of columns and `R
 2) Construct Multi-BRWT
 ```bash
 ./metagraph transform_anno -v -p NCORES --anno-type brwt \
-                           -i linkage.txt \
+                           --linkage-file linkage.txt \
                            -o primates \
                            --parallel-nodes V \
                            -p NCORES \
@@ -226,6 +242,24 @@ Stats for both
 ```bash
 ./metagraph stats -a annotation.column.annodbg graph.dbg
 ```
+
+## Developer Notes
+
+### Makefile
+
+The `Makefile` in the top level source directory can be used to build and test `metagraph` more conveniently. The following
+arguments are supported:
+* `env`: environment in which to compile/run (`""`: on the host, `docker`: in a docker container)
+* `alphabet`: compile metagraph for a certain alphabet (e.g. `DNA` or `Protein`, default `DNA`)
+* `additional_cmake_args`: additional arguments to pass to cmake.
+
+Examples:
+
+```
+# compiles metagraph in a docker container for the `DNA` alphabet
+make build-metagraph env=docker alphabet=DNA
+```
+
 
 ## License
 Metagraph is distributed under the GPLv3 License (see LICENSE).

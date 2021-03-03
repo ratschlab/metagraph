@@ -30,5 +30,5 @@ do
         continue
     fi
 
-    echo "/usr/bin/time -v $metagraph build -v -p $threads -k $K -o ${outfname%.dbg} --canonical --count-kmers $kmc" | bsub -J mg_k${K} -o ${logfname} -We 8:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+    echo "/usr/bin/time -v $metagraph build -v -p $threads -k $K -o ${outfname%.dbg} --mode canonical --count-kmers $kmc" | bsub -J mg_k${K} -o ${logfname} -We 8:00 -n $threads -M $mem -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
 done < <(cat ${metadata} | tr $'\t' ',')

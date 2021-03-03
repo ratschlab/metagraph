@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <fstream>
-#include <cmath>
 
 #include "common/serialization.hpp"
 #include "dbg_bitmap_construct.hpp"
@@ -12,18 +11,17 @@ namespace mtg {
 namespace graph {
 
 // Assume all k-mers present
-DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
+DBGBitmap::DBGBitmap(size_t k, Mode mode)
       : k_(k),
-        canonical_mode_(canonical_mode),
+        mode_(mode),
         seq_encoder_(),
-        kmers_(std::pow(static_cast<long double>(seq_encoder_.alphabet.size()), k_) + 1, true),
+        kmers_((1llu << (k * seq_encoder_.bits_per_char)) + 1, true),
         complete_(true) {
-    assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
-    if (k * std::log2(alphabet().size()) >= 64) {
+    if (k * seq_encoder_.bits_per_char >= 64) {
         std::cerr << "ERROR: Too large k!"
                   << " Maximum allowed k with this alphabet is "
-                  << static_cast<int>(64. / std::log2(alphabet().size())) - 1 << std::endl;
+                  << 63 / seq_encoder_.bits_per_char << std::endl;
         exit(1);
     }
 }
@@ -39,7 +37,7 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, canonical_mode_)) {
+    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
@@ -99,6 +97,9 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
 size_t DBGBitmap::outdegree(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
+    if (complete_)
+        return alphabet().size();
+
     size_t outdegree = 0;
 
     const auto &kmer = node_to_kmer(node);
@@ -116,6 +117,9 @@ size_t DBGBitmap::outdegree(node_index node) const {
 
 bool DBGBitmap::has_single_outgoing(node_index node) const {
     assert(node > 0 && node <= num_nodes());
+
+    if (complete_)
+        return alphabet().size() == 1;
 
     bool outgoing_edge_detected = false;
 
@@ -138,6 +142,9 @@ bool DBGBitmap::has_single_outgoing(node_index node) const {
 
 bool DBGBitmap::has_multiple_outgoing(node_index node) const {
     assert(node > 0 && node <= num_nodes());
+
+    if (complete_)
+        return alphabet().size() > 1;
 
     bool outgoing_edge_detected = false;
 
@@ -177,57 +184,15 @@ void DBGBitmap::call_incoming_kmers(node_index node,
 size_t DBGBitmap::indegree(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 
-    size_t indegree = 0;
+    if (complete_)
+        return alphabet().size();
 
-    const auto &kmer = node_to_kmer(node);
+    // k-mers are ordered co-lexicographically
+    auto first = node_to_kmer(node);
+    first.to_prev(k_, 0);
 
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos)
-            indegree++;
-    }
-
-    return indegree;
-}
-
-bool DBGBitmap::has_no_incoming(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-
-    const auto &kmer = node_to_kmer(node);
-
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos)
-            return false;
-    }
-
-    return true;
-}
-
-bool DBGBitmap::has_single_incoming(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
-
-    bool incoming_edge_detected = false;
-
-    const auto &kmer = node_to_kmer(node);
-
-    for (char c : alphabet()) {
-        auto prev_kmer = kmer;
-        prev_kmer.to_prev(k_, seq_encoder_.encode(c));
-
-        if (to_node(prev_kmer) != npos) {
-            if (incoming_edge_detected)
-                return false;
-
-            incoming_edge_detected = true;
-        }
-    }
-
-    return incoming_edge_detected;
+    return kmers_.rank1(first.data() + alphabet().size())
+            - kmers_.rank1(first.data());
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,
@@ -245,7 +210,8 @@ void DBGBitmap::adjacent_incoming_nodes(node_index node,
 }
 
 DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
-    auto index = kmer.data() + 1;
+    uint64_t index = kmer.data() + 1;
+
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
 
@@ -292,7 +258,7 @@ void DBGBitmap::serialize(std::ostream &out) const {
 
     serialize_number(out, k_);
     kmers_.serialize(out);
-    serialize_number(out, canonical_mode_);
+    serialize_number(out, static_cast<int>(mode_));
 }
 
 void DBGBitmap::serialize(const std::string &filename) const {
@@ -326,13 +292,7 @@ bool DBGBitmap::load(std::istream &in) {
 
         complete_ = (kmers_.size() == kmers_.num_set_bits());
 
-        try {
-            canonical_mode_ = load_number(in);
-            if (in.eof())
-                canonical_mode_ = false;
-        } catch (...) {
-            canonical_mode_ = false;
-        }
+        mode_ = static_cast<Mode>(load_number(in));
 
         return true;
     } catch (...) {
@@ -353,7 +313,7 @@ DBGBitmap::sequence_to_kmers(std::string_view sequence, bool to_canonical) const
 
 bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
-            || is_canonical_mode() != other.is_canonical_mode()
+            || get_mode() != other.get_mode()
             || num_nodes() != other.num_nodes())
         return false;
 
@@ -366,7 +326,7 @@ bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
     if (!verbose) {
         return k_ == other.k_
-                && canonical_mode_ == other.canonical_mode_
+                && mode_ == other.mode_
                 && kmers_ == other.kmers_;
     }
 
@@ -375,9 +335,9 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
         return false;
     }
 
-    if (canonical_mode_ != other.canonical_mode_) {
-        std::cerr << "canonical: " << canonical_mode_
-                  << " != " << other.canonical_mode_ << std::endl;
+    if (mode_ != other.mode_) {
+        std::cerr << "mode: " << static_cast<int>(mode_)
+                  << " != " << static_cast<int>(other.mode_) << std::endl;
         return false;
     }
 

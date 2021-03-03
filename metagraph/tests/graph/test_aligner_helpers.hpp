@@ -5,16 +5,25 @@
 
 #include "gtest/gtest.h"
 
-#include "graph/alignment/aligner_helper.hpp"
+#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
-namespace mtg {
-namespace test {
+namespace {
 
+using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::graph::align;
+using namespace mtg::test;
+using namespace mtg::kmer;
 
+
+typedef DBGAligner<>::score_t score_t;
+
+inline int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
+    return config.get_row(a)[b];
+}
 
 template <typename NodeType>
 void check_json_dump_load(const DeBruijnGraph &graph,
@@ -54,7 +63,33 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_query() << "\n";
 }
 
-} // namespace test
-} // namespace mtg
+DBGAligner<>::DBGQueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
+                                           const DBGAlignerConfig &config,
+                                           const DBGAligner<>::DBGQueryAlignment &paths,
+                                           const std::string &query) {
+    assert(graph.get());
+    EXPECT_EQ(query, paths.get_query());
+    auto uniconfig = config;
+    uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
+
+    return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
+        ? DBGAligner<SuffixSeeder<UniMEMSeeder<>>>(*graph, uniconfig).align(query)
+        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
+}
+
+inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
+                         const DBGAlignerConfig &config,
+                         const DBGAligner<>::DBGQueryAlignment &paths,
+                         const std::string &query) {
+    auto unimem_paths = get_extend(graph, config, paths, query);
+
+    ASSERT_EQ(paths.size(), unimem_paths.size());
+
+    for (size_t i = 0; i < paths.size(); ++i) {
+        EXPECT_EQ(paths[i], unimem_paths[i]) << paths[i] << "\n" << unimem_paths[i];
+    }
+}
+
+} // namespace
 
 #endif // __TEST_DBG_ALIGNER_HELPERS_HPP__

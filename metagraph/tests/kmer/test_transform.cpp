@@ -12,6 +12,8 @@
 namespace {
 using namespace mtg;
 
+#if ! _PROTEIN_GRAPH
+
 using TAlphabet = kmer::KmerExtractorBOSS::TAlphabet;
 constexpr auto &bits_per_char = kmer::KmerExtractorBOSS::bits_per_char;
 
@@ -50,5 +52,7 @@ TYPED_TEST(ReverseComplement, Random) {
         }
     }
 }
+
+#endif // ! _PROTEIN_GRAPH
 
 } // namespace

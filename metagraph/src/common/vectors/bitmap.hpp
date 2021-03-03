@@ -47,7 +47,7 @@ class bitmap_dyn : public bitmap, public bitmap_builder {
 
     virtual bitmap_dyn& operator|=(const bitmap &other);
 
-    virtual InitializationData get_initialization_data() const {
+    virtual InitializationData get_initialization_data() {
         return { size(), num_set_bits(),
                  [&](auto callback) { call_ones(callback); } };
     }

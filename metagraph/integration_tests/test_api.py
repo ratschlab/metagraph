@@ -2,6 +2,7 @@ import json
 import os
 import shlex
 import time
+import unittest
 from subprocess import Popen
 
 import socket
@@ -11,19 +12,19 @@ from parameterized import parameterized, parameterized_class
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
 
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
+
 
 class TestAPIBase(TestingBase):
     @classmethod
-    def setUpClass(cls, fasta_path, canonical=False, primary=False):
+    def setUpClass(cls, fasta_path, mode='basic'):
         super().setUpClass()
 
         graph_path = cls.tempdir.name + '/graph.dbg'
         annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
 
-        cls._build_graph(cls, fasta_path, graph_path, 6, 'succinct',
-                         canonical=canonical, primary=primary)
-        cls._annotate_graph(cls, fasta_path, graph_path, annotation_path, 'column',
-                            primary=primary)
+        cls._build_graph(fasta_path, graph_path, 6, 'succinct', mode=mode)
+        cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column')
 
         cls.host = socket.gethostbyname(socket.gethostname())
         cls.port = 3456
@@ -31,7 +32,8 @@ class TestAPIBase(TestingBase):
         cls.server_process = cls._start_server(cls, graph_path, annotation_path)
 
         wait_time_sec = 1
-        print("Waiting {} sec for the server (PID {}) to start up".format(wait_time_sec, cls.server_process.pid), flush=True)
+        print("Waiting {} sec for the server (PID {}) to start up".format(
+            wait_time_sec, cls.server_process.pid), flush=True)
         time.sleep(wait_time_sec)
 
     @classmethod
@@ -52,11 +54,11 @@ class TestAPIBase(TestingBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
     def setUp(self) -> None:
         self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
@@ -137,7 +139,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -157,7 +159,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_bad_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nNNNNNNNN" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload)
 
@@ -174,20 +176,21 @@ class TestAPIRaw(TestAPIBase):
 
     def test_api_raw_align_empty_fasta_desc(self):
         fasta_str = ">\nTCGATCGA"
-        payload = json.dumps({"FASTA": fasta_str, "discovery_fraction": 0})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
         ret = self.raw_post_request('align', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
 
     def test_api_raw_search_empty_fasta_desc(self):
         fasta_str = ">\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
-        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'discovery_fraction': 0.1})
+        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1})
         ret = self.raw_post_request('search', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -196,8 +199,7 @@ class TestAPIClient(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
@@ -215,11 +217,10 @@ class TestAPIClient(TestAPIBase):
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_simple_query_align_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
 
-        self.assertIn('cigar', df.columns)
-        self.assertEqual((self.sample_query_expected_rows, 6), df.shape)
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -247,7 +248,7 @@ class TestAPIClient(TestAPIBase):
         repetitions = 4
         alignment_cnt = 3
         seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
-        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, discovery_threshold=1.0)
+        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
@@ -255,6 +256,7 @@ class TestAPIClient(TestAPIBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
@@ -263,25 +265,28 @@ class TestAPIJson(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
+    def setUp(self):
+        if not self.graph_client.ready():
+            self.fail("Server takes too long to initialize")
+
     def test_api_align_json(self):
-        ret, _ = self.graph_client.align("TCGATCGA")
+        ret = self.graph_client.align("TCGATCGA")
         self.assertEqual(len(ret), 1)
 
     # do various queries
     def test_api_simple_query(self):
-        res_list, _ = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
+        res_list = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
 
         self.assertEqual(len(res_list), 1)
 
         res_obj = res_list[0]['results']
         self.assertEqual(len(res_obj), self.sample_query_expected_cols)
 
-        first_res = res_obj[0]
+        first_res = sorted(res_obj, key=lambda k: k['kmer_count'], reverse=True)[0]
 
         self.assertEqual(first_res['kmer_count'], 39)
 
@@ -291,14 +296,14 @@ class TestAPIJson(TestAPIBase):
     def test_api_multiple_queries(self):
         repetitions = 4
 
-        res_list, _ = self.graph_client.search([self.sample_query] * repetitions)
+        res_list = self.graph_client.search([self.sample_query] * repetitions)
         self.assertEqual(len(res_list), repetitions)
 
         # testing if the returned query indices range from 0 to n - 1
         self.assertEqual(sorted(range(0, repetitions)), sorted([int(a['seq_description']) for a in res_list]))
 
     def test_api_stats(self):
-        res = self.graph_client.stats()[0]
+        res = self.graph_client.stats()
 
         self.assertIn("graph", res.keys())
         graph_props = res['graph']
@@ -306,6 +311,7 @@ class TestAPIJson(TestAPIBase):
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -316,8 +322,7 @@ class TestAPIClientWithProperties(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa',
-                           canonical=True, primary=(cls.mode == 'primary'))
+        super().setUpClass(TEST_DATA_DIR + '/metasub_fake_data.fa', mode=cls.mode)
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)

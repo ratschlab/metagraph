@@ -22,7 +22,7 @@ mem=$6
 
 if [ ! -f ${outbase}.dbg ]
 then 
-    ${metagraph} build -v -p $threads -k $K -o ${outbase} --canonical --mem-cap-gb $((${mem} / 1250)) --count-kmers ${fasta}
+    ${metagraph} build -v -p $threads -k $K -o ${outbase} --mode canonical --mem-cap-gb $((${mem} / 1250)) --count-kmers ${fasta}
 fi
 
 if [ ! -f ${outbase}.clean.fasta.gz ]

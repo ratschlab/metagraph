@@ -16,12 +16,12 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
                         bool only_valid_nodes_in_mask = false,
-                        bool canonical = false);
+                        Mode mode = BASIC);
 
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::function<bool(node_index)>&& callback,
                         bool only_valid_nodes_in_mask = false,
-                        bool canonical = false);
+                        Mode mode = BASIC);
 
     MaskedDeBruijnGraph(MaskedDeBruijnGraph&&) = default;
     MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) = default;
@@ -90,7 +90,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_->get_k(); }
 
-    virtual bool is_canonical_mode() const override { return is_canonical_; }
+    virtual Mode get_mode() const override { return mode_; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
@@ -125,7 +125,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
-    bool is_canonical_;
+    Mode mode_;
 };
 
 } // namespace graph

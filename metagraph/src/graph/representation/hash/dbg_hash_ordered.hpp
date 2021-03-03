@@ -12,7 +12,7 @@ namespace graph {
 class DBGHashOrdered : public DeBruijnGraph {
   public:
     explicit DBGHashOrdered(size_t k,
-                            bool canonical_mode = false,
+                            Mode mode = BASIC,
                             bool packed_serialization = false);
 
     // Insert sequence to graph and invoke callback |on_insertion| for each new
@@ -99,7 +99,7 @@ class DBGHashOrdered : public DeBruijnGraph {
     }
 
     size_t get_k() const { return hash_dbg_->get_k(); }
-    bool is_canonical_mode() const { return hash_dbg_->is_canonical_mode(); }
+    Mode get_mode() const { return hash_dbg_->get_mode(); }
 
     uint64_t num_nodes() const { return hash_dbg_->num_nodes(); }
 
@@ -139,7 +139,7 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
-    initialize_graph(size_t k, bool canonical_mode, bool packed_serialization);
+    initialize_graph(size_t k, Mode mode, bool packed_serialization);
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };

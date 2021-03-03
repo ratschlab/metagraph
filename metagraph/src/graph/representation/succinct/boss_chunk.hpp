@@ -22,25 +22,25 @@ class BOSS::Chunk {
   public:
     typedef uint8_t TAlphabet;
 
+    Chunk() {}
+
+    Chunk(Chunk&&) = default;
+    Chunk& operator=(Chunk&&) = default;
+
     /**
      * Creates an empty BOSS chunk with the given parameters
      * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
      * @param k k-mer size
-     * @param canonical if true, the BOSS table will be constructed with both a k-mer
-     *        and its reverse complement
      * @param swap_dir directory where to write vector buffers for construction with
      * streaming
      */
-    Chunk(uint64_t alph_size, size_t k, bool canonical,
-          const std::string &swap_dir = "");
+    Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir = "");
 
     /**
      * Creates a BOSS Chunk with k-mer counts. Assumes that k-mers are distinct and
      * sorted.
      * @param alph_size the alphabet size. For DNA this will be 5 ($,A,C,G,T).
      * @param k k-mer size
-     * @param canonical if true, the BOSS table will be constructed with both a k-mer
-     *        and its reverse complement
      * @param kmers_with_counts the k-mers and their counts to construct the chunk from
      * @param bits_per_count for weighted graphs, the number of bits used to store the
      * weight counts
@@ -50,7 +50,6 @@ class BOSS::Chunk {
     template <typename Array>
     Chunk(uint64_t alph_size,
           size_t k,
-          bool canonical,
           const Array &kmers_with_counts,
           uint8_t bits_per_count = 0,
           const std::string &swap_dir = "");
@@ -83,7 +82,7 @@ class BOSS::Chunk {
      * Merge BOSS chunks loaded from the files passed in #chunk_filenames and construct
      * the full BOSS table.
      */
-    static std::pair<BOSS* /* boss */, bool /* is_canonical */>
+    static BOSS*
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                            bool verbose = false,
                            sdsl::int_vector<> *weights = nullptr,
@@ -96,7 +95,6 @@ class BOSS::Chunk {
 
     size_t alph_size_;
     size_t k_;
-    bool canonical_;
     // see the BOSS paper for the meaning of W_, last_ and F_
     std::string dir_;
     sdsl::int_vector_buffer<> W_;

@@ -112,7 +112,7 @@ ColumnMajor build_matrix_from_columns<ColumnMajor>(const BitVectorPtrArray &colu
     for (const auto &col_ptr : columns) {
         columns_copy.emplace_back(new bit_vector_sd(col_ptr->copy_to<bit_vector_sd>()));
     }
-    return ColumnMajor(std::move(columns_copy));;
+    return ColumnMajor(std::move(columns_copy));
 }
 template <>
 BRWT build_matrix_from_columns<BRWT>(const BitVectorPtrArray &columns, uint64_t) {

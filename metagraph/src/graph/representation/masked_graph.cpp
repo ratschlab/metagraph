@@ -12,26 +12,33 @@ MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::unique_ptr<bitmap>&& kmers_in_graph,
                       bool only_valid_nodes_in_mask,
-                      bool canonical)
+                      Mode mode)
       : graph_(graph),
         kmers_in_graph_(std::move(kmers_in_graph)),
         only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
-        is_canonical_(canonical) {
+        mode_(mode) {
     assert(kmers_in_graph_.get());
     assert(kmers_in_graph_->size() == graph->max_index() + 1);
-    assert(!is_canonical_ || graph_->is_canonical_mode());
+
+    if (graph_->get_mode() == PRIMARY && mode_ != PRIMARY) {
+        throw std::runtime_error("Any subgraph of a primary graph is primary, thus"
+                                 " the mode of the subgraph must be set to PRIMARY");
+    }
+    if (graph_->get_mode() != CANONICAL && mode_ == CANONICAL) {
+        throw std::runtime_error("Canonical subgraph requires canonical base graph");
+    }
 }
 
 MaskedDeBruijnGraph
 ::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::function<bool(node_index)>&& callback,
                       bool only_valid_nodes_in_mask,
-                      bool canonical)
+                      Mode mode)
       : MaskedDeBruijnGraph(graph,
                             std::make_unique<bitmap_lazy>(std::move(callback),
                                                           graph->max_index() + 1),
                             only_valid_nodes_in_mask,
-                            canonical) {}
+                            mode) {}
 
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
@@ -39,7 +46,7 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
     assert(in_subgraph(node));
 
     auto index = graph_->traverse(node, next_char);
-    return index && in_subgraph(index) ? index : DeBruijnGraph::npos;
+    return index && in_subgraph(index) ? index : npos;
 }
 // Traverse the incoming edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
@@ -47,7 +54,7 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
     assert(in_subgraph(node));
 
     auto index = graph_->traverse_back(node, prev_char);
-    return index && in_subgraph(index) ? index : DeBruijnGraph::npos;
+    return index && in_subgraph(index) ? index : npos;
 }
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
@@ -260,7 +267,7 @@ std::string MaskedDeBruijnGraph::get_node_sequence(node_index index) const {
 
 bool MaskedDeBruijnGraph::operator==(const MaskedDeBruijnGraph &other) const {
     return get_k() == other.get_k()
-            && is_canonical_mode() == other.is_canonical_mode()
+            && get_mode() == other.get_mode()
             && num_nodes() == other.num_nodes()
             && *kmers_in_graph_ == *other.kmers_in_graph_
             && *graph_ == *other.graph_;
@@ -268,7 +275,7 @@ bool MaskedDeBruijnGraph::operator==(const MaskedDeBruijnGraph &other) const {
 
 bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
-            || is_canonical_mode() != other.is_canonical_mode()
+            || get_mode() != other.get_mode()
             || num_nodes() != other.num_nodes())
         return false;
 

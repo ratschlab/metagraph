@@ -20,12 +20,12 @@ namespace boss {
     BOSS* merge(const std::vector<const BOSS*> &graphs,
                 bool verbose = false);
 
-    BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
-                                       size_t chunk_idx,
-                                       size_t num_chunks,
-                                       size_t num_threads,
-                                       size_t num_bins_per_thread,
-                                       bool verbose = false);
+    BOSS::Chunk merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
+                                      size_t chunk_idx,
+                                      size_t num_chunks,
+                                      size_t num_threads,
+                                      size_t num_bins_per_thread,
+                                      bool verbose = false);
 
 } // namespace boss
 } // namespace graph

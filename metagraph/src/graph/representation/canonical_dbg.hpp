@@ -22,43 +22,29 @@ class CanonicalDBG : public DeBruijnGraph {
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(const DeBruijnGraph &graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 100'000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(DeBruijnGraph &graph, bool primary = false, size_t cache_size = 100'000);
+    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 100'000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 100'000);
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
-     * @param primary indicates whether the underlying graph is primary or not
-     * (i.e., only one of a k-mer and its reverse complement are in the graph)
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph,
-                 bool primary = false,
-                 size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 100'000);
 
     virtual ~CanonicalDBG() {}
 
@@ -122,7 +108,7 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual size_t get_k() const override { return graph_.get_k(); }
 
-    virtual bool is_canonical_mode() const override { return true; }
+    virtual Mode get_mode() const override { return CANONICAL; }
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const override;
@@ -148,21 +134,20 @@ class CanonicalDBG : public DeBruijnGraph {
     inline node_index get_base_node(node_index node) const {
         assert(node);
         assert(node <= offset_ * 2);
-        return !graph_.is_canonical_mode()
-            ? (node > offset_ ? node - offset_ : node)
-            : std::min(node, reverse_complement(node));
+        return node > offset_ ? node - offset_ : node;
     }
+
+    node_index reverse_complement(node_index node) const;
 
   private:
     std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
     const DeBruijnGraph &graph_ = *const_graph_ptr_;
     size_t offset_;
+    bool k_odd_;
 
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     std::array<size_t, 256> alphabet_encoder_;
-
-    mutable bool primary_;
 
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
@@ -172,17 +157,17 @@ class CanonicalDBG : public DeBruijnGraph {
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> parent_node_cache_;
 
-    // caches for the results of reverse_complement.
-
-    // cache the index of the reverse complement of a node
-    mutable caches::fixed_sized_cache<node_index, node_index,
-                                      caches::LRUCachePolicy<node_index>> rev_comp_cache_;
-
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
-    node_index reverse_complement(node_index node) const;
+    // find all parent nodes of node in the CanonicalDBG which are represented
+    // in the reverse complement orientation in the underlying primary graph
+    void append_prev_rc_nodes(node_index node, std::vector<node_index> &parents) const;
+
+    // find all child nodes of node in the CanonicalDBG which are represented
+    // in the reverse complement orientation in the underlying primary graph
+    void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
 };
 
 } // namespace graph

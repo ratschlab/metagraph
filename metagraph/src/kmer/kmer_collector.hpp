@@ -42,24 +42,23 @@ class KmerCollector {
     using Data = typename Container::result_type;
     using Kmer = KMER;
 
+    enum Mode { BASIC, CANONICAL_ONLY, BOTH };
+
     /**
      * @param  k The k-mer length
-     * @param  both_strands_mode If true, both a sequence and its reverse complement will
-     * be added (only makes sense for DNA sequences)
+     * @param  mode Collection mode
      * @param  filter_suffix_encoded  Keep only k-mers with the given suffix. Useful for
      * sharding the collection process.
      * @param  num_threads The number of threads in the pool processing incoming sequences
      * @param  memory_preallocated The number of bytes to reserve in the container
-     * @param canonical_only keep only canonical k-mers when in #both_strands_mode
      */
     KmerCollector(size_t k,
-                  bool both_strands_mode = false,
+                  Mode mode = BASIC,
                   std::vector<typename Extractor::TAlphabet>&& filter_suffix_encoded = {},
                   size_t num_threads = 1,
                   double memory_preallocated = 0,
                   const std::filesystem::path &swap_dir = "/tmp/",
-                  size_t max_disk_space = 1e9,
-                  bool canonical_only = false);
+                  size_t disk_cap_bytes = 1e9);
 
     ~KmerCollector();
 
@@ -98,11 +97,10 @@ class KmerCollector {
 
     Container& container() { join(); return *kmers_; }
 
-    inline bool is_both_strands_mode() const { return both_strands_mode_; }
+    inline Mode get_mode() const { return mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
     inline std::filesystem::path tmp_dir() const { return tmp_dir_; }
-    inline size_t max_disk_space() const { return max_disk_space_; }
 
   private:
     void join();
@@ -117,35 +115,28 @@ class KmerCollector {
 
     std::vector<typename Extractor::TAlphabet> filter_suffix_encoded_;
 
-    bool both_strands_mode_;
-
-    bool canonical_only_;
+    Mode mode_;
 
     std::filesystem::path tmp_dir_;
 
     size_t buffer_size_;
-
-    /** Maximum disk space in bytes used by #kmers_ */
-    size_t max_disk_space_;
 };
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
 void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
-                   bool both_strands_mode,
+                   typename KmerCollector<KMER, KmerExtractor, Container>::Mode mode,
                    Container *kmers,
-                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                   bool canonical_only = false);
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 /** Visible For Testing */
 template <typename KMER, class KmerExtractor, class Container>
 void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
-                 bool both_strands_mode,
+                 typename KmerCollector<KMER, KmerExtractor, Container>::Mode mode,
                  Container *kmers,
-                 const std::vector<typename KmerExtractor::TAlphabet> &suffix,
-                 bool canonical_only = false);
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 } // namespace kmer
 } // namespace mtg

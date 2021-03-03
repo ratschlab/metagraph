@@ -41,6 +41,18 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
     }
 }
 
+void remove_chunks(const std::vector<std::string> &files) {
+    for (const std::string &f : files) {
+        std::vector<std::string> suffixes = { "", ".up" };
+        if (std::filesystem::exists(f + ".count"))
+            suffixes.push_back(".count");
+
+        for (const std::string &suffix : suffixes) {
+            std::filesystem::remove(f + suffix);
+        }
+    }
+}
+
 template <class T, class Enable = void>
 struct Unaligned;
 
@@ -209,6 +221,15 @@ EliasFanoEncoder<T>::EliasFanoEncoder(const std::vector<T> &data,
 template <typename T>
 EliasFanoEncoder<T>::~EliasFanoEncoder() {
     assert(!sink_internal_.is_open());
+}
+
+template <typename T>
+void EliasFanoEncoder<T>::append(const std::vector<T> &data,
+                                 const std::string &out_fname) {
+    std::ofstream sink(out_fname, std::ios::binary | std::ios::app);
+    std::ofstream sink_upper(out_fname + ".up", std::ios::binary | std::ios::app);
+    EliasFanoEncoder<T> encoder(data, &sink, &sink_upper);
+    encoder.finish();
 }
 
 template <typename T>

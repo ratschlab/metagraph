@@ -14,8 +14,8 @@ class DBGSuccinct : public DeBruijnGraph {
   public:
     friend class MaskedDeBruijnGraph;
 
-    explicit DBGSuccinct(size_t k, bool canonical_mode = false);
-    explicit DBGSuccinct(boss::BOSS *boss_graph, bool canonical_mode = false);
+    explicit DBGSuccinct(size_t k, Mode mode = BASIC);
+    explicit DBGSuccinct(boss::BOSS *boss_graph, Mode mode = BASIC);
 
     virtual ~DBGSuccinct() {}
 
@@ -72,9 +72,9 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
-    // Find a range of nodes with a common suffix matching the maximal prefix
-    // of the string |str|, and call these nodes. If more than |max_num_allowed_matches|
-    // are found, or if the maximal prefix is shorter than |min_match_length|, return
+    // Find nodes with a common suffix matching the maximal prefix of the string |str|,
+    // and call these nodes. If more than |max_num_allowed_matches| are found,
+    // or if the maximal prefix is shorter than |min_match_length|, return
     // without calling.
     void call_nodes_with_suffix_matching_longest_prefix(
             std::string_view str,
@@ -152,7 +152,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void switch_state(boss::BOSS::State new_state) final;
     virtual boss::BOSS::State get_state() const final;
 
-    virtual bool is_canonical_mode() const override final { return canonical_mode_; }
+    virtual Mode get_mode() const override final { return mode_; }
 
     virtual const boss::BOSS& get_boss() const final { return *boss_graph_; }
     virtual boss::BOSS& get_boss() final { return *boss_graph_; }
@@ -186,7 +186,7 @@ class DBGSuccinct : public DeBruijnGraph {
     // all edges in boss except dummy
     std::unique_ptr<bit_vector> valid_edges_;
 
-    bool canonical_mode_;
+    Mode mode_;
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 };

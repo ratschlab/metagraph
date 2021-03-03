@@ -5,7 +5,6 @@
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-#include "common/threads/threading.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -238,7 +237,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::move(mask),
-        graph_ptr->is_canonical_mode()
+        graph_ptr->get_mode()
     );
 
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());

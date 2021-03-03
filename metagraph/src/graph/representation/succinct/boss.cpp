@@ -1610,6 +1610,9 @@ sdsl::bit_vector
 BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
                                   size_t num_threads,
                                   bool verbose) {
+    // reset the index of suffix ranges
+    index_suffix_ranges(0);
+
     sdsl::bit_vector redundant_dummy_edges_mask(W_->size(), false);
 
     if (source_dummy_edges) {
@@ -1795,10 +1798,10 @@ inline void masked_call_outgoing(const BOSS &boss,
             && "i has to point to the last outgoing edge in unmasked graph");
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
-    do {
-        if (!subgraph_mask || (*subgraph_mask)[i])
-            callback(i);
-    } while (--i > 0 && !boss.get_last(i));
+    boss.call_outgoing(i, [&](BOSS::edge_index adjacent_edge) {
+        if (!subgraph_mask || (*subgraph_mask)[adjacent_edge])
+            callback(adjacent_edge);
+    });
 }
 
 // If a single incoming edge is found, write it to |*i| and return true.
@@ -1964,6 +1967,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2360,7 +2364,7 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        call_path(boss, callback, path, sequence,
+        call_path(boss, callback, path, sequence, split_to_unitigs,
                   kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
                   async, fetched_mutex, progress_bar, subgraph_mask, &edges);
     }
@@ -2485,6 +2489,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2575,6 +2580,15 @@ call_path(const BOSS &boss,
             // to the buffer. The index is inverted because dual_path will be
             // reversed.
             dual_visited.push_back(dual_path.size() - 1 - i);
+
+            // For the unitig mode, wait until the dual unitig is fully traversed
+            // by the same thread that visited its first node.
+            if (i == 0 && split_to_unitigs
+                       && !std::count(dual_path.begin(), dual_path.end(), 0)) {
+                // The first node had already been visited, hence, the remaining
+                // part of this non-branching path will be reached as well.
+                while (!fetch_bit(visited.data(), dual_path.back(), concurrent)) {}
+            }
         }
     }
 
@@ -2638,8 +2652,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),
@@ -2880,8 +2893,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),

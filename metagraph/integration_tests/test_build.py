@@ -10,6 +10,8 @@ import os
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
+DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -37,7 +39,7 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         return res
 
-    @parameterized.expand(BUILDS)
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -57,7 +59,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, build):
@@ -79,7 +81,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
         convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
             exe=METAGRAPH,
@@ -101,6 +103,7 @@ class TestBuild(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, build):
         """
         Build simple canonical graphs
@@ -108,7 +111,7 @@ class TestBuild(unittest.TestCase):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --canonical -k 20 -o {outfile} {input}'.format(
+                --graph {repr} --mode canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -124,7 +127,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 1159851', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
     @parameterized.expand(BUILDS)
     def test_build_tiny_k(self, build):
@@ -145,14 +148,15 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
         self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--mode canonical',
                 '-k', '2',
                 '--disk-swap', tmp_dir,
                 '-o', self.tempdir.name + '/graph',
@@ -167,7 +171,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
         self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc(self, build):
@@ -189,7 +193,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc_both(self, build):
@@ -211,14 +215,15 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --disk-swap {tmp_dir} --mode canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -234,14 +239,15 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --disk-swap {tmp_dir} --mode canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -257,9 +263,10 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
+    @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
     def test_build_chunks_from_kmc(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -296,15 +303,16 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
+    @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
     def test_build_chunks_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         # Build chunks
         for suffix in ['$', 'A', 'C', 'G', 'T']:
-            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} --graph {repr} --canonical -k 11 \
+            construct_command = '{exe} build --mask-dummy --disk-swap {tmp_dir} --graph {repr} --mode canonical -k 11 \
                     --suffix {suffix} -o {outfile} {input}'.format(
                 exe=METAGRAPH,
                 repr=representation,
@@ -318,7 +326,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
         # Concatenate chunks
-        construct_command = '{exe} concatenate --len-suffix 1 --graph {repr} -i {chunk_filebase} -o {outfile}'.format(
+        construct_command = '{exe} concatenate --len-suffix 1 --graph {repr} -i {chunk_filebase} --mode canonical -o {outfile}'.format(
             exe=METAGRAPH,
             repr=representation,
             chunk_filebase=self.tempdir.name + '/graph',
@@ -335,7 +343,7 @@ class TestBuild(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
 
 
 if __name__ == '__main__':

@@ -1,15 +1,58 @@
-#include "aligner_helper.hpp"
+#include "aligner_cigar.hpp"
 
 #include "kmer/alphabets.hpp"
-
 
 namespace mtg {
 namespace graph {
 namespace align {
 
-Cigar::Cigar(const std::string &cigar_str) {
+
+OperatorTable initialize_opt_table() {
+    OperatorTable char_to_op;
+
+    // TODO: fix this when alphabets are no longer set at compile time
+    #if _PROTEIN_GRAPH
+        const auto *alphabet = kmer::alphabets::kAlphabetProtein;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToProtein;
+    #elif _DNA_CASE_SENSITIVE_GRAPH
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
+    #elif _DNA5_GRAPH
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
+    #elif _DNA_GRAPH
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
+    #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+    #endif
+
+    for (auto &row : char_to_op) {
+        row.fill(Cigar::MISMATCH);
+    }
+
+    for (uint8_t c : std::string(alphabet)) {
+        if (alphabet_encoding[c] == alphabet_encoding[0])
+            continue;
+
+        char upper = toupper(c);
+        char lower = tolower(c);
+
+        char_to_op[upper][upper]
+            = char_to_op[upper][lower]
+            = char_to_op[lower][upper]
+            = char_to_op[lower][lower] = Cigar::MATCH;
+    }
+
+    return char_to_op;
+}
+
+Cigar::Cigar(std::string_view cigar_str) {
     std::string op_count;
-    for (auto c : cigar_str) {
+    for (char c : cigar_str) {
         switch (c) {
             case '=':
                 cigar_.emplace_back(Cigar::MATCH, std::stol(op_count));
@@ -35,65 +78,6 @@ Cigar::Cigar(const std::string &cigar_str) {
                 op_count += c;
         }
     }
-}
-
-
-Cigar::OperatorTable Cigar::initialize_opt_table() {
-    OperatorTable char_to_op;
-
-    // TODO: fix this when alphabets are no longer set at compile time
-    #if _PROTEIN_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetProtein;
-        const auto *alphabet_encoding = kmer::alphabets::kCharToProtein;
-    #elif _DNA_CASE_SENSITIVE_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
-    #elif _DNA5_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
-    #elif _DNA_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
-        const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
-    #else
-        static_assert(false,
-            "Define an alphabet: either "
-            "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-        );
-    #endif
-
-    for (auto& row : char_to_op) {
-        row.fill(Cigar::MISMATCH);
-    }
-
-    for (uint8_t c : std::string(alphabet)) {
-        if (alphabet_encoding[c] == alphabet_encoding[0])
-            continue;
-
-        char upper = toupper(c);
-        char lower = tolower(c);
-
-        char_to_op[upper][upper]
-            = char_to_op[upper][lower]
-            = char_to_op[lower][upper]
-            = char_to_op[lower][lower] = Cigar::MATCH;
-    }
-
-    return char_to_op;
-}
-
-Cigar::OperatorTable Cigar::char_to_op = Cigar::initialize_opt_table();
-
-char Cigar::opt_to_char(Cigar::Operator op) {
-    switch (op) {
-        case Cigar::MATCH: return '=';
-        case Cigar::MISMATCH: return 'X';
-        case Cigar::INSERTION: return 'I';
-        case Cigar::DELETION: return 'D';
-        case Cigar::CLIPPED: return 'S';
-    }
-
-    assert(false);
-    return '\0';
 }
 
 std::string Cigar::to_string() const {
@@ -125,8 +109,7 @@ void Cigar::append(Cigar&& other) {
     cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
-bool Cigar::is_valid(const std::string_view reference,
-                     const std::string_view query) const {
+bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
 
@@ -182,9 +165,9 @@ bool Cigar::is_valid(const std::string_view reference,
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Operator::DELETION: {
-                if (i && cigar_[i - 1].first == Operator::INSERTION) {
-                    std::cerr << "DELETION after INSERTION" << std::endl
+            case Operator::INSERTION: {
+                if (i && cigar_[i - 1].first == Operator::DELETION) {
+                    std::cerr << "INSERTION after DELETION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -201,9 +184,9 @@ bool Cigar::is_valid(const std::string_view reference,
 
                 alt_it += op.second;
             } break;
-            case Operator::INSERTION: {
-                if (i && cigar_[i - 1].first == Operator::DELETION) {
-                    std::cerr << "INSERTION after DELETION" << std::endl
+            case Operator::DELETION: {
+                if (i && cigar_[i - 1].first == Operator::INSERTION) {
+                    std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

@@ -23,6 +23,8 @@ namespace common {
  */
 void concat(const std::vector<std::string> &files, const std::string &result);
 
+void remove_chunks(const std::vector<std::string> &files);
+
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
  * Loosely inspired  by
@@ -56,6 +58,9 @@ class EliasFanoEncoder {
 
     /** Dumps any pending data to the stream. Must be called exactly once when done #add-ing */
     size_t finish();
+
+    /** Append sorted array #data to EF-coded #out_fname */
+    static void append(const std::vector<T> &data, const std::string &out_fname);
 
   private:
     /**
