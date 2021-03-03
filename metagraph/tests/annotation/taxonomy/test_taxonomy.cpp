@@ -1,14 +1,15 @@
 #include "gtest/gtest.h"
-#define private public
 
-#include "annotation/taxonomy/taxonomic_db.hpp"
-#include "../test_annotated_dbg_helpers.hpp"
-#include "seq_io/sequence_io.hpp"
+#define private public
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "annotation/taxonomy/taxonomic_db.hpp"
+#include "../test_annotated_dbg_helpers.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace mtg {
@@ -197,8 +198,8 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
     ASSERT_TRUE(taxo.taxonomic_map.size() == 0);
 
-    // Iterating a hopscotch_map on linux and on darwin returns the objects in a different order,
-    // Thus, the normalization ids are different. We need to compute all the normalized taxids.
+    // Iterating a hopscotch_map on linux and on darwin returns the objects in a different order.
+    // Thus, the normalization ids are different and we need to compute all of them here.
     uint64_t normalized_taxid_seq1;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ1]),
         normalized_taxid_seq1));
@@ -250,6 +251,7 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
         for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
             taxo.taxonomic_map[i] = 0;
         }
+        // Resize taxonomic_map to 0 for testing the piece of code which does taxonomic_map resizing.
         taxo.taxonomic_map.resize(0);
 
         std::vector<std::string> test_sequences;

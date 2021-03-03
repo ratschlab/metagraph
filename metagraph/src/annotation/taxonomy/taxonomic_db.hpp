@@ -6,7 +6,6 @@
 
 #include "annotation/representation/base/annotation.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "cli/config/config.hpp"
 
 
 namespace mtg {
@@ -15,7 +14,7 @@ namespace annot {
 /**
  * TaxonomyDB constructs a taxonomic map (kmer to taxid) in a similar way
  * to how Kraken2 works. The file exported by this object will be further
- * used for taxonomic sequence classifier by query metagraph cli cmd.
+ * used for taxonomic sequence classifier in './metagraph tax_class'.
  */
 class TaxonomyDB {
   public:
@@ -54,12 +53,12 @@ class TaxonomyDB {
     tsl::hopscotch_map<AccessionVersion, TaxId> lookup_table;
 
     /**
-     * precalc_log2 is a table for faster compute of log2.
+     * precalc_log2 is a table for a fast compute of log2(x).
      */
     std::vector<uint64_t> precalc_log2;
 
     /**
-     * precalc_pow2 is a table for faster compute of pow2.
+     * precalc_pow2 is a table for a fast compute of pow2(x).
      */
     std::vector<uint64_t> precalc_pow2;
 
@@ -67,10 +66,14 @@ class TaxonomyDB {
      * Maps taxid to its normalized index. Used for optimizing the runtime performance.
      */
     tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
+
+    /**
+     * Maps normalized taxid to its denormalized counterpart.
+     */
     std::vector<TaxId> denormalized_taxid;
 
     /**
-    * taxonomic_map returns the taxid LCA for a given kmer.
+    * taxonomic_map[kmer] returns the taxid LCA for the given kmer.
     */
     sdsl::int_vector<> taxonomic_map;
 
@@ -138,6 +141,10 @@ class TaxonomyDB {
      * to the given filepath.
      */
     void export_to_file(const std::string &filepath);
+
+    /**
+     * Find LCA for a set of nodes in the tree.
+     */
     NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids) const;
 
     bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) const;
@@ -145,8 +152,8 @@ class TaxonomyDB {
 
   private:
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
-    static uint64_t num_external_get_taxid_calls;
-    static uint64_t num_external_get_taxid_calls_failed;
+    static uint64_t num_get_taxid_calls;
+    static uint64_t num_get_taxid_calls_failed;
 };
 
 }

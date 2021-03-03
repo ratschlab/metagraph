@@ -20,7 +20,6 @@ class TaxoClassifier {
     using KmerId = Annotator::Index;
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
-
   private:
     TaxId root_node;
 
@@ -50,9 +49,9 @@ class TaxoClassifier {
 
     /**
      * Assign a LCA taxid to a given sequence.
-     * Consider matches[node] = number of kmers in 'sequence' for which the taxonomic_map points to 'node'.
-     *          weight[node] = matches[node] / #(kmers in sequence). (Values in [0, 1])
-     *          score[node] = sum(weight[node*]) where node* is iterating over node's subtree + node's ancestors (Values in [0, 1])
+     * Consider matches[node] = number of kmers in 'sequence' for which the taxonomic_map (LCA) points to 'node'.
+     *          weight[node] = matches[node] / #(kmers in sequence). (To obtain values in [0, 1])
+     *          score[node] = sum(weight[node*]) where node* is iterating over node's subtree + node's ancestors (Obtain values in [0, 1])
      * The assigned taxid is the farthest node to the root with score[node] >= lca_coverage_threshold (unique).
       */
     TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,

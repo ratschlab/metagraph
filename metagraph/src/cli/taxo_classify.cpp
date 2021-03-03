@@ -1,12 +1,14 @@
 #include "taxo_classify.hpp"
 
-#include "common/logger.hpp"
-#include "config/config.hpp"
-#include "common/unix_tools.hpp"
-#include "load/load_graph.hpp"
 #include "annotation/taxonomy/taxo_classifier.hpp"
 #include "common/threads/threading.hpp"
+#include "common/unix_tools.hpp"
+#include "config/config.hpp"
+#include "load/load_graph.hpp"
 #include "seq_io/sequence_io.hpp"
+
+#include "common/logger.hpp"
+
 
 namespace mtg {
 namespace cli {
@@ -52,7 +54,7 @@ int taxonomic_classification(Config *config) {
     logger->trace("Processing the classification");
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
     for (const auto &file: files) {
-        Timer curr_timer;
+        logger->trace("Start processing file '{}'.", file);
         execute_fasta_file(file,
                            thread_pool,
                            *graph,
@@ -64,9 +66,8 @@ int taxonomic_classification(Config *config) {
                                std::cout << result << std::endl;
                            },
                            *config);
-        logger->trace("File '{}' was processed in {} sec, total time: {}", file,
-                      curr_timer.elapsed(), timer.elapsed());
     }
+    thread_pool.join();
     logger->trace("Finished processing all the classification in {}", timer.elapsed());
 
     return 0;

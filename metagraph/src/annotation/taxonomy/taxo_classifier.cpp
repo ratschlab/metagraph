@@ -1,17 +1,17 @@
 #include "taxo_classifier.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
-#include <cmath>
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
+#include <vector>
 
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "common/serialization.hpp"
 #include "common/unix_tools.hpp"
+#include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 #include "common/logger.hpp"
 
@@ -44,7 +44,7 @@ void TaxoClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
     f.close();
-    logger->trace("Finished with importing metagraph taxonomic data after '{}' sec", timer.elapsed());
+    logger->trace("Finished with importing metagraph taxonomicDB after '{}' sec", timer.elapsed());
 }
 
 TaxoClassifier::TaxoClassifier(const std::string &filepath) {

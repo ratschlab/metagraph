@@ -1,18 +1,18 @@
 #include "taxonomic_db.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
-#include <cmath>
 #include <sdsl/int_vector.hpp>
+#include <vector>
 
-#include "common/serialization.hpp"
-#include "seq_io/sequence_io.hpp"
-#include "common/utils/string_utils.hpp"
-#include "common/unix_tools.hpp"
-#include "graph/annotated_dbg.hpp"
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "common/serialization.hpp"
+#include "common/unix_tools.hpp"
+#include "common/utils/string_utils.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "seq_io/sequence_io.hpp"
 
 #include "common/logger.hpp"
 
@@ -24,8 +24,8 @@ using mtg::common::logger;
 
 typedef TaxonomyDB::NormalizedTaxId NormalizedTaxId;
 
-uint64_t TaxonomyDB::num_external_get_taxid_calls = 0;
-uint64_t TaxonomyDB::num_external_get_taxid_calls_failed = 0;
+uint64_t TaxonomyDB::num_get_taxid_calls = 0;
+uint64_t TaxonomyDB::num_get_taxid_calls_failed = 0;
 
 void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
                                    std::vector<NormalizedTaxId> &tree_linearization) {
@@ -40,7 +40,6 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList 
         }
     }
     node_depth[node] = depth + 1;
-    assert(tree_linearization.size());
 }
 
 void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
@@ -53,8 +52,6 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         std::vector<std::string> parts = utils::split_string(line, "\t");
         uint64_t act = static_cast<uint64_t>(std::stoull(parts[0]));
         uint64_t parent = static_cast<uint64_t>(std::stoull(parts[2]));
-
-        assert(!full_parents_list.count(act));
         full_parents_list[act] = parent;
     }
     f.close();
@@ -87,7 +84,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         relevant_taxids.push(full_parents_list[taxid]);
     }
     if (num_taxid_failed) {
-        logger->warn("Number taxids succeeded {}, failed {}.", num_nodes, num_taxid_failed);
+        logger->warn("Could not find {} taxid out of the total number of {} evaluated taxids.", num_taxid_failed, num_nodes);
     }
 
     tree.resize(num_nodes);
@@ -99,7 +96,6 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         tree[normalized_taxid[full_parents_list[taxid]]].push_back(
                 normalized_taxid[taxid]);
     }
-    assert(tree.size());
 }
 
 void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization) {
@@ -117,10 +113,10 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
     uint delta = 1;
     for (uint row = 1; row < num_rmq_rows; ++row) {
         for (uint64_t i = 0; i + delta < tree_linearization.size(); ++i) {
-            if (node_depth[rmq_data[row-1][i]] > node_depth[rmq_data[row-1][i + delta]]) {
-                rmq_data[row][i] = rmq_data[row-1][i];
+            if (node_depth[rmq_data[row - 1][i]] > node_depth[rmq_data[row - 1][i + delta]]) {
+                rmq_data[row][i] = rmq_data[row - 1][i];
             } else {
-                rmq_data[row][i] = rmq_data[row-1][i + delta];
+                rmq_data[row][i] = rmq_data[row - 1][i + delta];
             }
         }
         delta *= 2;
@@ -197,7 +193,7 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
 
 NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) const {
     if (taxids.empty()) {
-        logger->error("Can't find LCA for an empty taxid set.");
+        logger->error("Can't find LCA for an empty set of taxids.");
         std::exit(1);
     }
     uint64_t left_idx = node_to_linearization_idx[taxids[0]];
@@ -222,10 +218,10 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
 }
 
 bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) const {
-    num_external_get_taxid_calls += 1;
+    num_get_taxid_calls += 1;
     if (! lookup_table.count(accession_version)) {
         // accession_version not in the lookup_table
-        num_external_get_taxid_calls_failed += 1;
+        num_get_taxid_calls_failed += 1;
         return false;
     }
     if (! normalized_taxid.count(lookup_table.at(accession_version))) {
@@ -250,6 +246,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
                 return;
             }
             if (index >= taxonomic_map.size()) {
+                // Double the size of taxonomic_map until the current 'index' fits inside.
                 taxo_mutex.lock();
                 uint64_t new_size = taxonomic_map.size();
                 while (index >= new_size) {
@@ -281,10 +278,9 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
 }
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {
-    if (num_external_get_taxid_calls_failed) {
-//        TODO Check why 'num_external_get_taxid_calls' is so large.
-        logger->warn("Total number external get_normalized_taxid calls: {} from which nonexistent accession versions: {}",
-                     num_external_get_taxid_calls, num_external_get_taxid_calls_failed);
+    if (num_get_taxid_calls_failed) {
+        logger->warn("Failed to get taxid {} times out of the total number of {} calls.",
+                     num_get_taxid_calls_failed, num_get_taxid_calls);
     }
 
     Timer timer;
@@ -297,25 +293,23 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     }
 
     const std::vector<NormalizedTaxId> &linearization = rmq_data[0];
+    tsl::hopscotch_map<TaxId, TaxId> node_parent;
 
-    tsl::hopscotch_map<TaxId, TaxId> node_parents;
+    node_parent[denormalized_taxid[linearization[0]]] = denormalized_taxid[linearization[0]];
 
-    node_parents[denormalized_taxid[linearization[0]]] = denormalized_taxid[linearization[0]];
+    // Start the iteration from 1, because we are computing linearization[i - 1].
     for (uint64_t i = 1; i < linearization.size(); ++i) {
         uint64_t act = linearization[i];
         uint64_t prv = linearization[i - 1];
-
-        if (node_parents.count(denormalized_taxid[act])) {
+        if (node_parent.count(denormalized_taxid[act])) {
             // Prv is act's child.
             continue;
         }
         // Prv is act's parent.
-        node_parents[denormalized_taxid[act]] = denormalized_taxid[prv];
+        node_parent[denormalized_taxid[act]] = denormalized_taxid[prv];
     }
-    assert(node_parents.size());
-    serialize_number_number_map(f, node_parents);
+    serialize_number_number_map(f, node_parent);
 
-//    auto &taxo = *taxonomic_map;
     // Denormalize taxids in taxonomic map.
     for (size_t i = 0; i < taxonomic_map.size(); ++i) {
         if (taxonomic_map[i]) {

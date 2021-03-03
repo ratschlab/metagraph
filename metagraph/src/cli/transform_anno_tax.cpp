@@ -1,15 +1,15 @@
 #include "transform_anno_tax.hpp"
 
-#include "common/logger.hpp"
-#include "common/threads/threading.hpp"
-#include "config/config.hpp"
+#include <filesystem>
+#include <tsl/hopscotch_set.h>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotation/taxonomy/taxonomic_db.hpp"
+#include "common/threads/threading.hpp"
+#include "config/config.hpp"
 #include "cli/load/load_annotation.hpp"
 
-#include <filesystem>
-#include <tsl/hopscotch_set.h>
+#include "common/logger.hpp"
 
 
 namespace mtg {
@@ -23,7 +23,7 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
     for(const auto &path: paths) {
         if (! filesystem::is_directory(path)) {
             if (!utils::ends_with(path, ".annodbg")) {
-                logger->warn("File {} is not an '.annodbg' file.", path);
+                logger->warn("File '{}' is not an '.annodbg' file.", path);
                 continue;
             }
             filenames.push_back(path);
@@ -64,6 +64,7 @@ int transform_anno_taxo(Config *config) {
 
     tsl::hopscotch_set<std::string> all_labels;
 
+    // Get all labels from all the annotation files.
     for (const auto &file: filenames) {
         std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
                 cli::initialize_annotation(file, *config);
@@ -79,13 +80,15 @@ int transform_anno_taxo(Config *config) {
 
     annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->lookup_table, all_labels);
 
-    // load as many annotation matrix files as we can fit in memory.
+    // Load as many annotation matrix files as we can fit in memory.
     for (uint32_t i = 0; i < filenames.size(); ) {
-        logger->trace("Loading columns for batch-conversion...");
+        logger->trace("Loading a new batch of files...");
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < filenames.size(); ++i) {
             uint64_t file_size = std::filesystem::file_size(filenames[i]);
+
+            // If there is only one file in tha batch and its size exceeds 'mem_bytes', still construct a batch of size 1.
             if (file_size > mem_bytes_left && file_batch.size() > 0) {
                 break;
             }

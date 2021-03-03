@@ -22,8 +22,7 @@ class TestTaxonomy(unittest.TestCase):
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_taxonomy(self):
         k = 20
-        construct_command = '{exe} build -p {num_threads} \
-                             -k {k} -o {outfile} {input}'.format(
+        construct_command = '{exe} build -p {num_threads} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             k=k,
@@ -33,8 +32,7 @@ class TestTaxonomy(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        annotate_command = '{exe} annotate --anno-header -i {dbg} -o {anno} \
-                            -p {num_threads} {input_fasta}'.format(
+        annotate_command = '{exe} annotate --anno-header -i {dbg} -o {anno} -p {num_threads} {input_fasta}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             anno=self.tempdir.name + '/annotation',
@@ -55,9 +53,8 @@ class TestTaxonomy(unittest.TestCase):
         res = subprocess.run([transform_anno_tax_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = subprocess.run(["ls -la " + self.tempdir.name], shell=True);
-
-        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxoDB} --lca-coverage-threshold {lca_coverage}'.format(
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxoDB} \
+                            --lca-coverage-threshold {lca_coverage}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAXO_DATA_DIR + '/taxo_query.fa',
@@ -66,4 +63,28 @@ class TestTaxonomy(unittest.TestCase):
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 64566)
+        res_lines = res.stdout.decode().rstrip().split('\n')
+
+        num_correct_predictions_tips = 0
+        num_correct_predictions_internals = 0
+        num_total_predictions_tips = 0
+        num_total_predictions_internals = 0
+        for line in res_lines:
+            if line == "":
+                continue
+            query_expected = line.split(" ")[1].split("|")[3]
+            query_prediction = line.split(" ")[7].split("'")[1]
+
+            if line.split(" ")[1].split("|")[5] == "0":
+                num_total_predictions_tips += 1
+                if query_expected == query_prediction:
+                    num_correct_predictions_tips += 1
+            else:
+                num_total_predictions_internals += 1
+                if query_expected == query_prediction:
+                    num_correct_predictions_internals += 1
+
+        self.assertEqual(num_correct_predictions_tips, 547)
+        self.assertEqual(num_correct_predictions_internals, 26)
+        self.assertEqual(num_total_predictions_tips, 650)
+        self.assertEqual(num_total_predictions_internals, 48)

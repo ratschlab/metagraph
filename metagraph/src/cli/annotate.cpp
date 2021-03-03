@@ -12,8 +12,6 @@
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 
-#include <sdsl/int_vector.hpp>
-
 
 namespace mtg {
 namespace cli {
@@ -202,7 +200,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::string &annotator_filename) {
 
     auto anno_graph = initialize_annotated_dbg(graph, config);
-
     bool forward_and_reverse = config.forward_and_reverse;
     if (anno_graph->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL) {
         logger->trace("Annotating canonical graph");
@@ -389,6 +386,7 @@ int annotate_graph(Config *config) {
                     : files[i]);
         }
     }
+
     return 0;
 }
 
