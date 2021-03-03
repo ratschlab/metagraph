@@ -50,6 +50,9 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     std::vector<uint64_t> column_ids;
     uint64_t num_rows = 0;
 
+    logger->trace("Loading annotation and sampling subcolumns of size {}",
+                  num_rows_subsampled);
+
     ThreadPool subsampling_pool(get_num_threads(), 1);
 
     // Load columns from disk
@@ -124,6 +127,54 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     }
 
     return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
+}
+
+binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
+                                      Config::AnnotationType anno_type) {
+    logger->trace("Computing total number of columns");
+    size_t num_columns = 0;
+    std::string extension = anno_type == Config::ColumnCompressed
+            ? ColumnCompressed<>::kExtension
+            : RowDiffColumnAnnotator::kExtension;
+    for (std::string file : files) {
+        file = utils::remove_suffix(file, extension) + extension;
+        std::ifstream instream(file, std::ios::binary);
+        if (!instream.good()) {
+            logger->error("Can't read from {}", file);
+            exit(1);
+        }
+        if (anno_type == Config::ColumnCompressed)
+            std::ignore = load_number(instream);
+
+        annot::LabelEncoder<std::string> label_encoder;
+        if (!label_encoder.load(instream)) {
+            logger->error("Can't load label encoder from {}", file);
+            exit(1);
+        }
+
+        num_columns += label_encoder.size();
+    }
+
+    logger->trace("Generating trivial linkage matrix for {} columns",
+                  num_columns);
+
+    return binmat::agglomerative_linkage_trivial(num_columns);
+}
+
+binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
+                                      Config::AnnotationType anno_type,
+                                      const Config &config) {
+    if (config.greedy_brwt) {
+        if (config.fast) {
+            return cluster_columns<binmat::SparseColumn>(files, anno_type,
+                                                         config.num_rows_subsampled);
+        } else {
+            return cluster_columns<sdsl::bit_vector>(files, anno_type,
+                                                     config.num_rows_subsampled);
+        }
+    } else {
+        return trivial_linkage(files, anno_type);
+    }
 }
 
 int transform_annotation(Config *config) {
@@ -274,53 +325,8 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        if (!config->greedy_brwt) {
-            logger->trace("Computing total number of columns");
-            size_t num_columns = 0;
-            std::string extension = input_anno_type == Config::ColumnCompressed
-                    ? ColumnCompressed<>::kExtension
-                    : RowDiffColumnAnnotator::kExtension;
-            for (std::string file : files) {
-                file = utils::remove_suffix(file, extension) + extension;
-                std::ifstream instream(file, std::ios::binary);
-                if (!instream.good()) {
-                    logger->error("Can't read from {}", file);
-                    exit(1);
-                }
-                if (input_anno_type == Config::ColumnCompressed)
-                    std::ignore = load_number(instream);
-
-                annot::LabelEncoder<std::string> label_encoder;
-                if (!label_encoder.load(instream)) {
-                    logger->error("Can't load label encoder from {}", file);
-                    exit(1);
-                }
-
-                num_columns += label_encoder.size();
-            }
-
-            logger->trace("Generating trivial linkage matrix for {} columns",
-                          num_columns);
-
-            binmat::LinkageMatrix linkage_matrix
-                    = binmat::agglomerative_linkage_trivial(num_columns);
-
-            std::ofstream out(config->outfbase);
-            out << linkage_matrix.format(CSVFormat) << std::endl;
-
-            logger->trace("Linkage matrix is written to {}", config->outfbase);
-            return 0;
-        }
-
-        logger->trace("Loading annotation and sampling subcolumns of size {}",
-                      config->num_rows_subsampled);
-
         binmat::LinkageMatrix linkage_matrix
-            = config->fast
-                ? cluster_columns<binmat::SparseColumn>(files, input_anno_type,
-                                                        config->num_rows_subsampled)
-                : cluster_columns<sdsl::bit_vector>(files, input_anno_type,
-                                                    config->num_rows_subsampled);
+                = compute_linkage(files, input_anno_type, *config);
 
         std::ofstream out(config->outfbase);
         out << linkage_matrix.format(CSVFormat) << std::endl;
