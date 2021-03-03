@@ -101,11 +101,9 @@ std::vector<BRWT::Row> BRWT::has_column(const std::vector<Row> &row_ids, Column 
     }
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        // check index
-        if (uint64_t rank = nonzero_rows_->conditional_rank1(row_ids[i])) {
-            // map index from parent's to children's coordinate system
+        // check index, then map index from parent's to child's coordinate system
+        if (uint64_t rank = nonzero_rows_->conditional_rank1(row_ids[i]))
             result.push_back(rank - 1);
-        }
     }
 
     auto child_node = assignments_.group(column);
@@ -119,6 +117,7 @@ std::vector<BRWT::Row> BRWT::has_column(const std::vector<Row> &row_ids, Column 
     for (size_t i = 0; i < rows.size(); ++i) {
         rows[i] = nonzero_rows_->select1(rows[i] + 1);
     }
+
     return rows;
 }
 
