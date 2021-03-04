@@ -13,8 +13,6 @@ docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph build -v -k 10 /mnt/tran
 where you'd need to replace `${DATA_DIR_HOST}` with a directory on the host system. This directory is then mapped 
 under `/mnt` in the container.
 
-See also section [Developing with Docker Images](#developing-with-docker-images)
-
 
 ## Install From Sources
 
