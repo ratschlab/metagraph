@@ -403,9 +403,15 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     }
 
     auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
-    assert(target_column_idx >= edge_sets.size());
-    edge_sets.resize(target_column_idx + 1);
-    edge_sets[target_column_idx] = edges;
+    if (target_column_idx >= edge_sets.size()) {
+        edge_sets.resize(target_column_idx + 1);
+        edge_sets[target_column_idx] = edges;
+#ifndef NDEBUG
+    } else {
+        assert(edge_sets[target_column_idx] == edges);
+#endif
+    }
+
     return edges;
 }
 
