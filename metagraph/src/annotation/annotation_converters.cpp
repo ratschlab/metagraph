@@ -364,51 +364,6 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
             num_parallel_nodes, num_threads);
 }
 
-std::vector<std::vector<uint64_t>>
-parse_linkage_matrix(const std::string &filename) {
-    std::ifstream in(filename);
-
-    std::vector<std::vector<uint64_t>> linkage;
-    std::string line;
-    while (std::getline(in, line)) {
-        std::vector<std::string> parts = utils::split_string(line, " ");
-        if (parts.empty())
-            continue;
-
-        try {
-            if (parts.size() != 4)
-                throw std::runtime_error("Invalid format");
-
-            uint64_t first = std::stoi(parts.at(0));
-            uint64_t second = std::stoi(parts.at(1));
-            uint64_t merged = std::stoi(parts.at(3));
-
-            if (first == second || first >= merged || second >= merged) {
-                logger->error("Invalid format of the linkage matrix."
-                              " Indexes of parent clusters must be larger than"
-                              " indexes of the objects/clusters the include");
-                exit(1);
-            }
-
-            while (linkage.size() <= merged) {
-                linkage.push_back({});
-            }
-
-            linkage[merged].push_back(first);
-            linkage[merged].push_back(second);
-
-        } catch (const std::exception &e) {
-            logger->error("Possibly invalid format of the linkage matrix."
-                          " Each line must contain exactly 4 values:"
-                          " <cluster 1> <cluster 2> <dist> <cluster 3>"
-                          "\nException: {}", e.what());
-            exit(1);
-        }
-    }
-
-    return linkage;
-}
-
 std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator) {
     uint64_t num_set_bits = annotator.num_relations();
     uint64_t num_rows = annotator.num_objects();
@@ -429,14 +384,12 @@ std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator 
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
-        const std::string &linkage_matrix_file,
+        const std::vector<std::vector<uint64_t>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path,
         const std::function<void(const BRWTBottomUpBuilder::CallColumn &)> &get_columns,
         std::vector<std::pair<uint64_t, std::string>> &&column_names) {
-    auto linkage = parse_linkage_matrix(linkage_matrix_file);
-
     if (!linkage.size())
         logger->warn("Parsed empty linkage tree");
 
@@ -461,7 +414,7 @@ convert_to_BRWT(
 template <>
 std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::vector<std::string> &annotation_files,
-        const std::string &linkage_matrix_file,
+        const std::vector<std::vector<uint64_t>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
         const fs::path &tmp_path) {
@@ -485,14 +438,14 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
             exit(1);
         }
     };
-    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+    return convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                            tmp_path, get_columns, std::move(column_names));
 }
 
 template<>
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                         const std::string &linkage_matrix_file,
+                         const std::vector<std::vector<uint64_t>> &linkage,
                          size_t num_parallel_nodes,
                          size_t num_threads,
                          const fs::path &tmp_path) {
@@ -518,7 +471,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
     };
 
     std::unique_ptr<MultiBRWTAnnotator> annotator
-            = convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+            = convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                               tmp_path, get_columns, std::move(column_names));
 
     return std::make_unique<RowDiffBRWTAnnotator>(
