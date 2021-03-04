@@ -18,11 +18,23 @@ process_seq_path(const DeBruijnGraph &graph,
                  const std::function<void(AnnotatedDBG::row_index, size_t)> &callback) {
     const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     if (canonical) {
-        for (size_t i = 0; i < query_nodes.size(); ++i) {
-            if (query_nodes[i] != DeBruijnGraph::npos) {
-                callback(AnnotatedDBG::graph_to_anno_index(
-                    canonical->get_base_node(query_nodes[i])
-                ), i);
+        if (query_nodes.size()) {
+            if (canonical->get_base_node(query_nodes[0]) == query_nodes[0]) {
+                for (size_t i = 0; i < query_nodes.size(); ++i) {
+                    if (query_nodes[i] != DeBruijnGraph::npos) {
+                        callback(AnnotatedDBG::graph_to_anno_index(
+                            canonical->get_base_node(query_nodes[i])
+                        ), i);
+                    }
+                }
+            } else {
+                for (size_t i = query_nodes.size(); i > 0; --i) {
+                    if (query_nodes[i - 1] != DeBruijnGraph::npos) {
+                        callback(AnnotatedDBG::graph_to_anno_index(
+                            canonical->get_base_node(query_nodes[i - 1])
+                        ), i - 1);
+                    }
+                }
             }
         }
     } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
@@ -264,6 +276,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     if (std::get<0>(node) == this->graph_.max_index() + 1)
         return DefaultColumnExtender<NodeType>::get_outgoing(node);
 
+    const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+
     uint64_t target_column_idx = align_node_to_target_[node];
     uint64_t target_column = target_columns_.at(target_column_idx);
 
@@ -279,7 +293,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         std::vector<AnnotatedDBG::row_index> rows;
         rows.reserve(edges.size());
 
-        const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
         for (const auto &[next_node, c] : edges) {
             if (canonical) {
                 rows.emplace_back(AnnotatedDBG::graph_to_anno_index(
@@ -351,6 +364,10 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     };
 
     // prefetch the next unitig
+    const char *cur_position = this->seed_->get_query().data()
+        + this->seed_->get_query().size() + std::get<3>(node) - 2;
+    size_t max_depth = this->query_.data() + this->query_.size() - cur_position;
+
     call_hull_sequences(this->graph_, std::get<0>(node),
         [&](std::string_view seq, const std::vector<NodeType> &path) {
             assert(path.size());
@@ -359,8 +376,12 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             push_path(seq, path);
         },
         [&](std::string_view seq, const auto &path, size_t depth, size_t fork_count) {
-            bool result = fork_count || depth > this->query_.size()
-                || (path.size() && cached_edge_sets_.count(path.back()));
+            bool result = fork_count || depth > max_depth
+                || (path.size() && cached_edge_sets_.count(path.back()))
+                || (path.size() >= 2 && canonical
+                    && (canonical->get_base_node(path.back()) == path.back())
+                        != (canonical->get_base_node(path[path.size() - 2])
+                            == path[path.size() - 2]));
 
             if (result && depth == 1)
                 push_path(seq, path);
