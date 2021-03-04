@@ -154,7 +154,7 @@ void sum_and_call_counts(const fs::path &dir,
     for (const auto &p : fs::directory_iterator(dir)) {
         auto path = p.path();
         if (utils::ends_with(path, file_extension)) {
-            logger->info("Found count vector {}", path);
+            logger->trace("Found count vector {}", path);
             vectors.emplace_back(path, std::ios::in);
 
             if (vectors.back().size() != vectors.front().size()) {
@@ -202,7 +202,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
                                const std::string &row_count_extension) {
-    logger->info("Assigning row-diff successors at forks...");
+    logger->trace("Assigning row-diff successors at forks...");
 
     rd_succ_bv_type rd_succ;
 
@@ -213,8 +213,8 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
     }
 
     if (optimize_forks) {
-        logger->info("RowDiff successors will be set to the adjacent nodes with"
-                     " the largest number of labels");
+        logger->trace("RowDiff successors will be set to the adjacent nodes with"
+                      " the largest number of labels");
 
         const bit_vector &last = graph.get_boss().get_last();
         graph::DeBruijnGraph::node_index graph_idx
@@ -247,7 +247,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
         rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
 
     } else {
-        logger->info("No count vectors could be found in {}. The last outgoing"
+        logger->warn("No count vectors could be found in {}. The last outgoing"
                      " edges will be selected for assigning RowDiff successors",
                      count_vectors_dir);
     }
@@ -426,11 +426,11 @@ void assign_anchors(const std::string &graph_fname,
             exit(1);
         }
         if (rd_succ.size()) {
-            logger->info("RowDiff successors {} will be used to assign anchors",
-                         rd_succ_filename);
+            logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_filename);
             boss.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
         } else {
-            logger->info("The last outgoing edges will be used to assign anchors");
+            logger->warn("Assigning anchors... The last outgoing edges will be"
+                         " used for routing assign anchors.");
             boss.row_diff_traverse(num_threads, max_length, boss.get_last(), &anchors_bv);
         }
     }
