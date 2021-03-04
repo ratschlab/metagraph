@@ -122,11 +122,6 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
-    std::string_view extend_window_;
-
-    // start of the partial sum table
-    const score_t *match_score_begin_;
-
     static bool has_converged(const Column &column, const Scores &next);
 
     static void sanitize(Scores &scores);

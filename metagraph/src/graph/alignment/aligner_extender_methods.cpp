@@ -455,9 +455,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     size_t start = align_start - query_.data();
     size_t size = query_.size() - start + 1;
     assert(start + size == partial_sums_.size());
-    match_score_begin_ = partial_sums_.data() + start;
 
-    extend_window_ = { align_start, size - 1 };
+    std::string_view extend_window_{ align_start, size - 1 };
     DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
 
@@ -556,7 +555,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             converged = !updated || has_converged(column_pair, next_column);
 
-            const score_t *match = &match_score_begin_[offset];
+            const score_t *match = &partial_sums_[start + offset];
             bool extendable = false;
             for (size_t i = 0; i < S.size() && !extendable; ++i) {
                 if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
@@ -637,7 +636,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>
 ::call_visited_nodes(const std::function<void(NodeType, size_t, size_t)> &callback) const {
-    size_t window_start = extend_window_.data() - query_.data();
+    const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
+    size_t window_start = align_start - query_.data();
+
     for (const auto &[node, columns] : table_) {
         size_t start = query_.size();
         size_t end = 0;
