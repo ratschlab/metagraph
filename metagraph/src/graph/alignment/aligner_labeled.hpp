@@ -180,6 +180,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
+        std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
 
         assert(config_.num_alternative_paths);
@@ -187,6 +188,9 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
         const auto &nodes = query_nodes[num_queries];
         const auto &targets = target_columns[num_queries].values_container();
+
+        Extender extender(anno_graph_, config_, this_query);
+        Extender extender_rc(anno_graph_, config_, reverse);
 
         for (size_t it = 0; it < targets.size(); ++it) {
             const auto &[target_column, signature] = targets[it];
@@ -199,8 +203,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 signature
             );
 
-            Extender extender(anno_graph_, config_, this_query);
-
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
                 const auto &nodes_rc = query_nodes_rc[num_queries];
                 const auto &targets_rc = target_columns_rc[num_queries].values_container();
@@ -208,18 +210,14 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 assert(!is_reverse_complement);
                 assert(target_column == target_column_rc);
 
-                auto build_rev_comp_alignment_core = [&](std::string_view reverse,
-                                                         const auto &,
-                                                         auto&& rev_comp_seeds,
+                auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                          const auto &callback) {
-                    callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)),
-                             Extender(anno_graph_, config_, reverse));
+                    callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)));
                 };
 
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
-                std::string_view reverse = paths.get_query(true);
                 Seeder seeder_rc = build_seeder(target_column,
                                                 reverse,
                                                 !is_reverse_complement,
@@ -227,8 +225,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                 signature_rc);
 
                 aligner_core.align_both_directions(paths, seeder, seeder_rc,
-                                                   std::move(extender),
-                                                   Extender(anno_graph_, config_, reverse),
+                                                   extender, extender_rc,
                                                    build_rev_comp_alignment_core);
 
             } else if (config_.forward_and_reverse_complement) {
@@ -238,8 +235,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 assert(!is_reverse_complement);
                 assert(target_column == target_column_rc);
 
-                std::string_view reverse = paths.get_query(true);
-
                 Seeder seeder_rc = build_seeder(target_column,
                                                 reverse,
                                                 !is_reverse_complement,
@@ -247,12 +242,11 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                 signature_rc);
 
                 aligner_core.align_best_direction(paths, seeder, seeder_rc,
-                                                  std::move(extender),
-                                                  Extender(anno_graph_, config_, reverse));
+                                                  extender, extender_rc);
 
             } else {
                 aligner_core.align_one_direction(paths, is_reverse_complement,
-                                                 seeder, std::move(extender));
+                                                 seeder, extender);
             }
 
             callback(header, std::move(paths));
