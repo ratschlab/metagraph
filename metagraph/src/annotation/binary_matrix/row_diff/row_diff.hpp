@@ -242,11 +242,23 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(std::istream &f) {
-    if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
-        anchor_.load(f);
-        if (!fork_succ_.load(f)) {
-            common::logger->warn("RowDiff routing bitmap could not be loaded. The last"
-                                 " outgoing edges will be used as RowDiff successors.");
+    auto pos = f.tellg();
+    std::string version(4, '\0');
+    if (f.read(version.data(), 4) && version == "v2.0") {
+        if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            if (!anchor_.load(f) || !fork_succ_.load(f))
+                return false;
+        }
+    } else {
+        // backward compatibility
+        f.seekg(pos);
+        if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            if (!anchor_.load(f))
+                return false;
+
+            common::logger->warn(
+                "Loading old version of RowDiff without a fork routing bitmap."
+                " The last outgoing edges will be used as successors.");
             fork_succ_ = fork_succ_bv_type();
         }
     }
@@ -255,6 +267,7 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+    f.write("v2.0", 4);
     if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
         anchor_.serialize(f);
         fork_succ_.serialize(f);
