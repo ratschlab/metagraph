@@ -11,6 +11,22 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+inline void reverse_bit_vector(sdsl::bit_vector &v) {
+    size_t begin = 0;
+    for ( ; begin + begin + 128 <= v.size(); begin += 64) {
+        uint64_t a = sdsl::bits::rev(v.get_int(begin));
+        uint64_t b = sdsl::bits::rev(v.get_int(v.size() - begin - 64));
+        v.set_int(begin, b);
+        v.set_int(v.size() - begin - 64, a);
+    }
+
+    size_t size = (v.size() % 128) / 2;
+    uint64_t a = sdsl::bits::rev(v.get_int(begin, size)) >> (64 - size);
+    uint64_t b = sdsl::bits::rev(v.get_int(v.size() - begin - size, size)) >> (64 - size);
+    v.set_int(begin, b, size);
+    v.set_int(v.size() - begin - size, a, size);
+}
+
 void
 process_seq_path(const DeBruijnGraph &graph,
                  std::string_view query,
@@ -218,8 +234,7 @@ auto ILabeledDBGAligner
                     for (const auto &[target, signature] : target_columns[j]) {
                         assert(target_columns_rc[j].count(target));
                         target_columns_rc[j][target] = signature;
-                        std::reverse(target_columns_rc[j][target].begin(),
-                                     target_columns_rc[j][target].end());
+                        reverse_bit_vector(target_columns_rc[j][target]);
                     }
                 }
             }
