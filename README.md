@@ -2,6 +2,16 @@
 
 ## Install
 
+### Conda
+
+There are conda packages available on bioconda for both Linux and Mac OS X:
+
+```
+conda install -c bioconda metagraph
+```
+
+The executable is called `metagraph_DNA`.
+
 ### Docker
 
 If docker is available on your system, you can immediately get started using
