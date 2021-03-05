@@ -7,7 +7,7 @@
 There are conda packages available on bioconda for both Linux and Mac OS X:
 
 ```
-conda install -c bioconda metagraph
+conda install -c bioconda -c conda-forge metagraph
 ```
 
 The executable is called `metagraph_DNA`.
