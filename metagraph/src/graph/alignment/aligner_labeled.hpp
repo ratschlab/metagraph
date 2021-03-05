@@ -32,15 +32,17 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
-    typedef std::vector<std::vector<node_index>> BatchMapping;
-    typedef std::vector<VectorMap<uint64_t, sdsl::bit_vector>> BatchLabels;
+    typedef std::pair<std::vector<node_index>, std::vector<node_index>> Mapping;
+    typedef std::pair<sdsl::bit_vector, sdsl::bit_vector> Signature;
+    typedef std::vector<Mapping> BatchMapping;
+    typedef std::vector<VectorMap<uint64_t, Signature>> BatchLabels;
 
     const AnnotatedDBG &anno_graph_;
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
     size_t num_top_labels_;
 
-    std::tuple<BatchMapping, BatchMapping, BatchLabels, BatchLabels>
+    std::pair<BatchMapping, BatchLabels>
     map_and_label_query_batch(const QueryGenerator &generate_query) const;
 };
 
@@ -175,8 +177,8 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        const auto &[query_nodes, query_nodes_rc, target_columns, target_columns_rc]
-            = mapped_batch;
+        const auto &[query_nodes_pair, target_columns] = mapped_batch;
+
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
@@ -186,14 +188,15 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         assert(config_.num_alternative_paths);
         assert(target_columns[num_queries].size());
 
-        const auto &nodes = query_nodes[num_queries];
+        const auto &[nodes, nodes_rc] = query_nodes_pair[num_queries];
         const auto &targets = target_columns[num_queries].values_container();
 
         Extender extender(anno_graph_, config_, this_query);
         Extender extender_rc(anno_graph_, config_, reverse);
 
         for (size_t it = 0; it < targets.size(); ++it) {
-            const auto &[target_column, signature] = targets[it];
+            const auto &[target_column, signature_pair] = targets[it];
+            const auto &[signature, signature_rc] = signature_pair;
 
             Seeder seeder = build_seeder(
                 target_column,
@@ -204,11 +207,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             );
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-                const auto &nodes_rc = query_nodes_rc[num_queries];
-                const auto &targets_rc = target_columns_rc[num_queries].values_container();
-                const auto &[target_column_rc, signature_rc] = targets_rc[it];
                 assert(!is_reverse_complement);
-                assert(target_column == target_column_rc);
 
                 auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                          const auto &callback) {
@@ -229,11 +228,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                    build_rev_comp_alignment_core);
 
             } else if (config_.forward_and_reverse_complement) {
-                const auto &nodes_rc = query_nodes_rc[num_queries];
-                const auto &targets_rc = target_columns_rc[num_queries].values_container();
-                const auto &[target_column_rc, signature_rc] = targets_rc[it];
                 assert(!is_reverse_complement);
-                assert(target_column == target_column_rc);
 
                 Seeder seeder_rc = build_seeder(target_column,
                                                 reverse,

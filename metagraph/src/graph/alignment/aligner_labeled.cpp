@@ -79,10 +79,9 @@ ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
 
 auto ILabeledDBGAligner
 ::map_and_label_query_batch(const QueryGenerator &generate_query) const
-        -> std::tuple<BatchMapping, BatchMapping, BatchLabels, BatchLabels> {
+        -> std::pair<BatchMapping, BatchLabels> {
     // exact k-mer matchings of each query sequence
     BatchMapping query_nodes;
-    BatchMapping query_nodes_rc;
 
     // map from Annotation row indices to (i,j), indicating position j in query i
     typedef std::vector<std::pair<size_t, size_t>> RowMapping;
@@ -93,22 +92,23 @@ auto ILabeledDBGAligner
         size_t i = query_nodes.size();
 
         // map query sequence to the graph
-        query_nodes.emplace_back(map_sequence_to_nodes(graph_, query));
+        query_nodes.emplace_back(map_sequence_to_nodes(graph_, query),
+                                 std::vector<node_index>{});
 
         // update row_to_query_idx
-        process_seq_path(graph_, query, query_nodes.back(),
+        process_seq_path(graph_, query, query_nodes.back().first,
                          [&](AnnotatedDBG::row_index row, size_t j) {
             row_to_query_idx[row].first.emplace_back(i, j);
         });
 
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                 || config_.forward_and_reverse_complement) {
-            query_nodes_rc.push_back(query_nodes.back());
+            query_nodes.back().second = query_nodes.back().first;
             std::string query_rc(query);
-            reverse_complement_seq_path(graph_, query_rc, query_nodes_rc.back());
+            reverse_complement_seq_path(graph_, query_rc, query_nodes.back().second);
 
             if (graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-                process_seq_path(graph_, query_rc, query_nodes_rc.back(),
+                process_seq_path(graph_, query_rc, query_nodes.back().second,
                                  [&](AnnotatedDBG::row_index row, size_t j) {
                     row_to_query_idx[row].second.emplace_back(i, j);
                 });
@@ -145,7 +145,7 @@ auto ILabeledDBGAligner
     std::vector<VectorMap<uint64_t, uint64_t>> column_counter_rc;
     if (config_.forward_and_reverse_complement
             && graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-        column_counter_rc.resize(query_nodes_rc.size());
+        column_counter_rc.resize(query_nodes.size());
         for (size_t i = 0; i < annotation.size(); ++i) {
             for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].second) {
                 for (uint64_t column : annotation[i]) {
@@ -157,7 +157,6 @@ auto ILabeledDBGAligner
 
     // compute target columns and initialize signatures for each query
     BatchLabels target_columns(query_nodes.size());
-    BatchLabels target_columns_rc(query_nodes_rc.size());
     for (size_t i = 0; i < column_counter.size(); ++i) {
         auto &counter = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
             column_counter[i].values_container()
@@ -172,14 +171,13 @@ auto ILabeledDBGAligner
 
         for (const auto &[column, count] : counter) {
             if (!target_columns[i].count(column)) {
-                target_columns[i].emplace(
-                    column, sdsl::bit_vector(query_nodes[i].size(), false)
-                );
-                if (query_nodes_rc.size()) {
-                    target_columns_rc[i].emplace(
-                        column, sdsl::bit_vector(query_nodes_rc[i].size(), false)
-                    );
-                }
+                target_columns[i].emplace(column, Signature {
+                    sdsl::bit_vector(query_nodes[i].first.size(), false),
+                    config_.forward_and_reverse_complement
+                            && graph_.get_mode() != DeBruijnGraph::CANONICAL
+                        ? sdsl::bit_vector(query_nodes[i].second.size(), false)
+                        : sdsl::bit_vector()
+                });
             }
         }
     }
@@ -200,12 +198,10 @@ auto ILabeledDBGAligner
 
         for (const auto &[column, count] : counter) {
             if (!target_columns[i].count(column)) {
-                target_columns[i].emplace(
-                    column, sdsl::bit_vector(query_nodes[i].size(), false)
-                );
-                target_columns_rc[i].emplace(
-                    column, sdsl::bit_vector(query_nodes_rc[i].size(), false)
-                );
+                target_columns[i].emplace(column, Signature {
+                    sdsl::bit_vector(query_nodes[i].first.size(), false),
+                    sdsl::bit_vector(query_nodes[i].second.size(), false)
+                });
             }
         }
     }
@@ -215,26 +211,25 @@ auto ILabeledDBGAligner
         for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].first) {
             for (uint64_t column : annotation[i]) {
                 if (target_columns[query_id].count(column))
-                    target_columns[query_id][column][idx] = true;
+                    target_columns[query_id][column].first[idx] = true;
             }
         }
 
-        if (query_nodes_rc.size()) {
-            assert(graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement);
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+                || config_.forward_and_reverse_complement) {
             if (graph_.get_mode() != DeBruijnGraph::CANONICAL) {
                 for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].second) {
                     for (uint64_t column : annotation[i]) {
-                        if (target_columns_rc[query_id].count(column))
-                            target_columns_rc[query_id][column][idx] = true;
+                        if (target_columns[query_id].count(column))
+                            target_columns[query_id][column].second[idx] = true;
                     }
                 }
             } else {
                 for (size_t j = 0; j < target_columns.size(); ++j) {
-                    for (const auto &[target, signature] : target_columns[j]) {
-                        assert(target_columns_rc[j].count(target));
-                        target_columns_rc[j][target] = signature;
-                        reverse_bit_vector(target_columns_rc[j][target]);
+                    for (auto it = target_columns[j].begin();
+                            it != target_columns[j].end(); ++it) {
+                        it.value().second = it.value().first;
+                        reverse_bit_vector(it.value().second);
                     }
                 }
             }
@@ -243,21 +238,22 @@ auto ILabeledDBGAligner
 
     // if any of the queries has no associated labels, mark them as such
     for (size_t i = 0; i < target_columns.size(); ++i) {
-        if (target_columns[i].empty()
-                && (query_nodes_rc.empty() || target_columns_rc[i].empty())) {
-            assert(!query_nodes[i][0]);
-            assert(std::equal(query_nodes[i].begin() + 1, query_nodes[i].end(),
-                              query_nodes[i].begin()));
-            target_columns[i][kNTarget] = sdsl::bit_vector(query_nodes[i].size(), true);
-            if (query_nodes_rc.size()) {
-                target_columns_rc[i][kNTarget]
-                    = sdsl::bit_vector(query_nodes_rc[i].size(), true);
-            }
+        if (target_columns[i].empty()) {
+            assert(!query_nodes[i].first[0]);
+            assert(std::equal(query_nodes[i].first.begin() + 1,
+                              query_nodes[i].first.end(),
+                              query_nodes[i].first.begin()));
+            target_columns[i].emplace(kNTarget, Signature {
+                sdsl::bit_vector(query_nodes[i].first.size(), true),
+                graph_.get_mode() == DeBruijnGraph::CANONICAL
+                        || config_.forward_and_reverse_complement
+                    ? sdsl::bit_vector(query_nodes[i].second.size(), true)
+                    : sdsl::bit_vector()
+            });
         }
     }
 
-    return std::make_tuple(std::move(query_nodes), std::move(query_nodes_rc),
-                           std::move(target_columns), std::move(target_columns_rc));
+    return { std::move(query_nodes), std::move(target_columns) };
 }
 
 template <typename NodeType>
@@ -379,9 +375,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     };
 
     // prefetch the next unitig
-    const char *cur_position = this->seed_->get_query().data()
-        + this->seed_->get_query().size() + std::get<3>(node) - 2;
-    size_t max_depth = this->query_.data() + this->query_.size() - cur_position;
+    size_t max_depth = this->query_.size();
 
     call_hull_sequences(this->graph_, std::get<0>(node),
         [&](std::string_view seq, const std::vector<NodeType> &path) {
