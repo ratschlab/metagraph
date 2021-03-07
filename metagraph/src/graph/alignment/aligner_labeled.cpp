@@ -35,8 +35,15 @@ process_seq_path(const DeBruijnGraph &graph,
     const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     if (canonical) {
         if (query_nodes.size()) {
-            if (canonical->get_base_node(query_nodes[0]) == query_nodes[0]) {
-                for (size_t i = 0; i < query_nodes.size(); ++i) {
+            auto first = std::find_if(query_nodes.begin(), query_nodes.end(),
+                                      [](auto i) -> bool { return i; });
+            if (first == query_nodes.end())
+                return;
+
+            size_t start = first - query_nodes.begin();
+
+            if (canonical->get_base_node(*first) == *first) {
+                for (size_t i = start; i < query_nodes.size(); ++i) {
                     if (query_nodes[i] != DeBruijnGraph::npos) {
                         callback(AnnotatedDBG::graph_to_anno_index(
                             canonical->get_base_node(query_nodes[i])
@@ -44,7 +51,7 @@ process_seq_path(const DeBruijnGraph &graph,
                     }
                 }
             } else {
-                for (size_t i = query_nodes.size(); i > 0; --i) {
+                for (size_t i = query_nodes.size(); i > start; --i) {
                     if (query_nodes[i - 1] != DeBruijnGraph::npos) {
                         callback(AnnotatedDBG::graph_to_anno_index(
                             canonical->get_base_node(query_nodes[i - 1])
