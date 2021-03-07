@@ -450,29 +450,30 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         anno_rows.push_back(pair.first);
     }
 
-    auto rows_with_target = anno_graph_.get_annotation().get_matrix().has_column(
+    sdsl::bit_vector row_mask = anno_graph_.get_annotation().get_matrix().has_column(
         anno_rows, target_column
     );
 
-    anno_rows = std::vector<AnnotatedDBG::row_index>();
-
     Edges edges;
-    for (AnnotatedDBG::row_index row : rows_with_target) {
-        for (const auto &[parent_node, child_node, c, i] : anno_rows_to_id[row]) {
-            assert(c != boss::BOSS::kSentinel);
-            assert(this->graph_.traverse(parent_node, c) == child_node);
+    for (size_t j = 0; j < anno_rows.size(); ++j) {
+        if (row_mask[j]) {
+            AnnotatedDBG::row_index row = anno_rows[j];
+            for (const auto &[parent_node, child_node, c, i] : anno_rows_to_id[row]) {
+                assert(c != boss::BOSS::kSentinel);
+                assert(this->graph_.traverse(parent_node, c) == child_node);
 
-            if (!i) {
-                assert(parent_node == std::get<0>(node));
-                edges.emplace_back(child_node, c);
-            } else {
-                auto &parent_edge_sets = cached_edge_sets_[parent_node];
-                if (target_column_idx >= parent_edge_sets.size())
-                    parent_edge_sets.resize(target_column_idx + 1);
+                if (!i) {
+                    assert(parent_node == std::get<0>(node));
+                    edges.emplace_back(child_node, c);
+                } else {
+                    auto &parent_edge_sets = cached_edge_sets_[parent_node];
+                    if (target_column_idx >= parent_edge_sets.size())
+                        parent_edge_sets.resize(target_column_idx + 1);
 
-                cached_edge_sets_[parent_node][target_column_idx].emplace_back(
-                    child_node, c
-                );
+                    cached_edge_sets_[parent_node][target_column_idx].emplace_back(
+                        child_node, c
+                    );
+                }
             }
         }
     }
