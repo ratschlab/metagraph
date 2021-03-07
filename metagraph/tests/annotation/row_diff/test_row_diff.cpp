@@ -153,8 +153,15 @@ TEST(RowDiff, HasColumn) {
         }
     }
 
-    EXPECT_EQ(has_columns[0], annot.has_column(rows, 0));
-    EXPECT_EQ(has_columns[1], annot.has_column(rows, 1));
+    for (uint64_t i : { 0, 1 }) {
+        auto it = has_columns[i].begin();
+        call_ones(annot.has_column(rows, i), [&](auto j) {
+            ASSERT_NE(has_columns[i].end(), it);
+            EXPECT_EQ(*it, rows[j]);
+            ++it;
+        });
+        EXPECT_EQ(has_columns[i].end(), it);
+    }
 }
 
 /**

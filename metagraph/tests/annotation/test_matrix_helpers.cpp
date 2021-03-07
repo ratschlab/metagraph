@@ -307,7 +307,13 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
 
         column.resize(std::max(column.size() / 2, (size_t)1));
 
-        auto has_column = matrix.has_column(column, j);
+        auto has_column_vec = matrix.has_column(column, j);
+        std::vector<uint64_t> has_column;
+        for (size_t i = 0; i < has_column_vec.size(); ++i) {
+            if (has_column_vec[i])
+                has_column.push_back(column[i]);
+        }
+
         EXPECT_EQ(column.size(), has_column.size());
 
         if (column.size() == has_column.size()) {

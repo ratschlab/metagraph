@@ -78,47 +78,48 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<BRWT::Row> BRWT::has_column(const std::vector<Row> &row_ids, Column column) const {
+sdsl::bit_vector BRWT::has_column(const std::vector<Row> &row_ids, Column column) const {
     assert(column < num_columns());
 
+    sdsl::bit_vector result(row_ids.size(), false);
     auto num_nonzero_rows = nonzero_rows_->num_set_bits();
 
     // check if the column is empty
     if (!num_nonzero_rows)
-        return {};
-
-    std::vector<Row> result;
-    result.reserve(std::min(row_ids.size(), (size_t)num_nonzero_rows));
+        return result;
 
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the overlap with the index column
-        for (Row i : row_ids) {
-            if ((*nonzero_rows_)[i])
-                result.push_back(i);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if ((*nonzero_rows_)[row_ids[i]])
+                result[i] = true;
         }
+
         return result;
     }
 
+    std::vector<Row> child_rows;
+    std::vector<size_t> child_row_ids;
     for (size_t i = 0; i < row_ids.size(); ++i) {
         // check index, then map index from parent's to child's coordinate system
-        if (uint64_t rank = nonzero_rows_->conditional_rank1(row_ids[i]))
-            result.push_back(rank - 1);
+        if (uint64_t rank = nonzero_rows_->conditional_rank1(row_ids[i])) {
+            child_rows.push_back(rank - 1);
+            child_row_ids.push_back(i);
+        }
     }
 
     auto child_node = assignments_.group(column);
-    auto rows = child_nodes_[child_node]->has_column(result, assignments_.rank(column));
+    auto child_rows_mask = child_nodes_[child_node]->has_column(
+        child_rows, assignments_.rank(column)
+    );
 
-    // check if we need to update the row indexes
-    if (num_nonzero_rows == nonzero_rows_->size())
-        return rows;
-
-    // shift indexes
-    for (size_t i = 0; i < rows.size(); ++i) {
-        rows[i] = nonzero_rows_->select1(rows[i] + 1);
+    for (size_t i = 0; i < child_rows.size(); ++i) {
+        if (child_rows_mask[i])
+            result[child_row_ids[i]] = true;
     }
 
-    return rows;
+    return result;
 }
 
 std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) const {

@@ -7,17 +7,16 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-std::vector<BinaryMatrix::Row>
+sdsl::bit_vector
 BinaryMatrix::has_column(const std::vector<Row> &row_ids, Column column) const {
-    std::vector<Row> rows;
-    rows.reserve(row_ids.size());
+    sdsl::bit_vector row_mask(row_ids.size(), false);
 
-    for (Row row : row_ids) {
-        if (get(row, column))
-            rows.push_back(row);
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        if (get(row_ids[i], column))
+            row_mask[i] = true;
     }
 
-    return rows;
+    return row_mask;
 }
 
 std::vector<BinaryMatrix::SetBitPositions>

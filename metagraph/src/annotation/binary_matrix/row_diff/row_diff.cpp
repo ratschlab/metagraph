@@ -49,7 +49,7 @@ template <typename Key, class Hash = std::hash<Key>, class EqualTo = std::equal_
 using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, Size>;
 
 template <class BaseMatrix>
-std::vector<BinaryMatrix::Row>
+sdsl::bit_vector
 RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) const {
     const graph::boss::BOSS &boss = graph_->get_boss();
 
@@ -82,20 +82,22 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) 
         }
     }
 
-    auto rd_rows = diffs_.has_column(row_set.values_container(), column);
-    row_set = VectorSet<Row>();
-    tsl::hopscotch_set<Row> flip_rows(rd_rows.begin(), rd_rows.end());
-    tsl::hopscotch_map<Row, bool> has_col;
-    rd_rows = std::vector<Row>();
+    tsl::hopscotch_set<Row> flip_rows;
+    call_ones(diffs_.has_column(row_set.values_container(), column), [&](auto i) {
+        flip_rows.emplace(row_set.values_container()[i]);
+    });
 
-    std::vector<Row> rows;
-    rows.reserve(row_ids.size());
+    row_set = VectorSet<Row>();
+
+    tsl::hopscotch_map<Row, bool> has_col;
+
+    sdsl::bit_vector result(row_ids.size(), false);
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         auto find = has_col.find(row_ids[i]);
         if (find != has_col.end()) {
             if (find->second)
-                rows.push_back(row_ids[i]);
+                result[i] = true;
 
             continue;
         }
@@ -114,10 +116,10 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) 
         }
 
         if (found)
-            rows.push_back(row_ids[i]);
+            result[i] = true;
     }
 
-    return rows;
+    return result;
 }
 
 template

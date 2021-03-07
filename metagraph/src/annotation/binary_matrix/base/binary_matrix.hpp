@@ -29,7 +29,7 @@ class BinaryMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual bool get(Row row, Column column) const = 0;
-    virtual std::vector<Row> has_column(const std::vector<Row> &rows, Column column) const;
+    virtual sdsl::bit_vector has_column(const std::vector<Row> &rows, Column column) const;
     virtual SetBitPositions get_row(Row row) const = 0;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
