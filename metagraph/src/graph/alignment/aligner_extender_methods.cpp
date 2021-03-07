@@ -59,15 +59,16 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
 
     seed_ = &seed;
     reset();
+    xdrop_cutoff_ = ninf;
 }
 
-template <typename Node, typename Column>
-std::pair<size_t, size_t> get_band(const Node &prev,
-                                   const Column &column_prev,
-                                   score_t xdrop_cutoff) {
-    const auto &S_prev = std::get<0>(column_prev[std::get<2>(prev)]);
-    size_t offset_prev = std::get<9>(column_prev[std::get<2>(prev)]);
-    size_t max_pos_prev = std::get<10>(column_prev[std::get<2>(prev)]);
+template <typename NodeType>
+auto DefaultColumnExtender<NodeType>
+::get_band(const AlignNode &prev, const Column &column_prev, score_t xdrop_cutoff)
+        -> std::pair<size_t, size_t> {
+    const auto &S_prev = std::get<0>(column_prev.first[std::get<2>(prev)]);
+    size_t offset_prev = std::get<9>(column_prev.first[std::get<2>(prev)]);
+    size_t max_pos_prev = std::get<10>(column_prev.first[std::get<2>(prev)]);
     assert(max_pos_prev - offset_prev < S_prev.size());
     assert(std::max_element(S_prev.begin(), S_prev.end())
         == S_prev.begin() + (max_pos_prev - offset_prev));
@@ -109,7 +110,7 @@ bool update_column(const DeBruijnGraph &graph_,
 
     auto &[S_prev, E_prev, F_prev, OS_prev, OE_prev, OF_prev,
            prev_node_prev, PS_prev, PF_prev, offset_prev, max_pos_prev]
-        = column_prev[std::get<2>(prev_node)];
+        = column_prev.first[std::get<2>(prev_node)];
     assert(S_prev.size() + offset_prev <= size);
 
     // compute column boundaries for updating the match and deletion scores
@@ -452,9 +453,9 @@ template <typename NodeType>
 auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
         -> std::vector<DBGAlignment> {
     const char *align_start = seed_->get_query().data() + seed_->get_query().size() - 1;
-    size_t start = align_start - query_.data();
-    size_t size = query_.size() - start + 1;
-    assert(start + size == partial_sums_.size());
+    start_ = align_start - query_.data();
+    size_t size = query_.size() - start_ + 1;
+    assert(start_ + size == partial_sums_.size());
 
     std::string_view extend_window_{ align_start, size - 1 };
     DEBUG_LOG("Extend query window: {}", extend_window_);
@@ -483,7 +484,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     };
     size_t total_size = column_vector_size + get_column_size(first_column);
 
-    S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start + 1];
+    S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start_ + 1];
 
     AlignNode start_node{ graph_.max_index() + 1, '\0', 0, 0 };
 
@@ -519,12 +520,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 continue;
 
             assert(table_.count(std::get<0>(prev)));
-            auto &column_prev = table_[std::get<0>(prev)].first;
+            auto &column_prev = table_[std::get<0>(prev)];
 
-            score_t xdrop_cutoff = best_start.second - config_.xdrop;
+            xdrop_cutoff_ = best_start.second - config_.xdrop;
 
             // compute bandwidth based on xdrop criterion
-            auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff);
+            auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff_);
             if (min_i >= max_i)
                 continue;
 
@@ -542,8 +543,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             sanitize(next_column);
 
             bool updated = update_column<NodeType>(
-                graph_, config_, column_prev, next_column, c, start, size,
-                xdrop_cutoff, profile_score_, profile_op_, *seed_
+                graph_, config_, column_prev, next_column, c, start_, size,
+                xdrop_cutoff_, profile_score_, profile_op_, *seed_
             );
             sanitize(next_column);
 
@@ -555,7 +556,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
             converged = !updated || has_converged(column_pair, next_column);
 
-            const score_t *match = &partial_sums_[start + offset];
+            const score_t *match = &partial_sums_[start_ + offset];
             bool extendable = false;
             for (size_t i = 0; i < S.size() && !extendable; ++i) {
                 if (S[i] >= 0 && S[i] + match[i] >= min_path_score)
@@ -570,9 +571,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 add_to_table = true;
             }
 
-            assert(xdrop_cutoff == best_start.second - config_.xdrop);
+            assert(xdrop_cutoff_ == best_start.second - config_.xdrop);
 
-            if (*max_it >= xdrop_cutoff && extendable) {
+            if (*max_it >= xdrop_cutoff_ && extendable) {
                 stack.emplace(cur, *max_it);
                 add_to_table = true;
             }

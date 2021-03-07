@@ -103,6 +103,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     // the initial seed
     const DBGAlignment *seed_;
 
+    score_t xdrop_cutoff_;
+    size_t start_;
+
     virtual void reset() override { table_.clear(); }
 
     virtual const DBGAlignment& get_seed() const override { return *seed_; }
@@ -112,6 +115,10 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode&) {
         column.first.emplace_back(std::move(scores));
     }
+
+    static std::pair<size_t, size_t> get_band(const AlignNode &prev,
+                                              const Column &column_prev,
+                                              score_t xdrop_cutoff);
 
   private:
     // compute perfect match scores for all suffixes
