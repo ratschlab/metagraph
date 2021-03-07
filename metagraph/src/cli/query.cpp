@@ -330,10 +330,18 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
         // TODO: combine these two callbacks into one?
         auto callback = [&](std::string_view sequence,
                             const std::vector<node_index> &path) {
-            added_paths.emplace_back(sequence, path);
+            if (sequence.front() == '#') {
+                added_paths.emplace_back(
+                    full_dbg.get_node_sequence(path[0]).substr(0, full_dbg.get_k() - 1),
+                    path
+                );
+                added_paths.back().first += sequence.substr(full_dbg.get_k() - 1);
+            } else {
+                added_paths.emplace_back(sequence, path);
+            }
             if (full_dbg.get_mode() == DeBruijnGraph::CANONICAL) {
                 added_paths.back().second.resize(0);
-                full_dbg.map_to_nodes(sequence,
+                full_dbg.map_to_nodes(added_paths.back().first,
                     [&](node_index cn) { added_paths.back().second.push_back(cn); }
                 );
             }

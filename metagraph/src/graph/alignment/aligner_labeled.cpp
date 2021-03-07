@@ -67,12 +67,23 @@ process_seq_path(const DeBruijnGraph &graph,
         }
     } else {
         size_t i = 0;
-        graph.map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
-            if (node != DeBruijnGraph::npos)
-                callback(AnnotatedDBG::graph_to_anno_index(node), i);
+        if (query.front() == '#') {
+            std::string map_query = graph.get_node_sequence(query_nodes[0]).substr(0, graph.get_k() - 1);
+            map_query += query.substr(graph.get_k() - 1);
+            graph.map_to_nodes(map_query, [&](DeBruijnGraph::node_index node) {
+                if (node != DeBruijnGraph::npos)
+                    callback(AnnotatedDBG::graph_to_anno_index(node), i);
 
-            ++i;
-        });
+                ++i;
+            });
+        } else {
+            graph.map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
+                if (node != DeBruijnGraph::npos)
+                    callback(AnnotatedDBG::graph_to_anno_index(node), i);
+
+                ++i;
+            });
+        }
         assert(i == query_nodes.size());
     }
 }

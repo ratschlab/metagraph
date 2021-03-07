@@ -265,9 +265,7 @@ void call_hull_sequences(const DeBruijnGraph &graph,
                                                   size_t /* depth */,
                                                   size_t /* fork count */)> &halt) {
     // DFS from branching points
-    std::string kmer = graph.get_node_sequence(node);
-    assert(kmer != std::string(graph.get_k(), '$'));
-    kmer.erase(kmer.begin());
+    std::string kmer(graph.get_k() - 1, '#');
     kmer.push_back('$');
     std::vector<HullPathContext> paths_to_extend;
     graph.call_outgoing_kmers(node, [&](node_index next_node, char c) {
