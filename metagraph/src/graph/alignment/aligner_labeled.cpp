@@ -382,13 +382,21 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     };
 
     // prefetch the next unitig
-    size_t max_depth = this->query_.size();
+    const auto &column = this->table_.find(std::get<0>(node))->second;
+    auto [min_i, max_i] = this->get_band(node, column, this->xdrop_cutoff_);
+
+    size_t bandwidth = max_i - min_i;
+    const score_t *S = &std::get<0>(column.first[std::get<2>(node)])[min_i];
+    std::string_view q_min = this->query_.substr(this->start_);
+
+    assert(this->query_.size() >= min_i + this->start_);
+    size_t max_depth = this->query_.size() - min_i - this->start_;
 
     call_hull_sequences(this->graph_, std::get<0>(node),
         [&](std::string_view seq, const std::vector<NodeType> &path) {
             assert(path.size());
-            assert(this->graph_.traverse(std::get<0>(node),
-                                         seq[this->graph_.get_k() - 1]) == path[0]);
+            assert(this->graph_.traverse(
+                std::get<0>(node), seq[this->graph_.get_k() - 1]) == path[0]);
             push_path(seq, path);
         },
         [&](std::string_view seq, const auto &path, size_t depth, size_t fork_count) {
@@ -398,6 +406,25 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     && (canonical->get_base_node(path.back()) == path.back())
                         != (canonical->get_base_node(path[path.size() - 2])
                             == path[path.size() - 2]));
+
+            if (!result) {
+                // compute xdrop cutoffs
+                bool has_extension = false;
+                std::string_view ref = seq.substr(this->graph_.get_k() - 1);
+                std::string_view qu = q_min.substr(depth + 1 - ref.size());
+                for (size_t i = 0; i < bandwidth; ++i) {
+                    score_t ext_score = S[i] + this->config_.score_sequences(
+                        ref, { qu.data() + i, ref.size() }
+                    );
+
+                    if (ext_score >= this->xdrop_cutoff_) {
+                        has_extension = true;
+                        break;
+                    }
+                }
+
+                result = !has_extension;
+            }
 
             if (result && depth == 1)
                 push_path(seq, path);
