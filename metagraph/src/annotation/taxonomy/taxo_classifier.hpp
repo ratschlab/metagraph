@@ -1,6 +1,9 @@
 #ifndef __TAXONOMIC_CLASSIFIER_HPP__
 #define __TAXONOMIC_CLASSIFIER_HPP__
 
+#include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
+
 #include "annotation/representation/base/annotation.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -39,6 +42,25 @@ class TaxoClassifier {
      */
     void import_taxonomy(const std::string &filepath);
 
+    /**
+     * Update current node scores and best LCA taxid found.
+     *
+     * @param [input] 'start_node' starting node to update ancestors and descendants in the taxonomic tree
+     * @param [input] 'num_kmers_per_node[taxid]' the number of kmers that point to 'taxid' according to the 'taxonomic_map'.
+     * @param [input] 'desired_number_kmers' represents the threshold score that a node have to exceed in order to be considered the solution.
+     * @param [input/modified] 'node_scores' the current scores for each node in the tree.
+     * @param [input/modified] 'nodes_already_propagated' list of nodes that were already considered as 'start_node'.
+     * @param [output] 'best_lca' the node furthest to the root that exceeds the `desired_number_kmers` threshold.
+     * @param [output] 'best_lca_dist_to_root' represents the distance to the root for the current best lca taxid.
+     */
+     void update_scores_and_lca(const TaxId start_node,
+                                const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
+                                const uint64_t &desired_number_kmers,
+                                tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
+                                tsl::hopscotch_set<TaxId> &nodes_already_propagated,
+                                TaxId &best_lca,
+                                uint64_t &best_lca_dist_to_root);
+
   public:
     /**
      * Construct a TaxoClassifier
@@ -46,6 +68,7 @@ class TaxoClassifier {
      * @param [input] filepath to the file exported by TaxonomyDB.
      */
     TaxoClassifier(const std::string &filepath);
+    TaxoClassifier(){};
 
     /**
      * Assign a LCA taxid to a given sequence.
