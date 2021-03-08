@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 
-#include <tsl/hopscotch_set.h>
 #include <tsl/ordered_set.h>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
