@@ -84,6 +84,11 @@ class TestTaxonomy(unittest.TestCase):
                 if query_expected == query_prediction:
                     num_correct_predictions_internals += 1
 
+        print ("num_correct_predictions_tips = ", num_correct_predictions_tips)
+        print ("num_correct_predictions_internals = ", num_correct_predictions_internals)
+        print ("num_total_predictions_tips = ", num_total_predictions_tips)
+        print ("num_total_predictions_internals = ", num_total_predictions_internals)
+
         self.assertEqual(num_correct_predictions_tips, 547)
         self.assertEqual(num_correct_predictions_internals, 26)
         self.assertEqual(num_total_predictions_tips, 650)
