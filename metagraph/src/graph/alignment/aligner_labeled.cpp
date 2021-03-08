@@ -405,10 +405,10 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     const auto &column = this->table_.find(std::get<0>(node))->second;
     auto [min_i, max_i] = this->get_band(node, column, this->xdrop_cutoff_);
 
-    size_t bandwidth = max_i - min_i;
     const auto &S_vec = std::get<0>(column.first[std::get<2>(node)]);
     size_t offset = std::get<9>(column.first[std::get<2>(node)]);
-    const score_t *S = &S_vec[min_i - offset];
+    std::vector<score_t> S(S_vec.begin() + min_i - offset, S_vec.begin() + max_i - offset);
+
     std::string_view q_min = this->query_.substr(this->start_ + min_i);
 
     std::string seq(this->graph_.get_k() - 1, '#');
@@ -446,19 +446,11 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             seq.push_back(outgoing[0].second);
             visited.emplace(outgoing[0].first);
 
-            std::string_view ref(seq);
-            ref = ref.substr(this->graph_.get_k() - 1);
-            assert(ref.size() == path.size());
-
-            for (size_t i = 0; i < bandwidth; ++i) {
-                if (path.size() + i + 1 > q_min.size())
-                    break;
-
-                std::string_view qu { q_min.data() + i + 1, path.size() };
-                if (S[i] + this->config_.score_sequences(ref, qu) >= this->xdrop_cutoff_) {
+            const auto &score_row = this->config_.get_row(seq.back());
+            for (size_t i = 0; i < S.size() && i + path.size() >= q_min.size(); ++i) {
+                S[i] += score_row[q_min[i + path.size()]];
+                if (S[i] >= this->xdrop_cutoff_)
                     cur_node = outgoing[0].first;
-                    break;
-                }
             }
 
             if (cur_node == DeBruijnGraph::npos)
