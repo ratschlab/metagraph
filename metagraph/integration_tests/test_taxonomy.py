@@ -79,6 +79,7 @@ class TestTaxonomy(unittest.TestCase):
                 num_total_predictions_tips += 1
                 if query_expected == query_prediction:
                     num_correct_predictions_tips += 1
+                    print (num_correct_predictions_tips, ". line correct = ", line)
             else:
                 num_total_predictions_internals += 1
                 if query_expected == query_prediction:
