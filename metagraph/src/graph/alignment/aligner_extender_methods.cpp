@@ -159,7 +159,7 @@ bool update_column(const DeBruijnGraph &graph_,
                        S=S.data(),OS=OS.data()](size_t i) {
         score_t del_open = sprev[i] + config_.gap_opening_penalty;
         score_t del_extend = fprev[i] + config_.gap_extension_penalty;
-        F[i] = std::max(del_open, del_extend);
+        F[i] = std::max({ del_open, del_extend, ninf });
         OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
 
         if (F[i] > S[i]) {
@@ -196,7 +196,8 @@ bool update_column(const DeBruijnGraph &graph_,
         __m256i gap_extend = _mm256_set1_epi32(config_.gap_extension_penalty);
         __m256i del_extend = _mm256_add_epi32(fprev_v, gap_extend);
 
-        __m256i del_score = _mm256_max_epi32(del_open, del_extend);
+        __m256i del_score = _mm256_max_epi32(_mm256_max_epi32(del_open, del_extend),
+                                             _mm256_set1_epi32(ninf));
         _mm256_storeu_si256((__m256i*)&F[i], del_score);
 
         __m128i del_op_v = _mm_blendv_epi8(
@@ -219,7 +220,7 @@ bool update_column(const DeBruijnGraph &graph_,
                        S=S.data(),E=E.data(),F=F.data(),
                        OS=OS.data(),OE=OE.data(),OF=OF.data(),
                        PS=PS.data(),PF=PF.data()](size_t i) {
-        if (S[i] < xdrop_cutoff) {
+        if (S[i] < xdrop_cutoff || S[i] < ninf) {
             S[i] = ninf;
             E[i] = ninf;
             F[i] = ninf;
@@ -245,7 +246,7 @@ bool update_column(const DeBruijnGraph &graph_,
     for ( ; i < cur_size; ++i) {
         score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
         score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
-        E[i] = std::max(ins_open, ins_extend);
+        E[i] = std::max({ ins_open, ins_extend, ninf });
         OE[i] = ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH;
 
         if (E[i] > S[i]) {
@@ -268,7 +269,12 @@ bool update_column(const DeBruijnGraph &graph_,
     while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
         score_t ins_open = S.back() + config_.gap_opening_penalty;
         score_t ins_extend = E.back() + config_.gap_extension_penalty;
-        E.push_back(std::max(ins_open, ins_extend));
+        score_t ins_score = std::max(ins_open, ins_extend);
+
+        if (ins_score < ninf)
+            break;
+
+        E.push_back(ins_score);
         F.push_back(ninf);
         S.push_back(std::max({ 0, E.back(), F.back() }));
 
