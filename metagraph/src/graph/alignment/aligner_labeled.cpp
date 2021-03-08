@@ -271,6 +271,8 @@ auto ILabeledDBGAligner
         }
     }
 
+    mtg::common::logger->trace("Seeding done");
+
     return { std::move(query_nodes), std::move(target_columns) };
 }
 
