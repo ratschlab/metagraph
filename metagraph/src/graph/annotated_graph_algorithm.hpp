@@ -68,16 +68,6 @@ mask_nodes_by_node_label(const AnnotatedDBG &anno_graph,
                          size_t num_threads = 1,
                          double min_frequency_for_frequent_label = 0.05);
 
-
-void call_hull_sequences(const DeBruijnGraph &graph,
-                         DeBruijnGraph::node_index start,
-                         const std::function<void(std::string_view,
-                                                  const std::vector<DeBruijnGraph::node_index>&)> &callback,
-                         const std::function<bool(std::string_view,
-                                                  const std::vector<DeBruijnGraph::node_index>&,
-                                                  size_t /* depth */,
-                                                  size_t /* fork count */)> &halt);
-
 } // namespace graph
 } // namespace mtg
 
