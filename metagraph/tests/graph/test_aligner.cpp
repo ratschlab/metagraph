@@ -1464,6 +1464,38 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
 
     check_extend(graph, aligner.get_config(), paths, query);
 }
+
+TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
+    size_t k = 6;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
+
+    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
+                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
+                        "CGATCGATCGATCGATCGATCGA";
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    config.gap_opening_penalty = -5;
+    config.gap_extension_penalty = -2;
+    config.xdrop = 27;
+    config.min_exact_match = 0.0;
+    config.max_nodes_per_seq_char = 10.0;
+    config.num_alternative_paths = 3;
+    config.min_path_score = 0;
+    config.min_cell_score = 0;
+
+    DBGAligner<> aligner(*graph, config);
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(3u, aligner.align(query).size());
+    }
+}
 #endif
 
 TYPED_TEST(DBGAlignerTest, align_nodummy) {
