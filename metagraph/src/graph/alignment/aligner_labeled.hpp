@@ -117,6 +117,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   public:
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::score_t score_t;
+    typedef typename IExtender<NodeType>::node_index node_index;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,

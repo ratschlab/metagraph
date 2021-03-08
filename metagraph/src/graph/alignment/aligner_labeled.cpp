@@ -1,5 +1,7 @@
 #include "aligner_labeled.hpp"
 
+#include <tsl/ordered_set.h>
+
 #include "graph/annotated_dbg.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -10,6 +12,11 @@
 namespace mtg {
 namespace graph {
 namespace align {
+
+template <typename Key, class Hash = std::hash<Key>, class EqualTo = std::equal_to<Key>,
+      class Allocator = std::allocator<Key>, class Container = std::vector<Key, Allocator>,
+      typename Size = uint64_t>
+using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, Size>;
 
 inline void reverse_bit_vector(sdsl::bit_vector &v) {
     size_t begin = 0;
@@ -402,51 +409,62 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     const auto &S_vec = std::get<0>(column.first[std::get<2>(node)]);
     size_t offset = std::get<9>(column.first[std::get<2>(node)]);
     const score_t *S = &S_vec[min_i - offset];
-    std::string_view q_min = this->query_.substr(this->start_);
+    std::string_view q_min = this->query_.substr(this->start_ + min_i);
 
-    assert(this->query_.size() >= min_i + this->start_);
-    size_t max_depth = this->query_.size() - min_i - this->start_;
+    std::string seq(this->graph_.get_k() - 1, '#');
+    VectorSet<node_index> visited;
+    auto &path = const_cast<std::vector<node_index>&>(visited.values_container());
+    node_index cur_node = std::get<0>(node);
+    std::vector<std::pair<node_index, char>> outgoing;
 
-    call_hull_sequences(this->graph_, std::get<0>(node),
-        [&](std::string_view seq, const std::vector<NodeType> &path) {
-            assert(path.size());
-            assert(this->graph_.traverse(
-                std::get<0>(node), seq[this->graph_.get_k() - 1]) == path[0]);
-            push_path(seq, path);
-        },
-        [&](std::string_view seq, const auto &path, size_t depth, size_t fork_count) {
-            bool result = fork_count || depth > max_depth
-                || (path.size() && cached_edge_sets_.count(path.back()))
-                || (path.size() >= 2 && canonical
+    while (cur_node != DeBruijnGraph::npos) {
+        outgoing.clear();
+        this->graph_.call_outgoing_kmers(cur_node, [&](node_index next, char c) {
+            if (c != boss::BOSS::kSentinel)
+                outgoing.emplace_back(next, c);
+        });
+
+        cur_node = DeBruijnGraph::npos;
+
+        if (outgoing.empty()) {
+            if (path.size())
+                push_path(seq, path);
+        } else if (outgoing.size() > 1 || visited.count(outgoing[0].first)
+                || cached_edge_sets_.count(outgoing[0].first)
+                || (path.size() && canonical
                     && (canonical->get_base_node(path.back()) == path.back())
-                        != (canonical->get_base_node(path[path.size() - 2])
-                            == path[path.size() - 2]));
+                        != (canonical->get_base_node(outgoing[0].first)
+                            == outgoing[0].first))) {
+            seq += '#';
+            path.push_back(0);
+            for (const auto &[next, c] : outgoing) {
+                seq.back() = c;
+                path.back() = next;
+                push_path(seq, path);
+            }
+        } else {
+            seq.push_back(outgoing[0].second);
+            visited.emplace(outgoing[0].first);
 
-            if (!result) {
-                // compute xdrop cutoffs
-                bool has_extension = false;
-                std::string_view ref = seq.substr(this->graph_.get_k() - 1);
-                std::string_view qu = q_min.substr(depth + 1 - ref.size());
-                for (size_t i = 0; i < bandwidth; ++i) {
-                    score_t ext_score = S[i] + this->config_.score_sequences(
-                        ref, { qu.data() + i, ref.size() }
-                    );
+            std::string_view ref(seq);
+            ref = ref.substr(this->graph_.get_k() - 1);
+            assert(ref.size() == path.size());
 
-                    if (ext_score >= this->xdrop_cutoff_) {
-                        has_extension = true;
-                        break;
-                    }
+            for (size_t i = 0; i < bandwidth; ++i) {
+                if (path.size() + i + 1 > q_min.size())
+                    break;
+
+                std::string_view qu { q_min.data() + i + 1, path.size() };
+                if (S[i] + this->config_.score_sequences(ref, qu) >= this->xdrop_cutoff_) {
+                    cur_node = outgoing[0].first;
+                    break;
                 }
-
-                result = !has_extension;
             }
 
-            if (result && depth == 1)
+            if (cur_node == DeBruijnGraph::npos)
                 push_path(seq, path);
-
-            return result;
         }
-    );
+    }
 
     std::vector<AnnotatedDBG::row_index> anno_rows;
     anno_rows.reserve(anno_rows_to_id.size());
