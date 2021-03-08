@@ -708,6 +708,7 @@ bool DefaultColumnExtender<NodeType>::has_converged(const Column &column,
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::sanitize(Scores &scores, score_t max_score) {
     auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = scores;
+    std::ignore = max_score;
 #ifndef NDEBUG
     for (size_t i = 0; i < S.size(); ++i) {
         assert(S[i] >= ninf);
