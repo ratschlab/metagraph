@@ -51,6 +51,11 @@ using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, Siz
 template <class BaseMatrix>
 sdsl::bit_vector
 RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) const {
+    sdsl::bit_vector result(row_ids.size(), false);
+
+    if (row_ids.empty())
+        return result;
+
     const graph::boss::BOSS &boss = graph_->get_boss();
 
     VectorSet<Row> row_set;
@@ -65,8 +70,9 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) 
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                     graph_->boss_to_kmer_index(boss_edge));
 
-            bool is_new = row_set.emplace(row).second;
-            rd_paths_trunc[i].push_back(row);
+            auto [it, is_new] = row_set.emplace(row);
+            rd_paths_trunc[i].push_back(it - row_set.begin());
+            assert(row_set.values_container()[rd_paths_trunc[i].back()] == row);
 
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
@@ -82,41 +88,15 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) 
         }
     }
 
-    tsl::hopscotch_set<Row> flip_rows;
-    call_ones(diffs_.has_column(row_set.values_container(), column), [&](auto i) {
-        flip_rows.emplace(row_set.values_container()[i]);
-    });
-
-    row_set = VectorSet<Row>();
-
-    tsl::hopscotch_map<Row, bool> has_col;
-
-    sdsl::bit_vector result(row_ids.size(), false);
+    sdsl::bit_vector row_set_mask = diffs_.has_column(row_set.values_container(), column);
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        auto find = has_col.find(row_ids[i]);
-        if (find != has_col.end()) {
-            if (find->second)
-                result[i] = true;
-
-            continue;
+        bool found = row_set_mask[rd_paths_trunc[i].back()];
+        for (auto it = rd_paths_trunc[i].rbegin() + 1; it != rd_paths_trunc[i].rend(); ++it) {
+            row_set_mask[*it] = (found ^= row_set_mask[*it]);
         }
 
-        auto it = rd_paths_trunc[i].rbegin();
-        assert(anchor()[*it] || has_col.count(*it));
-
-        bool found = anchor()[*it] ? flip_rows.count(*it) : has_col[*it];
-
-        for (++it; it != rd_paths_trunc[i].rend(); ++it) {
-            assert(!has_col.count(*it));
-            if (flip_rows.count(*it))
-                found = !found;
-
-            has_col[*it] = found;
-        }
-
-        if (found)
-            result[i] = true;
+        result[i] = found;
     }
 
     return result;
