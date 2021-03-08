@@ -470,7 +470,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             0 /* offset */, 0 /* max_pos */
         ) }, false }
     ).first.value().first[0];
-    sanitize(first_column);
+    sanitize(first_column, ninf);
     auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = first_column;
 
     size_t num_columns = 1;
@@ -540,13 +540,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                                OpVec(cur_size, Cigar::CLIPPED),
                                prev, PrevVec(cur_size, NONE), PrevVec(cur_size, NONE),
                                min_i /* offset */, 0 /* max_pos */);
-            sanitize(next_column);
+            sanitize(next_column, best_start.second);
 
             bool updated = update_column<NodeType>(
                 graph_, config_, column_prev, next_column, c, start_, size,
                 xdrop_cutoff_, profile_score_, profile_op_, *seed_
             );
-            sanitize(next_column);
 
             auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
 
@@ -581,6 +580,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             if (add_to_table) {
                 if (OS[max_pos - offset] == Cigar::MATCH)
                     starts.emplace_back(cur, *max_it);
+
+                sanitize(next_column, best_start.second);
 
                 total_size += get_column_size(next_column) + (!depth * column_vector_size);
                 ++num_columns;
@@ -699,8 +700,18 @@ bool DefaultColumnExtender<NodeType>::has_converged(const Column &column,
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>::sanitize(Scores &scores) {
+void DefaultColumnExtender<NodeType>::sanitize(Scores &scores, score_t max_score) {
     auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos] = scores;
+#ifndef NDEBUG
+    for (size_t i = 0; i < S.size(); ++i) {
+        assert(S[i] >= ninf);
+        assert(S[i] <= max_score);
+        assert(E[i] >= ninf);
+        assert(E[i] <= max_score);
+        assert(F[i] >= ninf);
+        assert(F[i] <= max_score);
+    }
+#endif
 
     size_t size = S.size();
     size_t pad_size = ((size + 7) / 8) * 8 + 8;

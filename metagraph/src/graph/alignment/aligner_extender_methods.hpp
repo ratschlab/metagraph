@@ -131,7 +131,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     static bool has_converged(const Column &column, const Scores &next);
 
-    static void sanitize(Scores &scores);
+    static void sanitize(Scores &scores, score_t max_score);
 };
 
 } // namespace align
