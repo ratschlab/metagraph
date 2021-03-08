@@ -273,7 +273,6 @@ void call_hull_sequences(const DeBruijnGraph &graph,
             return;
 
         kmer.back() = c;
-        assert(graph.kmer_to_node(kmer) == next_node);
         if (!halt(kmer, { next_node }, 1, 0)) {
             paths_to_extend.emplace_back(HullPathContext{
                 .last_kmer = kmer,
@@ -309,7 +308,6 @@ void call_hull_sequences(const DeBruijnGraph &graph,
         }
 
         assert(path.size() == seq.length() - graph.get_k() + 1);
-        assert(path == map_sequence_to_nodes(graph, seq));
 
         callback(seq, path);
 
@@ -330,7 +328,6 @@ void call_hull_sequences(const DeBruijnGraph &graph,
                 return;
 
             seq.back() = c;
-            assert(graph.kmer_to_node(seq) == next_node);
             if (!halt(seq, { next_node }, depth + 1, fork_count + 1)) {
                 paths_to_extend.emplace_back(HullPathContext{
                     .last_kmer = seq,
