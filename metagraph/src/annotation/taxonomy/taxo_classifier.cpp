@@ -61,16 +61,76 @@ TaxoClassifier::TaxoClassifier(const std::string &filepath) {
     logger->trace("Finished the Taxonomic Classifier's constructor in '{}' sec", timer.elapsed());
 }
 
+void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
+                                           const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
+                                           const uint64_t &desired_number_kmers,
+                                           tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
+                                           tsl::hopscotch_set<TaxId> &nodes_already_propagated,
+                                           TaxId &best_lca,
+                                           uint64_t &best_lca_dist_to_root) {
+    if (nodes_already_propagated.count(start_node)) {
+        return;
+    }
+    uint64_t score_from_processed_parents = 0;
+    uint64_t score_from_unprocessed_parents = num_kmers_per_node.at(start_node);
+
+    std::vector<TaxId> processed_parents;
+    std::vector<TaxId> unprocessed_parents;
+
+    TaxId act_node = start_node;
+    unprocessed_parents.push_back(act_node);
+
+    while (act_node != root_node) {
+        act_node = node_parent[act_node];
+        if (!nodes_already_propagated.count(act_node)) {
+            if (num_kmers_per_node.count(act_node)) {
+                score_from_unprocessed_parents += num_kmers_per_node.at(act_node);
+            }
+            unprocessed_parents.push_back(act_node);
+        } else {
+            if (num_kmers_per_node.count(act_node)) {
+                score_from_processed_parents += num_kmers_per_node.at(act_node);
+            }
+            processed_parents.push_back(act_node);
+        }
+    }
+    for (uint64_t i = 0; i < unprocessed_parents.size(); ++i) {
+        TaxId &act_node = unprocessed_parents[i];
+        node_scores[act_node] =
+                score_from_processed_parents + score_from_unprocessed_parents;
+        nodes_already_propagated.insert(act_node);
+
+        uint64_t act_dist_to_root =
+                processed_parents.size() + unprocessed_parents.size() - i;
+        if (node_scores[act_node] >= desired_number_kmers &&
+            act_dist_to_root > best_lca_dist_to_root) {
+            best_lca = act_node;
+            best_lca_dist_to_root = act_dist_to_root;
+        }
+    }
+    for (uint64_t i = 0; i < processed_parents.size(); ++i) {
+        TaxId &act_node = processed_parents[i];
+        node_scores[act_node] += score_from_unprocessed_parents;
+
+        uint64_t act_dist_to_root = processed_parents.size() - i;
+        if (node_scores[act_node] >= desired_number_kmers &&
+            act_dist_to_root > best_lca_dist_to_root) {
+            best_lca = act_node;
+            best_lca_dist_to_root = act_dist_to_root;
+        }
+    }
+}
+
 TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                    const std::string &sequence,
                                    const double &lca_coverage_threshold) {
-    tsl::hopscotch_map<TaxId, uint64_t> raw_node_matches;
+    tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
     uint64_t total_kmers = 0;
 
     graph.map_to_nodes(sequence, [&](const auto &i) {
       if (i > 0) {
           // We need this i-1, because of the way how annotation cmd is implemented.
-          raw_node_matches[taxonomic_map[i - 1]]++;
+          num_kmers_per_node[taxonomic_map[i - 1]]++;
           total_kmers++;
       }
     });
@@ -81,59 +141,11 @@ TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     uint64_t desired_number_kmers = total_kmers * lca_coverage_threshold;
     TaxId best_lca = root_node;
     uint64_t best_lca_dist_to_root = 1;
-    for (const auto &node_pair: raw_node_matches) {
+    for (const auto &node_pair: num_kmers_per_node) {
         TaxId start_node = node_pair.first;
-        if (nodes_already_propagated.count(start_node)) {
-            continue;
-        }
-        uint64_t score_from_processed_parents = 0;
-        uint64_t score_from_unprocessed_parents = raw_node_matches[start_node];
-
-        std::vector<TaxId> processed_parents;
-        std::vector<TaxId> unprocessed_parents;
-
-        TaxId act_node = start_node;
-        unprocessed_parents.push_back(act_node);
-
-        while (act_node != root_node) {
-            act_node = node_parent[act_node];
-            if (!nodes_already_propagated.count(act_node)) {
-                if (raw_node_matches.count(act_node)) {
-                    score_from_unprocessed_parents += raw_node_matches[act_node];
-                }
-                unprocessed_parents.push_back(act_node);
-            } else {
-                if (raw_node_matches.count(act_node)) {
-                    score_from_processed_parents += raw_node_matches[act_node];
-                }
-                processed_parents.push_back(act_node);
-            }
-        }
-        for (uint64_t i = 0; i < unprocessed_parents.size(); ++i) {
-            TaxId &act_node = unprocessed_parents[i];
-            node_scores[act_node] =
-                    score_from_processed_parents + score_from_unprocessed_parents;
-            nodes_already_propagated.insert(act_node);
-
-            uint64_t act_dist_to_root =
-                    processed_parents.size() + unprocessed_parents.size() - i;
-            if (node_scores[act_node] >= desired_number_kmers &&
-                act_dist_to_root > best_lca_dist_to_root) {
-                best_lca = act_node;
-                best_lca_dist_to_root = act_dist_to_root;
-            }
-        }
-        for (uint64_t i = 0; i < processed_parents.size(); ++i) {
-            TaxId &act_node = processed_parents[i];
-            node_scores[act_node] += score_from_unprocessed_parents;
-
-            uint64_t act_dist_to_root = processed_parents.size() - i;
-            if (node_scores[act_node] >= desired_number_kmers &&
-                act_dist_to_root > best_lca_dist_to_root) {
-                best_lca = act_node;
-                best_lca_dist_to_root = act_dist_to_root;
-            }
-        }
+        update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers,
+                              node_scores, nodes_already_propagated, best_lca,
+                              best_lca_dist_to_root);
     }
     return best_lca;
 }

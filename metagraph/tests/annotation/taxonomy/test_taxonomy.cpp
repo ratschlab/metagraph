@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include "annotation/taxonomy/taxonomic_db.hpp"
+#include "annotation/taxonomy/taxo_classifier.hpp"
 #include "../test_annotated_dbg_helpers.hpp"
 #include "seq_io/sequence_io.hpp"
 
@@ -274,6 +275,143 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
         EXPECT_EQ(make_pair(test.test_id, test.expected_freq_taxid),
                   make_pair(test.test_id, frequencies_taxid));
+    }
+}
+
+TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
+    mtg::annot::TaxoClassifier taxo_classifier;
+
+    taxo_classifier.root_node = 1;
+    taxo_classifier.node_parent = {        {1, 1},
+                                    {2, 1},       {3, 1},
+                                             {4, 3},    {5, 3},
+                                        {6, 4}, {7, 4}
+                                    };
+
+    tsl::hopscotch_map<uint64_t, uint64_t> num_kmers_per_node = {
+        {1, 20}, {2, 1}, {3, 15}, {4, 25}, {5, 6}, {6, 15}, {7, 3}  // leaves 2, 7 and 5 have a smaller number of kmers.
+    };
+
+    struct query_taxo_map_update {
+        std::string test_id;
+        std::string description;
+        uint64_t desired_number_kmers;
+        vector<vector<uint64_t>> ordered_node_sets;
+        tsl::hopscotch_map<uint64_t, uint64_t> expected_node_scores;
+        tsl::hopscotch_set<uint64_t> expected_nodes_already_propagated;
+        uint64_t expected_best_lca;
+        uint64_t expected_best_lca_dist_to_root;
+    };
+
+    vector<vector<uint64_t>> ordered_node_sets = {
+            {1, 2, 3, 4, 5, 6, 7},
+            {7, 6, 5, 4, 3, 2, 1},
+            {7, 4, 6, 3, 5, 1, 2},
+            {4, 6, 7, 3, 5, 1, 2},
+            {2, 5, 4, 6, 7, 3, 1},
+            {2, 6, 7, 5},
+            {6, 7, 5, 2},
+            {6, 7, 5, 2, 1},
+            {3, 5, 6, 7, 2}
+    };
+
+    std::vector<query_taxo_map_update> tests = {
+        {   "test1",
+            "desired_number_kmers is equal to node_score[6]; expect LCA taxid = 6",
+            75,
+            ordered_node_sets,
+            {{1, 85}, {2, 21}, {3, 84}, {4, 78}, {5, 41}, {6, 75}, {7, 63}},
+            {1, 2, 3, 4, 5, 6, 7},
+            6,
+            4
+        },
+        {   "test2",
+                "desired_number_kmers is equal to node_score[6]+1; expect LCA taxid = 4",
+                76,
+                ordered_node_sets,
+                {{1, 85}, {2, 21}, {3, 84}, {4, 78}, {5, 41}, {6, 75}, {7, 63}},
+                {1, 2, 3, 4, 5, 6, 7},
+                4,
+                3
+        },
+        {   "test3",
+                "desired_number_kmers is equal to node_score[4]+1; expect LCA taxid = 3",
+                79,
+                ordered_node_sets,
+                {{1, 85}, {2, 21}, {3, 84}, {4, 78}, {5, 41}, {6, 75}, {7, 63}},
+                {1, 2, 3, 4, 5, 6, 7},
+                3,
+                2
+        },
+        {   "test4",
+                "desired_number_kmers is equal to node_score[3]+1; expect LCA taxid = 1",
+                85,
+                ordered_node_sets,
+                {{1, 85}, {2, 21}, {3, 84}, {4, 78}, {5, 41}, {6, 75}, {7, 63}},
+                {1, 2, 3, 4, 5, 6, 7},
+                1,
+                1
+        },
+        {   "test5",
+                "Check updated scores after processing only node 4",
+                100,
+                {{4}},
+                {{4, 60}, {3, 60}, {1, 60}},
+                {1, 3, 4},
+                1,
+                1
+        },
+        {   "test6",
+                "Check updated scores after processing only the nodes 4 and 6",
+                100,
+                {{4, 6}, {6, 4}},
+                {{6, 75}, {4, 75}, {3, 75}, {1, 75}},
+                {1, 3, 4, 6},
+                1,
+                1
+        },
+        {   "test7",
+                "Check updated scores after processing only the nodes 7 and 5",
+                100,
+                {{7, 5}, {5, 7}},
+                {{7, 63}, {4, 63}, {5, 41}, {3, 69}, {1, 69}},
+                {1, 3, 4, 5, 7},
+                1,
+                1
+        },
+        {   "test8",
+                "Check updated scores after processing only the nodes 2, 6 and 7",
+                100,
+                {{2, 6, 7}, {2, 7, 6}, {6, 2, 7}, {6, 7, 2}, {7, 2, 6}, {7, 6, 2}},
+                {{1, 79}, {2, 21}, {3, 78}, {4, 78}, {6, 75}, {7, 63}},
+                {1, 2, 3, 4, 6, 7},
+                1,
+                1
+        },
+    };
+
+    for (const auto &test: tests) {
+        for (std::vector<uint64_t> nodes_set: test.ordered_node_sets) {
+            tsl::hopscotch_set<uint64_t> nodes_already_propagated;
+            tsl::hopscotch_map<uint64_t, uint64_t> node_scores;
+            uint64_t best_lca = taxo_classifier.root_node;
+            uint64_t best_lca_dist_to_root = 1;
+
+            for (uint64_t node: nodes_set) {
+                taxo_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
+                                                      node_scores, nodes_already_propagated,
+                                                      best_lca, best_lca_dist_to_root);
+            }
+
+            EXPECT_EQ(make_pair(test.test_id, test.expected_node_scores),
+                    make_pair(test.test_id, node_scores));
+            EXPECT_EQ(make_pair(test.test_id, test.expected_nodes_already_propagated),
+                    make_pair(test.test_id, nodes_already_propagated));
+            EXPECT_EQ(make_pair(test.test_id, test.expected_best_lca),
+                    make_pair(test.test_id, best_lca));
+            EXPECT_EQ(make_pair(test.test_id, test.expected_best_lca_dist_to_root),
+                    make_pair(test.test_id, best_lca_dist_to_root));
+        }
     }
 }
 
