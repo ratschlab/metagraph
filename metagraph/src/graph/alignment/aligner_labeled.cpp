@@ -399,7 +399,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     auto [min_i, max_i] = this->get_band(node, column, this->xdrop_cutoff_);
 
     size_t bandwidth = max_i - min_i;
-    const score_t *S = &std::get<0>(column.first[std::get<2>(node)])[min_i];
+    const auto &S_vec = std::get<0>(column.first[std::get<2>(node)]);
+    size_t offset = std::get<9>(column.first[std::get<2>(node)]);
+    const score_t *S = &S_vec[min_i - offset];
     std::string_view q_min = this->query_.substr(this->start_);
 
     assert(this->query_.size() >= min_i + this->start_);
