@@ -704,7 +704,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         // merge chunks into a single one and remove them
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        common::merge_files(chunks_to_merge, write, true);
+        common::merge_files(chunks_to_merge, write);
         out.finish();
         logger->trace("Merged {} chunks into {} with {} k-mers",
                       chunks_to_merge.size(), real_F_W[j], out.size());
@@ -766,7 +766,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
             }
 
             KMER prev_kmer(0);
-            const std::function<void(const KMER_INT &)> &write_dummy = [&](const KMER_INT &v) {
+            const std::function<void(const KMER_INT &)> write_dummy = [&](const KMER_INT &v) {
                 dummy_chunk.add(v);
                 // ***F*
                 KMER kmer(v);
@@ -781,7 +781,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
             };
             std::vector<std::string> F_chunk_names(names.begin() + F * alphabet_size,
                                                    names.begin() + (F + 1) * alphabet_size);
-            common::merge_files(F_chunk_names, write_dummy, true);
+            common::merge_files(F_chunk_names, write_dummy);
 
             dummy_chunk.finish();
             std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),

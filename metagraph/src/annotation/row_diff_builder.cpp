@@ -585,11 +585,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         if (buf.size()) {
                             Encoder<uint64_t>::append(buf, new_chunks.back());
                         }
-
-                        // remove merged chunks
-                        for (const std::string &chunk_file : to_merge) {
-                            fs::remove(chunk_file);
-                        }
                     }
                     filenames.swap(new_chunks);
                 }

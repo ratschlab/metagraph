@@ -16,6 +16,7 @@ bitmap_builder_set_disk::bitmap_builder_set_disk(uint64_t size,
         set_bit_positions_(num_threads, buffer_size, tmp_dir_, -1, 16) {}
 
 bitmap_builder_set_disk::~bitmap_builder_set_disk() {
+    set_bit_positions_.clear();
     utils::remove_temp_dir(tmp_dir_);
 }
 

@@ -17,7 +17,6 @@ SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
                                         size_t disk_cap_bytes,
                                         size_t merge_count)
     : num_threads_(num_threads),
-      reserved_num_elements_(reserved_num_elements),
       disk_cap_bytes_(disk_cap_bytes),
       merge_count_(merge_count),
       chunk_file_prefix_(tmp_dir/"chunk_"),
@@ -80,7 +79,6 @@ void SortedSetDiskBase<T>::clear() {
     chunk_count_ = 0;
     l1_chunk_count_ = 0;
     total_chunk_size_bytes_ = 0;
-    try_reserve(reserved_num_elements_);
     Vector<T>().swap(data_); // free up the (usually very large) buffer
 }
 
