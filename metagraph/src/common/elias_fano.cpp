@@ -205,13 +205,17 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
     : declared_size_(size), offset_(min_value) {
     auto mode = append ? std::ios::binary | std::ios::app : std::ios::binary;
     sink_internal_ = std::ofstream(out_filename, mode | std::ios::binary);
-    sink_ = &sink_internal_;
-    sink_internal_upper_ = std::ofstream(out_filename + ".up", mode | std::ios::binary);
-    sink_upper_ = &sink_internal_upper_;
-    if (!sink_->good() || !sink_upper_->good()) {
-        logger->error("Unable to write to {}", out_filename);
+    if (!sink_internal_.is_open()) {
+        logger->error("Unable to open {} for writing", out_filename);
         std::exit(EXIT_FAILURE);
     }
+    sink_internal_upper_ = std::ofstream(out_filename + ".up", mode | std::ios::binary);
+    if (!sink_internal_upper_.is_open()) {
+        logger->error("Unable to open {} for writing", out_filename + ".up");
+        std::exit(EXIT_FAILURE);
+    }
+    sink_ = &sink_internal_;
+    sink_upper_ = &sink_internal_upper_;
     init(size, max_value);
 }
 
@@ -220,6 +224,7 @@ EliasFanoEncoder<T>::EliasFanoEncoder(const std::vector<T> &data,
                                       std::ofstream *sink,
                                       std::ofstream *sink_upper)
     : declared_size_(data.size()), sink_(sink), sink_upper_(sink_upper) {
+    assert(sink_->is_open() && sink_upper_->is_open());
     if (data.size() == 0U) {
         return;
     }
@@ -372,9 +377,13 @@ template <typename T>
 EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool remove_source)
     : source_name_(source_name), remove_source_(remove_source) {
     source_.open(source_name, std::ios::binary);
+    if (!source_.is_open()) {
+        logger->error("Unable to open {}", source_name);
+        std::exit(EXIT_FAILURE);
+    }
     source_upper_.open(source_name + ".up", std::ios::binary);
-    if (!source_.good() || !source_upper_.good()) {
-        logger->error("Unable to read from {}", source_name);
+    if (!source_upper_.is_open()) {
+        logger->error("Unable to open {}", source_name + ".up");
         std::exit(EXIT_FAILURE);
     }
     init();
@@ -454,7 +463,8 @@ bool EliasFanoDecoder<T>::init() {
     lower_idx_ = 0;
     memset(lower_, 0, sizeof(lower_));
     upper_pos_ = 0;
-    if (!source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t))) {
+    source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
+    if (source_.eof()) {
         if (remove_source_) {
             std::filesystem::remove(source_name_);
             std::filesystem::remove(source_name_ + ".up");
@@ -477,6 +487,11 @@ bool EliasFanoDecoder<T>::init() {
     upper_.resize((num_upper_bytes_ + 7) / 8, 0);
     source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
+
+    if (!source_.good() || !source_upper_.good()) {
+        logger->error("Failed reading from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
 
     return true;
 }
@@ -514,8 +529,8 @@ EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source,
       source_second_name_(source + ".count"),
       remove_source_(remove_source) {
     source_second_ = std::ifstream(source_second_name_, std::ios::binary);
-    if (!source_second_.good()) {
-        logger->error("Unable to read from {}", source_second_name_);
+    if (!source_second_.is_open()) {
+        logger->error("Unable to open {}", source_second_name_);
         std::exit(EXIT_FAILURE);
     }
 }

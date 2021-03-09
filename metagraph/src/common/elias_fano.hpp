@@ -77,7 +77,6 @@ class EliasFanoEncoder {
 
     void init(size_t size, T max_value);
 
-  private:
     /**
      * The lower bits of the encoded number, obtained by simply concatenating the
      * binary representation of the lower bits of each number.
@@ -186,7 +185,6 @@ class EliasFanoDecoder {
     /** Decompressed the next block into buffer and returns the number of elements in it */
     size_t decompress_next_block();
 
-  private:
     /** Index of current element */
     size_t position_ = 0;
 
@@ -337,7 +335,7 @@ class EliasFanoEncoderBuffered {
 
   private:
     void encode_chunk();
-  private:
+
     std::vector<T> buffer_;
     std::ofstream sink_;
     std::ofstream sink_upper_;
@@ -380,7 +378,7 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
 
   private:
     void encode_chunk();
-  private:
+
     std::vector<T> buffer_;
     std::vector<C> buffer_second_;
     std::ofstream sink_;
