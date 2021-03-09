@@ -25,6 +25,9 @@ void concat(const std::vector<std::string> &files, const std::string &result);
 
 void remove_chunks(const std::vector<std::string> &files);
 
+// get size in bytes
+uint64_t chunk_size(const std::string &file);
+
 /**
  * Elias-Fano encoder that streams the encoded result into a file.
  * Loosely inspired  by

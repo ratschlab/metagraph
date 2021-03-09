@@ -139,7 +139,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         // increment chunk_count, so that get_file_names() returns correct values
         merge_all(all_merged_file, get_file_names());
 
-        total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
+        total_chunk_size_bytes_ = chunk_size(all_merged_file);
         if (total_chunk_size_bytes_ > disk_cap_bytes_ * 0.8) {
             logger->critical("Disk space reduced by < 20%. Giving up.");
             std::exit(EXIT_FAILURE);
@@ -223,7 +223,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
     for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
         std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
         chunks.push_back(chunk_name);
-        *total_size -= static_cast<int64_t>(std::filesystem::file_size(chunk_name));
+        *total_size -= static_cast<int64_t>(chunk_size(chunk_name));
     }
     EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
     std::function<void(const T &v)> on_new_item
@@ -234,7 +234,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
     *l1_chunk_count += 1;
     logger->trace("Merging chunks {}..{} into {} done", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
-    *total_size += std::filesystem::file_size(merged_l1_file_name);
+    *total_size += chunk_size(merged_l1_file_name);
 }
 
 template <typename T>
@@ -250,7 +250,7 @@ void SortedSetDiskBase<T>::merge_all(const std::string &out_file,
     merge_files(to_merge, on_new_item);
     encoder.finish();
     logger->trace("Merging all {} chunks into {} of size {:.0f} MB done",
-                  to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
+                  to_merge.size(), out_file, chunk_size(out_file) / 1e6);
 }
 
 template <typename T>

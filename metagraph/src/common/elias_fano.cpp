@@ -53,6 +53,18 @@ void remove_chunks(const std::vector<std::string> &files) {
     }
 }
 
+uint64_t chunk_size(const std::string &file) {
+    std::vector<std::string> suffixes = { "", ".up" };
+    if (std::filesystem::exists(file + ".count"))
+        suffixes.push_back(".count");
+
+    uint64_t size = 0;
+    for (const std::string &suffix : suffixes) {
+        size += std::filesystem::file_size(file + suffix);
+    }
+    return size;
+}
+
 template <class T, class Enable = void>
 struct Unaligned;
 
