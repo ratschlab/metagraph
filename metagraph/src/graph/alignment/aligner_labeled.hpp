@@ -102,9 +102,6 @@ class LabeledDBGAligner : public ILabeledDBGAligner {
   protected:
     typedef LabeledSeeder<BaseSeeder> Seeder;
 
-    Extender build_extender(std::string_view query,
-                            const ISeeder<node_index> &seeder) const;
-
     Seeder build_seeder(uint64_t target_column,
                         std::string_view query,
                         bool is_reverse_complement,
@@ -174,7 +171,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
               const AlignmentCallback &callback) const {
     auto mapped_batch = map_and_label_query_batch(generate_query);
 
-    size_t num_queries = 0;
+    size_t i = 0;
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
@@ -187,16 +184,14 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         assert(this_query == query);
 
         assert(config_.num_alternative_paths);
-        assert(target_columns[num_queries].size());
+        assert(target_columns[i].size());
 
-        const auto &[nodes, nodes_rc] = query_nodes_pair[num_queries];
-        const auto &targets = target_columns[num_queries].values_container();
+        const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 
         Extender extender(anno_graph_, config_, this_query);
         Extender extender_rc(anno_graph_, config_, reverse);
 
-        for (size_t it = 0; it < targets.size(); ++it) {
-            const auto &[target_column, signature_pair] = targets[it];
+        for (const auto &[target_column, signature_pair] : target_columns[i]) {
             const auto &[signature, signature_rc] = signature_pair;
 
             Seeder seeder = build_seeder(
@@ -248,7 +243,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             callback(header, std::move(paths));
         }
 
-        ++num_queries;
+        ++i;
     });
 }
 
