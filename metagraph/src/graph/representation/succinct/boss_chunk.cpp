@@ -137,6 +137,10 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
 }
 
 BOSS::Chunk::~Chunk() {
+    W_.close(true);
+    last_.close(true);
+    weights_.close(true);
+
     // remove the temp directory, but only if it was initialized
     if (!dir_.empty())
         utils::remove_temp_dir(dir_);
