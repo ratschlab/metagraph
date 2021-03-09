@@ -71,11 +71,8 @@ void SortedSetDiskBase<T>::clear() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
-    async_merge_l1_.remove_waiting_tasks();
     // remove the files that have not been requested to merge
-    for (const auto &chunk_file : get_file_names()) {
-        std::filesystem::remove(chunk_file);
-    }
+    remove_chunks(get_file_names());
     chunk_count_ = 0;
     l1_chunk_count_ = 0;
     total_chunk_size_bytes_ = 0;
@@ -255,6 +252,7 @@ void SortedSetDiskBase<T>::merge_all(const std::string &out_file,
 
 template <typename T>
 std::vector<std::string> SortedSetDiskBase<T>::get_file_names() {
+    async_merge_l1_.remove_waiting_tasks();
     async_merge_l1_.join(); // make sure all L1 merges are done
     std::vector<std::string> file_names;
     if (merged_all_count_ > 0) {
