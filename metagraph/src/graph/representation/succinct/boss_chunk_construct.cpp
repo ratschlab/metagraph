@@ -604,6 +604,8 @@ void add_reverse_complements(size_t k,
         }
     }
 
+    uint64_t total_num_kmers = 0;
+
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < rc_set.size(); ++j) {
         // start merging original with reverse_complements kmers
@@ -615,6 +617,10 @@ void add_reverse_complements(size_t k,
                 = [&](const T_INT_REAL &v) { out.add(v); };
         common::merge_files(chunks_to_merge, write);
         out.finish();
+        logger->trace("Augmented chunk {} with reverse complement k-mers."
+                      " Total number of k-mers: {}", real_F_W[j], out.size());
+        #pragma omp atomic
+        total_num_kmers += out.size();
 
         rc_set[j].reset();
         std::filesystem::remove_all(real_F_W[j] + "_rc");
@@ -624,11 +630,8 @@ void add_reverse_complements(size_t k,
                 std::filesystem::rename(real_F_W[j] + "_new" + suffix,
                                         real_F_W[j] + suffix);
         }
-
-        logger->trace("Augmented chunk {} with reverse complement k-mers."
-                      " New size: {} bytes", real_F_W[j],
-                      std::filesystem::file_size(real_F_W[j]));
     }
+    logger->trace("Total number of real k-mers: {}", total_num_kmers);
 }
 
 template <typename KMER>
@@ -688,6 +691,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
 
+    uint64_t total_num_kmers = 0;
     // merge each group of chunks into a single one for each F and W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < real_F_W.size(); ++j) {
@@ -702,14 +706,17 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
                 = [&](const T_INT_REAL &v) { out.add(v); };
         common::merge_files(chunks_to_merge, write, true);
         out.finish();
-        logger->trace("Merged {} chunks into {} of size: {} bytes",
-                      chunks_to_merge.size(), real_F_W[j],
-                      std::filesystem::file_size(real_F_W[j]));
+        logger->trace("Merged {} chunks into {} with {} k-mers",
+                      chunks_to_merge.size(), real_F_W[j], out.size());
+        #pragma omp atomic
+        total_num_kmers += out.size();
     }
 
     if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
         // compute reverse complements k-mers and update the blocks #real_F_W
         add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
+    } else {
+        logger->trace("Total number of real k-mers: {}", total_num_kmers);
     }
 
     // k-mer blocks split by F

@@ -366,9 +366,12 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
         if (buffer_.size() == buffer_.capacity()) {
             encode_chunk();
         }
+        size_++;
     }
 
     const std::string& name() { return file_name_; }
+
+    size_t size() const { return size_; }
 
     size_t finish();
 
@@ -382,6 +385,7 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     std::ofstream sink_second_;
     std::string file_name_;
     size_t total_size_ = 0;
+    size_t size_ = 0; // total number of encoded elements
 };
 
 } // namespace common
