@@ -32,8 +32,10 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
-    typedef std::pair<std::vector<node_index>, std::vector<node_index>> Mapping;
-    typedef std::pair<sdsl::bit_vector, sdsl::bit_vector> Signature;
+    typedef std::pair<std::vector<node_index> /* forward */,
+                      std::vector<node_index> /* reverse complement */ > Mapping;
+    typedef std::pair<sdsl::bit_vector /* forward */,
+                      sdsl::bit_vector /* reverse complement */ > Signature;
     typedef std::vector<Mapping> BatchMapping;
     typedef std::vector<VectorMap<uint64_t, Signature>> BatchLabels;
 
@@ -133,7 +135,9 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     virtual Edges get_outgoing(const AlignNode &node) const override;
 
-    virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode &node) override {
+    virtual void add_scores_to_column(Column &column,
+                                      Scores&& scores,
+                                      const AlignNode &node) override {
         const AlignNode &prev = std::get<6>(scores);
         assert(align_node_to_target_.count(prev));
 
@@ -154,12 +158,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     const AnnotatedDBG &anno_graph_;
-
     mutable std::vector<uint64_t> target_columns_;
-
-    // alternative seed used to replace a suffix seed
-    DBGAlignment alt_seed_;
-
     mutable tsl::hopscotch_map<NodeType, std::vector<Edges>> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, uint8_t, AlignNodeHash> align_node_to_target_;
 };
