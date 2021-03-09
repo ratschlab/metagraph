@@ -104,8 +104,8 @@ void SortedSetDiskBase<T>::shrink_data() {
     size_t old_size = data_.size();
     sort_and_dedupe();
 
-    logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
-                  data_.size(), (data_.size() * sizeof(T) >> 20));
+    logger->trace("...done. Size reduced from {} to {}, {} MB", old_size,
+                  data_.size(), data_.size() * sizeof(T) / 1e6);
 }
 
 template <typename T>
@@ -178,9 +178,8 @@ void SortedSetDiskBase<T>::try_reserve(size_t size, size_t min_size) {
         try {
             data_.reserve(size);
             if (size != original_size) {
-                logger->warn("SortedSetDisk: Requested {}MiB, but only found {}MiB",
-                             (original_size * sizeof(T)) >> 20,
-                             (size * sizeof(T)) >> 20);
+                logger->warn("SortedSetDisk: Requested {} MB, but only got {} MB",
+                             original_size * sizeof(T) / 1e6, size * sizeof(T) / 1e6);
             }
             return;
         } catch (const std::bad_alloc &exception) {
@@ -250,7 +249,7 @@ void SortedSetDiskBase<T>::merge_all(const std::string &out_file,
             = [&encoder](const T &v) { encoder.add(v); };
     merge_files(to_merge, on_new_item);
     encoder.finish();
-    logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
+    logger->trace("Merging all {} chunks into {} of size {:.0f} MB done",
                   to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
 }
 
