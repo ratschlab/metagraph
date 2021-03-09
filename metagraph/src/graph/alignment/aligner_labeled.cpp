@@ -328,22 +328,16 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         if (next_offset)
             return edges;
 
+        std::string seq(this->graph_.get_k(), '#');
         std::vector<AnnotatedDBG::row_index> rows;
         rows.reserve(edges.size());
 
         for (const auto &[next_node, c] : edges) {
-            if (canonical) {
-                rows.emplace_back(AnnotatedDBG::graph_to_anno_index(
-                    canonical->get_base_node(next_node)
-                ));
-            } else if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-                rows.emplace_back(AnnotatedDBG::graph_to_anno_index(next_node));
-            } else {
-                this->graph_.map_to_nodes(this->graph_.get_node_sequence(next_node),
-                                          [&](NodeType next_canonical) {
-                    rows.emplace_back(AnnotatedDBG::graph_to_anno_index(next_canonical));
-                });
-            }
+            seq.back() = c;
+            process_seq_path(this->graph_, seq, std::vector<node_index>{ next_node },
+                             [&](AnnotatedDBG::row_index row, size_t) {
+                rows.emplace_back(row);
+            });
         }
 
         assert(rows.size() == edges.size());
