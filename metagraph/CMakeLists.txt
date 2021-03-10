@@ -229,9 +229,6 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
-  ${CMAKE_BINARY_DIR}/external-libraries/zlib
-  ${CMAKE_BINARY_DIR}/lib
-  ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/sdsl-lite/lib
 )
 
