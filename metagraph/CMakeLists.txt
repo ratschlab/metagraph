@@ -124,16 +124,7 @@ if(APPLE)
   endif()
 endif()
 
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_CXX_FLAGS CACHE)
-if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
-  find_package(OPENMP REQUIRED)
-else()
-  find_package(OpenMP REQUIRED)
-endif()
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+findOpenMP()
 
 # Check if 128 bit integers are supported
 try_compile(MODE_TI
