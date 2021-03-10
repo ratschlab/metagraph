@@ -302,10 +302,12 @@ add_library(mersenne_twister STATIC
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
 )
-set(BRWT_INCLUDE_TESTS FALSE)
+set(BRWT_INCLUDE_TESTS OFF)
+set(BRWT_INCLUDE_DOCS OFF)
 add_subdirectory(
-  external-libraries/binrel_wt
+  external-libraries/binrel_wt EXCLUDE_FROM_ALL
 )
+brwt_target_link_flags(brwt -lsdsl)
 
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
