@@ -1,6 +1,10 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
+#include <algorithm>
+
+#include <sdsl/int_vector_buffer.hpp>
+
 #include "common/vector.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
@@ -957,6 +961,56 @@ TEST(Misc, drag_and_mark_segments) {
               utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 3));
     EXPECT_EQ(std::vector<bool>({ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }),
               utils::drag_and_mark_segments(std::vector<int>({ 0, 6, 0, 10, 6, 4, 0, 0, 6, 0 }), 6, 100));
+}
+
+
+TEST(int_vector_buffer, small_buffer) {
+    const size_t size = 10'000;
+    const size_t width = 38;
+    const size_t buffer_size = 100;
+    const size_t num_threads = 4;
+
+    sdsl::int_vector<> vector(size, 0, width);
+    sdsl::util::set_random_bits(vector, 42);
+
+    // initialize buffers
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < num_threads; ++i) {
+        sdsl::int_vector_buffer<> buf(test_dump_basename + std::to_string(i),
+                                      std::ios::out, buffer_size, width);
+        for (auto it = vector.begin(); it != vector.end(); ++it) {
+            buf.push_back(*it);
+        }
+    }
+
+    // update buffers
+    sdsl::int_vector<> final(size, 0, width);
+    sdsl::util::set_random_bits(final, 12);
+
+    std::vector<sdsl::int_vector_buffer<>> bufs(num_threads);
+
+    std::vector<size_t> indexes(size);
+    std::iota(indexes.begin(), indexes.end(), 0);
+    std::mt19937 g(13);
+    std::shuffle(indexes.begin(), indexes.end(), g);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    for (size_t i = 0; i < num_threads; ++i) {
+        bufs[i] = sdsl::int_vector_buffer<>(test_dump_basename + std::to_string(i),
+                                            std::ios::in|std::ios::out, buffer_size, width);
+        for (size_t j : indexes) {
+            bufs[i][j] -= vector[j];
+            bufs[i][j] += final[j];
+        }
+    }
+
+    for (auto &buf : bufs) {
+        ASSERT_EQ(size, buf.size());
+        for (size_t j = 0; j < final.size(); ++j) {
+            ASSERT_EQ(final[j], buf[j]);
+        }
+        buf.close(true);
+    }
 }
 
 } // namespace
