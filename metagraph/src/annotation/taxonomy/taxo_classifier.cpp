@@ -43,7 +43,6 @@ void TaxoClassifier::import_taxonomy(const std::string &filepath) {
         logger->error("Can't load serialized 'taxonomic_map' from file '{}'.", filepath.c_str());
         std::exit(1);
     }
-    f.close();
     logger->trace("Finished with importing metagraph taxonomicDB after '{}' sec", timer.elapsed());
 }
 
@@ -138,5 +137,5 @@ TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     return best_lca;
 }
 
-}
-}
+} // namespace annot
+} // namespace mtg
