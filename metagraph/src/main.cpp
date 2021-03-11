@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
             return cli::align_to_graph(config.get());
 
         case Config::TRANSFORM_ANNO_TAX:
-            return cli::transform_anno_taxo(config.get());
+            return cli::transform_anno_tax(config.get());
 
         case Config::TAX_CLASSIFY:
             return cli::taxonomic_classification(config.get());

@@ -75,7 +75,7 @@ TEST (TaxonomyTest, DfsStatistics) {
     };
 
     std::vector<uint64_t> tree_linearization;
-    taxo.dfs_statistics(0, tree, tree_linearization);
+    taxo.dfs_statistics(0, tree, &tree_linearization);
     EXPECT_EQ(expected_linearization, tree_linearization);
     EXPECT_EQ(expected_node_depths, taxo.node_depth);
     EXPECT_EQ(expected_node_to_linearization_idx, taxo.node_to_linearization_idx);
