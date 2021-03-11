@@ -7,7 +7,7 @@ namespace cli {
 
 class Config;
 
-int transform_anno_taxo(Config *config);
+int transform_anno_tax(Config *config);
 
 } // namespace cli
 } // namespace mtg
