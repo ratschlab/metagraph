@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 template <typename T>
-using Encoder = common::EliasFanoEncoder<T>;
+using Encoder = common::EliasFanoEncoderBuffered<T>;
 
 
 void build_successor(const std::string &graph_fname,
@@ -366,7 +366,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
                                   size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
-        Encoder<uint64_t>::append(v, tmp_file(s, j, chunk));
+        Encoder<uint64_t>::append_block(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -578,12 +578,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
                             buf.push_back(i);
                             if (buf.size() == buf.capacity()) {
-                                Encoder<uint64_t>::append(buf, new_chunks.back());
+                                Encoder<uint64_t>::append_block(buf, new_chunks.back());
                                 buf.resize(0);
                             }
                         });
                         if (buf.size()) {
-                            Encoder<uint64_t>::append(buf, new_chunks.back());
+                            Encoder<uint64_t>::append_block(buf, new_chunks.back());
                         }
                     }
                     filenames.swap(new_chunks);

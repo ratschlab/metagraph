@@ -24,9 +24,18 @@ typedef ::testing::Types<uint64_t, sdsl::uint128_t, sdsl::uint256_t> ValueTypes;
 
 TYPED_TEST_SUITE(EliasFanoTestPair, ValueTypes);
 
+template <typename T, typename C>
+size_t encode(const std::vector<std::pair<T, C>> &values, const std::string &file_name) {
+    common::EliasFanoEncoderBuffered<std::pair<T, C>> encoder(file_name, values.size());
+    for (const auto &v : values) {
+        encoder.add(v);
+    }
+    return encoder.finish();
+}
+
 TYPED_TEST(EliasFanoTestPair, WriteEmpty) {
     utils::TempFile out;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(0, 0, 0, out.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 0);
     size_t file_size = encoder.finish();
     // 25 = 3*8 + 1; no data is written to the file except number of low/high bytes (8
     // bytes each), number of low bits (1 byte) and number of elements (8 bytes)
@@ -36,7 +45,7 @@ TYPED_TEST(EliasFanoTestPair, WriteEmpty) {
 
 TYPED_TEST(EliasFanoTestPair, ReadEmpty) {
     utils::TempFile out;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(0, 0, 0, out.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 0);
     encoder.finish();
 
     common::EliasFanoDecoder<std::pair<TypeParam, uint8_t>> decoder(out.name());
@@ -45,8 +54,7 @@ TYPED_TEST(EliasFanoTestPair, ReadEmpty) {
 
 TYPED_TEST(EliasFanoTestPair, WriteOne) {
     utils::TempFile out;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(1, 1234, 1234,
-                                                                    out.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 1);
     encoder.add({ 1234, 5 });
     size_t total_size = encoder.finish();
     // 24 + 1 + size(T); is the overhead, i.e. the number of low/high bytes (8
@@ -63,8 +71,7 @@ TYPED_TEST(EliasFanoTestPair, WriteOne) {
 
 TYPED_TEST(EliasFanoTestPair, ReadOne) {
     utils::TempFile file;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(1, 1234, 1234,
-                                                                    file.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(file.name(), 1);
     encoder.add({ 1234, 5 });
     encoder.finish();
 
@@ -78,8 +85,7 @@ TYPED_TEST(EliasFanoTestPair, ReadOne) {
 
 TYPED_TEST(EliasFanoTestPair, WriteTwo) {
     utils::TempFile out;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(2, 1234, 4321,
-                                                                    out.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(out.name(), 2);
     encoder.add({ 1234, 5 });
     encoder.add({ 4321, 3 });
     size_t file_size = encoder.finish();
@@ -94,8 +100,7 @@ TYPED_TEST(EliasFanoTestPair, WriteTwo) {
 
 TYPED_TEST(EliasFanoTestPair, ReadTwo) {
     utils::TempFile file;
-    common::EliasFanoEncoder<std::pair<TypeParam, uint8_t>> encoder(2, 1234, 4321,
-                                                                    file.name());
+    common::EliasFanoEncoderBuffered<std::pair<TypeParam, uint8_t>> encoder(file.name(), 2);
     encoder.add({ 1234, 5 });
     encoder.add({ 4321, 3 });
     encoder.finish();
@@ -110,17 +115,6 @@ TYPED_TEST(EliasFanoTestPair, ReadTwo) {
     EXPECT_EQ(static_cast<TypeParam>(4321), decoded.value().first);
     EXPECT_EQ(static_cast<TypeParam>(3), decoded.value().second);
     EXPECT_FALSE(decoder.next().has_value());
-}
-
-
-template <typename T, typename C>
-size_t encode(const std::vector<std::pair<T, C>> &values, const std::string &file_name) {
-    common::EliasFanoEncoder<std::pair<T, C>> encoder(values.size(), values.front().first,
-                                                      values.back().first, file_name);
-    for (const auto &v : values) {
-        encoder.add(v);
-    }
-    return encoder.finish();
 }
 
 TYPED_TEST(EliasFanoTestPair, ReadWriteIncrementOne) {

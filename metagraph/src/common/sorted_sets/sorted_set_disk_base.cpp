@@ -10,6 +10,9 @@
 namespace mtg {
 namespace common {
 
+const size_t ENCODER_BUFFER_SIZE = 100'000;
+
+
 template <typename T>
 SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
                                         size_t reserved_num_elements,
@@ -115,7 +118,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
     #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
     for (size_t t = 0; t < num_blocks_; ++t) {
         std::string block_name = file_name + "_block_" + std::to_string(t);
-        EliasFanoEncoderBuffered<T> encoder(block_name, 1000);
+        EliasFanoEncoderBuffered<T> encoder(block_name, ENCODER_BUFFER_SIZE);
         const size_t block_size = (data_.size() + num_blocks_ - 1) / num_blocks_;
         const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
         for (size_t i = t * block_size; i < block_end; ++i) {
@@ -158,9 +161,7 @@ void SortedSetDiskBase<T>::insert_sorted(const std::vector<T> &data) {
 
     std::string file_name = chunk_file_prefix_ + "sorted";
     constexpr bool append = true;
-
-    EliasFanoEncoder<T> encoder(data.size(), utils::get_first(data.front()),
-                                utils::get_first(data.back()), file_name, append);
+    EliasFanoEncoderBuffered<T> encoder(file_name, ENCODER_BUFFER_SIZE, append);
     for (const auto &v : data) {
         encoder.add(v);
     }
@@ -222,7 +223,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
         chunks.push_back(chunk_name);
         *total_size -= static_cast<int64_t>(chunk_size(chunk_name));
     }
-    EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
+    EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, ENCODER_BUFFER_SIZE);
     std::function<void(const T &v)> on_new_item
             = [&encoder](const T &v) { encoder.add(v); };
     merge_files(chunks, on_new_item);
@@ -241,7 +242,7 @@ void SortedSetDiskBase<T>::merge_all(const std::string &out_file,
             "Max allocated disk capacity exceeded. Starting merging all {} chunks "
             "into {}",
             to_merge.size(), out_file);
-    EliasFanoEncoderBuffered<T> encoder(out_file, 1000);
+    EliasFanoEncoderBuffered<T> encoder(out_file, ENCODER_BUFFER_SIZE);
     std::function<void(const T &v)> on_new_item
             = [&encoder](const T &v) { encoder.add(v); };
     merge_files(to_merge, on_new_item);

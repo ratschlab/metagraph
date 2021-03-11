@@ -30,13 +30,7 @@ TYPED_TEST_SUITE(EliasFanoFileMergerTest, ValueTypes);
 
 template <typename T>
 void do_encode(const std::vector<T> &values, const std::string &file_name) {
-    if (values.empty()) {
-        common::EliasFanoEncoder<T> encoder(0, 0, 0, file_name);
-        encoder.finish();
-        return;
-    }
-    common::EliasFanoEncoder<T> encoder(values.size(), utils::get_first(values.front()),
-                                        utils::get_first(values.back()), file_name);
+    common::EliasFanoEncoderBuffered<T> encoder(file_name, values.size());
     std::for_each(values.begin(), values.end(), [&encoder](const T &v) { encoder.add(v); });
     encoder.finish();
 }
