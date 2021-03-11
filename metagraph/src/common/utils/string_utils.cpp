@@ -15,6 +15,11 @@ bool ends_with(const std::string &str, const std::string &suffix) {
     return actual_suffix == suffix;
 }
 
+bool starts_with(const std::string &str, const std::string &prefix) {
+    auto actual_prefix = str.substr(0, static_cast<int>(prefix.size()));
+    return actual_prefix == prefix;
+}
+
 std::string remove_suffix(const std::string &str, const std::string &suffix) {
     return ends_with(str, suffix)
             ? str.substr(0, str.size() - suffix.size())
