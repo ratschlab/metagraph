@@ -257,7 +257,7 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
         std::vector<std::string> test_sequences;
         std::vector<std::string> test_labels;
-        for (const auto &seq: test.seq_list) {
+        for (const uint64_t &seq: test.seq_list) {
             test_sequences.push_back(all_sequences[seq]);
             test_labels.push_back(all_labels[seq]);
         }
