@@ -32,7 +32,7 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList 
     node_to_linearization_idx[node] = tree_linearization->size();
     tree_linearization->push_back(node);
     uint64_t depth = 0;
-    for (const auto &child: tree[node]) {
+    for (const NormalizedTaxId &child: tree[node]) {
         dfs_statistics(child, tree, tree_linearization);
         tree_linearization->push_back(node);
         if (node_depth[child] > depth) {
@@ -49,7 +49,15 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
 
     tsl::hopscotch_map<TaxId, TaxId> full_parents_list;
     while (getline(f, line)) {
+        if (line == "") {
+            logger->error("The Taxonomic tree filepath contains empty lines. Please make sure that this file was not manually modified: '{}'", taxo_tree_filepath);
+            exit(1);
+        }
         std::vector<std::string> parts = utils::split_string(line, "\t");
+        if (parts.size() < 2) {
+            logger->error("The Taxonomic tree filepath contains incomplete lines. Please make sure that this file was not manually modified: '{}'", taxo_tree_filepath);
+            exit(1);
+        }
         uint64_t act = static_cast<uint64_t>(std::stoull(parts[0]));
         uint64_t parent = static_cast<uint64_t>(std::stoull(parts[2]));
         full_parents_list[act] = parent;
@@ -138,11 +146,29 @@ std::string TaxonomyDB::get_accession_version_from_label(const std::string &labe
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
                                    const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
-    //   TODO Print an error when the file format (e.g. '\t') is broken.
     std::ifstream f(lookup_table_filepath);
+    if (!f.good()) {
+        logger->error("Failed to open accession to taxid lookup table.'{}'", lookup_table_filepath);
+        exit(1);
+    }
+
     std::string line;
+    getline(f, line);
+    if (!utils::starts_with(line, "accession\taccession.version\ttaxid\t")) {
+        logger->error("The accession to taxid lookup table is not in the standard '.accession2taxid' format: '{}'.", lookup_table_filepath);
+        exit(1);
+    }
+
     while (getline(f, line)) {
+        if (line == "") {
+            logger->error("The accession to taxid lookup table contains empty lines. Please make sure that this file was not manually modified: '{}'", lookup_table_filepath);
+            exit(1);
+        }
         std::vector<std::string> parts = utils::split_string(line, "\t");
+        if (parts.size() <= 2) {
+            logger->error("The accession to taxid lookup table contains incomplete lines. Please make sure that this file was not manually modified: '{}'", lookup_table_filepath);
+            exit(1);
+        }
         if (input_accessions.count(parts[1])) {
             TaxId act = static_cast<TaxId>(std::stoull(parts[2]));
             lookup_label_taxid[parts[1]] = act;
@@ -196,7 +222,7 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
     }
     uint64_t left_idx = node_to_linearization_idx[taxids[0]];
     uint64_t right_idx = node_to_linearization_idx[taxids[0]];
-    for (const auto &taxid: taxids) {
+    for (const NormalizedTaxId &taxid: taxids) {
         if (node_to_linearization_idx[taxid] < left_idx) {
             left_idx = node_to_linearization_idx[taxid];
         }
@@ -233,13 +259,13 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, Norma
 
 void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot,
                                           std::mutex &taxo_mutex) {
-    for (const auto &label: annot.get_all_labels()) {
+    for (const std::string &label: annot.get_all_labels()) {
         AccessionVersion accession_version = get_accession_version_from_label(label);
         uint64_t taxid;
         if (!get_normalized_taxid(accession_version, taxid)) {
             continue;
         }
-        annot.call_objects(label, [&](const auto &index) {
+        annot.call_objects(label, [&](const KmerId &index) {
           if (index <= 0) {
               return;
           }
@@ -266,7 +292,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
               taxonomic_map[index] = taxid;
               taxo_mutex.unlock();
           } else {
-              auto lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
+              NormalizedTaxId lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
               taxo_mutex.lock();
               taxonomic_map[index] = lca;
               taxo_mutex.unlock();

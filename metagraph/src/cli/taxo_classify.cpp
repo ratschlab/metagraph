@@ -53,7 +53,7 @@ int taxonomic_classification(Config *config) {
     timer.reset();
     logger->trace("Processing the classification");
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-    for (const auto &file: files) {
+    for (const std::string &file: files) {
         logger->trace("Start processing file '{}'.", file);
         execute_fasta_file(file,
                            thread_pool,
