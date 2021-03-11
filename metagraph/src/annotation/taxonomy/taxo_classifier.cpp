@@ -124,6 +124,10 @@ void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
 TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                    const std::string &sequence,
                                    const double &lca_coverage_threshold) {
+    if (lca_coverage_threshold <= 0.5) {
+        logger->error("Error: received lca coverage threshold {} <= 0.5. Please modify its value to be > 0.5 for having a unique taxid lca solution.", lca_coverage_threshold)
+        exit(1);
+    }
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
     uint64_t total_kmers = 0;
 
