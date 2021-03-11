@@ -163,8 +163,6 @@ class EliasFanoDecoder {
     static_assert( std::is_integral_v<T> || std::is_same_v<T, sdsl::uint256_t>);
 
   public:
-    EliasFanoDecoder() {}
-
     /** Creates a decoder that retrieves data from the given file */
     EliasFanoDecoder(const std::string &source_name, bool remove_source = true);
 
@@ -286,14 +284,17 @@ class EliasFanoDecoder<std::pair<T, C>> {
     inline std::optional<std::pair<T, C>> next() {
         std::optional<T> first = source_first_.next();
         C second;
+        source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
         if (!first.has_value()) {
-            assert(!source_second_.read(reinterpret_cast<char *>(&second), sizeof(C)));
-            if (remove_source_) {
+            if (!source_second_.eof())
+                throw std::ios_base::failure("EliasFanoDecoder " + source_second_name_ +
+                                                + " error: file is not read to the end");
+            source_second_.close();
+            if (remove_source_)
                 std::filesystem::remove(source_second_name_);
-            }
+
             return {};
         }
-        source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
         assert(source_second_);
         return std::make_pair(first.value(), second);
     }

@@ -189,9 +189,13 @@ inline uint32_t log2_floor(const sdsl::uint256_t &x) {
     return x.hi();
 }
 
-static void safe_close(std::ofstream &sink) {
+void safe_close(std::ofstream &sink) {
     if (sink.is_open()) {
         sink.close();
+        if (sink.fail()) {
+            logger->error("Unable to close stream");
+            std::exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -203,14 +207,14 @@ EliasFanoEncoder<T>::EliasFanoEncoder(size_t size,
                                       const std::string &out_filename,
                                       bool append)
     : declared_size_(size), offset_(min_value) {
-    auto mode = append ? std::ios::binary | std::ios::app : std::ios::binary;
+    auto mode = append ? (std::ios::binary|std::ios::app) : std::ios::binary;
     sink_internal_ = std::ofstream(out_filename, mode | std::ios::binary);
-    if (!sink_internal_.is_open()) {
+    if (!sink_internal_) {
         logger->error("Unable to open {} for writing", out_filename);
         std::exit(EXIT_FAILURE);
     }
     sink_internal_upper_ = std::ofstream(out_filename + ".up", mode | std::ios::binary);
-    if (!sink_internal_upper_.is_open()) {
+    if (!sink_internal_upper_) {
         logger->error("Unable to open {} for writing", out_filename + ".up");
         std::exit(EXIT_FAILURE);
     }
@@ -238,13 +242,22 @@ EliasFanoEncoder<T>::EliasFanoEncoder(const std::vector<T> &data,
 template <typename T>
 EliasFanoEncoder<T>::~EliasFanoEncoder() {
     assert(!sink_internal_.is_open());
+    assert(!sink_internal_upper_.is_open());
 }
 
 template <typename T>
 void EliasFanoEncoder<T>::append(const std::vector<T> &data,
                                  const std::string &out_fname) {
     std::ofstream sink(out_fname, std::ios::binary | std::ios::app);
+    if (!sink) {
+        logger->error("Unable to open {} for writing", out_fname);
+        std::exit(EXIT_FAILURE);
+    }
     std::ofstream sink_upper(out_fname + ".up", std::ios::binary | std::ios::app);
+    if (!sink_upper) {
+        logger->error("Unable to open {} for writing", out_fname + ".up");
+        std::exit(EXIT_FAILURE);
+    }
     EliasFanoEncoder<T> encoder(data, &sink, &sink_upper);
     encoder.finish();
 }
@@ -376,13 +389,13 @@ void EliasFanoEncoder<T>::write_bits(char *data, size_t pos, T value) {
 template <typename T>
 EliasFanoDecoder<T>::EliasFanoDecoder(const std::string &source_name, bool remove_source)
     : source_name_(source_name), remove_source_(remove_source) {
-    source_.open(source_name, std::ios::binary);
-    if (!source_.is_open()) {
+    source_ = std::ifstream(source_name, std::ios::binary);
+    if (!source_) {
         logger->error("Unable to open {}", source_name);
         std::exit(EXIT_FAILURE);
     }
-    source_upper_.open(source_name + ".up", std::ios::binary);
-    if (!source_upper_.is_open()) {
+    source_upper_ = std::ifstream(source_name + ".up", std::ios::binary);
+    if (!source_upper_) {
         logger->error("Unable to open {}", source_name + ".up");
         std::exit(EXIT_FAILURE);
     }
@@ -464,7 +477,11 @@ bool EliasFanoDecoder<T>::init() {
     memset(lower_, 0, sizeof(lower_));
     upper_pos_ = 0;
     source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
-    if (source_.eof()) {
+    if (source_.bad()) {
+        throw std::runtime_error("Error while reading from " + source_name_);
+    } else if (source_.eof()) {
+        source_.close();
+        source_upper_.close();
         if (remove_source_) {
             std::filesystem::remove(source_name_);
             std::filesystem::remove(source_name_ + ".up");
@@ -504,9 +521,14 @@ EliasFanoEncoder<std::pair<T, C>>::EliasFanoEncoder(size_t size,
                                                     const std::string &sink_name,
                                                     bool append)
     : ef_encoder(size, first_value, last_value, sink_name, append),
-      sink_second_name_(sink_name + ".count"),
-      sink_second_(sink_second_name_,
-                   append ? std::ios::binary | std::ios::app : std::ios::binary) {}
+      sink_second_name_(sink_name + ".count") {
+    sink_second_ = std::ofstream(sink_second_name_,
+                                 append ? (std::ios::binary|std::ios::app) : std::ios::binary);
+    if (!sink_second_) {
+        logger->error("Unable to open {} for writing", sink_second_name_);
+        std::exit(EXIT_FAILURE);
+    }
+}
 
 template <typename T, typename C>
 void EliasFanoEncoder<std::pair<T, C>>::add(const std::pair<T, C> &value) {
@@ -518,6 +540,10 @@ template <typename T, typename C>
 size_t EliasFanoEncoder<std::pair<T, C>>::finish() {
     size_t first_size = ef_encoder.finish();
     sink_second_.close();
+    if (sink_second_.fail()) {
+        logger->error("Unable to close file {}", sink_second_name_);
+        std::exit(EXIT_FAILURE);
+    }
     return first_size + std::filesystem::file_size(sink_second_name_);
 }
 
@@ -529,7 +555,7 @@ EliasFanoDecoder<std::pair<T, C>>::EliasFanoDecoder(const std::string &source,
       source_second_name_(source + ".count"),
       remove_source_(remove_source) {
     source_second_ = std::ifstream(source_second_name_, std::ios::binary);
-    if (!source_second_.is_open()) {
+    if (!source_second_) {
         logger->error("Unable to open {}", source_second_name_);
         std::exit(EXIT_FAILURE);
     }
@@ -541,13 +567,22 @@ EliasFanoEncoderBuffered<T>::EliasFanoEncoderBuffered(const std::string &file_na
                                                       size_t buffer_size)
     : file_name_(file_name) {
     sink_ = std::ofstream(file_name, std::ios::binary);
+    if (!sink_) {
+        logger->error("Unable to open {} for writing", file_name);
+        std::exit(EXIT_FAILURE);
+    }
     sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary);
+    if (!sink_upper_) {
+        logger->error("Unable to open {} for writing", file_name + ".up");
+        std::exit(EXIT_FAILURE);
+    }
     buffer_.reserve(buffer_size);
 }
 
 template <typename T>
 EliasFanoEncoderBuffered<T>::~EliasFanoEncoderBuffered() {
     assert(!sink_.is_open());
+    assert(!sink_upper_.is_open());
 }
 
 
@@ -555,7 +590,15 @@ template <typename T>
 size_t EliasFanoEncoderBuffered<T>::finish() {
     encode_chunk();
     sink_.close();
+    if (sink_.fail()) {
+        logger->error("Unable to close file {}", file_name_);
+        std::exit(EXIT_FAILURE);
+    }
     sink_upper_.close();
+    if (sink_upper_.fail()) {
+        logger->error("Unable to close file {}", file_name_ + ".up");
+        std::exit(EXIT_FAILURE);
+    }
     return total_size_;
 }
 
@@ -570,10 +613,22 @@ void EliasFanoEncoderBuffered<T>::encode_chunk() {
 template <typename T, typename C>
 EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::string &file_name,
                                                                     size_t buffer_size)
-    : sink_(file_name, std::ios::binary),
-      sink_upper_(file_name + ".up", std::ios::binary),
-      sink_second_(file_name + ".count", std::ios::binary),
-      file_name_(file_name) {
+    : file_name_(file_name) {
+    sink_ = std::ofstream(file_name, std::ios::binary);
+    if (!sink_) {
+        logger->error("Unable to open {} for writing", file_name);
+        std::exit(EXIT_FAILURE);
+    }
+    sink_upper_ = std::ofstream(file_name + ".up", std::ios::binary);
+    if (!sink_upper_) {
+        logger->error("Unable to open {} for writing", file_name + ".up");
+        std::exit(EXIT_FAILURE);
+    }
+    sink_second_ = std::ofstream(file_name + ".count", std::ios::binary);
+    if (!sink_second_) {
+        logger->error("Unable to open {} for writing", file_name + ".count");
+        std::exit(EXIT_FAILURE);
+    }
     buffer_.reserve(buffer_size);
     buffer_second_.reserve(buffer_size);
 }
@@ -581,6 +636,8 @@ EliasFanoEncoderBuffered<std::pair<T, C>>::EliasFanoEncoderBuffered(const std::s
 template <typename T, typename C>
 EliasFanoEncoderBuffered<std::pair<T, C>>::~EliasFanoEncoderBuffered() {
     assert(!sink_.is_open());
+    assert(!sink_upper_.is_open());
+    assert(!sink_second_.is_open());
 }
 
 template <typename T, typename C>
