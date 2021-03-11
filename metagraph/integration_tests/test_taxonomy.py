@@ -43,7 +43,7 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         transform_anno_tax_command = '{exe} transform_anno_tax --taxonomic-tree {tax_tree} \
-                                     --lookup-table {lookup_table} -o {output} {anno}'.format(
+                                     --lookup-label-taxid {lookup_table} -o {output} {anno}'.format(
             exe=METAGRAPH,
             tax_tree=TAXO_DATA_DIR + '/dumb_nodes.dmp',
             lookup_table=TAXO_DATA_DIR + '/dumb.accession2taxid',

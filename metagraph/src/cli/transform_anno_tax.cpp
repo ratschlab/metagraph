@@ -20,7 +20,7 @@ using mtg::common::logger;
 std::vector<std::string> get_anno_filenames(const std::vector<std::string> &paths) {
     std::vector<std::string> filenames;
 
-    for(const auto &path: paths) {
+    for (const auto &path: paths) {
         if (! filesystem::is_directory(path)) {
             if (!utils::ends_with(path, ".annodbg")) {
                 logger->warn("File '{}' is not an '.annodbg' file.", path);
@@ -57,7 +57,7 @@ void call_taxonomy_map_updates(annot::TaxonomyDB &taxonomy,
     }
 }
 
-int transform_anno_taxo(Config *config) {
+int transform_anno_tax(Config *config) {
     assert(config);
     const auto &filenames = get_anno_filenames(config->fnames);
     uint64_t mem_bytes = config->memory_available * 1e9;
@@ -78,7 +78,7 @@ int transform_anno_taxo(Config *config) {
         }
     }
 
-    annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->lookup_table, all_labels);
+    annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->lookup_label_taxid, all_labels);
 
     // Load as many annotation matrix files as we can fit in memory.
     for (uint32_t i = 0; i < filenames.size(); ) {
@@ -109,5 +109,5 @@ int transform_anno_taxo(Config *config) {
     return 0;
 }
 
-}
-}
+} // namespace cli
+} // namespace mtg
