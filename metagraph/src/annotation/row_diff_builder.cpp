@@ -12,6 +12,7 @@
 #include "graph/annotated_dbg.hpp"
 
 const uint64_t BLOCK_SIZE = 1 << 25;
+const uint64_t BUFFER_SIZE = 1024 * 1024; // 1 MiB
 const uint64_t ROW_REDUCTION_WIDTH = 32;
 const uint32_t MAX_NUM_FILES_OPEN = 2000;
 
@@ -78,15 +79,15 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     logger->trace("Row count vector: {}", row_count_fname);
     if (new_vector) {
         // create an empty vector
-        sdsl::int_vector_buffer(row_count_fname,
-                                std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
+        sdsl::int_vector_buffer<>(row_count_fname,
+                                  std::ios::out, BUFFER_SIZE, ROW_REDUCTION_WIDTH);
         logger->trace("Initialized new row count vector {}", row_count_fname);
     } else {
         logger->trace("Row count vector {} already exists and will be updated",
                       row_count_fname);
     }
-    sdsl::int_vector_buffer row_count(row_count_fname,
-                                      std::ios::in | std::ios::out, BLOCK_SIZE);
+    sdsl::int_vector_buffer<> row_count(row_count_fname,
+                                        std::ios::in | std::ios::out, BUFFER_SIZE);
 
     // total number of set bits in the original rows
     std::vector<uint32_t> row_count_block;
@@ -155,7 +156,7 @@ void sum_and_call_counts(const fs::path &dir,
         auto path = p.path();
         if (utils::ends_with(path, file_extension)) {
             logger->trace("Found count vector {}", path);
-            vectors.emplace_back(path, std::ios::in);
+            vectors.emplace_back(path, std::ios::in, BUFFER_SIZE);
 
             if (vectors.back().size() != vectors.front().size()) {
                 logger->error("Count vectors have different sizes");
@@ -292,10 +293,10 @@ void build_pred_succ(const std::string &graph_fname,
 
     // create the succ/pred files, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
-    sdsl::int_vector_buffer succ(outfbase + ".succ", std::ios::out, BLOCK_SIZE, width);
-    sdsl::int_vector_buffer<1> succ_boundary(outfbase + ".succ_boundary", std::ios::out, BLOCK_SIZE);
-    sdsl::int_vector_buffer pred(outfbase + ".pred", std::ios::out, BLOCK_SIZE, width);
-    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BLOCK_SIZE);
+    sdsl::int_vector_buffer<> succ(outfbase + ".succ", std::ios::out, BUFFER_SIZE, width);
+    sdsl::int_vector_buffer<1> succ_boundary(outfbase + ".succ_boundary", std::ios::out, BUFFER_SIZE);
+    sdsl::int_vector_buffer<> pred(outfbase + ".pred", std::ios::out, BUFFER_SIZE, width);
+    sdsl::int_vector_buffer<1> pred_boundary(outfbase + ".pred_boundary", std::ios::out, BUFFER_SIZE);
 
     ProgressBar progress_bar(graph.num_nodes(), "Compute succ/pred", std::cerr,
                              !common::get_verbose());
@@ -541,12 +542,12 @@ void traverse_anno_chunked(
 
     const uint32_t num_threads = get_num_threads();
 
-    sdsl::int_vector_buffer succ(pred_succ_fprefix + ".succ", std::ios::in, BLOCK_SIZE);
+    sdsl::int_vector_buffer<> succ(pred_succ_fprefix + ".succ", std::ios::in, BUFFER_SIZE);
     sdsl::int_vector_buffer<1> succ_boundary(pred_succ_fprefix + ".succ_boundary",
-                                             std::ios::in, BLOCK_SIZE);
-    sdsl::int_vector_buffer pred(pred_succ_fprefix + ".pred", std::ios::in, BLOCK_SIZE);
+                                             std::ios::in, BUFFER_SIZE);
+    sdsl::int_vector_buffer<> pred(pred_succ_fprefix + ".pred", std::ios::in, BUFFER_SIZE);
     sdsl::int_vector_buffer<1> pred_boundary(pred_succ_fprefix + ".pred_boundary",
-                                             std::ios::in, BLOCK_SIZE);
+                                             std::ios::in, BUFFER_SIZE);
     auto succ_it = succ.begin();
     auto succ_boundary_it = succ_boundary.begin();
     auto pred_it = pred.begin();
@@ -706,21 +707,21 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     ThreadPool async_writer(1, 1);
-    sdsl::int_vector_buffer row_reduction;
+    sdsl::int_vector_buffer<> row_reduction;
     const bool new_reduction_vector = !fs::exists(row_reduction_fname);
     if (compute_row_reduction) {
         logger->trace("Row reduction vector: {}", row_reduction_fname);
         if (new_reduction_vector) {
             // create an empty vector
-            sdsl::int_vector_buffer(row_reduction_fname,
-                                    std::ios::out, BLOCK_SIZE, ROW_REDUCTION_WIDTH);
+            sdsl::int_vector_buffer<>(row_reduction_fname,
+                                      std::ios::out, BUFFER_SIZE, ROW_REDUCTION_WIDTH);
             logger->trace("Initialized new row reduction vector");
         } else {
             logger->trace("Row reduction vector already exists and will be updated");
         }
 
-        row_reduction = sdsl::int_vector_buffer(row_reduction_fname,
-                                                std::ios::in | std::ios::out, BLOCK_SIZE);
+        row_reduction = sdsl::int_vector_buffer<>(row_reduction_fname,
+                                                  std::ios::in | std::ios::out, BUFFER_SIZE);
 
         if (!new_reduction_vector && row_reduction.size() != num_rows) {
             logger->error("Count vector {} is incompatible with annotations."
@@ -880,7 +881,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
                         new_chunks.push_back(to_merge.at(0) + "_");
                         std::vector<uint64_t> buf;
-                        buf.reserve(1024 * 1024);
+                        buf.reserve(BUFFER_SIZE);
 
                         elias_fano::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
                             buf.push_back(i);

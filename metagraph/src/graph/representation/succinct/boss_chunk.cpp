@@ -16,7 +16,7 @@ using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
 namespace fs = std::filesystem;
 
-const uint64_t BUFFER_SIZE = 5 * 1024 * 1024; // 5 MiB
+const uint64_t BUFFER_SIZE = 1024 * 1024; // 1 MiB
 
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
