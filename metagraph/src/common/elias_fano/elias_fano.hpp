@@ -14,7 +14,7 @@
 
 
 namespace mtg {
-namespace common {
+namespace elias_fano {
 
 /**
  * Concatenates Elias-Fano files into result.
@@ -243,5 +243,5 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
     std::ofstream sink_second_;
 };
 
-} // namespace common
+} // namespace elias_fano
 } // namespace mtg

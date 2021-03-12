@@ -11,7 +11,7 @@
 
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/vector.hpp"
-#include "common/elias_fano.hpp"
+#include "common/elias_fano/elias_fano.hpp"
 
 
 namespace mtg {
@@ -54,7 +54,7 @@ class SortedSetDiskBase {
         // make sure the data was processed
         async_worker_.join();
         // remove the files that have not been requested to merge
-        remove_chunks(get_file_names());
+        elias_fano::remove_chunks(get_file_names());
     }
 
     size_t buffer_size() const { return data_.capacity(); }

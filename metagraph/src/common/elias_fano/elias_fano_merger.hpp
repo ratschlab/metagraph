@@ -7,12 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "common/elias_fano.hpp"
+#include "elias_fano.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 
 namespace mtg {
-namespace common {
+namespace elias_fano {
 
 /**
  * Heap implemented as a sorted vector.
@@ -144,7 +144,7 @@ class MergeDecoder {
 
   private:
     std::vector<EliasFanoDecoder<T>> sources_;
-    common::MergeHeap<T> heap_;
+    MergeHeap<T> heap_;
 };
 
 // transforms objects from Decoder::T to T
@@ -240,5 +240,5 @@ void merge_files(const std::vector<std::string> &sources,
     on_new_item(current);
 }
 
-} // namespace common
+} // namespace elias_fano
 } // namespace mtg

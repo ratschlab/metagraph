@@ -8,7 +8,7 @@
 
 #include <sdsl/uint128_t.hpp>
 
-#include "common/elias_fano.hpp"
+#include "common/elias_fano/elias_fano.hpp"
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
@@ -16,6 +16,8 @@
 namespace {
 
 using namespace mtg;
+using mtg::elias_fano::EliasFanoEncoderBuffered;
+using mtg::elias_fano::EliasFanoDecoder;
 
 template <typename T>
 class EliasFanoTest : public ::testing::Test {};
@@ -26,7 +28,7 @@ TYPED_TEST_SUITE(EliasFanoTest, ValueTypes);
 
 template <typename T>
 size_t encode(const std::vector<T> &values, const std::string &file_name) {
-    return common::EliasFanoEncoderBuffered<T>::append_block(values, file_name);
+    return EliasFanoEncoderBuffered<T>::append_block(values, file_name);
 }
 
 TYPED_TEST(EliasFanoTest, WriteEmpty) {
@@ -44,7 +46,7 @@ TYPED_TEST(EliasFanoTest, ReadEmpty) {
     utils::TempFile out;
     encode<TypeParam>({}, out.name());
 
-    common::EliasFanoDecoder<TypeParam> decoder(out.name());
+    EliasFanoDecoder<TypeParam> decoder(out.name());
     EXPECT_FALSE(decoder.next().has_value());
 }
 
@@ -64,7 +66,7 @@ TYPED_TEST(EliasFanoTest, WriteOne) {
 TYPED_TEST(EliasFanoTest, ReadOne) {
     utils::TempFile file;
     encode<TypeParam>({ 1234 }, file.name());
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
     EXPECT_TRUE(decoded.has_value());
     EXPECT_EQ(static_cast<TypeParam>(1234), decoded.value());
@@ -85,7 +87,7 @@ TYPED_TEST(EliasFanoTest, ReadTwo) {
     utils::TempFile file;
     encode<TypeParam>({ (TypeParam)1234, (TypeParam)4321 }, file.name());
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
     EXPECT_TRUE(decoded.has_value());
     EXPECT_EQ(static_cast<TypeParam>(1234), decoded.value());
@@ -106,7 +108,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
               std::filesystem::file_size(file.name())
                       + std::filesystem::file_size(file.name() + ".up"));
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 100; ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         EXPECT_TRUE(decoded.has_value());
@@ -125,7 +127,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
               std::filesystem::file_size(file.name())
                       + std::filesystem::file_size(file.name() + ".up"));
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 100; ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         EXPECT_TRUE(decoded.has_value());
@@ -145,7 +147,7 @@ TYPED_TEST(EliasFanoTest, VariousSizes) {
                   std::filesystem::file_size(file.name())
                           + std::filesystem::file_size(file.name() + ".up"));
 
-        common::EliasFanoDecoder<TypeParam> decoder(file.name());
+        EliasFanoDecoder<TypeParam> decoder(file.name());
         for (uint32_t i = 0; i < size; ++i) {
             std::optional<TypeParam> decoded = decoder.next();
             EXPECT_TRUE(decoded.has_value());
@@ -171,7 +173,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly64LowBits) {
               std::filesystem::file_size(file.name())
                       + std::filesystem::file_size(file.name() + ".up"));
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         EXPECT_TRUE(decoded.has_value());
@@ -194,7 +196,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
               std::filesystem::file_size(file.name())
                       + std::filesystem::file_size(file.name() + ".up"));
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         EXPECT_TRUE(decoded.has_value());
@@ -222,7 +224,7 @@ TYPED_TEST(EliasFanoTest, LastByteRead) {
               std::filesystem::file_size(file.name())
                       + std::filesystem::file_size(file.name() + ".up"));
 
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < values.size(); ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         EXPECT_TRUE(decoded.has_value());
@@ -249,7 +251,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
                   std::filesystem::file_size(file.name())
                           + std::filesystem::file_size(file.name() + ".up"));
 
-        common::EliasFanoDecoder<TypeParam> decoder(file.name());
+        EliasFanoDecoder<TypeParam> decoder(file.name());
         for (uint32_t i = 0; i < size; ++i) {
             std::optional<TypeParam> decoded = decoder.next();
             EXPECT_TRUE(decoded.has_value());
@@ -282,7 +284,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandomLargerThanBuffer) {
                   std::filesystem::file_size(file.name())
                           + std::filesystem::file_size(file.name() + ".up"));
 
-        common::EliasFanoDecoder<TypeParam> decoder(file.name());
+        EliasFanoDecoder<TypeParam> decoder(file.name());
         for (uint32_t i = 0; i < size; ++i) {
             std::optional<TypeParam> decoded = decoder.next();
             EXPECT_TRUE(decoded.has_value());
@@ -299,14 +301,14 @@ TYPED_TEST_SUITE(EliasFanoBufferedTest, ValueTypes);
 TYPED_TEST(EliasFanoBufferedTest, Empty) {
     utils::TempFile file;
     encode<TypeParam>({}, file.name());
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     EXPECT_FALSE(decoder.next().has_value());
 }
 
 TYPED_TEST(EliasFanoBufferedTest, InsertOne) {
     utils::TempFile file;
     encode<TypeParam>({ (TypeParam)43 }, file.name());
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(43U, decoded.value());
@@ -315,12 +317,12 @@ TYPED_TEST(EliasFanoBufferedTest, InsertOne) {
 
 TYPED_TEST(EliasFanoBufferedTest, InsertFullChunk) {
     utils::TempFile file;
-    common::EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
+    EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
         under_test.add(2 * i);
     }
     under_test.finish();
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 3; ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         ASSERT_TRUE(decoded.has_value());
@@ -331,12 +333,12 @@ TYPED_TEST(EliasFanoBufferedTest, InsertFullChunk) {
 
 TYPED_TEST(EliasFanoBufferedTest, InsertTwoChunks) {
     utils::TempFile file;
-    common::EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
+    EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 4; ++i) {
         under_test.add(2 * i);
     }
     under_test.finish();
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 4; ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         ASSERT_TRUE(decoded.has_value());
@@ -347,12 +349,12 @@ TYPED_TEST(EliasFanoBufferedTest, InsertTwoChunks) {
 
 TYPED_TEST(EliasFanoBufferedTest, InsertManyChunks) {
     utils::TempFile file;
-    common::EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 10);
+    EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 10);
     for (uint32_t i = 0; i < 75; ++i) {
         under_test.add(2 * i);
     }
     under_test.finish();
-    common::EliasFanoDecoder<TypeParam> decoder(file.name());
+    EliasFanoDecoder<TypeParam> decoder(file.name());
     for (uint32_t i = 0; i < 75; ++i) {
         std::optional<TypeParam> decoded = decoder.next();
         ASSERT_TRUE(decoded.has_value());
@@ -384,7 +386,7 @@ TEST(EliasFanoTest128, ReadWriteRandomLarge) {
                       std::filesystem::file_size(file.name())
                               + std::filesystem::file_size(file.name() + ".up"));
 
-            common::EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
+            EliasFanoDecoder<sdsl::uint128_t> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
                 std::optional<sdsl::uint128_t> decoded = decoder.next();
                 EXPECT_TRUE(decoded.has_value());
@@ -419,7 +421,7 @@ TEST(EliasFanoTest256, ReadWriteRandomLarge) {
                       std::filesystem::file_size(file.name())
                               + std::filesystem::file_size(file.name() + ".up"));
 
-            common::EliasFanoDecoder<sdsl::uint256_t> decoder(file.name());
+            EliasFanoDecoder<sdsl::uint256_t> decoder(file.name());
             for (uint32_t i = 0; i < size; ++i) {
                 std::optional<sdsl::uint256_t> decoded = decoder.next();
                 EXPECT_TRUE(decoded.has_value());

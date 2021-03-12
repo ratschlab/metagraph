@@ -1,5 +1,4 @@
 #include "elias_fano.hpp"
-#include "logger.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -8,11 +7,14 @@
 
 #include <sdsl/uint128_t.hpp>
 
-#include <common/utils/template_utils.hpp>
+#include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
-namespace common {
+namespace elias_fano {
+
+using mtg::common::logger;
 
 void concat(const std::vector<std::string> &files, const std::string &result) {
     if (files.empty())
@@ -707,5 +709,5 @@ template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint8_t>>;
 template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint16_t>>;
 template class EliasFanoEncoderBuffered<std::pair<sdsl::uint256_t, uint32_t>>;
 
-} // namespace common
+} // namespace elias_fano
 } // namespace mtg
