@@ -11,6 +11,7 @@
 
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/vector.hpp"
+#include "common/elias_fano/elias_fano.hpp"
 
 
 namespace mtg {
@@ -50,11 +51,10 @@ class SortedSetDiskBase {
                       size_t merge_count);
 
     virtual ~SortedSetDiskBase() {
+        // make sure the data was processed
+        async_worker_.join();
         // remove the files that have not been requested to merge
-        for (const auto &chunk_file : get_file_names()) {
-            std::filesystem::remove(chunk_file);
-        }
-        async_worker_.join(); // make sure the data was processed
+        elias_fano::remove_chunks(get_file_names());
     }
 
     size_t buffer_size() const { return data_.capacity(); }
@@ -161,8 +161,6 @@ class SortedSetDiskBase {
      * The number of L1 merges that were successfully performed.
      */
     std::atomic<uint32_t> l1_chunk_count_ = 0;
-
-    size_t reserved_num_elements_;
 
     size_t disk_cap_bytes_;
 

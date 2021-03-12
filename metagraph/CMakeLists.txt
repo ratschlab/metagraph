@@ -124,16 +124,7 @@ if(APPLE)
   endif()
 endif()
 
-# unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
-# and happily cached, thus messing up the compilation flags forever
-unset(OpenMP_CXX_FLAGS CACHE)
-if (CMAKE_CXX_COMPILER_ID MATCHES AppleClang)
-  find_package(OPENMP REQUIRED)
-else()
-  find_package(OpenMP REQUIRED)
-endif()
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+findOpenMP()
 
 # Check if 128 bit integers are supported
 try_compile(MODE_TI
@@ -238,9 +229,6 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
-  ${CMAKE_BINARY_DIR}/external-libraries/zlib
-  ${CMAKE_BINARY_DIR}/lib
-  ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/sdsl-lite/lib
 )
 
@@ -311,10 +299,12 @@ add_library(mersenne_twister STATIC
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
 )
-set(BRWT_INCLUDE_TESTS FALSE)
+set(BRWT_INCLUDE_TESTS OFF)
+set(BRWT_INCLUDE_DOCS OFF)
 add_subdirectory(
-  external-libraries/binrel_wt
+  external-libraries/binrel_wt EXCLUDE_FROM_ALL
 )
+brwt_target_link_flags(brwt -lsdsl)
 
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)

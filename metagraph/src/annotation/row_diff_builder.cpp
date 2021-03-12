@@ -6,7 +6,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/threads/threading.hpp"
-#include "common/elias_fano_file_merger.hpp"
+#include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 using anchor_bv_type = RowDiff<ColumnMajor>::anchor_bv_type;
 using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
-using Encoder = common::EliasFanoEncoder<T>;
+using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
 
 
 std::vector<annot::ColumnCompressed<>>
@@ -673,7 +673,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     auto dump_chunk_to_disk = [&](const std::vector<uint64_t> &v,
                                   size_t s, size_t j, size_t chunk) {
         assert(std::is_sorted(v.begin(), v.end()) && "all bits in chunks must be sorted");
-        Encoder<uint64_t>::append(v, tmp_file(s, j, chunk));
+        Encoder<uint64_t>::append_block(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
     };
 
@@ -857,7 +857,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
 
                 // if there are too many chunks, merge them into larger ones
-                // TODO: move this pre-merging to common::merge_files
+                // TODO: move this pre-merging to elias_fano::merge_files
                 //       and implement it for SortedSetDisk too.
                 while (filenames.size() > files_open_per_thread) {
                     // chunk 0 stores fwd bits and hence not merged
@@ -882,26 +882,21 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         std::vector<uint64_t> buf;
                         buf.reserve(1024 * 1024);
 
-                        common::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
+                        elias_fano::merge_files<uint64_t>(to_merge, [&](uint64_t i) {
                             buf.push_back(i);
                             if (buf.size() == buf.capacity()) {
-                                Encoder<uint64_t>::append(buf, new_chunks.back());
+                                Encoder<uint64_t>::append_block(buf, new_chunks.back());
                                 buf.resize(0);
                             }
                         });
                         if (buf.size()) {
-                            Encoder<uint64_t>::append(buf, new_chunks.back());
-                        }
-
-                        // remove merged chunks
-                        for (const std::string &chunk_file : to_merge) {
-                            fs::remove(chunk_file);
+                            Encoder<uint64_t>::append_block(buf, new_chunks.back());
                         }
                     }
                     filenames.swap(new_chunks);
                 }
 
-                common::merge_files<uint64_t>(filenames, call);
+                elias_fano::merge_files<uint64_t>(filenames, call);
             };
             columns[j] = std::make_unique<bit_vector_sd>(call_ones, num_rows,
                                                          row_diff_bits[l_idx][j]);

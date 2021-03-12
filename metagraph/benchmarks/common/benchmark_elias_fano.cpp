@@ -5,7 +5,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include "common/elias_fano.hpp"
+#include "common/elias_fano/elias_fano.hpp"
 #include "common/vector.hpp"
 #include "common/utils/file_utils.hpp"
 
@@ -13,11 +13,13 @@
 namespace {
 
 using namespace mtg;
+using mtg::elias_fano::EliasFanoEncoderBuffered;
+using mtg::elias_fano::EliasFanoDecoder;
 
 template <typename T>
 class EliasFanoFixture : public benchmark::Fixture {
   public:
-    Vector<T> sorted;
+    std::vector<T> sorted;
     static T sum_compressed;
     static T sum_uncompressed;
     size_t size;
@@ -47,12 +49,7 @@ class EliasFanoFixture : public benchmark::Fixture {
 
     void encode() {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<T> encoder(sorted.size(), sorted.front(), sorted.back(),
-                                            tempfile.name());
-        for (const auto &v : sorted) {
-            encoder.add(v);
-        }
-        size = encoder.finish();
+        size = EliasFanoEncoderBuffered<T>::append_block(sorted, tempfile.name());
     }
 
     void write_compressed(benchmark::State &state) {
@@ -75,14 +72,9 @@ class EliasFanoFixture : public benchmark::Fixture {
 
     void read_compressed(benchmark::State &state) {
         utils::TempFile tempfile;
-        common::EliasFanoEncoder<T> encoder(sorted.size(), sorted.front(), sorted.back(),
-                                            tempfile.name());
-        for (const auto &v : sorted) {
-            encoder.add(v);
-        }
-        encoder.finish();
+        EliasFanoEncoderBuffered<T>::append_block(sorted, tempfile.name());
         for (auto _ : state) {
-            common::EliasFanoDecoder<T> decoder(tempfile.name());
+            EliasFanoDecoder<T> decoder(tempfile.name());
             std::optional<T> value;
             sum_compressed = 0;
             while ((value = decoder.next()).has_value()) {
