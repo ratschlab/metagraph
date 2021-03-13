@@ -18,6 +18,24 @@ NUM_THREADS = 4
 class TestTaxonomy(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
+        self.taxo_parent = {}
+        self.taxo_root = -1
+        taxo_lines = open(TAXO_DATA_DIR + '/dumb_nodes.dmp').readlines()
+        for line in taxo_lines:
+            act_node = int(line.split('\t')[0])
+            act_parent = int(line.split('\t')[2])
+            self.taxo_parent[act_node] = act_parent
+            if act_node == act_parent:
+                self.taxo_root = act_node
+
+    def is_descendant(self, node, query):
+        node = int(node)
+        query = int(query)
+        while query != self.taxo_root:
+            query = self.taxo_parent[query]
+            if query == node:
+                return True
+        return False
 
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_taxonomy(self):
@@ -69,6 +87,13 @@ class TestTaxonomy(unittest.TestCase):
         num_correct_predictions_internals = 0
         num_total_predictions_tips = 0
         num_total_predictions_internals = 0
+
+        num_subtree_predictions_internals = 0
+        num_ancestors_predictions_tips = 0
+        num_ancestors_predictions_internals = 0
+
+        num_wrong_predictions_tips = 0
+        num_wrong_predictions_internals = 0
         for line in res_lines:
             if line == "":
                 continue
@@ -79,23 +104,31 @@ class TestTaxonomy(unittest.TestCase):
                 num_total_predictions_tips += 1
                 if query_expected == query_prediction:
                     num_correct_predictions_tips += 1
-                    print (num_correct_predictions_tips, ". line valid tip = ", line)
                 else:
-                    print (num_correct_predictions_tips, ". line wrong tip = ", line)
+                    if self.is_descendant(node=query_prediction, query=query_expected):
+                        num_ancestors_predictions_tips += 1
+                    else:
+                        num_wrong_predictions_tips += 1
             else:
                 num_total_predictions_internals += 1
                 if query_expected == query_prediction:
                     num_correct_predictions_internals += 1
-                    print (num_correct_predictions_tips, ". line valid inter = ", line)
                 else:
-                    print (num_correct_predictions_tips, ". line wrong inter = ", line)
-
-        print ("num_correct_predictions_tips = ", num_correct_predictions_tips)
-        print ("num_correct_predictions_internals = ", num_correct_predictions_internals)
-        print ("num_total_predictions_tips = ", num_total_predictions_tips)
-        print ("num_total_predictions_internals = ", num_total_predictions_internals)
+                    if self.is_descendant(node=query_prediction, query=query_expected):
+                        num_ancestors_predictions_internals += 1
+                    elif self.is_descendant(node=query_expected, query=query_prediction):
+                        num_subtree_predictions_internals += 1
+                    else:
+                        num_wrong_predictions_internals += 1
+        self.assertEqual(num_total_predictions_tips, 650)
+        self.assertEqual(num_total_predictions_internals, 48)
 
         self.assertEqual(num_correct_predictions_tips, 547)
         self.assertEqual(num_correct_predictions_internals, 26)
-        self.assertEqual(num_total_predictions_tips, 650)
-        self.assertEqual(num_total_predictions_internals, 48)
+
+        self.assertEqual(num_ancestors_predictions_internals, 8)
+        self.assertEqual(num_subtree_predictions_internals, 8)
+        self.assertEqual(num_ancestors_predictions_tips, 44)
+
+        self.assertEqual(num_wrong_predictions_internals, 6)
+        self.assertEqual(num_wrong_predictions_tips, 59)
