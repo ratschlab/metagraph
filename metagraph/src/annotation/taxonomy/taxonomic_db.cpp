@@ -68,6 +68,10 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         relevant_taxids.push(it.second);
     }
 
+    // We want to treat the case when "taxid==0" as a kind of uninitialisation.
+    // Thus, 'denormalized_taxid' and 'normalized_taxid' must start their indexing from 1.
+    denormalized_taxid.push_back(0);
+
     uint64_t num_nodes = 0;
     // num_taxid_failed used for logging only.
     uint64_t num_taxid_failed = 0;
@@ -82,7 +86,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
             num_taxid_failed += 1;
             continue;
         }
-        normalized_taxid[taxid] = num_nodes++;
+        normalized_taxid[taxid] = ++num_nodes;
         denormalized_taxid.push_back(taxid);
         if (taxid == full_parents_list[taxid]) {
             (*root_node) = normalized_taxid[taxid];
@@ -94,7 +98,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
         logger->warn("Could not find {} taxid out of the total number of {} evaluated taxids.", num_taxid_failed, num_nodes);
     }
 
-    (*tree).resize(num_nodes);
+    (*tree).resize(num_nodes + 1);
     for (const auto &it: normalized_taxid) {
         TaxId taxid = it.first;
         if (normalized_taxid[taxid] == *root_node) {
@@ -271,7 +275,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
           }
           if (index >= taxonomic_map.size()) {
               // Double the size of taxonomic_map until the current 'index' fits inside.
-              taxo_mutex.lock();
+              std::lock_guard<std::mutex> lock(taxo_mutex);
               uint64_t new_size = taxonomic_map.size();
               while (index >= new_size) {
                   new_size = new_size * 2 + 1;
@@ -284,18 +288,17 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
               for (uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
                   taxonomic_map[i] = aux_taxonomic_map[i];
               }
-              taxo_mutex.unlock();
+              taxonomic_map[index] = taxid;
+              return;
           }
 
           if (taxonomic_map[index] == 0) {
-              taxo_mutex.lock();
+              std::lock_guard<std::mutex> lock(taxo_mutex);
               taxonomic_map[index] = taxid;
-              taxo_mutex.unlock();
           } else {
               NormalizedTaxId lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
-              taxo_mutex.lock();
+              std::lock_guard<std::mutex> lock(taxo_mutex);
               taxonomic_map[index] = lca;
-              taxo_mutex.unlock();
           }
         });
     }
