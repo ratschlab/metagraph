@@ -124,11 +124,11 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(num_total_predictions_internals, 48)
 
         self.assertEqual(num_correct_predictions_tips, 547)
-        self.assertEqual(num_correct_predictions_internals, 26)
+        self.assertEqual(num_correct_predictions_internals, 24)
 
-        self.assertEqual(num_ancestors_predictions_internals, 8)
+        self.assertEqual(num_ancestors_predictions_internals, 13)
         self.assertEqual(num_subtree_predictions_internals, 8)
-        self.assertEqual(num_ancestors_predictions_tips, 44)
+        self.assertEqual(num_ancestors_predictions_tips, 98)
 
-        self.assertEqual(num_wrong_predictions_internals, 6)
-        self.assertEqual(num_wrong_predictions_tips, 59)
+        self.assertEqual(num_wrong_predictions_internals, 3)
+        self.assertEqual(num_wrong_predictions_tips, 5)

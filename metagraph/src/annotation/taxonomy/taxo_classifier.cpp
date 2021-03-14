@@ -131,7 +131,7 @@ TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     uint64_t total_kmers = 0;
 
     graph.map_to_nodes(sequence, [&](const auto &i) {
-      if (i > 0) {
+      if (i > 0 && taxonomic_map[i - 1] > 0) {
           // We need this i-1, because of the way how annotation cmd is implemented.
           num_kmers_per_node[taxonomic_map[i - 1]]++;
           total_kmers++;
