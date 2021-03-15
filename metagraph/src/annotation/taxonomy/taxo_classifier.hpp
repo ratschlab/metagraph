@@ -18,8 +18,8 @@ namespace annot {
  */
 class TaxoClassifier {
   public:
-    typedef std::uint64_t TaxId;
-    typedef annot::MultiLabelEncoded<std::string> Annotator;
+    using TaxId = std::uint64_t;
+    using Annotator = annot::MultiLabelEncoded<std::string>;
     using KmerId = Annotator::Index;
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
@@ -83,4 +83,5 @@ class TaxoClassifier {
 
 } // namespace annot
 } // namespace mtg
+
 #endif // __TAXONOMIC_CLASSIFIER_HPP__

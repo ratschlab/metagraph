@@ -20,8 +20,7 @@ namespace mtg {
 namespace annot {
 
 using mtg::common::logger;
-
-typedef TaxoClassifier::TaxId TaxId;
+using TaxId = TaxoClassifier::TaxId;
 
 void TaxoClassifier::import_taxonomy(const std::string &filepath) {
     Timer timer;
