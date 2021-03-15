@@ -38,7 +38,7 @@ void execute_fasta_file(const string &file,
 int taxonomic_classification(Config *config) {
     assert(config);
 
-    const auto &files = config->fnames;
+    const std::vector<std::string> &files = config->fnames;
 
     Timer timer;
     logger->trace("Loading TaxonomyDB ...");

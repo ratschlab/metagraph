@@ -14,7 +14,7 @@ namespace annot {
 /**
  * TaxonomyDB constructs a taxonomic map (kmer to taxid) in a similar way
  * to how Kraken2 works. The file exported by this object will be further
- * used for taxonomic sequence classifier in './metagraph tax_class'.
+ * used by taxonomic sequence classifier in './metagraph tax_class'.
  */
 class TaxonomyDB {
   public:
@@ -38,7 +38,7 @@ class TaxonomyDB {
 
     /**
      * Iterate the received annotation matrix (kmer-OX labels-OY) for updating the
-     * LCA taxid per kmer. The new data is stored in "this->taxonomic_map".
+     * LCA taxid per kmer. The updated data is stored in "this->taxonomic_map".
      *
      * @param [input] annot - the annotation matrix object.
      * @param [input] mutex - a mutex used for updating "this->taxonomic_map" in parallel
@@ -56,13 +56,13 @@ class TaxonomyDB {
      */
     NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids) const;
 
-    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId &taxid) const;
+    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const;
     static std::string get_accession_version_from_label(const std::string &label);
 
 
   private:
     /**
-     * node_depth returns the depth for each node.
+     * node_depth returns the depth for each node in the taxonomic tree.
      * The root is the unique node with maximal depth and all the leaves have depth 1.
      */
     std::vector<uint64_t> node_depth;
@@ -123,7 +123,7 @@ class TaxonomyDB {
                    ChildrenList *tree, NormalizedTaxId *root_node);
 
     /**
-     * Reads and returns the lookup table (accession version to taxid) corresponding to the received accession versions.
+     * Reads and returns the lookup table (accession version to taxid) corresponding to the received set of used accession versions.
      *
      * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
      * @param [input] input_accessions contains all the accession version in the input.
