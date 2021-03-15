@@ -11,6 +11,8 @@
 #include "common/serialization.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/threads/threading.hpp"
+
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 
@@ -22,12 +24,13 @@ namespace annot {
 
 using mtg::common::logger;
 
-typedef TaxonomyDB::NormalizedTaxId NormalizedTaxId;
+using NormalizedTaxId = TaxonomyDB::NormalizedTaxId;
 
 uint64_t TaxonomyDB::num_get_taxid_calls = 0;
 uint64_t TaxonomyDB::num_get_taxid_calls_failed = 0;
 
-void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
+void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node,
+                                const ChildrenList &tree,
                                 std::vector<NormalizedTaxId> *tree_linearization) {
     this->node_to_linearization_idx[node] = tree_linearization->size();
     tree_linearization->push_back(node);
@@ -43,7 +46,8 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node, const ChildrenList 
 }
 
 void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
-                           ChildrenList *tree, NormalizedTaxId *root_node) {
+                           ChildrenList *tree,
+                           NormalizedTaxId *root_node) {
     std::ifstream f(taxo_tree_filepath);
     if (!f.good()) {
         logger->error("Failed to open Taxonomic Tree file: '{}'", taxo_tree_filepath);
@@ -68,7 +72,7 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
     }
 
     std::queue<TaxId> relevant_taxids;
-    for (const pair<AccessionVersion, TaxId>  &it: lookup_label_taxid) {
+    for (const pair<AccessionVersion, TaxId>  &it: label_taxid_map) {
         relevant_taxids.push(it.second);
     }
 
@@ -152,55 +156,55 @@ std::string TaxonomyDB::get_accession_version_from_label(const std::string &labe
 }
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
-void TaxonomyDB::read_lookup_table(const std::string &lookup_table_filepath,
-                                   const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
-    std::ifstream f(lookup_table_filepath);
+void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepath,
+                                      const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
+    std::ifstream f(label_taxid_map_filepath);
     if (!f.good()) {
-        logger->error("Failed to open accession to taxid lookup table.'{}'", lookup_table_filepath);
+        logger->error("Failed to open accession to taxid map table.'{}'", label_taxid_map_filepath);
         exit(1);
     }
 
     std::string line;
     getline(f, line);
     if (!utils::starts_with(line, "accession\taccession.version\ttaxid\t")) {
-        logger->error("The accession to taxid lookup table is not in the standard '.accession2taxid' format: '{}'.", lookup_table_filepath);
+        logger->error("The accession to taxid map table is not in the standard '.accession2taxid' format: '{}'.", label_taxid_map_filepath);
         exit(1);
     }
 
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("The accession to taxid lookup table contains empty lines. Please make sure that this file was not manually modified: '{}'", lookup_table_filepath);
+            logger->error("The accession to taxid map table contains empty lines. Please make sure that this file was not manually modified: '{}'", label_taxid_map_filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() <= 2) {
-            logger->error("The accession to taxid lookup table contains incomplete lines. Please make sure that this file was not manually modified: '{}'", lookup_table_filepath);
+            logger->error("The accession to taxid map table contains incomplete lines. Please make sure that this file was not manually modified: '{}'", label_taxid_map_filepath);
             exit(1);
         }
         if (input_accessions.count(parts[1])) {
             TaxId act = static_cast<TaxId>(std::stoull(parts[2]));
-            lookup_label_taxid[parts[1]] = act;
+            label_taxid_map[parts[1]] = act;
         }
     }
 }
 
 TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
-                       const std::string &lookup_table_filepath,
+                       const std::string &label_taxid_map_filepath,
                        const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
 
     if (!std::filesystem::exists(taxo_tree_filepath)) {
         logger->error("Can't open taxonomic tree file '{}'.", taxo_tree_filepath);
         std::exit(1);
     }
-    if (!std::filesystem::exists(lookup_table_filepath)) {
-        logger->error("Can't open taxonomic lookup table file '{}'.", lookup_table_filepath);
+    if (!std::filesystem::exists(label_taxid_map_filepath)) {
+        logger->error("Can't open label_taxid_map file '{}'.", label_taxid_map_filepath);
         std::exit(1);
     }
 
     Timer timer;
-    logger->trace("Parsing lookup table..");
-    read_lookup_table(lookup_table_filepath, input_accessions);
-    logger->trace("Finished parsing lookup table in '{}' sec", timer.elapsed());
+    logger->trace("Parsing label_taxid_map file..");
+    read_label_taxid_map(label_taxid_map_filepath, input_accessions);
+    logger->trace("Finished label_taxid_map file in '{}' sec", timer.elapsed());
 
     timer.reset();
     logger->trace("Parsing taxonomic tree..");
@@ -251,58 +255,60 @@ NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids)
 
 bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const {
     num_get_taxid_calls += 1;
-    if (! lookup_label_taxid.count(accession_version)) {
-        // accession_version not in the lookup_label_taxid
+    if (! label_taxid_map.count(accession_version)) {
+        // accession_version not in the label_taxid_map
         num_get_taxid_calls_failed += 1;
         return false;
     }
-    if (! normalized_taxid.count(lookup_label_taxid.at(accession_version))) {
+    if (! normalized_taxid.count(label_taxid_map.at(accession_version))) {
         // taxid (corresponding to the current accession_version) not in the taxonomic tree.
         return false;
     }
 
-    *taxid = normalized_taxid.at(lookup_label_taxid.at(accession_version));
+    *taxid = normalized_taxid.at(label_taxid_map.at(accession_version));
     return true;
 }
 
-void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot,
-                                          std::mutex &taxo_mutex) {
-    for (const std::string &label: annot.get_all_labels()) {
+void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot) {
+    std::vector<std::string> all_labels = annot.get_all_labels();
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint64_t il = 0; il < all_labels.size(); ++il) {
+        const std::string &label = all_labels[il];
         AccessionVersion accession_version = get_accession_version_from_label(label);
         uint64_t taxid;
         if (!get_normalized_taxid(accession_version, &taxid)) {
             continue;
         }
         annot.call_objects(label, [&](const KmerId &index) {
-          if (index <= 0) {
-              return;
-          }
-          if (index >= taxonomic_map.size()) {
-              // Double the size of taxonomic_map until the current 'index' fits inside.
-              std::lock_guard<std::mutex> lock(taxo_mutex);
-              uint64_t new_size = taxonomic_map.size();
-              while (index >= new_size) {
-                  new_size = new_size * 2 + 1;
-              }
-              sdsl::int_vector<> aux_taxonomic_map = taxonomic_map;
-              taxonomic_map.resize(new_size);
-              for (uint64_t i = 0; i < taxonomic_map.size(); ++i) {
-                  taxonomic_map[i] = 0;
-              }
-              for (uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
-                  taxonomic_map[i] = aux_taxonomic_map[i];
-              }
-              taxonomic_map[index] = taxid;
-              return;
-          }
+            if (index <= 0) {
+                return;
+            }
+            if (index >= taxonomic_map.size()) {
+                // Double the size of taxonomic_map until the current 'index' fits inside.
+                std::lock_guard<std::mutex> lock(taxo_mutex);
+                uint64_t new_size = taxonomic_map.size();
+                while (index >= new_size) {
+                    new_size = new_size * 2 + 1;
+                }
+                sdsl::int_vector<> aux_taxonomic_map = taxonomic_map;
+                taxonomic_map.resize(new_size);
+                for (uint64_t i = 0; i < taxonomic_map.size(); ++i) {
+                    taxonomic_map[i] = 0;
+                }
+                for (uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
+                    taxonomic_map[i] = aux_taxonomic_map[i];
+                }
+                taxonomic_map[index] = taxid;
+                return;
+            }
 
-          if (taxonomic_map[index] == 0) {
-              std::lock_guard<std::mutex> lock(taxo_mutex);
-              taxonomic_map[index] = taxid;
-          } else {
-              NormalizedTaxId lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
-              std::lock_guard<std::mutex> lock(taxo_mutex);
-              taxonomic_map[index] = lca;
+            if (taxonomic_map[index] == 0) {
+                std::lock_guard<std::mutex> lock(taxo_mutex);
+                taxonomic_map[index] = taxid;
+            } else {
+                NormalizedTaxId lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
+                std::lock_guard<std::mutex> lock(taxo_mutex);
+                taxonomic_map[index] = lca;
           }
         });
     }
