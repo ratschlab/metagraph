@@ -20,10 +20,10 @@ using mtg::common::logger;
 std::vector<std::string> get_anno_filenames(const std::vector<std::string> &paths) {
     std::vector<std::string> filenames;
 
-    for (const auto &path: paths) {
+    for (const std::string &path: paths) {
         if (! filesystem::is_directory(path)) {
             if (!utils::ends_with(path, ".annodbg")) {
-                logger->warn("File '{}' is not an '.annodbg' file.", path);
+                logger->warn("File '{}' is not an '.annodbg' file. No evaluation for this file.", path);
                 continue;
             }
             filenames.push_back(path);
@@ -44,7 +44,7 @@ void call_taxonomy_map_updates(annot::TaxonomyDB &taxonomy,
                                const std::vector<std::string> &filenames,
                                cli::Config *config) {
     std::mutex taxo_mutex;
-#pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (uint64_t i = 0; i < filenames.size(); ++i) {
         const auto &file = filenames[i];
         std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
@@ -59,13 +59,13 @@ void call_taxonomy_map_updates(annot::TaxonomyDB &taxonomy,
 
 int transform_anno_tax(Config *config) {
     assert(config);
-    const auto &filenames = get_anno_filenames(config->fnames);
+    const std::vector<std::string> &filenames = get_anno_filenames(config->fnames);
     uint64_t mem_bytes = config->memory_available * 1e9;
 
     tsl::hopscotch_set<std::string> all_labels;
 
     // Get all labels from all the annotation files.
-    for (const auto &file: filenames) {
+    for (const std::string &file: filenames) {
         std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
                 cli::initialize_annotation(file, *config);
         if (!annot->load(file)) {
@@ -73,7 +73,7 @@ int transform_anno_tax(Config *config) {
             exit(1);
         }
         auto file_labels = annot->get_all_labels();
-        for (const auto &it: file_labels) {
+        for (const std::string &it: file_labels) {
             all_labels.insert(annot::TaxonomyDB::get_accession_version_from_label(it));
         }
     }

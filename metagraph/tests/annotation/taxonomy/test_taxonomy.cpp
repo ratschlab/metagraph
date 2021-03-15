@@ -203,15 +203,15 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     // Thus, the normalization ids are different and we need to compute all of them here.
     uint64_t normalized_taxid_seq1;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ1]),
-        normalized_taxid_seq1));
+        &normalized_taxid_seq1));
 
     uint64_t normalized_taxid_seq2;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ2]),
-        normalized_taxid_seq2));
+        &normalized_taxid_seq2));
 
     uint64_t normalized_taxid_seq3;
     ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ3]),
-        normalized_taxid_seq3));
+        &normalized_taxid_seq3));
 
     uint64_t normalized_lca_seq23 = taxo.find_lca({normalized_taxid_seq2,
                                                     normalized_taxid_seq3});
