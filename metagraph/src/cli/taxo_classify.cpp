@@ -27,10 +27,10 @@ void execute_fasta_file(const string &file,
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool.enqueue([&](){
-          uint64_t taxid = taxo_classifier.assign_class(graph,
-                                                        std::string(kseq.seq.s),
-                                                        config.lca_coverage_threshold);
-          callback(std::string(kseq.name.s), taxid);
+            uint64_t taxid = taxo_classifier.assign_class(graph,
+                                                          std::string(kseq.seq.s),
+                                                          config.lca_coverage_threshold);
+            callback(std::string(kseq.name.s), taxid);
         });
     }
 }
@@ -61,8 +61,7 @@ int taxonomic_classification(Config *config) {
                            taxo_classifier,
                            [](const std::string name_seq, const uint64_t &taxid) {
                              std::string result = fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
-                                                              name_seq,
-                                                              taxid);
+                                                              name_seq, taxid);
                              std::cout << result << std::endl;
                            },
                            *config);
