@@ -265,8 +265,8 @@ Config::Config(int argc, char *argv[]) {
             taxonomic_tree = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--lca-coverage-threshold")) {
             lca_coverage_threshold = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--lookup-label-taxid")) {
-            lookup_label_taxid = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--label-taxid-map")) {
+            label_taxid_map = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -1224,15 +1224,20 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
         case TRANSFORM_ANNO_TAX: {
-            fprintf(stderr, "Usage: %s transform_anno_tax --taxonomic-tree <nodes.dmp> --lookup-label-taxid <*.accession2taxid> \n"
-                    "\t-o <TAXONOMIC_DB-basename> ANNOT1 [[ANNOT2] ...] [options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform_anno_tax [options]\n"
+                        "\t\t --taxonomic-tree <nodes.dmp>\n"
+                        "\t\t --label-taxid-map <*.accession2taxid>\n"
+                        "\t\t -o <taxonomy-db-basename> ANNOT1 [[ANNOT2] ...]\n\n",
+                prog_name.c_str());
             fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tavailable memory in GB [1]\n");
             break;
         }
         case TAX_CLASSIFY: {
-            fprintf(stderr, "Usage: %s tax_class -i <GRAPH> --taxonomic-tree <TAXONOMIC_DB-basename> FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s tax_class [options]\n"
+                        "\t\t -i <GRAPH>\n"
+                        "\t\t --taxonomic-tree <TAXONOMIC_DB-basename> FILE1 [[FILE2] ...]\n"
+                        "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for taxonomic classify:\n");
             fprintf(stderr, "\t   --lca-coverage-threshold [FLOAT] fraction of covered kmers by the returned LCA's subtree and ancestors [0.66]\n");

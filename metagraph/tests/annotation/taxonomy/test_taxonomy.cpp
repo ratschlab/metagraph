@@ -195,7 +195,6 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     uint64_t SEQ3 = 41;
 
     get_sequences_and_labels_from_file(input_filepath, all_sequences, all_labels);
-    std::mutex taxo_mutex;
 
     ASSERT_TRUE(taxo.taxonomic_map.size() == 0);
 
@@ -265,7 +264,7 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
         auto anno_graph_seq =
                 build_anno_graph<DBGSuccinct>(k + 1, test_sequences, test_labels);
 
-        taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation(), taxo_mutex);
+        taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation());
         tsl::hopscotch_map<uint64_t, uint64_t> frequencies_taxid;
         for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
             if (taxo.taxonomic_map[i] > 0) {

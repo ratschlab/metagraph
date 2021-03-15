@@ -18,22 +18,22 @@ namespace annot {
  */
 class TaxonomyDB {
   public:
-    typedef std::string AccessionVersion;
-    typedef std::uint64_t TaxId;
-    typedef std::uint64_t NormalizedTaxId;
-    typedef std::vector<std::vector<NormalizedTaxId>> ChildrenList;
-    typedef annot::MultiLabelEncoded<AccessionVersion> Annotator;
+    using AccessionVersion = std::string;
+    using TaxId = std::uint64_t;
+    using NormalizedTaxId = std::uint64_t;
+    using ChildrenList = std::vector<std::vector<NormalizedTaxId>>;
+    using Annotator = annot::MultiLabelEncoded<AccessionVersion>;
     using KmerId = Annotator::Index;
 
     /**
      * Constructs a TaxonomyDB
      *
      * @param [input] taxo_tree_filepath path to a "nodes.dmp" file.
-     * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
+     * @param [input] label_taxid_map_filepath path to a ".accession2taxid" file.
      * @param [input] input_accessions contains all the accession version in the annotation matrix input.
      */
     TaxonomyDB(const std::string &taxo_tree_filepath,
-               const std::string &lookup_table_filepath,
+               const std::string &label_taxid_map_filepath,
                const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
@@ -41,10 +41,9 @@ class TaxonomyDB {
      * LCA taxid per kmer. The updated data is stored in "this->taxonomic_map".
      *
      * @param [input] annot - the annotation matrix object.
-     * @param [input] mutex - a mutex used for updating "this->taxonomic_map" in parallel
      */
-    void kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot,
-                                  std::mutex &taxo_mutex);
+    void kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot);
+
     /**
      * Exports 'taxonomic_map' and the taxonomic tree (as parent list)
      * to the given filepath.
@@ -61,6 +60,7 @@ class TaxonomyDB {
 
 
   private:
+    std::mutex taxo_mutex;
     /**
      * node_depth returns the depth for each node in the taxonomic tree.
      * The root is the unique node with maximal depth and all the leaves have depth 1.
@@ -83,9 +83,9 @@ class TaxonomyDB {
     std::vector<uint64_t> node_to_linearization_idx;
 
     /**
-     * lookup_label_taxid maps accession version to taxid.
+     * label_taxid_map maps accession version to taxid.
      */
-    tsl::hopscotch_map<AccessionVersion, TaxId> lookup_label_taxid;
+    tsl::hopscotch_map<AccessionVersion, TaxId> label_taxid_map;
 
     /**
      * precalc_log2 is a table for a fast compute of log2(x).
@@ -120,16 +120,17 @@ class TaxonomyDB {
      * @param [output] root_node -> normalized id of the root of the tree.
      */
     void read_tree(const std::string &taxo_tree_filepath,
-                   ChildrenList *tree, NormalizedTaxId *root_node);
+                   ChildrenList *tree,
+                   NormalizedTaxId *root_node);
 
     /**
-     * Reads and returns the lookup table (accession version to taxid) corresponding to the received set of used accession versions.
+     * Reads and returns the label_taxid_map (accession version to taxid) corresponding to the received set of used accession versions.
      *
-     * @param [input] lookup_table_filepath path to a ".accession2taxid" file.
+     * @param [input] label_taxid_map_filepath path to a ".accession2taxid" file.
      * @param [input] input_accessions contains all the accession version in the input.
      */
-    void read_lookup_table(const std::string &lookup_table_filepath,
-                           const tsl::hopscotch_set<AccessionVersion> &input_accessions);
+    void read_label_taxid_map(const std::string &label_taxid_map_filepath,
+                              const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
      * Computes the rmq data in "this->rmq_data". Beside this, calculates
@@ -147,7 +148,8 @@ class TaxonomyDB {
      * @param [input] tree -> tree stored as list of children.
      * @param [output] tree_linearization -> the linearization of the received tree.
      */
-    void dfs_statistics(const NormalizedTaxId &node, const ChildrenList &tree,
+    void dfs_statistics(const NormalizedTaxId &node,
+                        const ChildrenList &tree,
                         std::vector<NormalizedTaxId> *tree_linearization);
 
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
