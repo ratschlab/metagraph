@@ -51,13 +51,13 @@ TaxoClassifier::TaxoClassifier(const std::string &filepath) {
     logger->trace("Constructing Classifier object..");
     import_taxonomy(filepath);
 
-    for (const auto &it: node_parent) {
+    for (const pair<TaxId, TaxId> &it: node_parent) {
         if (it.first == it.second) {
             root_node = it.first;
             break;
         }
     }
-    logger->trace("Finished the Taxonomic Classifier's constructor in '{}' sec", timer.elapsed());
+    logger->trace("Finished the TaxoClassifier construction in '{}' sec", timer.elapsed());
 }
 
 void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
@@ -130,7 +130,7 @@ TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
     uint64_t total_kmers = 0;
 
-    graph.map_to_nodes(sequence, [&](const auto &i) {
+    graph.map_to_nodes(sequence, [&](const uint64_t &i) {
       if (i > 0 && taxonomic_map[i - 1] > 0) {
           // We need this i-1, because of the way how annotation cmd is implemented.
           num_kmers_per_node[taxonomic_map[i - 1]]++;
@@ -144,7 +144,7 @@ TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     uint64_t desired_number_kmers = total_kmers * lca_coverage_threshold;
     TaxId best_lca = root_node;
     uint64_t best_lca_dist_to_root = 1;
-    for (const auto &node_pair: num_kmers_per_node) {
+    for (const pair<TaxId, uint64_t> &node_pair: num_kmers_per_node) {
         TaxId start_node = node_pair.first;
         update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers,
                               node_scores, nodes_already_propagated, best_lca,

@@ -22,15 +22,13 @@ class TestTaxonomy(unittest.TestCase):
         self.taxo_root = -1
         taxo_lines = open(TAXO_DATA_DIR + '/dumb_nodes.dmp').readlines()
         for line in taxo_lines:
-            act_node = int(line.split('\t')[0])
-            act_parent = int(line.split('\t')[2])
+            act_node = line.split('\t')[0].strip()
+            act_parent = line.split('\t')[2].strip()
             self.taxo_parent[act_node] = act_parent
             if act_node == act_parent:
                 self.taxo_root = act_node
 
-    def is_descendant(self, node, query):
-        node = int(node)
-        query = int(query)
+    def is_descendant(self, node: str, query: str) -> bool:
         while query != self.taxo_root:
             query = self.taxo_parent[query]
             if query == node:
@@ -40,6 +38,7 @@ class TestTaxonomy(unittest.TestCase):
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_taxonomy(self):
         k = 20
+        lca_coverage = 0.9
         construct_command = '{exe} build -p {num_threads} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -77,7 +76,7 @@ class TestTaxonomy(unittest.TestCase):
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAXO_DATA_DIR + '/taxo_query.fa',
             taxoDB=self.tempdir.name + '/taxoDB.taxo',
-            lca_coverage=0.90
+            lca_coverage=lca_coverage
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -88,36 +87,38 @@ class TestTaxonomy(unittest.TestCase):
         num_total_predictions_tips = 0
         num_total_predictions_internals = 0
 
-        num_subtree_predictions_internals = 0
-        num_ancestors_predictions_tips = 0
-        num_ancestors_predictions_internals = 0
+        num_descendant_predictions_internals = 0
+        num_ancestor_predictions_tips = 0
+        num_ancestor_predictions_internals = 0
 
         num_wrong_predictions_tips = 0
         num_wrong_predictions_internals = 0
         for line in res_lines:
             if line == "":
                 continue
-            query_expected = line.split(" ")[1].split("|")[3]
-            query_prediction = line.split(" ")[7].split("'")[1]
+            query_expected = line.split(" ")[1].split("|")[3].strip()
+            query_prediction = line.split(" ")[7].split("'")[1].strip()
 
             if line.split(" ")[1].split("|")[5] == "0":
+                # This taxid is a tip, has no children in the taxonomic tree.
                 num_total_predictions_tips += 1
                 if query_expected == query_prediction:
                     num_correct_predictions_tips += 1
                 else:
                     if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestors_predictions_tips += 1
+                        num_ancestor_predictions_tips += 1
                     else:
                         num_wrong_predictions_tips += 1
             else:
+                # This taxid is an internal node.
                 num_total_predictions_internals += 1
                 if query_expected == query_prediction:
                     num_correct_predictions_internals += 1
                 else:
                     if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestors_predictions_internals += 1
+                        num_ancestor_predictions_internals += 1
                     elif self.is_descendant(node=query_expected, query=query_prediction):
-                        num_subtree_predictions_internals += 1
+                        num_descendant_predictions_internals += 1
                     else:
                         num_wrong_predictions_internals += 1
         self.assertEqual(num_total_predictions_tips, 650)
@@ -126,9 +127,9 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(num_correct_predictions_tips, 547)
         self.assertEqual(num_correct_predictions_internals, 24)
 
-        self.assertEqual(num_ancestors_predictions_internals, 13)
-        self.assertEqual(num_subtree_predictions_internals, 8)
-        self.assertEqual(num_ancestors_predictions_tips, 98)
+        self.assertEqual(num_ancestor_predictions_internals, 13)
+        self.assertEqual(num_descendant_predictions_internals, 8)
+        self.assertEqual(num_ancestor_predictions_tips, 98)
 
         self.assertEqual(num_wrong_predictions_internals, 3)
         self.assertEqual(num_wrong_predictions_tips, 5)
