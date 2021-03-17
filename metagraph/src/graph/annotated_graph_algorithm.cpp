@@ -238,6 +238,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         std::move(mask),
+        true,
         graph_ptr->get_mode()
     );
 
@@ -288,7 +289,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         masked_graph = std::make_shared<MaskedDeBruijnGraph>(
             graph_ptr,
             std::make_unique<bitmap_vector>(std::move(new_indicator)),
-            masked_canonical
+            true,
+            masked_canonical ? DeBruijnGraph::CANONICAL : DeBruijnGraph::BASIC
         );
 
         logger->trace("Reconstructing count vector");
