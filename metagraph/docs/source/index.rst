@@ -1,4 +1,4 @@
-Metagraph - User Manual
+MetaGraph - User Manual
 =======================
 
 Welcome to the user manual of MetaGraph. This document summarizes setup and use of the MetaGraph
