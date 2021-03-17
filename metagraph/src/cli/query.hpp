@@ -41,7 +41,6 @@ std::unique_ptr<graph::AnnotatedDBG>
 construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
-                      bool canonical = false,
                       const Config *config = nullptr);
 
 

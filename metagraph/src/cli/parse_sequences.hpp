@@ -32,7 +32,13 @@ void parse_sequences(const std::string &file,
                      const Config &config,
                      Callback call_sequence,
                      CallWeighted call_weighted_sequence) {
-    mtg::common::logger->trace("Parsing '{}'", file);
+    mtg::common::logger->trace("Parsing {}", file);
+
+    if (config.graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
+        mtg::common::logger->error("Primary graphs can only be constructed from"
+                                   " primary contigs");
+        exit(1);
+    }
 
     if (file_format(file) == "VCF") {
         read_vcf_file_critical(file,
@@ -47,15 +53,10 @@ void parse_sequences(const std::string &file,
         auto min_count = config.min_count;
         auto max_count = config.max_count;
 
+        // compute the quantiles to update the thresholds
         if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
             tsl::hopscotch_map<uint64_t, uint64_t> count_hist;
-            read_kmers(
-                file,
-                [&](std::string_view, uint32_t count) {
-                    count_hist[count] += (1 + config.forward_and_reverse);
-                },
-                !config.canonical && !config.forward_and_reverse
-            );
+            read_kmers(file, [&](auto, uint32_t count) { count_hist[count]++; }, false);
 
             if (count_hist.size()) {
                 std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
@@ -79,7 +80,7 @@ void parse_sequences(const std::string &file,
             file,
             [&](std::string_view sequence, uint32_t count) {
                 if (!warning_different_k && sequence.size() != config.k) {
-                    mtg::common::logger->warn("k-mers parsed from KMC database '{}' have "
+                    mtg::common::logger->warn("k-mers parsed from KMC database {} have "
                                              "length {} but graph is constructed for k={}",
                                              file, sequence.size(), config.k);
                     warning_different_k = true;
@@ -93,7 +94,10 @@ void parse_sequences(const std::string &file,
                     call_weighted_sequence(sequence, count);
                 }
             },
-            !config.canonical && !config.forward_and_reverse, min_count, max_count
+            // For canonical graph the rev-compl sequences will be called automatically anyway.
+            // Also, if forward_and_reverse = true, the rev-compl will be computed in the callback.
+            config.graph_mode != graph::DeBruijnGraph::CANONICAL && !config.forward_and_reverse,
+            min_count, max_count
         );
 
     } else if (file_format(file) == "FASTA"
@@ -102,13 +106,13 @@ void parse_sequences(const std::string &file,
         if (config.count_kmers
             && std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
 
-            mtg::common::logger->trace("Parsing k-mer counts from '{}'",
+            mtg::common::logger->trace("Parsing k-mer counts from {}",
                 utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
             );
             read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
                 [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
                     if (k != config.k) {
-                        mtg::common::logger->error("File '{}' contains counts for k-mers of "
+                        mtg::common::logger->error("File {} contains counts for k-mers of "
                                                   "length {} but graph is constructed with k={}",
                                                   file, k, config.k);
                         exit(1);

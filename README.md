@@ -2,28 +2,61 @@
 
 ## Install
 
-### Prerequisites
-- cmake 3.6.1
-- GNU GCC with C++17 (gcc-9 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
-- HTSlib
-- folly (optional)
-- Python 3 (for running integration tests)
+### Conda
 
-All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh) (does not require root)
+There are conda packages available on bioconda for both Linux and Mac OS X:
+
+```
+conda install -c bioconda -c conda-forge metagraph
+```
+
+The executable is called `metagraph_DNA`.
+
+### Docker
+
+If docker is available on your system, you can immediately get started using
+e.g.
+```
+docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph build -v -k 10 /mnt/transcripts_1000.fa -o /mnt/transcripts_1000
+```
+
+where you'd need to replace `${DATA_DIR_HOST}` with a directory on the host system. This directory is then mapped 
+under `/mnt` in the container.
+
+
+## Install From Sources
+
+### Prerequisites
+- cmake 3.10 or higher
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- bzip2
+- HTSlib
+
+#### Optional
+- boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
+- Python 3 (for running integration tests)
 
 For compiling with **AppleClang**, the prerequisites can be installed as easy as:
 ```
-brew install libomp cmake make htslib boost folly
+brew install libomp cmake make bzip2 htslib boost jemalloc
 ```
 
-For **Linux** with **GNU GCC** or **LLVM Clang**, see [wiki](../../wiki/How-to-Start).
+For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
+```
+sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+```
+
+For **CentOS** (8 or higher)
+```
+yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+```
+
+All prerequisites can also be installed by users **without root** using [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
 
 
 ### Compile
-1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
-2. make sure all submodules are downloaded: `git submodule update --init --recursive`
-3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding instructions
-or simply run the following script
+1. `git clone --recursive https://github.com/ratschlab/metagraph.git`
+2. install *sdsl-lite* in `metagraph/external-libraries/` by running the following script from the repository root directory
 ```bash
 git submodule sync
 git submodule update --init --recursive
@@ -31,18 +64,12 @@ git submodule update --init --recursive
 pushd metagraph/external-libraries/sdsl-lite
 ./install.sh $PWD
 popd
-
-pushd metagraph/external-libraries/libmaus2
-cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
-make install
-popd
 ```
 
-4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
-5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
-6. run unit tests `./unit_tests`
-6. run integration tests `./integration_tests`
+3. make a **build** directory `mkdir -p metagraph/build && cd metagraph/build`
+4. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))` (for alphabets other than DNA, see below)
+5. (optional) run unit tests `./unit_tests`
+6. (optional) run integration tests `./integration_tests`
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (`Release` by default)
@@ -173,7 +200,7 @@ Requires `N*R/8 + 6*N^2` bytes of RAM, where `N` is the number of columns and `R
 2) Construct Multi-BRWT
 ```bash
 ./metagraph transform_anno -v -p NCORES --anno-type brwt \
-                           -i linkage.txt \
+                           --linkage-file linkage.txt \
                            -o primates \
                            --parallel-nodes V \
                            -p NCORES \
@@ -225,6 +252,24 @@ Stats for both
 ```bash
 ./metagraph stats -a annotation.column.annodbg graph.dbg
 ```
+
+## Developer Notes
+
+### Makefile
+
+The `Makefile` in the top level source directory can be used to build and test `metagraph` more conveniently. The following
+arguments are supported:
+* `env`: environment in which to compile/run (`""`: on the host, `docker`: in a docker container)
+* `alphabet`: compile metagraph for a certain alphabet (e.g. `DNA` or `Protein`, default `DNA`)
+* `additional_cmake_args`: additional arguments to pass to cmake.
+
+Examples:
+
+```
+# compiles metagraph in a docker container for the `DNA` alphabet
+make build-metagraph env=docker alphabet=DNA
+```
+
 
 ## License
 Metagraph is distributed under the GPLv3 License (see LICENSE).

@@ -104,6 +104,11 @@ class BOSS {
     using Call = typename std::function<void(T...)>;
 
     /**
+     * Given the last outgoing edge of a given node, call all edges from that node
+     */
+    void call_outgoing(edge_index edge, const Call<edge_index> &callback) const;
+
+    /**
      * Traverse the boss graph and call all its edges
      * except for the dummy source nodes and the dummy sink nodes
      */
@@ -280,13 +285,29 @@ class BOSS {
     void print_internal_representation(std::ostream &os = std::cout) const;
 
     /**
-     * Representation states of the BOSS table.
+     * Alternative representation states of the BOSS table.
      *
-     * SMALL is the smallest
-     * STAT provides a good space/time tradeoff
-     * FAST is the fastest but large
+     * STAT: provides the best space/time trade-off
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_stat
+     *
+     * SMALL: is the smallest, useful for storage or when RAM is limited
+     *      Representation:
+     *          last -- bit_vector_small
+     *             W -- wavelet_tree_small
+     *
+     * FAST: is the fastest but large
+     *      Representation:
+     *          last -- bit_vector_stat
+     *             W -- wavelet_tree_fast
+     *
+     * DYN: is a dynamic representation supporting insert and delete
+     *      Representation:
+     *          last -- bit_vector_dyn
+     *             W -- wavelet_tree_dyn
      */
-    enum State { STAT = 1, DYN, SMALL, FAST };
+    enum State { SMALL = 1, DYN, STAT, FAST };
 
     State get_state() const { return state; }
     void switch_state(State state);
@@ -565,6 +586,7 @@ class BOSS {
 
   public:
     class Chunk;
+    void initialize(Chunk *chunk);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);
@@ -710,6 +732,13 @@ BOSS::map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
     return edge && *(end - 1) < alph_size
             ? pick_edge(edge, *(end - 1))
             : npos;
+}
+
+inline void BOSS::call_outgoing(edge_index edge, const Call<edge_index> &callback) const {
+    assert(get_last(edge));
+    do {
+        callback(edge);
+    } while (--edge && !get_last(edge));
 }
 
 } // namespace boss

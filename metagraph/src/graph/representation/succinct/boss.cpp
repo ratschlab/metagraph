@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <progress_bar.hpp>
-#include <libmaus2/util/NumberSerialisation.hpp>
 #include <tsl/hopscotch_set.h>
 
 #include "common/threads/threading.hpp"
@@ -44,9 +43,10 @@ typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 typedef BOSS::TAlphabet TAlphabet;
 
-const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_FAST = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 6;
-const size_t MAX_ITER_WAVELET_TREE_SMALL = 20;
+const size_t MAX_ITER_WAVELET_TREE_STAT = 20;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 1;
 
 static const uint64_t kBlockSize = 9'999'872;
 static_assert(!(kBlockSize & 0xFF));
@@ -95,6 +95,31 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
 BOSS::~BOSS() {
     delete W_;
     delete last_;
+}
+
+void BOSS::initialize(Chunk *chunk) {
+    delete W_;
+    delete last_;
+
+    // TODO: optimize
+    W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
+
+    {
+        chunk->last_.flush();
+        sdsl::bit_vector last;
+        std::ifstream in(chunk->last_.filename(), std::ios::binary);
+        last.load(in);
+        last_ = new bit_vector_stat(std::move(last));
+    }
+
+    F_ = chunk->F_;
+    recompute_NF();
+
+    k_ = chunk->k_;
+    // TODO:
+    // alph_size = chunk->alph_size_;
+
+    state = State::STAT;
 }
 
 /**
@@ -223,7 +248,7 @@ void BOSS::serialize(std::ofstream &outstream) const {
         throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
-    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+    serialize_number_vector_raw(outstream, F_);
     serialize_number(outstream, k_);
     serialize_number(outstream, state);
     outstream.flush();
@@ -251,7 +276,7 @@ bool BOSS::load(std::ifstream &instream) {
 
     try {
         // load F, k, and state
-        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<edge_index>(instream);
+        F_ = load_number_vector_raw<edge_index>(instream);
         k_ = load_number(instream);
         state = static_cast<State>(load_number(instream));
 
@@ -278,7 +303,7 @@ bool BOSS::load(std::ifstream &instream) {
                 break;
             case State::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                last_ = new bit_vector_small();
                 break;
         }
         if (!W_->load(instream)) {
@@ -392,7 +417,7 @@ edge_index BOSS::pred_W(edge_index i, TAlphabet c_first, TAlphabet c_second) con
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -450,7 +475,7 @@ BOSS::succ_W(edge_index i, TAlphabet c_first, TAlphabet c_second) const {
             max_iter = MAX_ITER_WAVELET_TREE_SMALL;
             break;
         case FAST:
-            max_iter = MAX_ITER_WAVELET_TREE_STAT;
+            max_iter = MAX_ITER_WAVELET_TREE_FAST;
             break;
     }
 
@@ -1048,7 +1073,7 @@ void BOSS::switch_state(State new_state) {
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
         case State::FAST: {
@@ -1585,6 +1610,9 @@ sdsl::bit_vector
 BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
                                   size_t num_threads,
                                   bool verbose) {
+    // reset the index of suffix ranges
+    index_suffix_ranges(0);
+
     sdsl::bit_vector redundant_dummy_edges_mask(W_->size(), false);
 
     if (source_dummy_edges) {
@@ -1770,10 +1798,10 @@ inline void masked_call_outgoing(const BOSS &boss,
             && "i has to point to the last outgoing edge in unmasked graph");
     assert(!subgraph_mask || subgraph_mask->size() == boss.num_edges() + 1);
 
-    do {
-        if (!subgraph_mask || (*subgraph_mask)[i])
-            callback(i);
-    } while (--i > 0 && !boss.get_last(i));
+    boss.call_outgoing(i, [&](BOSS::edge_index adjacent_edge) {
+        if (!subgraph_mask || (*subgraph_mask)[adjacent_edge])
+            callback(adjacent_edge);
+    });
 }
 
 // If a single incoming edge is found, write it to |*i| and return true.
@@ -1828,7 +1856,7 @@ using Edge = std::pair<edge_index, std::unique_ptr<TAlphabet[]>>;
 // then switches and only stores edge indices if too many are queued.
 class EdgeQueue {
   public:
-    EdgeQueue(std::vector<Edge>&& initial_edges = {})
+    EdgeQueue(std::deque<Edge>&& initial_edges = {})
           : decoded_edges_(std::move(initial_edges)) {
         total_decoded_ += decoded_edges_.size();
     }
@@ -1860,6 +1888,24 @@ class EdgeQueue {
         } else {
             --total_decoded_;
             indexes_.push_back(edge);
+        }
+    }
+
+    template <typename Iterator>
+    void emplace_front(edge_index edge, Iterator begin, Iterator end) {
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>);
+
+        if (begin == end) {
+            indexes_.push_front(edge);
+            return;
+        }
+
+        if (++total_decoded_ <= MAX_DECODED_EDGES_IN_QUEUE) {
+            decoded_edges_.emplace_front(edge, new TAlphabet[end - begin]);
+            std::copy(begin, end, decoded_edges_.front().second.get());
+        } else {
+            --total_decoded_;
+            indexes_.push_front(edge);
         }
     }
 
@@ -1899,19 +1945,14 @@ class EdgeQueue {
         return split_queue;
     }
 
-    void reserve(size_t capacity) {
-        decoded_edges_.reserve(capacity);
-        indexes_.reserve(capacity);
-    }
-
     size_t size() const { return decoded_edges_.size() + indexes_.size(); }
 
     bool empty() const { return decoded_edges_.empty() && indexes_.empty(); }
 
   private:
     inline static std::atomic<uint64_t> total_decoded_ = 0;
-    std::vector<Edge> decoded_edges_;
-    std::vector<edge_index> indexes_;
+    std::deque<Edge> decoded_edges_;
+    std::deque<edge_index> indexes_;
 };
 
 /*
@@ -1939,6 +1980,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2335,7 +2377,7 @@ void call_paths(const BOSS &boss,
         if (path.empty())
             continue;
 
-        call_path(boss, callback, path, sequence,
+        call_path(boss, callback, path, sequence, split_to_unitigs,
                   kmers_in_single_form, trim_sentinels, visited, *fetched_ptr,
                   async, fetched_mutex, progress_bar, subgraph_mask, &edges);
     }
@@ -2460,6 +2502,7 @@ call_path(const BOSS &boss,
                            std::vector<TAlphabet>&&> &callback,
           std::vector<edge_index> &path,
           std::vector<TAlphabet> &sequence,
+          bool split_to_unitigs,
           bool kmers_in_single_form,
           bool trim_sentinels,
           sdsl::bit_vector &visited,
@@ -2539,7 +2582,7 @@ call_path(const BOSS &boss,
                 // otherwise it's a fork which will be covered in the forward pass.
                 if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
                     if (!fetch_bit(visited.data(), next_edge, concurrent)) {
-                        edge_queue->emplace_back(next_edge,
+                        edge_queue->emplace_front(next_edge,
                                                  rev_comp_seq.begin() + i + 1,
                                                  rev_comp_seq.begin() + i + 1 + boss.get_k());
                     }
@@ -2550,6 +2593,15 @@ call_path(const BOSS &boss,
             // to the buffer. The index is inverted because dual_path will be
             // reversed.
             dual_visited.push_back(dual_path.size() - 1 - i);
+
+            // For the unitig mode, wait until the dual unitig is fully traversed
+            // by the same thread that visited its first node.
+            if (i == 0 && split_to_unitigs
+                       && !std::count(dual_path.begin(), dual_path.end(), 0)) {
+                // The first node had already been visited, hence, the remaining
+                // part of this non-branching path will be reached as well.
+                while (!fetch_bit(visited.data(), dual_path.back(), concurrent)) {}
+            }
         }
     }
 
@@ -2613,8 +2665,7 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),
@@ -2855,8 +2906,7 @@ void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
     call_paths([&](std::vector<edge_index>&& edges, std::vector<TAlphabet>&& path) {
         assert(path.size() >= k_ + 1);
         assert(edges.size() == path.size() - k_);
-        assert(std::all_of(path.begin(), path.end(),
-                           [](TAlphabet c) { return c != kSentinelCode; }));
+        assert(!std::count(path.begin(), path.end(), kSentinelCode));
 
         std::string sequence(path.size(), '\0');
         std::transform(path.begin(), path.end(), sequence.begin(),

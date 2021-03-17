@@ -20,20 +20,23 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-const size_t kNumElementsReservedInBitmapBuilder = 10'000'000;
 const uint8_t kCountBits = 8;
 const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
 
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
-                                          size_t num_columns_cached)
+                                          size_t num_columns_cached,
+                                          const std::string &swap_dir,
+                                          uint64_t buffer_size_bytes)
       : num_rows_(num_rows),
+        swap_dir_(swap_dir),
+        buffer_size_bytes_(buffer_size_bytes),
         cached_columns_(std::max(num_columns_cached, (size_t)1),
                         caches::LRUCachePolicy<size_t>(),
                         [this](size_t j, bitmap_builder *column_builder) {
                             assert(column_builder);
-                            this->flush(j, *column_builder);
+                            this->flush(j, column_builder);
                             delete column_builder;
                         }) {}
 
@@ -165,7 +168,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);;
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -176,7 +179,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
                 sum_counts += v;
             }
 
-            relation_counts_[j].serialize(outstream);;
+            relation_counts_[j].serialize(outstream);
         }
     }
 
@@ -248,9 +251,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
         std::ifstream instream(filename, std::ios::binary);
@@ -269,15 +269,15 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         offsets[i] = label_encoder.size();
     }
 
+    if (error_occurred)
+        return false;
+
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
         try {
             auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
 
@@ -310,7 +310,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                          label_encoder_load.decode(c),
                          std::move(new_column));
             }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading columns: {}", e.what());
+            error_occurred = true;
         } catch (...) {
+            logger->error("Unknown exception when loading columns");
             error_occurred = true;
         }
     }
@@ -474,18 +478,16 @@ void ColumnCompressed<Label>::flush() const {
     std::lock_guard<std::mutex> lock(bitmap_conversion_mu_);
 
     if (!flushed_) {
-        for (const auto &cached_vector : cached_columns_) {
-            const_cast<ColumnCompressed*>(this)->flush(
-                cached_vector.first, *cached_vector.second
-            );
-        }
+        // the columns are flushed automatically on erasing from cache
+        const_cast<ColumnCompressed*>(this)->cached_columns_.Clear();
         flushed_ = true;
     }
     assert(bitmatrix_.size() == label_encoder_.size());
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::flush(size_t j, const bitmap_builder &builder) {
+void ColumnCompressed<Label>::flush(size_t j, bitmap_builder *builder) {
+    assert(builder);
     assert(j < bitmatrix_.size());
 
     // Note: asserting that j is cached cannot be done here when this function
@@ -495,7 +497,7 @@ void ColumnCompressed<Label>::flush(size_t j, const bitmap_builder &builder) {
 
     bitmatrix_[j].reset();
 
-    auto initialization_data = builder.get_initialization_data();
+    auto initialization_data = builder->get_initialization_data();
     bitmatrix_[j].reset(new bit_vector_smart(initialization_data.call_ones,
                                              initialization_data.size,
                                              initialization_data.num_set_bits));
@@ -560,13 +562,19 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
             bitmatrix_.emplace_back();
             // Work with the full uncompressed bitmap if it takes less space
             // than the buffer in its builder.
-            if (num_rows_ < kNumElementsReservedInBitmapBuilder * 64) {
+            if (num_rows_ < buffer_size_bytes_ * 8) {
                 vector = new bitmap_vector(num_rows_, 0);
+
+            // For large bitmaps, use a more space efficient builder that
+            // requires only 64 bits per each 1-bit in the bitmap.
+            } else if (swap_dir_.size()) {
+                // use a fixed size buffer and disk swap
+                vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
+                                                     buffer_size_bytes_ / 8, swap_dir_);
             } else {
-                // For large bitmaps, use the efficient builder, using only
-                // space proportional to the number of bits set in the bitmap.
+                // all in RAM, the buffer is automatically resized for large bitmaps
                 vector = new bitmap_builder_set(num_rows_, get_num_threads(),
-                                                kNumElementsReservedInBitmapBuilder);
+                                                buffer_size_bytes_ / 8);
             }
         } else {
             // otherwise, decompress the existing column and initialize a bitmap
@@ -589,7 +597,7 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
     // lock the mutex in case the bitmap conversion happens
     std::lock_guard<std::mutex> lock(bitmap_conversion_mu_);
 
-    const auto &builder = *cached_columns_.Get(j);
+    auto &builder = *cached_columns_.Get(j);
 
     if (const bitmap *uncompressed = dynamic_cast<const bitmap*>(&builder))
         return *uncompressed;
@@ -622,7 +630,6 @@ template <typename Label>
 binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    cached_columns_.Clear();
     return binmat::ColumnMajor(std::move(bitmatrix_));
 }
 

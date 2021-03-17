@@ -12,6 +12,7 @@ import gzip
 """Test graph construction"""
 
 METAGRAPH = './metagraph'
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
@@ -34,7 +35,7 @@ class TestBuildWeighted(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
-    @parameterized.expand(BUILDS)
+    @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]
 
@@ -59,17 +60,18 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 591997', params_str[3])
         self.assertEqual('avg weight: 2.48587', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --canonical --count-kmers --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
+                --graph {repr} --mode canonical --count-kmers --disk-swap {tmp_dir} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -89,7 +91,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 1159851', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 1159851', params_str[3])
         self.assertEqual('avg weight: 2.53761', params_str[4])
 
@@ -116,16 +118,17 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
         self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 16', params_str[3])
         self.assertEqual('avg weight: 255', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
-        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--canonical',
+        args = [METAGRAPH, 'build', '--mask-dummy', '--graph', representation, '--mode canonical',
                 '--count-kmers',
                 '--disk-swap', tmp_dir,
                 '-k', '2',
@@ -145,7 +148,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 2', params_str[0])
         self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 16', params_str[3])
         self.assertEqual('avg weight: 255', params_str[4])
 
@@ -174,7 +177,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 469983', params_str[3])
         self.assertEqual('avg weight: 3.15029', params_str[4])
 
@@ -203,17 +206,18 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 802920', params_str[3])
         self.assertEqual('avg weight: 3.68754', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} --mode canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -233,17 +237,18 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 802920', params_str[3])
         self.assertEqual('avg weight: 3.68754', params_str[4])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_from_kmc_both_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
         construct_command = '{exe} build --mask-dummy \
-                --graph {repr} --count-kmers --disk-swap {tmp_dir} --canonical -k 11 -o {outfile} {input}'.format(
+                --graph {repr} --count-kmers --disk-swap {tmp_dir} --mode canonical -k 11 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             repr=representation,
             tmp_dir=tmp_dir,
@@ -263,7 +268,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', params_str[0])
         self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('canonical mode: yes', params_str[2])
+        self.assertEqual('mode: canonical', params_str[2])
         self.assertEqual('nnz weights: 802920', params_str[3])
         self.assertEqual('avg weight: 3.68754', params_str[4])
 
@@ -305,7 +310,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 4', params_str[0])
         self.assertEqual('nodes (k): 256', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 256', params_str[3])
         self.assertEqual('avg weight: {}'.format(avg_count_expected), params_str[4])
 
@@ -336,6 +341,7 @@ class TestBuildWeighted(unittest.TestCase):
                           ]
                           )
     ))
+    @unittest.skipIf(PROTEIN_MODE, "Too large k-mer size for Protein alphabets")
     def test_kmer_count_width_large(self, build, k_width_result):
         representation, tmp_dir = build_params[build]
         k, count_width, avg_count_expected = k_width_result
@@ -368,7 +374,7 @@ class TestBuildWeighted(unittest.TestCase):
         params_str = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: {}'.format(k), params_str[0])
         self.assertEqual('nodes (k): 2', params_str[1])
-        self.assertEqual('canonical mode: no', params_str[2])
+        self.assertEqual('mode: basic', params_str[2])
         self.assertEqual('nnz weights: 2', params_str[3])
         self.assertEqual('avg weight: {}'.format(avg_count_expected), params_str[4])
 

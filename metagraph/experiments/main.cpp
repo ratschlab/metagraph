@@ -6,7 +6,6 @@
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 #include <ips4o.hpp>
-#include <libmaus2/util/NumberSerialisation.hpp>
 #include <progress_bar.hpp>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
@@ -24,7 +23,8 @@
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/data_generation.hpp"
-#include "graph/alignment/aligner_helper.hpp"
+#include "graph/alignment/aligner_config.hpp"
+#include "graph/alignment/aligner_cigar.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/kmc_parser.hpp"
 #include "cli/config/config.hpp"
@@ -1180,7 +1180,12 @@ int main(int argc, char *argv[]) {
             }
 
             // load F, k, and state
-            auto F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+            std::vector<uint64_t> F_;
+            if (!load_number_vector(instream, &F_)) {
+                std::cerr << "ERROR: failed to read F vector from file" << std::endl;
+                return 1;
+            }
+
             auto k_ = load_number(instream);
             auto state = static_cast<BOSS::State>(load_number(instream));
 
@@ -1285,7 +1290,7 @@ int main(int argc, char *argv[]) {
             }
 
             // write F values, k, and state
-            libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+            serialize_number_vector(outstream, F_);
             serialize_number(outstream, k_);
             serialize_number(outstream, state);
             // write Wavelet Tree

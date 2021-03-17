@@ -30,8 +30,6 @@ int merge_graph(Config *config) {
     std::vector<std::shared_ptr<graph::DBGSuccinct>> dbg_graphs;
     std::vector<const graph::boss::BOSS*> graphs;
 
-    config->canonical = true;
-
     for (const auto &file : files) {
         logger->info("Opening file '{}'", file);
 
@@ -42,7 +40,13 @@ int merge_graph(Config *config) {
         if (get_verbose())
             print_boss_stats(*graphs.back());
 
-        config->canonical &= dbg_graphs.back()->is_canonical_mode();
+        if (file == files.front())
+            config->graph_mode = dbg_graphs.back()->get_mode();
+
+        if (config->graph_mode != dbg_graphs.back()->get_mode()) {
+            logger->error("Input graphs are in different modes and thus incompatible for merge");
+            exit(1);
+        }
     }
 
     logger->info("Graphs are loaded in {} sec", timer.elapsed());
@@ -72,7 +76,7 @@ int merge_graph(Config *config) {
         logger->info("Start merging blocks");
         timer.reset();
 
-        auto *chunk = graph::boss::merge_blocks_to_chunk(
+        graph::boss::BOSS::Chunk chunk = graph::boss::merge_blocks_to_chunk(
             graphs,
             config->part_idx,
             config->parts_total,
@@ -80,21 +84,20 @@ int merge_graph(Config *config) {
             config->num_bins_per_thread,
             get_verbose()
         );
-        if (!chunk) {
+        if (!chunk.size()) {
             logger->error("ERROR when building chunk {}", config->part_idx);
             exit(1);
         }
         logger->info("Blocks merged in {} sec", timer.elapsed());
 
         if (config->parts_total > 1) {
-            chunk->serialize(config->outfbase
+            chunk.serialize(config->outfbase
                               + "." + std::to_string(config->part_idx)
                               + "_" + std::to_string(config->parts_total));
         } else {
             graph = new graph::boss::BOSS(graphs[0]->get_k());
-            chunk->initialize_boss(graph);
+            chunk.initialize_boss(graph);
         }
-        delete chunk;
     } else {
         logger->info("Start merging graphs");
         timer.reset();
@@ -108,7 +111,7 @@ int merge_graph(Config *config) {
     logger->info("Graphs merged in {} sec", timer.elapsed());
 
     // graph output
-    graph::DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
+    graph::DBGSuccinct(graph, config->graph_mode).serialize(config->outfbase);
 
     return 0;
 }

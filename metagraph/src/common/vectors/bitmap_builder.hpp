@@ -3,8 +3,10 @@
 
 #include <cassert>
 #include <functional>
+#include <filesystem>
 
 #include "common/sorted_sets/sorted_set.hpp"
+#include "common/sorted_sets/sorted_set_disk.hpp"
 
 
 /**
@@ -26,7 +28,9 @@ class bitmap_builder {
         const std::function<void(const std::function<void(uint64_t)> &callback)> call_ones;
     };
 
-    virtual InitializationData get_initialization_data() const = 0;
+    // Generally, can only be called once. The returned InitializationData
+    // may become invalid after the bitmap_builder object is destroyed.
+    virtual InitializationData get_initialization_data() = 0;
 };
 
 
@@ -53,7 +57,9 @@ class bitmap_builder_set : public bitmap_builder {
         set_bit_positions_.insert(begin, end);
     }
 
-    virtual InitializationData get_initialization_data() const {
+    // Can be called multiple times. The returned InitializationData
+    // becomes invalid after the bitmap_builder_set object is destroyed.
+    virtual InitializationData get_initialization_data() {
         return { size(), num_set_bits(),
                  [&](auto callback) { call_ones(callback); } };
     }
@@ -74,5 +80,35 @@ class bitmap_builder_set : public bitmap_builder {
     mtg::common::SortedSet<uint64_t> set_bit_positions_;
 };
 
+
+/**
+ * A class for building a bitmap from positions of its set bits (ones).
+ * The positions may be not distinct and can be passed in arbitrary order.
+ * Keeps a buffer of a fixed size and writes temporary data to disk.
+ */
+class bitmap_builder_set_disk : public bitmap_builder {
+  public:
+    bitmap_builder_set_disk(uint64_t size,
+                            size_t num_threads,
+                            uint64_t buffer_size,
+                            const std::string &swap_dir);
+
+    ~bitmap_builder_set_disk();
+
+    virtual void add_one(uint64_t pos) { set_bit_positions_.insert(&pos, &pos + 1); }
+    virtual void add_ones(const uint64_t *begin, const uint64_t *end) {
+        set_bit_positions_.insert(begin, end);
+    }
+
+    // Can only be called once. The returned InitializationData becomes
+    // invalid after the bitmap_builder_set_disk object is destroyed.
+    virtual InitializationData get_initialization_data();
+
+  private:
+    const uint64_t size_;
+    const std::filesystem::path tmp_dir_;
+    mtg::common::SortedSetDisk<uint64_t> set_bit_positions_;
+    bool merged_ = false;
+};
 
 #endif // __BITMAP_BUILDER_HPP__

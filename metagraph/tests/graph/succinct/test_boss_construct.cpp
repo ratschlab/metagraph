@@ -1,11 +1,11 @@
-#include <stdio.h>
+#include <cstdio>
 #include <string>
 #include <sstream>
 #include <mutex>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #define protected public
 #define private public
@@ -31,43 +31,14 @@ const std::string test_data_dir = TEST_DATA_DIR;
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
+#define kMaxK ( 256 / KmerExtractorBOSS::bits_per_char )
 
-template <typename Kmer>
-class BOSSConstruct : public ::testing::Test { };
-
-template <typename Kmer>
-class WeightedBOSSConstruct : public ::testing::Test { };
 
 template <typename Kmer>
 class CollectKmers : public ::testing::Test { };
 
 template <typename Kmer>
 class CountKmers : public ::testing::Test { };
-
-template <typename KMER, bool Weighted = false>
-class BOSSConfigurationType {
- public:
-    typedef KMER Kmer;
-    static const bool kWeighted = Weighted;
-};
-template <typename KMER, bool Weighted>
-const bool BOSSConfigurationType<KMER, Weighted>::kWeighted;
-
-typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, false>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, false>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, false>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerAndWeightedTypes;
-
-typedef ::testing::Types<BOSSConfigurationType<KmerExtractorBOSS::Kmer64, true>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer128, true>,
-                         BOSSConfigurationType<KmerExtractorBOSS::Kmer256, true>> KmerWeightedTypes;
-
-TYPED_TEST_SUITE(BOSSConstruct, KmerAndWeightedTypes);
-TYPED_TEST_SUITE(WeightedBOSSConstruct, KmerWeightedTypes);
-
-#define kMaxK ( sizeof(typename TypeParam::Kmer) * 8 / KmerExtractorBOSS::bits_per_char )
 
 typedef ::testing::Types<kmer::KMerBOSS<uint64_t, KmerExtractorBOSS::bits_per_char>,
                          kmer::KMerBOSS<sdsl::uint128_t, KmerExtractorBOSS::bits_per_char>,
@@ -77,107 +48,113 @@ TYPED_TEST_SUITE(CollectKmers, KmerTypes);
 TYPED_TEST_SUITE(CountKmers, KmerTypes);
 
 
-TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
+TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences({ std::string(100, 'A') });
-        BOSS constructed(&constructor);
-
         BOSS appended(k);
         appended.add_sequence(std::string(100, 'A'));
 
-        EXPECT_EQ(constructed, appended);
-    }
-}
-
-TYPED_TEST(BOSSConstruct, ConstructionEQAppendingTwoPaths) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor.add_sequences({ std::string(100, 'A'),
-                                    std::string(50, 'B') });
-        BOSS constructed(&constructor);
-
-        BOSS appended(k);
-        appended.add_sequence(std::string(100, 'A'));
-        appended.add_sequence(std::string(50, 'B'));
-
-        EXPECT_EQ(constructed, appended);
-    }
-}
-
-TYPED_TEST(BOSSConstruct, ConstructionLowerCase) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor_first(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor_first.add_sequences({ std::string(100, 'A'),
-                                          std::string(50, 'C') });
-        BOSS first(&constructor_first);
-
-        BOSSConstructor constructor_second(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor_second.add_sequences({ std::string(100, 'a'),
-                                           std::string(50, 'c') });
-        BOSS second(&constructor_second);
-
-#if _DNA_CASE_SENSITIVE_GRAPH
-        EXPECT_FALSE(first.equals_internally(second));
-#else
-        EXPECT_TRUE(first.equals_internally(second));
-#endif
-    }
-}
-
-TYPED_TEST(BOSSConstruct, ConstructionDummySentinel) {
-    for (size_t k = 1; k < kMaxK; ++k) {
-        BOSSConstructor constructor_first(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor_first.add_sequences({ std::string(100, 'N'),
-                                          std::string(50, '$') });
-        BOSS first(&constructor_first);
-
-        BOSSConstructor constructor_second(k, false, TypeParam::kWeighted ? 8 : 0);
-        constructor_second.add_sequences({ std::string(100, 'N'),
-                                           std::string(50, '.') });
-        BOSS second(&constructor_second);
-
-        EXPECT_TRUE(first.equals_internally(second));
-    }
-}
-
-TYPED_TEST(BOSSConstruct, ConstructionEQAppending) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
-            std::vector<std::string> input_data = {
-                "ACAGCTAGCTAGCTAGCTAGCTG",
-                "ATATTATAAAAAATTTTAAAAAA",
-                "ATATATTCTCTCTCTCTCATA",
-                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-            };
-            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
-                                        20000, container);
-            constructor.add_sequences(std::vector<std::string>(input_data));
+        for (bool weighted : { false, true }) {
+            BOSSConstructor constructor(k, false, weighted ? 8 : 0);
+            constructor.add_sequences({ std::string(100, 'A') });
             BOSS constructed(&constructor);
-
-            BOSS appended(k);
-            for (const auto &sequence : input_data) {
-                appended.add_sequence(sequence);
-            }
 
             EXPECT_EQ(constructed, appended);
         }
     }
 }
 
-TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
-    ASSERT_TRUE(TypeParam::kWeighted);
+TEST(BOSSConstruct, ConstructionEQAppendingTwoPaths) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        BOSS appended(k);
+        appended.add_sequence(std::string(100, 'A'));
+        appended.add_sequence(std::string(50, 'B'));
+
+        for (bool weighted : { false, true }) {
+            BOSSConstructor constructor(k, false, weighted ? 8 : 0);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(50, 'B') });
+            BOSS constructed(&constructor);
+
+            EXPECT_EQ(constructed, appended);
+        }
+    }
+}
+
+TEST(BOSSConstruct, ConstructionLowerCase) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        for (bool weighted : { false, true }) {
+            BOSSConstructor constructor_first(k, false, weighted ? 8 : 0);
+            constructor_first.add_sequences({ std::string(100, 'A'),
+                                              std::string(50, 'C') });
+            BOSS first(&constructor_first);
+
+            BOSSConstructor constructor_second(k, false, weighted ? 8 : 0);
+            constructor_second.add_sequences({ std::string(100, 'a'),
+                                               std::string(50, 'c') });
+            BOSS second(&constructor_second);
+
+#if _DNA_CASE_SENSITIVE_GRAPH
+            EXPECT_FALSE(first.equals_internally(second));
+#else
+            EXPECT_TRUE(first.equals_internally(second));
+#endif
+        }
+    }
+}
+
+TEST(BOSSConstruct, ConstructionDummySentinel) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        for (bool weighted : { false, true }) {
+            BOSSConstructor constructor_first(k, false, weighted ? 8 : 0);
+            constructor_first.add_sequences({ std::string(100, 'N'),
+                                              std::string(50, '$') });
+            BOSS first(&constructor_first);
+
+            BOSSConstructor constructor_second(k, false, weighted ? 8 : 0);
+            constructor_second.add_sequences({ std::string(100, 'N'),
+                                               std::string(50, '.') });
+            BOSS second(&constructor_second);
+
+            EXPECT_TRUE(first.equals_internally(second));
+        }
+    }
+}
+
+TEST(BOSSConstruct, ConstructionEQAppending) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
+    for (size_t k = 1; k < kMaxK; ++k) {
+        BOSS appended(k);
+        for (const auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+        }
+        for (bool weighted : { false, true }) {
+            for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                                            20000, container);
+                constructor.add_sequences(std::vector<std::string>(input_data));
+                BOSS constructed(&constructor);
+
+                EXPECT_EQ(constructed, appended);
+            }
+        }
+    }
+}
+
+TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
-            std::vector<std::string> input_data = {
-                "ACAGCTAGCTAGCTAGCTAGCTG",
-                "ATATTATAAAAAATTTTAAAAAA",
-                "ATATATTCTCTCTCTCTCATA",
-                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-            };
-
-            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
-                                        20000, container);
+            BOSSConstructor constructor(k, false, 8, "", 1, 20000, container);
             constructor.add_sequences(std::vector<std::string>(input_data));
 
             BOSS constructed;
@@ -202,32 +179,28 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
     }
 }
 
-TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
-    ASSERT_TRUE(TypeParam::kWeighted);
-
+TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
         for (size_t k = 1; k < kMaxK; ++k) {
-            std::vector<std::string> input_data = {
-                "ACAGCTAGCTAGCTAGCTAGCTG",
-                "ATATTATAAAAAATTTTAAAAAA",
-                "ATATATTCTCTCTCTCTCATA",
-                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-            };
-
             BOSS constructed(k);
 
             auto constructor
-                    = IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                        "", 1, 20000, container);
+                    = IBOSSChunkConstructor::initialize(k, false, 8, "", 1, 20000, container);
 
             for (auto &&sequence : input_data) {
                 constructor->add_sequence(std::move(sequence));
             }
 
-            std::unique_ptr<BOSS::Chunk> chunk { constructor->build_chunk() };
+            BOSS::Chunk chunk = constructor->build_chunk();
 
             sdsl::int_vector<> weights;
-            chunk->initialize_boss(&constructed, &weights);
+            chunk.initialize_boss(&constructed, &weights);
 
             ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 
@@ -247,148 +220,118 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
     }
 }
 
-TYPED_TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
-            std::vector<std::string> input_data = {
-                "ACAGCTAGCTAGCTAGCTAGCTG",
-                "ATATTATAAAAAATTTTAAAAAA",
-                "ATATATTCTCTCTCTCTCATA",
-                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-            };
-            BOSSConstructor constructor(k, true, TypeParam::kWeighted ? 8 : 0, "", 1,
-                                        20'000, container);
-            constructor.add_sequences(std::vector<std::string>(input_data));
-            BOSS constructed(&constructor);
+#if ! _PROTEIN_GRAPH
+TEST(BOSSConstruct, ConstructionEQAppendingCanonical) {
+    std::vector<std::string> input_data = {
+        "ACAGCTAGCTAGCTAGCTAGCTG",
+        "ATATTATAAAAAATTTTAAAAAA",
+        "ATATATTCTCTCTCTCTCATA",
+        "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+    };
+    for (size_t k = 1; k < kMaxK; ++k) {
+        BOSS appended(k);
+        for (auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+            reverse_complement(sequence.begin(), sequence.end());
+            appended.add_sequence(sequence);
+        }
+        for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+            for (bool weighted : { false, true }) {
+                BOSSConstructor constructor(k, true, weighted ? 8 : 0, "", 1,
+                                            20'000, container);
+                constructor.add_sequences(std::vector<std::string>(input_data));
+                BOSS constructed(&constructor);
 
-            BOSS appended(k);
-            for (auto &sequence : input_data) {
-                appended.add_sequence(sequence);
-                reverse_complement(sequence.begin(), sequence.end());
-                appended.add_sequence(sequence);
+                EXPECT_EQ(constructed, appended);
             }
+        }
+    }
+}
+#endif
 
-            EXPECT_EQ(constructed, appended);
+TEST(BOSSConstruct, ConstructionLong) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        BOSS appended(k);
+        appended.add_sequence(std::string(k + 1, 'A'));
+
+        for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+            for (bool weighted : { false, true }) {
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                                            20'000, container);
+                constructor.add_sequences({ std::string(k + 1, 'A') });
+                BOSS constructed(&constructor);
+
+                EXPECT_EQ(constructed, appended);
+                ASSERT_TRUE(constructed.num_nodes() > 1u);
+            }
         }
     }
 }
 
-TYPED_TEST(BOSSConstruct, ConstructionLong) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
-            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
-                                        20'000, container);
-            constructor.add_sequences({ std::string(k + 1, 'A') });
-            BOSS constructed(&constructor);
+TEST(BOSSConstruct, ConstructionShort) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        BOSS appended(k);
+        appended.add_sequence(std::string(k, 'A'));
 
-            BOSS appended(k);
-            appended.add_sequence(std::string(k + 1, 'A'));
+        for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+            for (bool weighted : { false, true }) {
+                BOSSConstructor constructor(k, false, weighted ? 8 : 0, "", 1,
+                                            20'000, container);
+                constructor.add_sequences({ std::string(k, 'A') });
+                BOSS constructed(&constructor);
 
-            EXPECT_EQ(constructed, appended);
-            ASSERT_TRUE(constructed.num_nodes() > 1u);
+                EXPECT_EQ(constructed, appended);
+                ASSERT_EQ(1u, constructed.num_nodes());
+            }
         }
     }
 }
 
-TYPED_TEST(BOSSConstruct, ConstructionShort) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; ++k) {
-            BOSSConstructor constructor(k, false, TypeParam::kWeighted ? 8 : 0, "", 1,
-                                        20'000, container);
-            constructor.add_sequences({ std::string(k, 'A') });
-            BOSS constructed(&constructor);
+TEST(BOSSConstruct, ConstructionFromChunks) {
+    for (size_t k = 1; k < kMaxK; k += 6) {
+        BOSS boss_dynamic(k);
+        boss_dynamic.add_sequence(std::string(100, 'A'));
+        boss_dynamic.add_sequence(std::string(100, 'C'));
+        boss_dynamic.add_sequence(std::string(100, 'T') + "A"
+                                        + std::string(100, 'G'));
 
-            BOSS appended(k);
-            appended.add_sequence(std::string(k, 'A'));
+        for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
+            for (size_t suffix_len = 0; suffix_len < std::min(k, (size_t)3u); ++suffix_len) {
+                for (bool weighted : { false, true }) {
+                    for (size_t num_threads : { 1, 4 }) {
+                        BOSS::Chunk graph_data;
 
-            EXPECT_EQ(constructed, appended);
-        ASSERT_EQ(1u, constructed.num_nodes());
-        }
-    }
-}
+                        for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
+                            std::unique_ptr<IBOSSChunkConstructor> constructor(
+                                    IBOSSChunkConstructor::initialize(k, false, weighted ? 8 : 0,
+                                                                      suffix, num_threads, 20000, container));
 
-TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; k += 6) {
-            BOSS boss_dynamic(k);
-            boss_dynamic.add_sequence(std::string(100, 'A'));
-            boss_dynamic.add_sequence(std::string(100, 'C'));
-            boss_dynamic.add_sequence(std::string(100, 'T') + "A"
-                                            + std::string(100, 'G'));
+                            constructor->add_sequence(std::string(100, 'A'));
+                            constructor->add_sequence(std::string(100, 'C'));
+                            constructor->add_sequence(std::string(100, 'T') + "A"
+                                                            + std::string(100, 'G'));
 
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
-                std::unique_ptr<BOSS::Chunk> graph_data;
+                            BOSS::Chunk next_block = constructor->build_chunk();
+                            if (graph_data.size()) {
+                                graph_data.extend(next_block);
+                            } else {
+                                graph_data = std::move(next_block);
+                            }
+                        }
 
-                for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
-                    std::unique_ptr<IBOSSChunkConstructor> constructor(
-                            IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                              suffix, 1, 20000, container));
+                        BOSS boss;
+                        graph_data.initialize_boss(&boss);
 
-                    constructor->add_sequence(std::string(100, 'A'));
-                    constructor->add_sequence(std::string(100, 'C'));
-                    constructor->add_sequence(std::string(100, 'T') + "A"
-                                                    + std::string(100, 'G'));
-
-                    auto next_block = constructor->build_chunk();
-                    if (graph_data) {
-                        graph_data->extend(*next_block);
-                        delete next_block;
-                    } else {
-                        graph_data.reset(next_block);
+                        EXPECT_EQ(boss_dynamic, boss);
                     }
                 }
-
-                BOSS boss;
-                graph_data->initialize_boss(&boss);
-
-                EXPECT_EQ(boss_dynamic, boss);
             }
         }
     }
 }
 
-TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
-    const uint64_t num_threads = 4;
-
-    for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
-        for (size_t k = 1; k < kMaxK; k += 6) {
-            BOSS boss_dynamic(k);
-            boss_dynamic.add_sequence(std::string(100, 'A'));
-            boss_dynamic.add_sequence(std::string(100, 'C'));
-            boss_dynamic.add_sequence(std::string(100, 'T') + "A"
-                                            + std::string(100, 'G'));
-
-            for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 3u; ++suffix_len) {
-                std::unique_ptr<BOSS::Chunk> graph_data;
-
-                for (const std::string &suffix : KmerExtractorBOSS::generate_suffixes(suffix_len)) {
-                    std::unique_ptr<IBOSSChunkConstructor> constructor(
-                            IBOSSChunkConstructor::initialize(k, false, TypeParam::kWeighted ? 8 : 0,
-                                                              suffix, num_threads, 20000, container));
-
-                    constructor->add_sequence(std::string(100, 'A'));
-                    constructor->add_sequence(std::string(100, 'C'));
-                    constructor->add_sequence(std::string(100, 'T') + "A"
-                                                    + std::string(100, 'G'));
-
-                    auto next_block = constructor->build_chunk();
-                    if (graph_data) {
-                        graph_data->extend(*next_block);
-                        delete next_block;
-                    } else {
-                        graph_data.reset(next_block);
-                    }
-                }
-
-                BOSS boss;
-                graph_data->initialize_boss(&boss);
-
-                EXPECT_EQ(boss_dynamic, boss);
-            }
-        }
-    }
-}
-
+template <typename KMER, class Container>
+using Collector = typename mtg::kmer::KmerCollector<KMER, KmerExtractorBOSS, Container>;
 
 // TODO: k is node length
 template <typename KMER>
@@ -402,7 +345,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix
+        k, Collector<KMER, common::SortedSet<typename KMER::WordType>>::BASIC, kmers, suffix
     );
     delete reads;
 }
@@ -497,7 +440,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                 callback(read, 1);
             }
         },
-        k, false, kmers, suffix
+        k, Collector<KMER, Container>::BASIC, kmers, suffix
     );
     delete reads;
 }
@@ -611,8 +554,8 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
 #if _DNA_GRAPH
     ASSERT_EQ(1u, result.data().size());
 #else
-    // AA, $B, BB
-    ASSERT_EQ(3u, result.data().size());
+    // AA, BB
+    ASSERT_EQ(2u, result.data().size());
 #endif
 }
 

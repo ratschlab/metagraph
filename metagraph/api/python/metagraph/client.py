@@ -10,8 +10,8 @@ from metagraph import helpers
 
 """Metagraph client."""
 
-DEFAULT_TOP_LABELS = 10000
-DEFAULT_DISCOVERY_THRESHOLD = 0.7
+DEFAULT_TOP_LABELS = 100
+DEFAULT_DISCOVERY_THRESHOLD = 0
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
 
 JsonDict = Dict[str, Any]
@@ -25,59 +25,68 @@ class GraphClientJson:
     returning error message in the second element of the tuple returned.
     """
 
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
+    def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
         self.host = host
         self.port = port
-        self.label = label
-        self.api_path = api_path
+
+        self.server = f"http://{self.host}:{self.port}"
+        if api_path:
+            self.server = f"{self.server}/{api_path.lstrip('/')}"
+
+        self.name = name if name else self.server
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+               **align_params) -> Tuple[JsonDict, str]:
+        """See parameters for alignment `align_params` in align()"""
+
         if discovery_threshold < 0.0 or discovery_threshold > 1.0:
             raise ValueError(
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
-        if max_num_nodes_per_seq_char < 0:
-            warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
+        if align:
+            json_obj = self.align(sequence, **align_params)
+
+            def to_fasta(df):
+                fasta = []
+                for i in range(df.shape[0]):
+                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
+                return '\n'.join(fasta)
+
+            sequence = to_fasta(helpers.df_from_align_result(json_obj))
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
-                      "num_labels": top_labels,
-                      "align": align,
-                      "max_num_nodes_per_seq_char": max_num_nodes_per_seq_char}
+                      "num_labels": top_labels}
 
         return self._json_seq_query(sequence, param_dict, "search")
 
     def align(self, sequence: Union[str, Iterable[str]],
-              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
-        if discovery_threshold < 0.0 or discovery_threshold > 1.0:
+        if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
-                f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
+                f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
 
         if max_num_nodes_per_seq_char < 0:
             warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
 
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
-                  'discovery_fraction': discovery_threshold}
-        return self._json_seq_query(sequence, params, "align")
+                  'min_exact_match': min_exact_match}
 
-    # noinspection PyTypeChecker
-    def column_labels(self) -> Tuple[JsonStrList, str]:
-        return self._do_request("column_labels", {}, False)
+        return self._json_seq_query(sequence, params, "align")
 
     def _json_seq_query(self, sequence: Union[str, Iterable[str]], param_dict,
                         endpoint: str) -> Tuple[JsonDict, str]:
         if isinstance(sequence, str):
-            fasta_str = f">query\n{sequence}"
-        else:
-            fasta_str = '\n'.join(
-                [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
+            sequence = [sequence]
+
+        fasta_str = '\n'.join(
+            [f">{i}\n{seq}" for (i, seq) in enumerate(sequence)])
 
         payload_dict = {"FASTA": fasta_str}
         payload_dict.update(param_dict)
@@ -86,12 +95,7 @@ class GraphClientJson:
         return self._do_request(endpoint, payload)
 
     def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
-        endpoint_path = endpoint
-
-        if self.api_path:
-            endpoint_path = f"{self.api_path.lstrip('/')}/{endpoint}"
-
-        url = f'http://{self.host}:{self.port}/{endpoint_path}'
+        url = f'{self.server}/{endpoint}'
         if post_req:
             ret = requests.post(url=url, json=payload)
         else:
@@ -100,58 +104,66 @@ class GraphClientJson:
         try:
             json_obj = ret.json()
         except:
-            return {}, str(ret.status_code) + " " + str(ret)
+            raise RuntimeError(
+                f"Error while calling the server API. {str(ret.status_code)}: {ret.text}")
 
         if not ret.ok:
-            error_msg = json_obj[
-                'error'] if 'error' in json_obj.keys() else str(json_obj)
-            return {}, str(ret.status_code) + " " + error_msg
+            error_msg = json_obj['error'] if 'error' in json_obj.keys() else str(json_obj)
+            raise RuntimeError(
+                f"Error while calling the server API. {str(ret.status_code)}: {error_msg}")
 
-        return json_obj, ""
+        return json_obj
+
+    # noinspection PyTypeChecker
+    def column_labels(self) -> Tuple[JsonStrList, str]:
+        return self._do_request("column_labels", {}, post_req=False)
 
     def stats(self) -> Tuple[dict, str]:
         return self._do_request("stats", {}, post_req=False)
 
+    def ready(self) -> bool:
+        try:
+            self.stats()
+            return True
+        except RuntimeError as e:
+            if "503: Server is currently initializing" in str(e):
+                return False
+            raise e
+
 
 class GraphClient:
-    def __init__(self, host: str, port: int, label: str = None, api_path: str = None):
-        self._json_client = GraphClientJson(host, port, api_path=api_path)
-        self.label = label
+    def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
+        self._json_client = GraphClientJson(host, port, name, api_path=api_path)
+        self.name = self._json_client.name
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        (json_obj, err) = self._json_client.search(sequence, top_labels,
-                                                   discovery_threshold, align,
-                                                   max_num_nodes_per_seq_char)
+               **align_params) -> pd.DataFrame:
+        """See parameters for alignment `align_params` in align()"""
 
-        if err:
-            raise RuntimeError(
-                f"Error while calling the server API {str(err)}")
+        json_obj = self._json_client.search(sequence, top_labels,
+                                            discovery_threshold,
+                                            align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
 
     def align(self, sequence: Union[str, Iterable[str]],
-              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
-        json_obj, err = self._json_client.align(sequence, discovery_threshold,
-                                                max_alternative_alignments, max_num_nodes_per_seq_char)
-
-        if err:
-            raise RuntimeError(f"Error while calling the server API {str(err)}")
+        json_obj = self._json_client.align(sequence, min_exact_match,
+                                           max_alternative_alignments,
+                                           max_num_nodes_per_seq_char)
 
         return helpers.df_from_align_result(json_obj)
 
-
     def column_labels(self) -> List[str]:
-        json_obj, err = self._json_client.column_labels()
+        return self._json_client.column_labels()
 
-        if err:
-            raise RuntimeError(f"Error while calling the server API {str(err)}")
-        return json_obj
+    def ready(self) -> bool:
+        return self._json_client.ready()
 
 
 class MultiGraphClient:
@@ -159,11 +171,9 @@ class MultiGraphClient:
     def __init__(self):
         self.graphs = {}
 
-    def add_graph(self, host: str, port: int, label: str = None, api_path: str = None) -> None:
-        if not label:
-            label = f"{host}:{port}"
-
-        self.graphs[label] = GraphClient(host, port, label, api_path=api_path)
+    def add_graph(self, host: str, port: int, name: str = None, api_path: str = None) -> None:
+        graph_client = GraphClient(host, port, name, api_path=api_path)
+        self.graphs[graph_client.name] = graph_client
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
         return {lbl: (inst.host, inst.port) for (lbl, inst) in
@@ -173,35 +183,34 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                align: bool = False,
-               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> \
-            Dict[str, pd.DataFrame]:
+               **align_params) -> Dict[str, pd.DataFrame]:
+        """See parameters for alignment `align_params` in align()"""
 
         result = {}
-        for label, graph_client in self.graphs.items():
-            result[label] = graph_client.search(sequence, top_labels,
-                                                discovery_threshold,
-                                                align,
-                                                max_num_nodes_per_seq_char)
+        for name, graph_client in self.graphs.items():
+            result[name] = graph_client.search(sequence, top_labels,
+                                               discovery_threshold,
+                                               align, **align_params)
 
         return result
 
     def align(self, sequence: Union[str, Iterable[str]],
-              discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+              min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
         str, pd.DataFrame]:
         result = {}
-        for label, graph_client in self.graphs.items():
+        for name, graph_client in self.graphs.items():
             # TODO: do this async
-            result[label] = graph_client.align(sequence, discovery_threshold,
-                                               max_alternative_alignments,
-                                               max_num_nodes_per_seq_char)
+            result[name] = graph_client.align(sequence, min_exact_match,
+                                              max_alternative_alignments,
+                                              max_num_nodes_per_seq_char)
 
         return result
 
     def column_labels(self) -> Dict[str, List[str]]:
         ret = {}
-        for label, graph_client in self.graphs.items():
-            ret[label] = graph_client.column_labels()
+        for name, graph_client in self.graphs.items():
+            ret[name] = graph_client.column_labels()
 
         return ret

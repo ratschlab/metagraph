@@ -14,8 +14,9 @@ namespace boss {
 
 using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
+namespace fs = std::filesystem;
 
-const uint64_t BUFFER_SIZE = 5 * 1024 * 1024;
+const uint64_t BUFFER_SIZE = 5 * 1024 * 1024; // 5 MiB
 
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
@@ -124,30 +125,34 @@ void initialize_chunk(uint64_t alph_size,
     assert(!weights || weights->size() == curpos);
 }
 
-BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, bool canonical,
-                   const std::string &swap_dir)
-      : alph_size_(alph_size), k_(k), canonical_(canonical),
+BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
+      : alph_size_(alph_size), k_(k),
         dir_(utils::create_temp_dir(swap_dir, "graph_chunk")),
         W_(dir_ + "/W", std::ios::out, BUFFER_SIZE, get_W_width()),
-        last_(dir_ + "/last", std::ios::out, BUFFER_SIZE) {
+        last_(dir_ + "/last", std::ios::out, BUFFER_SIZE),
+        weights_(dir_ + "/weights", std::ios::out, BUFFER_SIZE) {
     W_.push_back(0);
     last_.push_back(0);
     F_.assign(alph_size_, 0);
 }
 
 BOSS::Chunk::~Chunk() {
-    std::error_code ec;
-    std::filesystem::remove_all(dir_, ec);
+    W_.close(true);
+    last_.close(true);
+    weights_.close(true);
+
+    // remove the temp directory, but only if it was initialized
+    if (!dir_.empty())
+        utils::remove_temp_dir(dir_);
 }
 
 template <typename Array>
 BOSS::Chunk::Chunk(uint64_t alph_size,
                    size_t k,
-                   bool canonical,
                    const Array &kmers_with_counts,
                    uint8_t bits_per_count,
                    const std::string &swap_dir)
-      : Chunk(alph_size, k, canonical, swap_dir) {
+      : Chunk(alph_size, k, swap_dir) {
 
     weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
                                          std::ios::out, BUFFER_SIZE,
@@ -170,9 +175,9 @@ template <typename T>
 using CWQ = common::ChunkedWaitQueue<T>;
 
 #define INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(...) \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const CWQ<__VA_ARGS__> &, \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, const CWQ<__VA_ARGS__> &, \
                                 uint8_t, const std::string &dir); \
-    template BOSS::Chunk::Chunk(uint64_t, size_t, bool, const Vector<__VA_ARGS__> &, \
+    template BOSS::Chunk::Chunk(uint64_t, size_t, const Vector<__VA_ARGS__> &, \
                                 uint8_t, const std::string &dir);
 
 INSTANTIATE_BOSS_CHUNK_CONSTRUCTORS(KmerExtractorBOSS::Kmer64);
@@ -198,7 +203,7 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     assert(k_);
 
     assert(last_.size() == W_.size());
-    assert(weights_.size() == 0);
+    assert(!weights_.size());
 
     W_.push_back(W);
     last_.push_back(last);
@@ -207,13 +212,12 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     }
 }
 
-void BOSS::Chunk::extend(const BOSS::Chunk &other) {
+void BOSS::Chunk::extend(Chunk &other) {
     assert(!weights_.size() || weights_.size() == W_.size());
     assert(!other.weights_.size() || other.weights_.size() == other.W_.size());
 
     if (alph_size_ != other.alph_size_
             || k_ != other.k_
-            || canonical_ != other.canonical_
             || W_.width() != other.W_.width()) {
         std::cerr << "ERROR: trying to concatenate incompatible graph chunks" << std::endl;
         exit(1);
@@ -227,13 +231,11 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
         exit(1);
     }
 
-    auto &other_W = const_cast<sdsl::int_vector_buffer<>&>(other.W_);
-    for (auto it = other_W.begin() + 1; it != other_W.end(); ++it) {
+    for (auto it = other.W_.begin() + 1; it != other.W_.end(); ++it) {
         W_.push_back(*it);
     }
 
-    auto &other_last = const_cast<sdsl::int_vector_buffer<1>&>(other.last_);
-    for (auto it = other_last.begin() + 1; it != other_last.end(); ++it) {
+    for (auto it = other.last_.begin() + 1; it != other.last_.end(); ++it) {
         last_.push_back(*it);
     }
 
@@ -243,8 +245,7 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     }
 
     if (other.weights_.size()) {
-        auto &other_weights = const_cast<sdsl::int_vector_buffer<>&>(other.weights_);
-        for (auto it = other_weights.begin() + 1; it != other_weights.end(); ++it) {
+        for (auto it = other.weights_.begin() + 1; it != other.weights_.end(); ++it) {
             weights_.push_back(*it);
         }
     }
@@ -255,38 +256,20 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 
 void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(last_.size() == W_.size());
-    assert(weights_.size() == 0 || weights_.size() == W_.size());
+    assert(!weights_.size() || weights_.size() == W_.size());
 
-    assert(graph->W_);
-    delete graph->W_;
-    graph->W_ = new wavelet_tree_small(get_W_width(), W_);
-
-    assert(graph->last_);
-    delete graph->last_;
-    sdsl::bit_vector last(last_.size());
-    std::copy(last_.begin(), last_.end(), last.begin());
-    graph->last_ = new bit_vector_stat(std::move(last));
-
-    graph->F_ = F_;
-    graph->recompute_NF();
-
-    graph->k_ = k_;
-    // TODO:
-    // graph->alph_size = alph_size_;
-
-    graph->state = BOSS::State::SMALL;
+    graph->initialize(this);
 
     assert(graph->is_valid());
 
     if (weights) {
-        weights->resize(0);
-        weights->width(weights_.width());
-        weights->resize(weights_.size());
-        std::copy(weights_.begin(), weights_.end(), weights->begin());
+        weights_.flush();
+        std::ifstream in(weights_.filename(), std::ios::binary);
+        weights->load(in);
     }
 }
 
-std::pair<BOSS*, bool>
+BOSS*
 BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                                     bool verbose,
                                     sdsl::int_vector<> *weights,
@@ -294,18 +277,18 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     assert(chunk_filenames.size());
 
     if (!chunk_filenames.size())
-        return std::make_pair(nullptr, false);
+        return nullptr;
 
     BOSS *graph = new BOSS();
 
-    std::unique_ptr<BOSS::Chunk> full_chunk;
+    Chunk full_chunk;
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
         auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
                                                         + kFileExtension;
 
-        auto graph_chunk = std::make_unique<BOSS::Chunk>(1, 0, false, swap_dir);
-        if (!graph_chunk->load(filename)) {
+        Chunk graph_chunk(1, 0, swap_dir);
+        if (!graph_chunk.load(filename)) {
             std::cerr << "ERROR: File corrupted. Cannot load graph chunk "
                       << filename << std::endl;
             exit(1);
@@ -318,7 +301,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         if (i == 0) {
             full_chunk = std::move(graph_chunk);
         } else {
-            full_chunk->extend(*graph_chunk);
+            full_chunk.extend(graph_chunk);
         }
 
         if (verbose) {
@@ -326,54 +309,40 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         }
     }
 
-    full_chunk->initialize_boss(graph, weights);
+    full_chunk.initialize_boss(graph, weights);
 
-    return std::make_pair(graph, full_chunk->canonical_);
+    return graph;
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {
+    std::string fname
+        = utils::remove_suffix(infbase, kFileExtension) + kFileExtension;
+
     try {
-        std::ifstream instream(utils::remove_suffix(infbase, kFileExtension)
-                                                                + kFileExtension,
-                               std::ios::binary);
-        {
-            W_.close(true);
-            sdsl::int_vector<> W_copy;
-            W_copy.load(instream);
-            std::ofstream outstream(dir_ + "/W", std::ios::binary);
-            W_copy.serialize(outstream);
-        }
+        W_.close(true);
+        last_.close(true);
+        weights_.close(true);
+
+        fs::copy(fname + ".W", dir_ + "/W", fs::copy_options::overwrite_existing);
+        fs::copy(fname + ".last", dir_ + "/last", fs::copy_options::overwrite_existing);
+        fs::copy(fname + ".weights", dir_ + "/weights", fs::copy_options::overwrite_existing);
+
         W_ = sdsl::int_vector_buffer<>(dir_ + "/W",
                                        std::ios::in | std::ios::out, BUFFER_SIZE);
-
-        {
-            last_.close(true);
-            sdsl::int_vector<1> last_copy;
-            last_copy.load(instream);
-            std::ofstream outstream(dir_ + "/last", std::ios::binary);
-            last_copy.serialize(outstream);
-        }
         last_ = sdsl::int_vector_buffer<1>(dir_ + "/last",
                                            std::ios::in | std::ios::out, BUFFER_SIZE);
+        weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
+                                             std::ios::in | std::ios::out, BUFFER_SIZE);
+
+        std::ifstream instream(fname, std::ios::binary);
 
         if (!load_number_vector(instream, &F_)) {
             std::cerr << "ERROR: failed to load F vector" << std::endl;
             return false;
         }
 
-        {
-            weights_.close(true);
-            sdsl::int_vector<> weights_copy;
-            weights_copy.load(instream);
-            std::ofstream outstream(dir_ + "/weights", std::ios::binary);
-            weights_copy.serialize(outstream);
-        }
-        weights_ = sdsl::int_vector_buffer<>(dir_ + "/weights",
-                                             std::ios::in | std::ios::out, BUFFER_SIZE);
-
         alph_size_ = load_number(instream);
         k_ = load_number(instream);
-        canonical_ = load_number(instream);
 
         return k_ && alph_size_ && W_.size() == last_.size()
                                 && F_.size() == alph_size_
@@ -381,41 +350,28 @@ bool BOSS::Chunk::load(const std::string &infbase) {
 
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load BOSS chunk from "
-                  << infbase << "." << std::endl;
+                  << fname << "." << std::endl;
         return false;
     } catch (...) {
         return false;
     }
 }
 
-void BOSS::Chunk::serialize(const std::string &outbase) const {
-    std::ofstream outstream(utils::remove_suffix(outbase, kFileExtension)
-                                                                + kFileExtension,
-                            std::ios::binary);
+void BOSS::Chunk::serialize(const std::string &outbase) {
+    std::string fname
+        = utils::remove_suffix(outbase, kFileExtension) + kFileExtension;
 
-    sdsl::int_vector<> W_copy(W_.size(), 0, W_.width());
-    auto &W = const_cast<sdsl::int_vector_buffer<>&>(W_);
-    std::copy(W.begin(), W.end(), W_copy.begin());
-    W_copy.serialize(outstream);
-    W_copy = sdsl::int_vector<>();
+    W_.flush();
+    fs::copy(W_.filename(), fname + ".W", fs::copy_options::overwrite_existing);
+    last_.flush();
+    fs::copy(last_.filename(), fname + ".last", fs::copy_options::overwrite_existing);
+    weights_.flush();
+    fs::copy(weights_.filename(), fname + ".weights", fs::copy_options::overwrite_existing);
 
-    sdsl::bit_vector last_copy(last_.size(), 0, last_.width());
-    auto &last = const_cast<sdsl::int_vector_buffer<1>&>(last_);
-    std::copy(last.begin(), last.end(), last_copy.begin());
-    last_copy.serialize(outstream);
-    last_copy = sdsl::bit_vector();
-
+    std::ofstream outstream(fname, std::ios::binary);
     serialize_number_vector(outstream, F_);
-
-    sdsl::int_vector<> weights_copy(weights_.size(), 0, weights_.width());
-    auto &weights = const_cast<sdsl::int_vector_buffer<>&>(weights_);
-    std::copy(weights.begin(), weights.end(), weights_copy.begin());
-    weights_copy.serialize(outstream);
-    weights_copy = sdsl::int_vector<>();
-
     serialize_number(outstream, alph_size_);
     serialize_number(outstream, k_);
-    serialize_number(outstream, canonical_);
 }
 
 uint8_t BOSS::Chunk::get_W_width() const {

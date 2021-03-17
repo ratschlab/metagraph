@@ -47,8 +47,8 @@ void SortedMultiset<T, C, Container>::shrink_data() {
     sort_and_merge_counts();
     sorted_end_ = data_.size();
 
-    logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
-                  data_.size(), (data_.size() * sizeof(value_type) >> 20));
+    logger->trace("...done. Size reduced from {} to {}, {} MB", old_size,
+                  data_.size(), data_.size() * sizeof(value_type) / 1e6);
 }
 
 template <typename T, typename C, class Container>
@@ -76,7 +76,7 @@ void SortedMultiset<T, C, Container>::sort_and_merge_counts() {
                 dest->second = max_count();
             }
         } else {
-            *++dest = std::move(*first);;
+            *++dest = std::move(*first);
         }
     }
 

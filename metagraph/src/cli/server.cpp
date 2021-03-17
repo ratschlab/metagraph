@@ -5,6 +5,7 @@
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -129,6 +130,10 @@ std::string process_search_request(const std::string &received_message,
     config.discovery_fraction
             = json.get("discovery_fraction", config.discovery_fraction).asDouble();
 
+    config.alignment_min_exact_match
+            = json.get("min_exact_match",
+                       config.alignment_min_exact_match).asDouble();
+
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
@@ -137,6 +142,13 @@ std::string process_search_request(const std::string &received_message,
         throw std::domain_error(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
                 + std::to_string(config.discovery_fraction));
+    }
+
+    if (config.alignment_min_exact_match < 0.0
+            || config.alignment_min_exact_match > 1.0) {
+        throw std::domain_error(
+                "Minimum exact match should be within [0, 1.0]. Instead got "
+                + std::to_string(config.alignment_min_exact_match));
     }
 
     config.count_labels = true;
@@ -197,8 +209,16 @@ std::string process_align_request(const std::string &received_message,
         config.alignment_num_alternative_paths = 1;
     }
 
-    config.discovery_fraction
-            = json.get("discovery_fraction", config.discovery_fraction).asDouble();
+    config.alignment_min_exact_match
+            = json.get("min_exact_match",
+                       config.alignment_min_exact_match).asDouble();
+
+    if (config.alignment_min_exact_match < 0.0
+            || config.alignment_min_exact_match > 1.0) {
+        throw std::domain_error(
+                "Minimum exact match should be within [0, 1.0]. Instead got "
+                + std::to_string(config.alignment_min_exact_match));
+    }
 
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
@@ -258,7 +278,8 @@ std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
     graph_stats["filename"] = std::filesystem::path(graph_filename).filename().string();
     graph_stats["k"] = static_cast<uint64_t>(anno_graph.get_graph().get_k());
     graph_stats["nodes"] = anno_graph.get_graph().num_nodes();
-    graph_stats["is_canonical_mode"] = anno_graph.get_graph().is_canonical_mode();
+    graph_stats["is_canonical_mode"] = (anno_graph.get_graph().get_mode()
+                                            == graph::DeBruijnGraph::CANONICAL);
     root["graph"] = graph_stats;
 
     Json::Value annotation_stats;
@@ -290,6 +311,7 @@ std::thread start_server(HttpServer &server_startup, Config &config) {
 template<typename T>
 bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
     if (data.wait_for(0s) != std::future_status::ready) {
+        logger->info("[Server] Got a request during initialization. Asked to come back later");
         response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
                         "Server is currently initializing, please come back later.");
         return false;
@@ -306,9 +328,6 @@ int run_server(Config *config) {
     ThreadPool graph_loader(1, 1);
 
     logger->info("[Server] Loading graph...");
-
-    // TODO: set canonical only if the graph is primary
-    config->canonical = true;
 
     auto anno_graph = graph_loader.enqueue([&]() {
         auto graph = load_critical_dbg(config->infbase);

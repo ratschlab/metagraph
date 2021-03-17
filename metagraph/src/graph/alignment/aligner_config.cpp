@@ -1,18 +1,36 @@
-#include "aligner_helper.hpp"
+#include "aligner_config.hpp"
 
+#include "aligner_cigar.hpp"
 #include "kmer/alphabets.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 namespace align {
 
+using mtg::common::logger;
+
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
-    int8_t min_penalty_score = std::min(gap_opening_penalty, gap_extension_penalty);
+    int8_t min_penalty_score = std::numeric_limits<int8_t>::max();
     for (const auto &row : score_matrix_) {
-        min_penalty_score = std::min(min_penalty_score, *std::min_element(row.begin(), row.end()));
+        min_penalty_score = std::min(min_penalty_score,
+                                     *std::min_element(row.begin(), row.end()));
     }
+
+    if (gap_opening_penalty * 2 >= min_penalty_score) {
+        common::logger->error(
+            "|gap_opening_penalty| * 2 should be greater than greatest mismatch penalty: "
+            "{} >= {}",
+            gap_opening_penalty * 2, (score_t)min_penalty_score
+        );
+        return false;
+    }
+
+    min_penalty_score = std::min({ min_penalty_score,
+                                   gap_opening_penalty,
+                                   gap_extension_penalty });
 
     assert(min_penalty_score < 0 && "min scores must be negative");
 
@@ -38,8 +56,8 @@ DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
         score_matrix_(std::move(score_matrix)) {}
 
 DBGAlignerConfig::score_t DBGAlignerConfig
-::score_cigar(const std::string_view reference,
-              const std::string_view query,
+::score_cigar(std::string_view reference,
+              std::string_view query,
               const Cigar &cigar) const {
     score_t score = 0;
 
@@ -62,11 +80,11 @@ DBGAlignerConfig::score_t DBGAlignerConfig
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Cigar::DELETION: {
+            case Cigar::INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 alt_it += op.second;
             } break;
-            case Cigar::INSERTION: {
+            case Cigar::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
             } break;

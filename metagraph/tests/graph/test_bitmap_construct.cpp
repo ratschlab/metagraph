@@ -123,7 +123,7 @@ TEST(DBGBitmapConstruct, ConstructionEQAppendingCanonical) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        DBGBitmapConstructor constructor(k, true);
+        DBGBitmapConstructor constructor(k, DeBruijnGraph::CANONICAL);
         constructor.add_sequences(std::vector<std::string>(input_data));
         DBGBitmap constructed(&constructor);
 
@@ -145,7 +145,7 @@ TEST(DBGBitmapConstruct, ConstructionEQAppendingCanonical) {
 }
 
 TEST(DBGBitmapConstruct, ConstructionFromChunks) {
-    for (bool canonical : { true, false }) {
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
         for (size_t k = 2; k <= kMaxK; k += 6) {
             std::vector<std::string> input_data = {
                 "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -155,22 +155,22 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                 std::string(100, 'A'),
                 std::string(100, 'C')
             };
-            auto constructor = std::make_unique<DBGBitmapConstructor>(k, canonical);
+            auto constructor = std::make_unique<DBGBitmapConstructor>(k, mode);
             constructor->add_sequences(std::vector<std::string>(input_data));
             DBGBitmap reference(constructor.get());
 
-            for (size_t suffix_len = 0; suffix_len <= k && suffix_len <= 4u; ++suffix_len) {
+            for (size_t suffix_len = 0; suffix_len <= std::min(k, (size_t)2); ++suffix_len) {
                 std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
                 for (const std::string &suffix : KmerExtractor2Bit().generate_suffixes(suffix_len)) {
-                    constructor.reset(new DBGBitmapConstructor(k, canonical, 0, suffix));
+                    constructor.reset(new DBGBitmapConstructor(k, mode, 0, suffix));
 
                     for (const auto &seq : input_data) {
                         constructor->add_sequence(std::string(seq));
                     }
 
-                    std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                    DBGBitmap::Chunk chunk = constructor->build_chunk();
 
                     chunk_filenames.push_back(
                         utils::join_strings({ test_data_dir + "/chunks_to_merge", suffix }, ".")
@@ -180,12 +180,12 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
                     std::filesystem::remove(chunk_filenames.back());
 
                     std::ofstream out(chunk_filenames.back(), std::ios::binary);
-                    chunk->serialize(out);
+                    chunk.serialize(out);
                 }
 
                 ASSERT_TRUE(chunk_filenames.size());
 
-                std::unique_ptr<DBGBitmap> graph(constructor->build_graph_from_chunks(chunk_filenames, canonical));
+                std::unique_ptr<DBGBitmap> graph(constructor->build_graph_from_chunks(chunk_filenames, mode));
 
                 for (const auto &filename : chunk_filenames) {
                     std::filesystem::remove(filename);
@@ -197,6 +197,9 @@ TEST(DBGBitmapConstruct, ConstructionFromChunks) {
     }
 }
 
+template <typename KMER>
+using Collector = typename mtg::kmer::KmerCollector<KMER, KmerExtractor2Bit,
+                                                    common::SortedSet<typename KMER::WordType>>;
 
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
@@ -210,7 +213,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix
+        k, Collector<KMER>::BASIC, kmers, suffix
     );
     delete reads;
 }
@@ -238,18 +241,6 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
     EXPECT_EQ(1u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, 100'000
-    );
-    EXPECT_EQ(1u, result.data().size());
-
-    sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
         2, &result, {}, 100'000
     );
@@ -260,6 +251,20 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
         2, &result, { 1, }, 100'000
     );
     EXPECT_EQ(2u, result.data().size());
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, {}, 100'000
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, { 1, }, 100'000
+    );
+    #if _DNA_GRAPH
+        ASSERT_EQ(2u, result.data().size());
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
@@ -298,21 +303,20 @@ TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, 0
     );
-    // #if _DNA4_GRAPH
-        // B->A in 2Bit mode
+    #if _DNA_GRAPH
         ASSERT_EQ(2u, result.data().size());
-    // #else
-    //     ASSERT_EQ(3u, result.data().size());
-    // #endif
+    #else
+        ASSERT_EQ(3u, result.data().size());
+    #endif
 }
 
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -328,16 +332,14 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
         std::vector<std::string> files;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
@@ -367,10 +369,10 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -386,25 +388,23 @@ TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
         std::vector<std::string> files;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
-            DBGBitmapConstructor::build_graph_from_chunks(files, true)
+            DBGBitmapConstructor::build_graph_from_chunks(files, DeBruijnGraph::CANONICAL)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGBitmapConstructor full_constructor(k, true);
+        DBGBitmapConstructor full_constructor(k, DeBruijnGraph::CANONICAL);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));
@@ -427,10 +427,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, 0, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::BASIC, 0, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -447,17 +447,15 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
         uint64_t chunk_size = 0;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
-            chunk_size += chunk->num_set_bits();
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
+            chunk_size += chunk.num_set_bits();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
@@ -490,10 +488,10 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
 
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "A", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "C", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "G", num_threads));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, 0, "T", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, DeBruijnGraph::CANONICAL, 0, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -510,26 +508,24 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
         uint64_t chunk_size = 0;
 
         for (size_t i = 0; i < constructors.size(); ++i) {
-            auto chunk = constructors[i]->build_chunk();
-            ASSERT_TRUE(chunk);
-            chunk_size += chunk->num_set_bits();
+            DBGBitmap::Chunk chunk = constructors[i]->build_chunk();
+            chunk_size += chunk.num_set_bits();
             files.push_back(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
             std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
-            chunk->serialize(file);
-            delete chunk;
+            chunk.serialize(file);
         }
 
         std::unique_ptr<DBGBitmap> chunked{
-            DBGBitmapConstructor::build_graph_from_chunks(files, true)
+            DBGBitmapConstructor::build_graph_from_chunks(files, DeBruijnGraph::CANONICAL)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGBitmapConstructor full_constructor(k, true);
+        DBGBitmapConstructor full_constructor(k, DeBruijnGraph::CANONICAL);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));

@@ -34,10 +34,12 @@ using namespace mtg::annot::binmat;
 
 using mtg::common::logger;
 
+namespace fs = std::filesystem;
+
 typedef LabelEncoder<std::string> LEncoder;
 
 const size_t kNumRowsInBlock = 50'000;
-const uint64_t ROW_DIFF_BUFFER_SIZE = 500'000;
+const uint64_t ROW_DIFF_BUFFER_BYTES = 8'000'000;
 
 
 template <class RowCallback>
@@ -362,51 +364,6 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
             num_parallel_nodes, num_threads);
 }
 
-std::vector<std::vector<uint64_t>>
-parse_linkage_matrix(const std::string &filename) {
-    std::ifstream in(filename);
-
-    std::vector<std::vector<uint64_t>> linkage;
-    std::string line;
-    while (std::getline(in, line)) {
-        std::vector<std::string> parts = utils::split_string(line, " ");
-        if (parts.empty())
-            continue;
-
-        try {
-            if (parts.size() != 4)
-                throw std::runtime_error("Invalid format");
-
-            uint64_t first = std::stoi(parts.at(0));
-            uint64_t second = std::stoi(parts.at(1));
-            uint64_t merged = std::stoi(parts.at(3));
-
-            if (first == second || first >= merged || second >= merged) {
-                logger->error("Invalid format of the linkage matrix."
-                              " Indexes of parent clusters must be larger than"
-                              " indexes of the objects/clusters the include");
-                exit(1);
-            }
-
-            while (linkage.size() <= merged) {
-                linkage.push_back({});
-            }
-
-            linkage[merged].push_back(first);
-            linkage[merged].push_back(second);
-
-        } catch (const std::exception &e) {
-            logger->error("Possibly invalid format of the linkage matrix."
-                          " Each line must contain exactly 4 values:"
-                          " <cluster 1> <cluster 2> <dist> <cluster 3>"
-                          "\nException: {}", e.what());
-            exit(1);
-        }
-    }
-
-    return linkage;
-}
-
 std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator) {
     uint64_t num_set_bits = annotator.num_relations();
     uint64_t num_rows = annotator.num_objects();
@@ -427,14 +384,12 @@ std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator 
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
-        const std::string &linkage_matrix_file,
+        const std::vector<std::vector<uint64_t>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
-        const std::filesystem::path &tmp_path,
+        const fs::path &tmp_path,
         const std::function<void(const BRWTBottomUpBuilder::CallColumn &)> &get_columns,
         std::vector<std::pair<uint64_t, std::string>> &&column_names) {
-    auto linkage = parse_linkage_matrix(linkage_matrix_file);
-
     if (!linkage.size())
         logger->warn("Parsed empty linkage tree");
 
@@ -459,10 +414,10 @@ convert_to_BRWT(
 template <>
 std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
         const std::vector<std::string> &annotation_files,
-        const std::string &linkage_matrix_file,
+        const std::vector<std::vector<uint64_t>> &linkage,
         size_t num_parallel_nodes,
         size_t num_threads,
-        const std::filesystem::path &tmp_path) {
+        const fs::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -483,17 +438,17 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
             exit(1);
         }
     };
-    return convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+    return convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                            tmp_path, get_columns, std::move(column_names));
 }
 
 template<>
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation_files,
-                         const std::string &linkage_matrix_file,
+                         const std::vector<std::vector<uint64_t>> &linkage,
                          size_t num_parallel_nodes,
                          size_t num_threads,
-                         const std::filesystem::path &tmp_path) {
+                         const fs::path &tmp_path) {
     std::vector<std::pair<uint64_t, std::string>> column_names;
     std::mutex mu;
 
@@ -516,7 +471,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
     };
 
     std::unique_ptr<MultiBRWTAnnotator> annotator
-            = convert_to_BRWT(linkage_matrix_file, num_parallel_nodes, num_threads,
+            = convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                               tmp_path, get_columns, std::move(column_names));
 
     return std::make_unique<RowDiffBRWTAnnotator>(
@@ -1121,20 +1076,20 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
-                         std::filesystem::path dest_dir,
-                         bool optimize) {
-    if (!files.size())
-        return;
-
-    if (dest_dir.empty())
-        dest_dir = "./";
+                         fs::path out_dir,
+                         fs::path swap_dir,
+                         bool optimize,
+                         fs::path row_reduction_fname) {
+    if (out_dir.empty())
+        out_dir = "./";
 
     build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
 
     if (optimize)
-        optimize_anchors_in_row_diff(graph_fname, dest_dir, ".row_reduction.unopt");
+        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
 
-    std::filesystem::path row_reduction_fname;
+    if (!files.size())
+        return;
 
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
@@ -1142,9 +1097,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
-            // also include two buffers (fwd and back) for each column transformed
-            uint64_t file_size = std::filesystem::file_size(files[i])
-                                + ROW_DIFF_BUFFER_SIZE * sizeof(uint64_t) * 2;
+            // also add some space for buffers for each column
+            uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
             if (file_size > mem_bytes) {
                 logger->warn(
                         "Not enough memory to process {}, requires {} MB, skipped",
@@ -1158,18 +1112,26 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             file_batch.push_back(files[i]);
 
             // derive name from first file in batch
-            if (row_reduction_fname.empty()) {
-                row_reduction_fname = dest_dir/std::filesystem::path(file_batch.back())
+            if (!optimize && row_reduction_fname.extension() != ".row_reduction") {
+                if (!row_reduction_fname.empty()) {
+                    logger->warn(
+                        "The output filename {} does not have extension '.row_reduction'."
+                        " The name of the row reduction vector will be derived"
+                        " from the first column in batch.", row_reduction_fname);
+                }
+                row_reduction_fname = out_dir/fs::path(file_batch.back())
                                                 .filename()
                                                 .replace_extension()
                                                 .replace_extension(".row_reduction");
-                if (!optimize)
-                    row_reduction_fname += ".unopt";
 
-                if (std::filesystem::exists(row_reduction_fname)) {
+                logger->info("The name of the row reduction vector was automatically"
+                             " derived from the first column in batch and set to {}",
+                             row_reduction_fname);
+
+                if (fs::exists(row_reduction_fname)) {
                     logger->warn("Found row reduction vector {}, will be overwritten",
                                  row_reduction_fname);
-                    std::filesystem::remove(row_reduction_fname);
+                    fs::remove(row_reduction_fname);
                 }
             }
         }
@@ -1180,7 +1142,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
         convert_batch_to_row_diff(
                 graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, dest_dir, row_reduction_fname, ROW_DIFF_BUFFER_SIZE);
+                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES, !optimize);
 
         logger->trace("Batch transformed in {} sec", timer.elapsed());
     }
@@ -1194,10 +1156,10 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
         RowDiffColumnAnnotator input_anno;
         input_anno.load(file);
 
-        std::string outname = utils::remove_suffix(std::filesystem::path(file).filename(),
+        std::string outname = utils::remove_suffix(fs::path(file).filename(),
                                                    RowDiffColumnAnnotator::kExtension);
         std::string out_path
-                = (std::filesystem::path(outfbase).remove_filename() / outname).string()
+                = (fs::path(outfbase).remove_filename() / outname).string()
                 + "_row_diff" + ColumnCompressed<std::string>::kExtension;
         std::ofstream outstream(out_path, std::ios::binary);
         logger->trace("Transforming {} to {}", file, out_path);
@@ -1224,7 +1186,7 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
             std::exit(1);
         }
         std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
-        if (!std::filesystem::exists(anchors_file)) {
+        if (!fs::exists(anchors_file)) {
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }

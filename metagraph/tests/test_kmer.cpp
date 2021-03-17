@@ -323,25 +323,69 @@ TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
 }
 
 TYPED_TEST(Kmer, InvertibleEndDol) {
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGN");
+#elif _PROTEIN_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("ATG$", "ATGX");
+#elif _DNA_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATG$"), "");
+#else
+    static_assert(false,
+        "Add a unit test for checking behavior with invalid characters"
+    );
+#endif
 }
 
 TYPED_TEST(Kmer, InvertibleStartDol) {
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "NATGG");
+#elif _PROTEIN_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("$ATGG", "XATGG");
+#elif _DNA_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATGG"), "");
+#else
+    static_assert(false,
+        "Add a unit test for checking behavior with invalid characters"
+    );
+#endif
 }
 
 TYPED_TEST(Kmer, InvertibleBothDol) {
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "NATGN");
+#elif _PROTEIN_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("$ATG$", "XATGX");
+#elif _DNA_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("$ATG$"), "");
+#else
+    static_assert(false,
+        "Add a unit test for checking behavior with invalid characters"
+    );
+#endif
 }
 
 TYPED_TEST(Kmer, InvalidChars) {
     KMer<typename TypeParam::type, kBitsPerChar> kmer(kmer_extractor.encode("ATGC"));
 
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGN");
+    test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGNN"); // cyrillic
+    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGNN"); // cyrillic
+#elif _PROTEIN_GRAPH
+    test_kmer_packed_codec<typename TypeParam::type>("ATGH", "ATGH");
+    test_kmer_packed_codec<typename TypeParam::type>("ATGЯ", "ATGXX"); // cyrillic
+    test_kmer_packed_codec<typename TypeParam::type>("ATGН", "ATGXX"); // cyrillic
+#elif _DNA_GRAPH
     ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGH"), "");
-    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGЯ"), "");
-
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGЯ"), ""); // cyrillic
+    ASSERT_DEBUG_DEATH(kmer_packed_codec<typename TypeParam::type>("ATGН"), ""); // cyrillic
     ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
     ASSERT_DEBUG_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
+#else
+    static_assert(false,
+        "Add a unit test for checking behavior with invalid characters"
+    );
+#endif
 }
 
 template <typename IntType>
@@ -383,7 +427,11 @@ TEST(Kmer, TestPrint64) {
     ss << kmer;
     std::string out;
     ss >> out;
+#if _PROTEIN_GRAPH
+    EXPECT_EQ("0000000000000000000000000000000000000000000000000084210842108421", out);
+#else
     EXPECT_EQ("0000000000000000000000000000000000000000000000005555555555555555", out);
+#endif
 }
 
 TEST(Kmer, TestPrint128) {
@@ -393,7 +441,11 @@ TEST(Kmer, TestPrint128) {
     ss << kmer;
     std::string out;
     ss >> out;
+#if _PROTEIN_GRAPH
+    EXPECT_EQ("0000000000000000000000000000000001084210842108421084210842108421", out);
+#else
     EXPECT_EQ("0000000000000000000000000000000055555555555555555555555555555555", out);
+#endif
 }
 
 TEST(Kmer, TestPrint256) {
@@ -403,7 +455,11 @@ TEST(Kmer, TestPrint256) {
     ss << kmer;
     std::string out;
     ss >> out;
+#if _PROTEIN_GRAPH
+    EXPECT_EQ("0421084210842108421084210842108421084210842108421084210842108421", out);
+#else
     EXPECT_EQ("5555555555555555555555555555555555555555555555555555555555555555", out);
+#endif
 }
 
 

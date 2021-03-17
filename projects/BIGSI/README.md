@@ -36,7 +36,7 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
         "find ~/metagenome/data/BIGSI/ -name \"*fasta.gz\" \
             | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph build -v \
                 -k 31 \
-                --canonical \
+                --mode canonical \
                 --parallel 30 \
                 --mem-cap-gb 300 \
                 --suffix $F \
@@ -107,7 +107,7 @@ bsub -J "build_brwt_5M" \
     "cat ~/metagenome/data/BIGSI/annotation/columns.txt \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
             --anno-type brwt \
-            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
+            --linkage-file ~/metagenome/data/BIGSI/annotation/linkage_BIGSI.csv \
             -o ~/metagenome/data/BIGSI/annotation/annotation_5M \
             -p 96 --parallel-nodes 48 \
             2>&1"
@@ -143,6 +143,7 @@ bsub -J "BIGSI_primary_build" \
      -n 36 -R "rusage[mem=6000] span[hosts=1]" \
     "gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph build -v \
             -k 31 \
+            --mode primary \
             --mem-cap-gb 100 \
             -o ~/metagenome/data/BIGSI/graph_primary \
             ~/metagenome/data/BIGSI/graph_primary.fasta.gz \
@@ -210,7 +211,7 @@ bsub -J "build_brwt_primary" \
     "cat ~/metagenome/data/BIGSI/annotation/columns_primary.txt \
         | gtime -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph transform_anno -v \
             --anno-type brwt \
-            -i ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
+            --linkage-file ~/metagenome/data/BIGSI/annotation/linkage_BIGSI_primary.csv \
             -o ~/metagenome/data/BIGSI/annotation/annotation_primary \
             -p 48 --parallel-nodes 48 \
             2>&1"
@@ -246,7 +247,7 @@ for i in {1..33}; do
         "cat subsets/files_${N}.txt \
             | /usr/bin/time -v ~/metagenome/metagraph_server/metagraph_DNA build -v \
                 -k 31 \
-                --canonical \
+                --mode canonical \
                 --parallel 30 \
                 --mem-cap-gb 300 \
                 -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N} \
@@ -293,6 +294,7 @@ for i in {1..33}; do
          -n 15 -R "rusage[mem=12000] span[hosts=1]" \
         "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA build -v \
                 -k 31 \
+                --mode primary \
                 --parallel 30 \
                 --mem-cap-gb 150 \
                 --index-ranges 12 \
@@ -530,7 +532,7 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
         run="$METAGRAPH query -v --discovery-fraction 0.0 --count-labels --fast \
                 -i \${TMPDIR}/graph.dbg \
                 -a \${TMPDIR}/graph.rb_brwt.annodbg \
-                --canonical \
+                --mode canonical \
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \

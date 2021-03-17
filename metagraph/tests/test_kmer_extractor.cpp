@@ -33,15 +33,27 @@ TEST(KmerExtractor2Bit, encode_decode) {
     EXPECT_EQ('C', encoder.decode(encoder.encode('C')));
     EXPECT_EQ('G', encoder.decode(encoder.encode('G')));
     EXPECT_EQ('T', encoder.decode(encoder.encode('T')));
+#if _DNA_GRAPH || _DNA5_GRAPH
     EXPECT_EQ('A', encoder.decode(encoder.encode('a')));
     EXPECT_EQ('C', encoder.decode(encoder.encode('c')));
     EXPECT_EQ('G', encoder.decode(encoder.encode('g')));
     EXPECT_EQ('T', encoder.decode(encoder.encode('t')));
+#endif
+#if _DNA_GRAPH
     ASSERT_THROW(encoder.decode(encoder.encode('N')), std::exception);
     ASSERT_THROW(encoder.decode(encoder.encode('n')), std::exception);
     ASSERT_THROW(encoder.decode(encoder.encode('y')), std::exception);
+    ASSERT_THROW(encoder.decode(encoder.encode('X')), std::exception);
+    ASSERT_THROW(encoder.decode(encoder.encode(-1)), std::exception);
+#elif _PROTEIN_GRAPH
+    EXPECT_EQ('X', encoder.decode(encoder.encode('X')));
+    EXPECT_EQ('X', encoder.decode(encoder.encode(-1)));
+#else
+    EXPECT_EQ('N', encoder.decode(encoder.encode('N')));
+#endif
 }
 
+#if _DNA_GRAPH
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
                                   const std::string &kmer) {
     Vector<KmerExtractor2Bit::Kmer64> kmers;
@@ -118,6 +130,7 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         EXPECT_EQ(last_part, reconstructed);
     }
 }
+#endif // _DNA_GRAPH
 
 TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
     KmerExtractor2Bit encoder;

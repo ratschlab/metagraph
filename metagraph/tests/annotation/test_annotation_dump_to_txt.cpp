@@ -24,6 +24,7 @@ typedef ::testing::Types<annot::BinRelWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,
                          annot::RowFlatAnnotator,
+                         annot::RowSparseAnnotator,
                          annot::UniqueRowAnnotator,
                          annot::ColumnCompressed<>> AnnotatorDumpTestTypes;
 
