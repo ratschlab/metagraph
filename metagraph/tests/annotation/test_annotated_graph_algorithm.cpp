@@ -5,22 +5,25 @@
 
 #include "common/threads/threading.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
+#include "graph/representation/masked_graph.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
 
 namespace {
 
 using namespace mtg;
 using namespace mtg::graph;
+using namespace mtg::annot;
 using namespace mtg::test;
 
 
 template <typename GraphAnnotationPair>
 class MaskedDeBruijnGraphAlgorithm : public ::testing::Test {};
 // test with DBGBitmap and DBGHashFast to have k-mers in different order
-typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
-                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
-                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
-                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGBitmap, ColumnCompressed<>>,
+                         std::pair<DBGHashFast, ColumnCompressed<>>,
+                         std::pair<DBGBitmap, RowFlatAnnotator>,
+                         std::pair<DBGHashFast, RowFlatAnnotator>
                         > GraphAnnoTypes;
 TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 
@@ -76,7 +79,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     }
 }
 
-template <class Graph, class Annotation = annot::ColumnCompressed<>>
+template <class Graph, class Annotation = ColumnCompressed<>>
 void test_mask_unitigs(double inlabel_fraction,
                        double outlabel_fraction,
                        double other_label_fraction,
@@ -160,13 +163,13 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
 }
 
 
-template <class Graph, class Annotation = annot::ColumnCompressed<>>
+template <class Graph, class Annotation = ColumnCompressed<>>
 void test_mask_unitigs_canonical(double inlabel_fraction,
                                  double outlabel_fraction,
                                  double other_label_fraction,
                                  const std::unordered_set<std::string> &ref_kmers,
                                  bool add_complement,
-                                 DBGMode mode) {
+                                 DeBruijnGraph::Mode mode) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -231,13 +234,11 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
-    std::vector<std::pair<bool, DBGMode>> params {
-        { true, DBGMode::NORMAL },
-        { false, DBGMode::CANONICAL },
-        { true, DBGMode::CANONICAL },
-        { false, DBGMode::CANONICAL_WRAPPER },
-        { true, DBGMode::CANONICAL_WRAPPER },
-        { true, DBGMode::PRIMARY },
+    std::vector<std::pair<bool, DeBruijnGraph::Mode>> params {
+        { true, DeBruijnGraph::BASIC },
+        { false, DeBruijnGraph::CANONICAL },
+        { true, DeBruijnGraph::CANONICAL },
+        { true, DeBruijnGraph::PRIMARY }
     };
     for (const auto &[add_complement, mode] : params) {
         for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {

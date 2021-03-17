@@ -179,7 +179,10 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
             if (line_split.size() <= 2 || line_split.size() > 4)
                 throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
 
-            auto diff_config = parse_diff_config(line_split[1], config->canonical);
+            auto diff_config = parse_diff_config(
+                line_split[1],
+                anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
+            );
 
             if (config->enumerate_out_sequences)
                 line_split[0] += ".";

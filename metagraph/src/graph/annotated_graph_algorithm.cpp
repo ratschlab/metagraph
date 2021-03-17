@@ -202,7 +202,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         size_t end = prev_bit(in_mask, in_mask.size() - 1) + 1;
         assert(end > begin);
-        out_kmer_count -= count_ones(out_mask, 0, begin) + count_ones(out_mask, end, out_mask.size());
+        out_kmer_count -= count_ones(out_mask, 0, begin)
+            + count_ones(out_mask, end, out_mask.size());
         size_t other_kmer_count = check_other ? count_ones(other_mask, begin, end) : 0;
 
         if (out_kmer_count > label_out_cutoff)
@@ -242,9 +243,11 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
 
-    bool masked_canonical = add_complement || graph_ptr->is_canonical_mode();
+    bool masked_canonical = add_complement
+        || graph_ptr->get_mode() == DeBruijnGraph::CANONICAL;
 
-    if (make_boss || (add_complement && !graph_ptr->is_canonical_mode())) {
+    if (make_boss
+            || (add_complement && graph_ptr->get_mode() != DeBruijnGraph::CANONICAL)) {
         // we can't guarantee that the reverse complement is present, so
         // construct a new subgraph
         logger->trace("Constructing BOSS from labeled subgraph");
@@ -270,8 +273,10 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             constructor.add_sequence(seq);
         }, num_threads, masked_canonical);
 
-        auto dbg_succ = std::make_shared<DBGSuccinct>(new BOSS(&constructor),
-                                                      masked_canonical);
+        auto dbg_succ = std::make_shared<DBGSuccinct>(
+            new BOSS(&constructor),
+            masked_canonical ? DeBruijnGraph::CANONICAL : DeBruijnGraph::BASIC
+        );
 
         // instead of keeping multiple masks (one for valid nodes and another
         // for the masked graph), transfer the valid node mask to the masked graph
@@ -358,7 +363,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(graph->max_index() + 1, 0, width * 2, 16);
+    sdsl::int_vector<> counts = aligned_int_vector(graph->max_index() + 1,
+                                                   0, width * 2, 16);
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
