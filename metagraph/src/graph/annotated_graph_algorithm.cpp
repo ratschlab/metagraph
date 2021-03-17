@@ -448,7 +448,8 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
         total_unitigs.fetch_add(1, memorder);
 
         size_t last = 0;
-        for (const auto &[begin, end] : get_kept_intervals(unitig, path)) {
+        for (const auto &pair : get_kept_intervals(unitig, path)) {
+            const auto &[begin, end] = pair;
             kept_unitigs.fetch_add(1, memorder);
             num_kept_nodes.fetch_add(end - begin, memorder);
             for ( ; last < begin; ++last) {
