@@ -162,7 +162,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
     }
 }
 
-
+#if ! _PROTEIN_GRAPH
 template <class Graph, class Annotation = ColumnCompressed<>>
 void test_mask_unitigs_canonical(double inlabel_fraction,
                                  double outlabel_fraction,
@@ -281,5 +281,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
         }
     }
 }
+#endif
 
 } // namespace
