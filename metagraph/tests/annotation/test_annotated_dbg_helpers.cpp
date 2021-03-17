@@ -2,16 +2,16 @@
 
 #include "../graph/all/test_dbg_helpers.hpp"
 
-#include "annotation/annotation_converters.hpp"
-#include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-
-#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
-
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
-#include "graph/annotated_dbg.hpp"
 
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+
+// this next #include includes AnnotatedDBG. we need access to its protected
+// members to modify the underlying annotator
+#define protected public
+#include "annotation/annotation_converters.hpp"
 
 namespace mtg {
 namespace test {

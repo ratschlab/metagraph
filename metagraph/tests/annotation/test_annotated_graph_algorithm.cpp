@@ -3,10 +3,10 @@
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
-#include "common/threads/threading.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
 
 namespace {

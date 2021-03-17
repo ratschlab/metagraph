@@ -9,13 +9,19 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-#include "annotation/annotation_converters.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
+
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+
+// this next #include includes AnnotatedDBG. we need access to its protected
+// members to modify the underlying annotator
+#define protected public
+#include "annotation/annotation_converters.hpp"
 
 
 namespace {
@@ -80,8 +86,8 @@ std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
-                                std::make_unique<ColumnCompressed<>>(1));
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
+        AnnotatedDBG anno_graph(graph, std::make_unique<ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
                   anno_graph.get_annotation().num_objects());
@@ -89,7 +95,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         std::string sequence(100, 'A');
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(sequence,
+        graph->add_sequence(sequence,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -150,7 +156,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -219,7 +225,7 @@ TEST(AnnotatedDBG, Transform) {
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph->get_graph().max_index() + 1, 0);
-        anno_graph->graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -303,10 +309,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -420,10 +426,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -540,10 +546,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -664,10 +670,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -786,10 +792,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -909,10 +915,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        anno_graph.graph_->add_sequence(seq_second,
+        graph->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        anno_graph.graph_->add_sequence(seq_third,
+        graph->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -1881,7 +1887,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 #endif
 
 TEST(AnnotatedDBG, score_kmer_presence_mask) {
-    auto anno_graph = build_anno_graph<DBGSuccinct>(31, {}, {});
+    auto anno_graph = build_anno_graph<DBGSuccinct, ColumnCompressed<>>(31);
     std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
        { sdsl::bit_vector(), 0},
        { sdsl::bit_vector({
