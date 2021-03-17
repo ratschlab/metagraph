@@ -13,11 +13,10 @@ Following the overview of contents covered by this document:
    :caption: Contents:
 
    installation.rst
-   getting_started.rst
+   quick_start.rst
+   api.rst
    sequence_search.rst
    sequence_assembly.rst
-   metagraph_server.rst
-   python_api.rst
    framework.rst
    resources.rst
 

@@ -6,7 +6,7 @@ Installation
 The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
 following, we provide detailed instructions for setting up the framework.
 
-Install with Conda
+Install with conda
 ------------------
 
 There are conda packages available on bioconda for both Linux and Mac OS X::
@@ -29,12 +29,11 @@ where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host sy
 This directory is then mapped under ``/mnt`` in the container.
 
 
-Install From Source
-====================
+Install from source
+-------------------
 
 Prerequisites
--------------
-
+^^^^^^^^^^^^^
 Before compiling MetaGraph, you need to install the following dependencies. For users that do not
 have administration/root access to their machine, we recommend using `brew
 <https://brew.sh/>`_, available for MacOS and Linux. 
@@ -50,30 +49,30 @@ have administration/root access to their machine, we recommend using `brew
 - Python 3 (for running integration tests)
 
 
-When compiling on Mac with AppleClang
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+For AppleClang on MacOS
+"""""""""""""""""""""""
 For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
     brew install libomp cmake make bzip2 htslib boost jemalloc
 
 
-When compiling on Ubuntu ro Debian
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+For Ubuntu or Debian
+""""""""""""""""""""
 For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
     sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
 
-When compiling on CentOS
-^^^^^^^^^^^^^^^^^^^^^^^^
+For CentOS
+""""""""""
 For **CentOS** (8 or higher)::
 
     yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
 
 
-When compiling on Linux with GNU GCC installed with Homebrew
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-For compiling with GNU GCC, the prerequisites can be installed as::
+For Linux with GNU GCC installed with Homebrew
+""""""""""""""""""""""""""""""""""""""""""""""
+GNU GCC and all the prerequisites can be installed with Homebrew as follows::
 
     brew install gcc autoconf automake libtool cmake make htslib
     [[ "$OSTYPE" == "darwin"* ]] \
@@ -86,7 +85,7 @@ For compiling with GNU GCC, the prerequisites can be installed as::
         && brew install --cc=gcc-5 glog zstd \
         && brew install --cc=gcc-9 openssl@1.1 boost folly
 
-Then, the following environment variable need to be set::
+Then, the following environment variables have to be set::
 
     echo "\
     # Use gcc-9 with cmake
@@ -94,13 +93,13 @@ Then, the following environment variable need to be set::
     export CXX=\"\$(which g++-9)\"
     " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
-When compiling on Linux with LLVM Clang installed with Homebrew
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-For compiling with LLVM Clang, the prerequisites can be installed as::
+For Linux with LLVM Clang installed with Homebrew
+"""""""""""""""""""""""""""""""""""""""""""""""""
+For compiling with LLVM Clang installed with Homebrew, the prerequisites can be installed with::
 
     brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
 
-Then, the following environment variable need to be set::
+Then, the following environment variables have to be set::
 
     echo "\
     # OpenMP
@@ -119,18 +118,18 @@ Then, the following environment variable need to be set::
     " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
 Compiling
----------
-To compile MetaGraph, please follow the subsequent steps:
+^^^^^^^^^
+To compile MetaGraph, please follow these steps.
 
 1. Clone the latest version of the code from the git repository::
 
     git clone --recursive https://github.com/ratschlab/metagraph.git
 
-2. Make sure all submodules are downloaded:: 
+2. Make sure all submodules have been downloaded::
 
     git submodule update --init --recursive
 
-3. Install **sdsl-lite** in :code:`metagraph/external-libraries/` following the corresponding instructions or simply run the following script::
+3. Install *sdsl-lite* (in :code:`metagraph/external-libraries/sdsl-lite`) with the following script::
 
     git submodule sync
     git submodule update --init --recursive
@@ -147,23 +146,23 @@ To compile MetaGraph, please follow the subsequent steps:
 
     cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
 
-6. Run unit tests::
+6. Run unit tests (optional)::
 
     ./unit_tests
 
-7. Run integration tests::
+7. Run integration tests (optional)::
 
     ./integration_tests
 
-Build types
------------
+Build configurations
+^^^^^^^^^^^^^^^^^^^^
 
-When building with :code:`cmake .. <arguments>` additional arguments can be provided:
+When configuring :code:`cmake .. <arguments>` additional arguments can be provided:
 
 - :code:`-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (:code:`Release` by default)
 - :code:`-DBUILD_STATIC=[ON|OFF]` -- link statically (:code:`OFF` by default)
 - :code:`-DLINK_OPT=[ON|OFF]` -- enable link time optimization (:code:`OFF` by default)
 - :code:`-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (:code:`ON` by default)
-- :code:`-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (:code:`ON` by default, if available)
-- :code:`-DWITH_MSSE42=[ON|OFF]` -- compile with support for the msse4.2 instructions (:code:`ON` by default, if available)
+- :code:`-DWITH_AVX=[ON|OFF]` -- compile with *avx* instructions (:code:`ON` by default, if available)
+- :code:`-DWITH_MSSE42=[ON|OFF]` -- compile with *msse4.2* instructions (:code:`ON` by default, if available)
 - :code:`-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (:code:`DNA` by default)
