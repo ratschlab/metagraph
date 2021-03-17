@@ -209,6 +209,8 @@ class bitmap_generator : public bitmap {
 
     void add_to(sdsl::bit_vector *other) const;
 
+    // This is inefficient when begin > 0 and end < size_. This will throw an
+    // exception if it is called in that way.
     void call_ones_in_range(uint64_t begin, uint64_t end,
                             const VoidCall<uint64_t> &callback) const;
 

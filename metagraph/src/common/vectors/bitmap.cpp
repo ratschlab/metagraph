@@ -399,9 +399,8 @@ void bitmap_generator::add_to(sdsl::bit_vector *other) const {
 
 void bitmap_generator::call_ones_in_range(uint64_t begin, uint64_t end,
                                           const VoidCall<uint64_t> &callback) const {
-    generator_([&](uint64_t i) {
-        assert(i < size_);
-        if (i >= begin && i < end)
-            callback(i);
-    });
+    if (begin || end != size_)
+        throw std::runtime_error("This is inefficient and should not be called");
+
+    generator_(callback);
 }
