@@ -1856,7 +1856,7 @@ using Edge = std::pair<edge_index, std::unique_ptr<TAlphabet[]>>;
 // then switches and only stores edge indices if too many are queued.
 class EdgeQueue {
   public:
-    EdgeQueue(std::vector<Edge>&& initial_edges = {})
+    EdgeQueue(std::deque<Edge>&& initial_edges = {})
           : decoded_edges_(std::move(initial_edges)) {
         total_decoded_ += decoded_edges_.size();
     }
@@ -1888,6 +1888,24 @@ class EdgeQueue {
         } else {
             --total_decoded_;
             indexes_.push_back(edge);
+        }
+    }
+
+    template <typename Iterator>
+    void emplace_front(edge_index edge, Iterator begin, Iterator end) {
+        static_assert(std::is_same_v<std::decay_t<decltype(*begin)>, TAlphabet>);
+
+        if (begin == end) {
+            indexes_.push_front(edge);
+            return;
+        }
+
+        if (++total_decoded_ <= MAX_DECODED_EDGES_IN_QUEUE) {
+            decoded_edges_.emplace_front(edge, new TAlphabet[end - begin]);
+            std::copy(begin, end, decoded_edges_.front().second.get());
+        } else {
+            --total_decoded_;
+            indexes_.push_front(edge);
         }
     }
 
@@ -1927,19 +1945,14 @@ class EdgeQueue {
         return split_queue;
     }
 
-    void reserve(size_t capacity) {
-        decoded_edges_.reserve(capacity);
-        indexes_.reserve(capacity);
-    }
-
     size_t size() const { return decoded_edges_.size() + indexes_.size(); }
 
     bool empty() const { return decoded_edges_.empty() && indexes_.empty(); }
 
   private:
     inline static std::atomic<uint64_t> total_decoded_ = 0;
-    std::vector<Edge> decoded_edges_;
-    std::vector<edge_index> indexes_;
+    std::deque<Edge> decoded_edges_;
+    std::deque<edge_index> indexes_;
 };
 
 /*
@@ -2569,7 +2582,7 @@ call_path(const BOSS &boss,
                 // otherwise it's a fork which will be covered in the forward pass.
                 if (masked_pick_single_outgoing(boss, &next_edge, subgraph_mask)) {
                     if (!fetch_bit(visited.data(), next_edge, concurrent)) {
-                        edge_queue->emplace_back(next_edge,
+                        edge_queue->emplace_front(next_edge,
                                                  rev_comp_seq.begin() + i + 1,
                                                  rev_comp_seq.begin() + i + 1 + boss.get_k());
                     }

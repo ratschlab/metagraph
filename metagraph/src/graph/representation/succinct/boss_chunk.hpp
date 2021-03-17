@@ -69,12 +69,12 @@ class BOSS::Chunk {
 
     void alter_last_back(bool last) { last_[size() - 1] = last; }
 
-    void extend(const Chunk &other);
+    void extend(Chunk &other);
 
     uint64_t size() const { return W_.size(); }
 
     bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
+    void serialize(const std::string &filename_base);
 
     void initialize_boss(BOSS *graph, sdsl::int_vector<> *weights = nullptr);
 

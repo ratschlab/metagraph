@@ -3,12 +3,15 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#include "common/elias_fano.hpp"
-#include "common/elias_fano_file_merger.hpp"
+#include "common/elias_fano/elias_fano.hpp"
+#include "common/elias_fano/elias_fano_merger.hpp"
 
 
 namespace mtg {
 namespace common {
+
+const size_t ENCODER_BUFFER_SIZE = 100'000;
+
 
 template <typename T>
 SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
@@ -17,7 +20,6 @@ SortedSetDiskBase<T>::SortedSetDiskBase(size_t num_threads,
                                         size_t disk_cap_bytes,
                                         size_t merge_count)
     : num_threads_(num_threads),
-      reserved_num_elements_(reserved_num_elements),
       disk_cap_bytes_(disk_cap_bytes),
       merge_count_(merge_count),
       chunk_file_prefix_(tmp_dir/"chunk_"),
@@ -72,15 +74,11 @@ void SortedSetDiskBase<T>::clear() {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     is_merging_ = false;
-    async_merge_l1_.remove_waiting_tasks();
     // remove the files that have not been requested to merge
-    for (const auto &chunk_file : get_file_names()) {
-        std::filesystem::remove(chunk_file);
-    }
+    elias_fano::remove_chunks(get_file_names());
     chunk_count_ = 0;
     l1_chunk_count_ = 0;
     total_chunk_size_bytes_ = 0;
-    try_reserve(reserved_num_elements_);
     Vector<T>().swap(data_); // free up the (usually very large) buffer
 }
 
@@ -94,7 +92,7 @@ void SortedSetDiskBase<T>::start_merging_async() {
     async_worker_.enqueue([file_names, this]() {
         std::function<void(const T &)> on_new_item
                 = [this](const T &v) { merge_queue_.push(v); };
-        merge_files(file_names, on_new_item);
+        elias_fano::merge_files(file_names, on_new_item);
         merge_queue_.shutdown();
     });
 }
@@ -106,8 +104,8 @@ void SortedSetDiskBase<T>::shrink_data() {
     size_t old_size = data_.size();
     sort_and_dedupe();
 
-    logger->trace("...done. Size reduced from {} to {}, {} MiB", old_size,
-                  data_.size(), (data_.size() * sizeof(T) >> 20));
+    logger->trace("...done. Size reduced from {} to {}, {} MB", old_size,
+                  data_.size(), data_.size() * sizeof(T) / 1e6);
 }
 
 template <typename T>
@@ -120,7 +118,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
     #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
     for (size_t t = 0; t < num_blocks_; ++t) {
         std::string block_name = file_name + "_block_" + std::to_string(t);
-        EliasFanoEncoderBuffered<T> encoder(block_name, 1000);
+        elias_fano::EliasFanoEncoderBuffered<T> encoder(block_name, ENCODER_BUFFER_SIZE);
         const size_t block_size = (data_.size() + num_blocks_ - 1) / num_blocks_;
         const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
         for (size_t i = t * block_size; i < block_end; ++i) {
@@ -141,7 +139,7 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
         // increment chunk_count, so that get_file_names() returns correct values
         merge_all(all_merged_file, get_file_names());
 
-        total_chunk_size_bytes_ = std::filesystem::file_size(all_merged_file);
+        total_chunk_size_bytes_ = elias_fano::chunk_size(all_merged_file);
         if (total_chunk_size_bytes_ > disk_cap_bytes_ * 0.8) {
             logger->critical("Disk space reduced by < 20%. Giving up.");
             std::exit(EXIT_FAILURE);
@@ -163,9 +161,7 @@ void SortedSetDiskBase<T>::insert_sorted(const std::vector<T> &data) {
 
     std::string file_name = chunk_file_prefix_ + "sorted";
     constexpr bool append = true;
-
-    EliasFanoEncoder<T> encoder(data.size(), utils::get_first(data.front()),
-                                utils::get_first(data.back()), file_name, append);
+    elias_fano::EliasFanoEncoderBuffered<T> encoder(file_name, ENCODER_BUFFER_SIZE, append);
     for (const auto &v : data) {
         encoder.add(v);
     }
@@ -180,9 +176,8 @@ void SortedSetDiskBase<T>::try_reserve(size_t size, size_t min_size) {
         try {
             data_.reserve(size);
             if (size != original_size) {
-                logger->warn("SortedSetDisk: Requested {}MiB, but only found {}MiB",
-                             (original_size * sizeof(T)) >> 20,
-                             (size * sizeof(T)) >> 20);
+                logger->warn("SortedSetDisk: Requested {} MB, but only got {} MB",
+                             original_size * sizeof(T) / 1e6, size * sizeof(T) / 1e6);
             }
             return;
         } catch (const std::bad_alloc &exception) {
@@ -204,7 +199,7 @@ std::string SortedSetDiskBase<T>::merge_blocks(const std::string &chunk_file_pre
     for (size_t t = 0; t < num_blocks; ++t) {
         block_names[t] = chunk_name + "_block_" + std::to_string(t);
     }
-    concat(block_names, chunk_name);
+    elias_fano::concat(block_names, chunk_name);
     return chunk_name;
 }
 
@@ -226,18 +221,18 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
     for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
         std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
         chunks.push_back(chunk_name);
-        *total_size -= static_cast<int64_t>(std::filesystem::file_size(chunk_name));
+        *total_size -= static_cast<int64_t>(elias_fano::chunk_size(chunk_name));
     }
-    EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, 1000);
+    elias_fano::EliasFanoEncoderBuffered<T> encoder(merged_l1_file_name, ENCODER_BUFFER_SIZE);
     std::function<void(const T &v)> on_new_item
             = [&encoder](const T &v) { encoder.add(v); };
-    merge_files(chunks, on_new_item);
+    elias_fano::merge_files(chunks, on_new_item);
     encoder.finish();
 
     *l1_chunk_count += 1;
     logger->trace("Merging chunks {}..{} into {} done", chunk_begin, chunk_end - 1,
                   merged_l1_file_name);
-    *total_size += std::filesystem::file_size(merged_l1_file_name);
+    *total_size += elias_fano::chunk_size(merged_l1_file_name);
 }
 
 template <typename T>
@@ -247,17 +242,18 @@ void SortedSetDiskBase<T>::merge_all(const std::string &out_file,
             "Max allocated disk capacity exceeded. Starting merging all {} chunks "
             "into {}",
             to_merge.size(), out_file);
-    EliasFanoEncoderBuffered<T> encoder(out_file, 1000);
+    elias_fano::EliasFanoEncoderBuffered<T> encoder(out_file, ENCODER_BUFFER_SIZE);
     std::function<void(const T &v)> on_new_item
             = [&encoder](const T &v) { encoder.add(v); };
-    merge_files(to_merge, on_new_item);
+    elias_fano::merge_files(to_merge, on_new_item);
     encoder.finish();
-    logger->trace("Merging all {} chunks into {} of size {:.0f}MiB done",
-                  to_merge.size(), out_file, std::filesystem::file_size(out_file) / 1e6);
+    logger->trace("Merging all {} chunks into {} of size {:.0f} MB done",
+                  to_merge.size(), out_file, elias_fano::chunk_size(out_file) / 1e6);
 }
 
 template <typename T>
 std::vector<std::string> SortedSetDiskBase<T>::get_file_names() {
+    async_merge_l1_.remove_waiting_tasks();
     async_merge_l1_.join(); // make sure all L1 merges are done
     std::vector<std::string> file_names;
     if (merged_all_count_ > 0) {

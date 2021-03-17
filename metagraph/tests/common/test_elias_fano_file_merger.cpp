@@ -7,7 +7,7 @@
 
 #include <sdsl/uint128_t.hpp>
 
-#include "common/elias_fano_file_merger.hpp"
+#include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
@@ -30,13 +30,7 @@ TYPED_TEST_SUITE(EliasFanoFileMergerTest, ValueTypes);
 
 template <typename T>
 void do_encode(const std::vector<T> &values, const std::string &file_name) {
-    if (values.empty()) {
-        common::EliasFanoEncoder<T> encoder(0, 0, 0, file_name);
-        encoder.finish();
-        return;
-    }
-    common::EliasFanoEncoder<T> encoder(values.size(), utils::get_first(values.front()),
-                                        utils::get_first(values.back()), file_name);
+    elias_fano::EliasFanoEncoderBuffered<T> encoder(file_name, values.size());
     std::for_each(values.begin(), values.end(), [&encoder](const T &v) { encoder.add(v); });
     encoder.finish();
 }
@@ -96,7 +90,7 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeEmpty) {
     }
     std::function<void(const TypeParam &v)> on_new_item
             = [](const TypeParam &) { FAIL() << "Should not be called."; };
-    common::merge_files(file_names, on_new_item, false);
+    elias_fano::merge_files(file_names, on_new_item, false);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
@@ -116,7 +110,7 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeIdentical) {
         EXPECT_EQ(i, utils::get_first(v));
         i++;
     };
-    common::merge_files(file_names, on_new_item);
+    elias_fano::merge_files(file_names, on_new_item);
 }
 
 TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
@@ -149,7 +143,7 @@ TYPED_TEST(EliasFanoFileMergerTest, MergeRandom) {
         EXPECT_EQ(expected[i], v) << i;
         i++;
     };
-    common::merge_files(file_names, on_new_item);
+    elias_fano::merge_files(file_names, on_new_item);
 }
 
 } // namespace

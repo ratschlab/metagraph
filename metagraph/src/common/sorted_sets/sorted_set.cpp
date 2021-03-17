@@ -55,8 +55,8 @@ void SortedSet<T, Container>::shrink_data() {
     sort_and_remove_duplicates();
     sorted_end_ = data_.size();
 
-    logger->trace("Erasing duplicate values done. Size reduced from {} to {}, {} MiB",
-                  old_size, data_.size(), (data_.size() * sizeof(T) >> 20));
+    logger->trace("Erasing duplicate values done. Size reduced from {} to {}, {} MB",
+                  old_size, data_.size(), (data_.size() * sizeof(T) / 1e6));
 }
 
 template <typename T, class Container>

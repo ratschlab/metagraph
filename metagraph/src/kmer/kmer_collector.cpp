@@ -154,15 +154,15 @@ KmerCollector<KMER, KmerExtractor, Container>
     } else {
         kmers_ = std::make_unique<Container>(num_threads, buffer_size_);
     }
-    common::logger->trace(
-            "Preallocated {} MiB for the k-mer storage, capacity: {} k-mers",
-            kmers_->buffer_size() * sizeof(typename Container::value_type) >> 20,
-            kmers_->buffer_size());
+    common::logger->trace("Reserved buffer: {} MB, capacity: {} k-mers",
+                          kmers_->buffer_size() * sizeof(typename Container::value_type) / 1e6,
+                          kmers_->buffer_size());
 }
 
 template <typename KMER, class KmerExtractor, class Container>
 KmerCollector<KMER, KmerExtractor, Container>
 ::~KmerCollector() {
+    kmers_.reset();
     if (!tmp_dir_.empty())
         utils::remove_temp_dir(tmp_dir_);
 }
