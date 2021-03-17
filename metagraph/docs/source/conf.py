@@ -151,7 +151,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
     (master_doc, 'MetaGraph', u'MetaGraph Documentation',
-     author, 'MetaGraph', 'Framework for petabase scale sequence graphs.',
+     author, 'MetaGraph', 'Framework for large scale sequence graphs.',
      'Miscellaneous'),
 ]
 

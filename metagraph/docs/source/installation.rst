@@ -3,31 +3,76 @@
 Installation
 ============
 
-MetaGraph is written in C++ and has been successfully tested on Linux and MacOS platforms. In the
+The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
 following, we provide detailed instructions for setting up the framework.
+
+Install with Conda
+------------------
+
+There are conda packages available on bioconda for both Linux and Mac OS X::
+
+    conda install -c bioconda -c conda-forge metagraph
+
+The executable is called ``metagraph_DNA``.
+
+Docker container
+----------------
+
+If docker is available on your system, you can immediately get started using
+e.g.::
+
+    docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph \
+        build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+
+
+where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host system.
+This directory is then mapped under ``/mnt`` in the container.
+
+
+Install From Source
+====================
 
 Prerequisites
 -------------
 
 Before compiling MetaGraph, you need to install the following dependencies. For users that do not
-have administration/root access to their machine, we recommend the usage of `brew
-<https://brew.sh/>`_ or `linuxbrew <https://linuxbrew.sh/>`_. 
+have administration/root access to their machine, we recommend using `brew
+<https://brew.sh/>`_, available for MacOS and Linux. 
 
-- cmake 3.6.1
-- GNU GCC with C++17 (gcc-9 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- cmake 3.10 or higher
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- bzip2
 - HTSlib
-- folly (optional)
-- Python 3 (for running integration tests) 
+
+*Optional:*
+
+- boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
+- Python 3 (for running integration tests)
 
 
 When compiling on Mac with AppleClang
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-For compiling with AppleClang, the prerequisites can be installed as easy as::
+For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-    brew install libomp cmake make htslib boost folly
+    brew install libomp cmake make bzip2 htslib boost jemalloc
 
-When compiling on Linux with GNU GCC
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When compiling on Ubuntu ro Debian
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
+
+    sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+
+
+When compiling on CentOS
+^^^^^^^^^^^^^^^^^^^^^^^^
+For **CentOS** (8 or higher)::
+
+    yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+
+
+When compiling on Linux with GNU GCC installed with Homebrew
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 For compiling with GNU GCC, the prerequisites can be installed as::
 
     brew install gcc autoconf automake libtool cmake make htslib
@@ -49,8 +94,8 @@ Then, the following environment variable need to be set::
     export CXX=\"\$(which g++-9)\"
     " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
-When compiling on Linux with LLVM Clang
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When compiling on Linux with LLVM Clang installed with Homebrew
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 For compiling with LLVM Clang, the prerequisites can be installed as::
 
     brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
@@ -85,7 +130,7 @@ To compile MetaGraph, please follow the subsequent steps:
 
     git submodule update --init --recursive
 
-3. Install **libmaus2** and **sdsl-lite** in :code:`metagraph/external-libraries/` following the corresponding instructions or simply run the following script::
+3. Install **sdsl-lite** in :code:`metagraph/external-libraries/` following the corresponding instructions or simply run the following script::
 
     git submodule sync
     git submodule update --init --recursive
@@ -93,12 +138,6 @@ To compile MetaGraph, please follow the subsequent steps:
     pushd metagraph/external-libraries/sdsl-lite
     ./install.sh $PWD
     popd
-
-    pushd metagraph/external-libraries/libmaus2
-    cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
-    make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
-    make install
-    popd    
 
 4. Go to the :code:`build` directory::
 
@@ -119,7 +158,7 @@ To compile MetaGraph, please follow the subsequent steps:
 Build types
 -----------
 
-When building with :code:`cmake .. <arguments>` additional arguments can be provided as follows:
+When building with :code:`cmake .. <arguments>` additional arguments can be provided:
 
 - :code:`-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (:code:`Release` by default)
 - :code:`-DBUILD_STATIC=[ON|OFF]` -- link statically (:code:`OFF` by default)
