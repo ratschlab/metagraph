@@ -34,7 +34,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
 
-        for (size_t k = 3; k < 15; ++k) {
+        size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
+        for (size_t k = 3; k < max_k; ++k) {
             const std::vector<std::string> sequences {
                 std::string("T") + std::string(k - 1, 'A') + std::string(100, 'T'),
                 std::string("T") + std::string(k - 1, 'A') + "C",
