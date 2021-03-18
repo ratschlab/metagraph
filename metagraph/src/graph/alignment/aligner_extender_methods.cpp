@@ -116,106 +116,118 @@ bool update_column(const DeBruijnGraph &graph_,
     // compute column boundaries for updating the match and deletion scores
     ssize_t offset_diff = static_cast<ssize_t>(offset_prev) - offset;
 
-    // to define the boundaries for match scores
-    // need i + offset - offset_prev - 1 >= 0
-    // &&   i + offset - offset_prev - 1 < S_prev.size()
-    // so offset_diff + 1 <= i < S_prev.size() + offset_diff + 1
-    size_t match_begin = std::max((ssize_t)0, offset_diff + 1);
-    size_t match_end = std::max(
-        match_begin,
-        static_cast<size_t>(std::min(S_prev.size() + offset_diff + 1, cur_size))
-    );
+    if (std::get<0>(prev_node) != graph_.max_index() + 1) {
+        // to define the boundaries for match scores
+        // need i + offset - offset_prev - 1 >= 0
+        // &&   i + offset - offset_prev - 1 < S_prev.size()
+        // so offset_diff + 1 <= i < S_prev.size() + offset_diff + 1
+        size_t match_begin = std::max((ssize_t)0, offset_diff + 1);
+        if (offset <= 1)
+            match_begin = std::max((size_t)2, match_begin + offset) - offset;
 
-    // to define the boundaries for deletion scores
-    // need i + offset - offset_prev >= 0
-    // &&   i + offset - offset_prev < S_prev.size()
-    // so offset_diff <= i < S_prev.size() + offset_diff
-    size_t del_begin = std::max((ssize_t)0, offset_diff);
-    size_t del_end = std::max(
-        del_begin,
-        static_cast<size_t>(std::min(S_prev.size() + offset_diff, cur_size))
-    );
+        size_t match_end = std::max(
+            match_begin,
+            static_cast<size_t>(std::min(S_prev.size() + offset_diff + 1, cur_size))
+        );
 
-    assert(del_end <= match_end);
-    assert(del_end + 1 >= match_end);
+        // to define the boundaries for deletion scores
+        // need i + offset - offset_prev >= 0
+        // &&   i + offset - offset_prev < S_prev.size()
+        // so offset_diff <= i < S_prev.size() + offset_diff
+        size_t del_begin = std::max((ssize_t)0, offset_diff);
+        if (offset <= 1)
+            del_begin = std::max((size_t)1, del_begin + offset) - offset;
+
+        size_t del_end = std::max(
+            del_begin,
+            static_cast<size_t>(std::min(S_prev.size() + offset_diff, cur_size))
+        );
+
+        assert(del_end <= match_end);
+        assert(del_end + 1 >= match_end);
 
 
-    const score_t *sprev = &S_prev[offset - offset_prev];
-    const score_t *fprev = &F_prev[offset - offset_prev];
-    const int8_t *profile = &profile_score_.find(c)->second[start + offset];
-    const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
+        const score_t *sprev = &S_prev[offset - offset_prev];
+        const score_t *fprev = &F_prev[offset - offset_prev];
+        const int8_t *profile = &profile_score_.find(c)->second[start + offset];
+        const Cigar::Operator *profile_o = &profile_op_.find(c)->second[start + offset];
 
-    std::fill(PS.begin() + match_begin, PS.begin() + match_end, Extender::PREV);
-    std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
+        std::fill(PS.begin() + match_begin, PS.begin() + match_end, Extender::PREV);
+        std::fill(PF.begin() + del_begin, PF.begin() + del_end, Extender::PREV);
 
-    bool updated = false;
+        auto update_match = [sprev,profile,profile_o,S=S.data(),OS=OS.data()](ssize_t i) {
+            S[i + 1] = *(sprev + i) + profile[i + 1];
+            OS[i + 1] = profile_o[i + 1];
+        };
 
-    auto update_match = [sprev,profile,profile_o,S=S.data(),OS=OS.data()](ssize_t i) {
-        S[i + 1] = *(sprev + i) + profile[i + 1];
-        OS[i + 1] = profile_o[i + 1];
-    };
+        auto update_del = [&config_,sprev,fprev,F=F.data(),OF=OF.data(),
+                           S=S.data(),OS=OS.data()](size_t i) {
+            score_t del_open = sprev[i] + config_.gap_opening_penalty;
+            score_t del_extend = fprev[i] + config_.gap_extension_penalty;
+            F[i] = std::max({ del_open, del_extend, ninf });
+            OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
 
-    auto update_del = [&config_,sprev,fprev,F=F.data(),OF=OF.data(),
-                       S=S.data(),OS=OS.data()](size_t i) {
-        score_t del_open = sprev[i] + config_.gap_opening_penalty;
-        score_t del_extend = fprev[i] + config_.gap_extension_penalty;
-        F[i] = std::max({ del_open, del_extend, ninf });
-        OF[i] = del_open < del_extend ? Cigar::DELETION : Cigar::MATCH;
+            if (F[i] > S[i]) {
+                S[i] = F[i];
+                OS[i] = Cigar::DELETION;
+            }
+        };
 
-        if (F[i] > S[i]) {
-            S[i] = F[i];
-            OS[i] = Cigar::DELETION;
-        }
-    };
+        if (del_begin < std::min(del_end, match_begin))
+            update_del(del_begin);
 
-    if (del_begin < std::min(del_end, match_begin))
-        update_del(del_begin);
-
-    if (match_begin < match_end)
-        update_match(static_cast<ssize_t>(match_begin) - 1);
+        if (match_begin < match_end)
+            update_match(static_cast<ssize_t>(match_begin) - 1);
 
 #ifndef __AVX2__
-    for (size_t i = match_begin; i < del_end; ++i) {
-        update_del(i);
-        update_match(i);
-    }
+        for (size_t i = match_begin; i < del_end; ++i) {
+            update_del(i);
+            update_match(i);
+        }
 #else
-    static_assert(sizeof(score_t) == sizeof(int32_t));
-    for (size_t i = match_begin; i < del_end; i += 8) {
-        // vectorized update_match(i)
-        __m256i sprev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
-        __m256i profile_v = _mm256_cvtepi8_epi32(mm_loadu_si64(&profile[i + 1]));
-        _mm256_storeu_si256((__m256i*)&S[i + 1], _mm256_add_epi32(sprev_v, profile_v));
-        *((uint64_t*)&OS[i + 1]) = *((uint64_t*)&profile_o[i + 1]);
+        static_assert(sizeof(score_t) == sizeof(int32_t));
+        for (size_t i = match_begin; i < del_end; i += 8) {
+            // vectorized update_match(i)
+            __m256i sprev_v = _mm256_loadu_si256((__m256i*)&sprev[i]);
+            __m256i profile_v = _mm256_cvtepi8_epi32(mm_loadu_si64(&profile[i + 1]));
+            _mm256_storeu_si256((__m256i*)&S[i + 1], _mm256_add_epi32(sprev_v, profile_v));
+            *((uint64_t*)&OS[i + 1]) = *((uint64_t*)&profile_o[i + 1]);
 
-        // vectorized update_del(i)
-        __m256i gap_open = _mm256_set1_epi32(config_.gap_opening_penalty);
-        __m256i del_open = _mm256_add_epi32(sprev_v, gap_open);
+            // vectorized update_del(i)
+            __m256i gap_open = _mm256_set1_epi32(config_.gap_opening_penalty);
+            __m256i del_open = _mm256_add_epi32(sprev_v, gap_open);
 
-        __m256i fprev_v = _mm256_loadu_si256((__m256i*)&fprev[i]);
-        __m256i gap_extend = _mm256_set1_epi32(config_.gap_extension_penalty);
-        __m256i del_extend = _mm256_add_epi32(fprev_v, gap_extend);
+            __m256i fprev_v = _mm256_loadu_si256((__m256i*)&fprev[i]);
+            __m256i gap_extend = _mm256_set1_epi32(config_.gap_extension_penalty);
+            __m256i del_extend = _mm256_add_epi32(fprev_v, gap_extend);
 
-        __m256i del_score = _mm256_max_epi32(_mm256_max_epi32(del_open, del_extend),
-                                             _mm256_set1_epi32(ninf));
-        _mm256_storeu_si256((__m256i*)&F[i], del_score);
+            __m256i del_score = _mm256_max_epi32(_mm256_max_epi32(del_open, del_extend),
+                                                 _mm256_set1_epi32(ninf));
+            _mm256_storeu_si256((__m256i*)&F[i], del_score);
 
-        __m128i del_op_v = _mm_blendv_epi8(
-            _mm_set1_epi8(Cigar::MATCH),
-            _mm_set1_epi8(Cigar::DELETION),
-            mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
-        );
-        mm_storeu_si64(&OF[i], del_op_v);
+            __m128i del_op_v = _mm_blendv_epi8(
+                _mm_set1_epi8(Cigar::MATCH),
+                _mm_set1_epi8(Cigar::DELETION),
+                mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_extend, del_open))
+            );
+            mm_storeu_si64(&OF[i], del_op_v);
 
-        __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
-        __m256i score_max = _mm256_max_epi32(s_v, del_score);
-        _mm256_storeu_si256((__m256i*)&S[i], score_max);
+            __m256i s_v = _mm256_loadu_si256((__m256i*)&S[i]);
+            __m256i score_max = _mm256_max_epi32(s_v, del_score);
+            _mm256_storeu_si256((__m256i*)&S[i], score_max);
 
-        __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_score, s_v));
-        mm_maskstorel_epi8((int8_t*)&OS[i], mask, _mm_set1_epi8(Cigar::DELETION));
-    }
+            __m128i mask = mm256_cvtepi32_epi8(_mm256_cmpgt_epi32(del_score, s_v));
+            mm_maskstorel_epi8((int8_t*)&OS[i], mask, _mm_set1_epi8(Cigar::DELETION));
+        }
 #endif
+    } else {
+        assert(!std::get<2>(prev_node));
+        S[1 - offset] = seed_.get_score();
+        OS[1 - offset] = seed_.get_cigar().back().first;
+        PS[1 - offset] = Extender::PREV;
+    }
 
+    bool updated = false;
     auto update_max = [&xdrop_cutoff,&updated,&config_,ninf=ninf,
                        S=S.data(),E=E.data(),F=F.data(),
                        OS=OS.data(),OE=OE.data(),OF=OF.data(),
@@ -240,9 +252,12 @@ bool update_column(const DeBruijnGraph &graph_,
         }
     };
 
-    update_max(0);
+    size_t i = std::get<0>(prev_node) == graph_.max_index() + 1 ? 2 - offset : 1;
 
-    size_t i = 1;
+    for (size_t j = 0; j < i; ++j) {
+        update_max(j);
+    }
+
     for ( ; i < cur_size; ++i) {
         score_t ins_open = S[i - 1] + config_.gap_opening_penalty;
         score_t ins_extend = E[i - 1] + config_.gap_extension_penalty;
@@ -266,32 +281,48 @@ bool update_column(const DeBruijnGraph &graph_,
     }
 
     // extend to the right with insertion scores
-    while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
-        score_t ins_open = S.back() + config_.gap_opening_penalty;
-        score_t ins_extend = E.back() + config_.gap_extension_penalty;
-        score_t ins_score = std::max(ins_open, ins_extend);
+    if (std::get<0>(prev_node) == graph_.max_index() + 1 || offset >= 1 || S.size() > 1) {
+        while (offset + S.size() < size && S.back() >= xdrop_cutoff) {
+            score_t ins_open = S.back() + config_.gap_opening_penalty;
+            score_t ins_extend = E.back() + config_.gap_extension_penalty;
+            score_t ins_score = std::max(ins_open, ins_extend);
 
-        if (ins_score < ninf)
-            break;
+            if (ins_score < ninf)
+                break;
 
-        E.push_back(ins_score);
-        F.push_back(ninf);
-        S.push_back(std::max({ 0, E.back(), F.back() }));
+            E.push_back(ins_score);
+            F.push_back(ninf);
+            S.push_back(std::max({ 0, E.back(), F.back() }));
 
-        OS.push_back(Cigar::CLIPPED);
-        OE.push_back(ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH);
-        OF.push_back(Cigar::CLIPPED);
+            OS.push_back(Cigar::CLIPPED);
+            OE.push_back(ins_open < ins_extend ? Cigar::INSERTION : Cigar::MATCH);
+            OF.push_back(Cigar::CLIPPED);
 
-        PS.push_back(Extender::NONE);
-        PF.push_back(Extender::NONE);
-        if (S.back() > 0) {
-            assert(S.back() == E.back());
-            updated = true;
-            PS.back() = Extender::CUR;
-            OS.back() = Cigar::INSERTION;
-            xdrop_cutoff = std::max(xdrop_cutoff, S.back() - config_.xdrop);
+            PS.push_back(Extender::NONE);
+            PF.push_back(Extender::NONE);
+            if (S.back() > 0) {
+                assert(S.back() == E.back());
+                updated = true;
+                PS.back() = Extender::CUR;
+                OS.back() = Cigar::INSERTION;
+                xdrop_cutoff = std::max(xdrop_cutoff, S.back() - config_.xdrop);
+            }
         }
     }
+
+#ifndef NDEBUG
+    if (std::get<0>(prev_node) == graph_.max_index() + 1) {
+        assert(offset <= 1);
+        assert(PS[1 - offset] == Extender::PREV);
+        assert(OS[1 - offset] == seed_.get_cigar().back().first);
+        assert(S[1 - offset] == seed_.get_score());
+    }
+
+    if (offset <= 1 && OS[1 - offset] != Cigar::DELETION && OS[1 - offset] != Cigar::CLIPPED) {
+        assert(std::get<0>(prev_node) == graph_.max_index() + 1);
+    }
+
+#endif
 
     // make sure that the first operation taken matches the seed
     std::ignore = graph_;
@@ -347,28 +378,26 @@ void backtrack(const Table &table_,
         last_op = OS[pos - offset];
 
         if (last_op == Cigar::CLIPPED || S[pos - offset] == 0) {
-            assert(S[pos - offset] == 0);
+            assert(S[pos - offset] != ninf);
+            score -= S[pos - offset];
             max_score = score;
             break;
         } else if (pos == 1 && last_op != Cigar::DELETION) {
+            assert(std::get<0>(prev) == graph_.max_index() + 1);
+            assert(std::get<0>(best_node) == seed_.back());
+            assert(!std::get<2>(best_node));
+            assert(last_op == seed_.get_cigar().back().first);
+            assert(seed_.get_score() == S[pos - offset]);
+
             score -= S[pos - offset];
-            if (std::get<0>(prev) != graph_.max_index() + 1
-                    || std::get<0>(best_node) != seed_.back()
-                    || std::get<2>(best_node)
-                    || last_op != seed_.get_cigar().back().first) {
-                // last op in the seed was skipped
-                // TODO: reconstruct the entire alignment. for now, throw this out
-                return;
-            } else {
-                assert(seed_.get_score() == S[pos - offset]);
-                start_node = seed_.back();
-            }
+            start_node = seed_.back();
             break;
         }
 
         switch (last_op) {
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
+                assert(pos);
                 cigar.append(last_op);
                 path.push_back(std::get<0>(best_node));
                 seq += std::get<1>(best_node);
@@ -381,16 +410,15 @@ void backtrack(const Table &table_,
                     case Extender::NONE: { assert(false); }
                 }
                 --pos;
-                assert(pos);
             } break;
             case Cigar::INSERTION: {
                 assert(PS[pos - offset] == Extender::CUR);
                 while (last_op == Cigar::INSERTION) {
+                    assert(pos);
                     last_op = OE[pos - offset];
                     assert(last_op == Cigar::MATCH || last_op == Cigar::INSERTION);
                     cigar.append(Cigar::INSERTION);
                     --pos;
-                    assert(pos);
                 }
             } break;
             case Cigar::DELETION: {
@@ -413,8 +441,6 @@ void backtrack(const Table &table_,
             } break;
             case Cigar::CLIPPED: { assert(false); }
         }
-
-        assert(pos);
     }
 
     if (max_score < min_path_score)
@@ -492,7 +518,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start_ + 1];
 
-    AlignNode start_node{ graph_.max_index() + 1, '\0', 0, 0 };
+    AlignNode start_node{ graph_.max_index() + 1, '$', 0, 0 };
 
     typedef std::pair<AlignNode, score_t> Ref;
     Ref best_start{ start_node, S[0] };
@@ -517,12 +543,13 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             break;
         }
 
+        bool prev_converged = table_[std::get<0>(prev)].second;
         size_t next_distance_from_origin = std::get<3>(prev) + 1;
 
         for (const auto &[next, c] : get_outgoing(prev)) {
             auto &column_pair = table_[next];
             auto &[column, converged] = column_pair;
-            if (converged)
+            if (prev_converged && converged)
                 continue;
 
             assert(table_.count(std::get<0>(prev)));
