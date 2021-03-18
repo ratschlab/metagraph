@@ -65,7 +65,7 @@ void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
                                            tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
                                            tsl::hopscotch_set<TaxId> &nodes_already_propagated,
                                            TaxId &best_lca,
-                                           uint64_t &best_lca_dist_to_root) {
+                                           uint64_t &best_lca_dist_to_root) const {
     if (nodes_already_propagated.count(start_node)) {
         return;
     }
@@ -79,7 +79,7 @@ void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
     unprocessed_parents.push_back(act_node);
 
     while (act_node != root_node) {
-        act_node = node_parent[act_node];
+        act_node = node_parent.at(act_node);
         if (!nodes_already_propagated.count(act_node)) {
             if (num_kmers_per_node.count(act_node)) {
                 score_from_unprocessed_parents += num_kmers_per_node.at(act_node);
@@ -121,9 +121,9 @@ void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
 
 TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                    const std::string &sequence,
-                                   const double &lca_coverage_threshold) {
-    if (lca_coverage_threshold <= 0.5) {
-        logger->error("Error: received lca coverage threshold {} <= 0.5. Please modify its value to be > 0.5 for having a unique taxid lca solution.", lca_coverage_threshold);
+                                   const double &lca_coverage_threshold) const {
+    if (lca_coverage_threshold <= 0.5 || lca_coverage_threshold > 1) {
+        logger->error("Error: received lca coverage threshold must be in (0.5, 1], current value is: {}. Please modify its value to be a percent strictly greater than 0.5 for having a unique taxid lca solution.", lca_coverage_threshold);
         exit(1);
     }
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
