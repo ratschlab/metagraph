@@ -302,7 +302,7 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     size_t target_column_idx = std::find(target_columns_.begin(), target_columns_.end(),
                                          path.target_column) - target_columns_.begin();
 
-    align_node_to_target_[{ this->graph_.max_index() + 1, '\0', 0, 0 }] = target_column_idx;
+    align_node_to_target_[this->start_node_] = target_column_idx;
 
     if (target_column_idx == target_columns_.size())
         target_columns_.push_back(path.target_column);
