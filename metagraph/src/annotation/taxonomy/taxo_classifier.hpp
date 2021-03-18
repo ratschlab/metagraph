@@ -40,7 +40,7 @@ class TaxoClassifier {
       */
     TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,
                        const std::string &sequence,
-                       const double &lca_coverage_threshold);
+                       const double &lca_coverage_threshold) const;
 
   private:
     TaxId root_node;
@@ -78,7 +78,7 @@ class TaxoClassifier {
                                 tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
                                 tsl::hopscotch_set<TaxId> &nodes_already_propagated,
                                 TaxId &best_lca,
-                                uint64_t &best_lca_dist_to_root);
+                                uint64_t &best_lca_dist_to_root) const;
 };
 
 } // namespace annot
