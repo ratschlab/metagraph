@@ -20,7 +20,8 @@ template <typename NodeType>
 DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
                                                        const DBGAlignerConfig &config,
                                                        std::string_view query)
-      : graph_(graph), config_(config), query_(query) {
+      : graph_(graph), config_(config), query_(query),
+        start_node_(graph_.max_index() + 1, '$', 0, 0) {
     assert(config_.check_config_scores());
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -518,14 +519,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     S[0] = seed_->get_score() - profile_score_[seed_->get_sequence().back()][start_ + 1];
 
-    AlignNode start_node{ graph_.max_index() + 1, '$', 0, 0 };
-
     typedef std::pair<AlignNode, score_t> Ref;
-    Ref best_start{ start_node, S[0] };
+    Ref best_start{ start_node_, S[0] };
     std::vector<Ref> starts;
 
     std::priority_queue<Ref, std::vector<Ref>, utils::LessSecond> stack;
-    stack.emplace(start_node, S[0]);
+    stack.emplace(start_node_, S[0]);
 
     while (stack.size()) {
         AlignNode prev = stack.top().first;

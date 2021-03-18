@@ -78,6 +78,8 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                        size_t /* copy number */,
                        size_t /* distance from origin */> AlignNode;
 
+    AlignNode start_node_;
+
     typedef AlignedVector<score_t> ScoreVec;
     typedef AlignedVector<NodeId> PrevVec;
     typedef AlignedVector<Cigar::Operator> OpVec;
