@@ -356,7 +356,8 @@ void gfa_map_files(const Config *config,
 std::string format_alignment(std::string_view header,
                              const DBGAligner<>::DBGQueryAlignment &paths,
                              const DeBruijnGraph &graph,
-                             const Config &config) {
+                             const Config &config,
+                             const AnnotatedDBG *anno_graph = nullptr) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
@@ -375,8 +376,12 @@ std::string format_alignment(std::string_view header,
 
         bool secondary = false;
         for (const auto &path : paths) {
+            std::string label = anno_graph && path.target_column != std::numeric_limits<uint64_t>::max()
+                ? anno_graph->get_annotation().get_label_encoder().decode(path.target_column)
+                : std::string();
+
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph, secondary, header);
+                                                 graph, secondary, header, label);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
@@ -499,7 +504,9 @@ int align_to_graph(Config *config) {
                 }
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string sout = format_alignment(header, paths, *aln_graph, *config);
+                    std::string sout = format_alignment(
+                        header, paths, *aln_graph, *config, aln_anno_graph.get()
+                    );
 
                     std::lock_guard<std::mutex> lock(print_mutex);
                     *out << sout;
