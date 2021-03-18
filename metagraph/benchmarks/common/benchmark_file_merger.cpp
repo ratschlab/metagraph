@@ -5,7 +5,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include "common/elias_fano_file_merger.hpp"
+#include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/utils/file_utils.hpp"
 
 // Note: if testing with many chunks use 'ulimit -n <max_files>' to increase the maxium
@@ -50,7 +50,7 @@ static void BM_merge_files(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        common::merge_files<uint64_t>(sources, file_writer, do_cleanup);
+        elias_fano::merge_files<uint64_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });
@@ -68,7 +68,7 @@ static void BM_merge_files_pairs(benchmark::State &state) {
     };
     bool do_cleanup = false;
     for (auto _ : state) {
-        common::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
+        elias_fano::merge_files<uint64_t, uint8_t>(sources, file_writer, do_cleanup);
     }
     std::for_each(sources.begin(), sources.end(),
                   [](const std::string &s) { std::filesystem::remove(s); });

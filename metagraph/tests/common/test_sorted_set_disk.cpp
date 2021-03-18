@@ -208,12 +208,12 @@ TYPED_TEST(SortedSetDiskTest, DiskExceeded) {
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_ssd");
     constexpr size_t thread_count = 1;
     constexpr size_t reserved_num_elements = 100;
-    constexpr size_t disk_cap_bytes = 100;
+    constexpr size_t disk_cap_bytes = 200;
     auto under_test = common::SortedSetDisk<TypeParam>(thread_count, reserved_num_elements,
                                                       tmp_dir, disk_cap_bytes);
     std::vector<TypeParam> elements(100);
     std::iota(elements.begin(), elements.end(), 0);
-    for(uint32_t i = 0; i<10;++i) {
+    for (uint32_t i = 0; i < 100; ++i) {
         under_test.insert(elements.begin(), elements.end());
     }
     expect_equals(under_test, elements);

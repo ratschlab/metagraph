@@ -273,8 +273,8 @@ void map_sequences_in_file(const std::string &file,
 
     }, config.forward_and_reverse);
 
-    logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
-                  file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
+    logger->trace("File {} processed in {} sec, current mem usage: {} MB, total time {} sec",
+                  file, data_reading_timer.elapsed(), get_curr_RSS() / 1e6, timer.elapsed());
 
     if (config.outfbase.size())
         delete out;
@@ -336,7 +336,7 @@ void gfa_map_files(const Config *config,
     std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa", ".path") + ".path.gfa");
 
     for (const std::string &file : files) {
-        logger->trace("Loading sequences from FASTA file '{}' to append gfa paths.", file);
+        logger->trace("Loading sequences from FASTA file {} to append GFA paths.", file);
 
         std::vector<string> seq_queries;
         seq_io::FastaParser fasta_parser(file, false);
@@ -430,7 +430,7 @@ int align_to_graph(Config *config) {
         logger->trace("Length of mapped k-mers: {}", config->alignment_length);
 
         for (const auto &file : files) {
-            logger->trace("Map sequences from file '{}'", file);
+            logger->trace("Map sequences from file {}", file);
 
             map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
         }
@@ -449,7 +449,7 @@ int align_to_graph(Config *config) {
     }
 
     for (const auto &file : files) {
-        logger->trace("Align sequences from file '{}'", file);
+        logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
 
         Timer data_reading_timer;
@@ -533,8 +533,8 @@ int align_to_graph(Config *config) {
                     ++num_minibatches;
                 }
 
-                logger->trace("Num minibatches: {}, minibatch size: {} KiB",
-                              num_minibatches, mbatch_size >> 10);
+                logger->trace("Num minibatches: {}, minibatch size: {} KB",
+                              num_minibatches, mbatch_size / 1e3);
             } else {
                 thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
             }
@@ -542,11 +542,11 @@ int align_to_graph(Config *config) {
 
         thread_pool.join();
 
-        logger->trace("File '{}' processed in {} sec, "
-                      "num batches: {}, batch size: {} KiB, "
-                      "current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(), num_batches, batch_size >> 10,
-                      get_curr_RSS() >> 20, timer.elapsed());
+        logger->trace("File {} processed in {} sec, "
+                      "num batches: {}, batch size: {} KB, "
+                      "current mem usage: {} MB, total time {} sec",
+                      file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
+                      get_curr_RSS() / 1e6, timer.elapsed());
 
         if (config->outfbase.size())
             delete out;
