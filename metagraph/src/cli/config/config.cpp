@@ -997,7 +997,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
-            fprintf(stderr, "\t-c --canonical \t\t\ttreat the input graph as a canonical graph [off]\n");
             fprintf(stderr, "\t   --parallel-assemblies [INT] \tnumber of assembly experiments to run in parallel [n_threads]\n");
             fprintf(stderr, "\t   --label-mask-file [STR] \tfile describing labels to mask in and out and their relative fractions []\n");
             fprintf(stderr, "\t                       \t\tA k-mer is an in-k-mer if it has at least in_kmer_frac in-labels.\n");
