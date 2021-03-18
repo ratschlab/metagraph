@@ -202,8 +202,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         size_t end = prev_bit(in_mask, in_mask.size() - 1) + 1;
         assert(end > begin);
-        out_kmer_count -= count_ones(out_mask, 0, begin)
-            + count_ones(out_mask, end, out_mask.size());
+        out_kmer_count -= count_ones(out_mask, 0, begin) + count_ones(out_mask, end, out_mask.size());
         size_t other_kmer_count = check_other ? count_ones(other_mask, begin, end) : 0;
 
         if (out_kmer_count > label_out_cutoff)
