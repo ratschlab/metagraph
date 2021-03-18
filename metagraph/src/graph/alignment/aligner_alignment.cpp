@@ -59,40 +59,12 @@ void Alignment<NodeType>::append(Alignment&& other) {
 
 template <typename NodeType>
 void Alignment<NodeType>::trim_offset() {
-    if (!offset_ || empty() || cigar_.empty())
+    if (!offset_ || nodes_.size() <= 1)
         return;
 
-    auto it = cigar_.begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    if (it == cigar_.end())
-        return;
-
-    auto jt = nodes_.begin();
-    size_t counter = 0;
-    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
-        if (counter == it->second
-                || it->first == Cigar::CLIPPED
-                || it->first == Cigar::INSERTION) {
-            ++it;
-            counter = 0;
-            continue;
-        }
-
-        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
-                                          static_cast<size_t>(nodes_.end() - jt) });
-        offset_ -= jump;
-        counter += jump;
-        jt += jump;
-    }
-
-    if (jt == nodes_.end()) {
-        --jt;
-        ++offset_;
-    }
-
-    nodes_.erase(nodes_.begin(), jt);
+    size_t trim = std::min(offset_, nodes_.size() - 1);
+    offset_ -= trim;
+    nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
 }
 
 template <typename NodeType>
@@ -108,6 +80,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
     trim_offset();
     assert(is_valid(graph));
+    assert(!offset_ || nodes_.size() == 1);
 
     if (!offset_) {
         reverse_complement_seq_path(graph, sequence_, nodes_);
