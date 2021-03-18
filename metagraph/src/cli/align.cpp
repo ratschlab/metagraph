@@ -2,9 +2,12 @@
 
 #include <tsl/ordered_set.h>
 
+#include "query.hpp"
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
@@ -357,15 +360,15 @@ std::string format_alignment(std::string_view header,
                              const DBGAligner<>::DBGQueryAlignment &paths,
                              const DeBruijnGraph &graph,
                              const Config &config,
-                             const AnnotatedDBG *anno_graph = nullptr) {
+                             const std::vector<std::string> labels) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
             sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
         } else {
-            for (const auto &path : paths) {
-                sout += fmt::format("\t{}", path);
+            for (size_t i = 0; i < paths.size(); ++i) {
+                sout += fmt::format("\t{}\t{}", paths[i], labels[i]);
             }
         }
 
@@ -375,10 +378,9 @@ std::string format_alignment(std::string_view header,
         builder["indentation"] = "";
 
         bool secondary = false;
-        for (const auto &path : paths) {
-            std::string label = anno_graph && path.target_column != std::numeric_limits<uint64_t>::max()
-                ? anno_graph->get_annotation().get_label_encoder().decode(path.target_column)
-                : std::string();
+        for (size_t i = 0; i < paths.size(); ++i) {
+            const auto &path = paths[i];
+            const std::string &label = labels[i];
 
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
                                                  graph, secondary, header, label);
@@ -397,6 +399,46 @@ std::string format_alignment(std::string_view header,
     }
 
     return sout;
+}
+
+void process_alignments(const DeBruijnGraph &graph,
+                        const Config &config,
+                        std::string_view header,
+                        IDBGAligner::DBGQueryAlignment&& paths,
+                        std::ostream &out,
+                        std::mutex &mu) {
+    std::string res = format_alignment(header, paths, graph, config,
+                                       std::vector<std::string>(paths.size()));
+    std::lock_guard<std::mutex> lock(mu);
+    out << res;
+}
+
+void process_alignments_labeled(const DeBruijnGraph &graph,
+                                const AnnotatedDBG &query_graph,
+                                const Config &config,
+                                std::string_view header,
+                                IDBGAligner::DBGQueryAlignment&& paths,
+                                std::ostream &out,
+                                std::mutex &mu) {
+    std::vector<std::string> labels;
+    for (const auto &path : paths) {
+        if (path.get_offset()) {
+            labels.emplace_back(utils::join_strings(query_graph.get_labels(
+                graph.get_node_sequence(path[0]).substr(0, path.get_offset())
+                    + path.get_sequence(),
+            1.0), ";"));
+        } else {
+            labels.emplace_back(utils::join_strings(query_graph.get_labels(
+                path.get_sequence(),
+            1.0), ";"));
+        }
+        if (labels.back().empty())
+            labels.back() = "*";
+    }
+
+    std::string res = format_alignment(header, paths, graph, config, labels);
+    std::lock_guard<std::mutex> lock(mu);
+    out << res;
 }
 
 int align_to_graph(Config *config) {
@@ -503,14 +545,38 @@ int align_to_graph(Config *config) {
                     aligner = build_aligner<DBGAligner>(*aln_graph, aligner_config);
                 }
 
-                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string sout = format_alignment(
-                        header, paths, *aln_graph, *config, aln_anno_graph.get()
-                    );
-
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << sout;
-                });
+                if (aln_anno_graph) {
+                    std::vector<std::pair<std::string, IDBGAligner::DBGQueryAlignment>> results;
+                    aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                        results.emplace_back(header, std::move(paths));
+                    });
+                    mtg::common::logger->trace("Constructing query graph for batch");
+                    auto query_graph = construct_query_graph(*aln_anno_graph, [&](auto callback) {
+                        for (const auto &[header, paths] : results) {
+                            for (const auto &path : paths) {
+                                if (path.get_offset()) {
+                                    callback(
+                                        aln_graph->get_node_sequence(path[0]).substr(0, path.get_offset())
+                                                + path.get_sequence()
+                                    );
+                                } else {
+                                    callback(path.get_sequence());
+                                }
+                            }
+                        }
+                    }, 1 /* num_threads */);
+                    mtg::common::logger->trace("Labeling alignment results");
+                    for (auto&& [header, paths] : results) {
+                        process_alignments_labeled(*aln_graph, *query_graph, *config,
+                                                   header, std::move(paths), *out,
+                                                   print_mutex);
+                    }
+                } else {
+                    aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                        process_alignments(*aln_graph, *config, header,
+                                           std::move(paths), *out, print_mutex);
+                    });
+                }
             };
 
             ++num_batches;
