@@ -19,8 +19,8 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
         is_palindrome_cache_(k_odd_ ? 0 : cache_size) {
-    if (graph->get_mode() != DeBruijnGraph::PRIMARY)
-        throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
+    //if (graph->get_mode() != DeBruijnGraph::PRIMARY)
+    //    throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
 
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alphabet_encoder_[graph_.alphabet()[i]] = i;
