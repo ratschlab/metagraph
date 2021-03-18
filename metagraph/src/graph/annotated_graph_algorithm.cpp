@@ -133,9 +133,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
     counts.width(width);
 
-    update_masked_graph_by_unitig(*masked_graph,
-                                  [&](const auto &unitig, const auto &path)
-                                      -> std::vector<std::pair<size_t, size_t>> {
+    auto get_kept_intervals = [&](const auto &unitig, const auto &path)
+            -> std::vector<std::pair<size_t, size_t>> {
         auto &counts = count_vector.first;
         sdsl::bit_vector in_mask(path.size(), false);
         sdsl::bit_vector out_mask(path.size(), false);
@@ -212,8 +211,9 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             return {};
 
         return { std::make_pair(begin, end) };
+    };
 
-    }, num_threads);
+    update_masked_graph_by_unitig(*masked_graph, get_kept_intervals, num_threads);
 
     return std::move(*masked_graph);
 }
