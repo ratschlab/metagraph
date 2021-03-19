@@ -137,9 +137,11 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
-    std::ostream *out = config.outfbase.size()
-        ? new std::ofstream(config.outfbase)
-        : &std::cout;
+    std::unique_ptr<std::ofstream> ofile;
+    if (config.outfbase.size())
+        ofile = std::make_unique<std::ofstream>(config.outfbase);
+
+    std::ostream *out = ofile ? ofile.get() : &std::cout;
 
     Timer data_reading_timer;
 
@@ -247,9 +249,6 @@ void map_sequences_in_file(const std::string &file,
 
     logger->trace("File {} processed in {} sec, current mem usage: {} MB, total time {} sec",
                   file, data_reading_timer.elapsed(), get_curr_RSS() / 1e6, timer.elapsed());
-
-    if (config.outfbase.size())
-        delete out;
 }
 
 std::string sequence_to_gfa_path(const std::string &seq,

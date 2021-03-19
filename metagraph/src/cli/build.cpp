@@ -445,9 +445,7 @@ int concatenate_graph_chunks(Config *config) {
     if (logger->level() <= spdlog::level::level_enum::trace) {
         print_stats(*graph);
         if (config->graph_type == Config::GraphType::SUCCINCT) {
-            print_boss_stats(
-                dynamic_cast<DBGSuccinct*>(graph.get())->get_boss()
-            );
+            print_boss_stats(dynamic_cast<DBGSuccinct&>(*graph).get_boss());
         }
     }
 
