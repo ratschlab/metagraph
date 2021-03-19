@@ -15,6 +15,7 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         k_odd_(graph_.get_k() % 2),
+        has_sentinel_(false),
         alphabet_encoder_({ graph_.alphabet().size() }),
         child_node_cache_(cache_size),
         parent_node_cache_(cache_size),
@@ -24,6 +25,8 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
 
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alphabet_encoder_[graph_.alphabet()[i]] = i;
+        if (graph_.alphabet()[i] == boss::BOSS::kSentinel)
+            has_sentinel_ = true;
     }
 }
 
@@ -237,14 +240,14 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        size_t max_num_edges_left = alphabet.size();
-        std::vector<node_index> children(max_num_edges_left);
+        std::vector<node_index> children(alphabet.size());
+        size_t max_num_edges_left = children.size() - has_sentinel_;
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel)
+            if (c != boss::BOSS::kSentinel) {
                 children[alphabet_encoder_[c]] = next;
-
-            --max_num_edges_left;
+                --max_num_edges_left;
+            }
         });
 
         if (max_num_edges_left)
@@ -343,14 +346,14 @@ void CanonicalDBG
         }
 
     } catch (...) {
-        size_t max_num_edges_left = alphabet.size();
-        std::vector<node_index> parents(max_num_edges_left);
+        std::vector<node_index> parents(alphabet.size());
+        size_t max_num_edges_left = parents.size() - has_sentinel_;
 
         graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
-            if (c != boss::BOSS::kSentinel)
+            if (c != boss::BOSS::kSentinel) {
                 parents[alphabet_encoder_[c]] = prev;
-
-            --max_num_edges_left;
+                --max_num_edges_left;
+            }
         });
 
         if (max_num_edges_left)
