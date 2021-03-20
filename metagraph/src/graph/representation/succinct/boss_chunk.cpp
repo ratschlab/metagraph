@@ -1,5 +1,7 @@
 #include "boss_chunk.hpp"
 
+#include <iostream>
+
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
@@ -137,9 +139,17 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
 }
 
 BOSS::Chunk::~Chunk() {
-    W_.close(true);
-    last_.close(true);
-    weights_.close(true);
+    try {
+        W_.close(true);
+        last_.close(true);
+        weights_.close(true);
+
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk";
+    }
 
     // remove the temp directory, but only if it was initialized
     if (!dir_.empty())
