@@ -34,10 +34,10 @@ class bit_vector_sdsl : public bit_vector {
         num_set_bits_(rk1_(vector_.size())) {}
     explicit bit_vector_sdsl(const bit_vector_sdsl &other) { *this = other; }
 
-    bit_vector_sdsl(sdsl::bit_vector&& vector) noexcept
+    bit_vector_sdsl(sdsl::bit_vector&& vector)
       : vector_(std::move(vector)), rk1_(&vector_), slct1_(&vector_), slct0_(&vector_),
         num_set_bits_(rk1_(vector_.size())) {}
-    bit_vector_sdsl(bit_vector_sdsl&& other) noexcept { *this = std::move(other); }
+    bit_vector_sdsl(bit_vector_sdsl&& other) { *this = std::move(other); }
     bit_vector_sdsl(std::initializer_list<bool> init)
       : bit_vector_sdsl(sdsl::bit_vector(init)) {}
 

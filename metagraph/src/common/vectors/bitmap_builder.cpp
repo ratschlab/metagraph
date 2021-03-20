@@ -1,5 +1,7 @@
 #include "bitmap_builder.hpp"
 
+#include <iostream>
+
 #include "common/elias_fano/elias_fano.hpp"
 #include "common/utils/file_utils.hpp"
 
@@ -16,8 +18,16 @@ bitmap_builder_set_disk::bitmap_builder_set_disk(uint64_t size,
         set_bit_positions_(num_threads, buffer_size, tmp_dir_, -1, 16) {}
 
 bitmap_builder_set_disk::~bitmap_builder_set_disk() {
-    set_bit_positions_.clear();
-    utils::remove_temp_dir(tmp_dir_);
+    try {
+        set_bit_positions_.clear();
+        utils::remove_temp_dir(tmp_dir_);
+
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk";
+    }
 }
 
 bitmap_builder_set_disk::InitializationData
