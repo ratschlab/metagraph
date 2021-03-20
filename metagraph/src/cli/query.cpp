@@ -906,7 +906,7 @@ void QueryExecutor
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
 
-    std::atomic<size_t> seq_count = 0;
+    size_t seq_count = 0;
 
     while (it != end) {
         Timer batch_timer;
@@ -952,10 +952,12 @@ void QueryExecutor
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < seq_batch.size(); ++i) {
-            callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
+            callback(query_sequence(seq_count + i, seq_batch[i].first, seq_batch[i].second,
                                     *query_graph, config_,
                                     config_.batch_align ? aligner_config_.get() : NULL));
         }
+
+        seq_count += seq_batch.size();
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
