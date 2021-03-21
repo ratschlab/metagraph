@@ -23,8 +23,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     // undefined target column
     static constexpr uint64_t kNTarget = std::numeric_limits<uint64_t>::max() - 1;
 
-    ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
-                       const DBGAlignerConfig &config);
+    ILabeledDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config);
 
     virtual ~ILabeledDBGAligner() {}
 
@@ -174,7 +173,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                        bool is_reverse_complement) {
         const auto &[query_nodes_pair, target_columns] = mapped_batch;
 
-        SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
         DBGQueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
         std::string_view reverse = paths.get_query(true);
@@ -189,6 +187,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         Extender extender_rc(anno_graph_, config_, reverse);
 
         for (const auto &[target_column, signature_pair] : target_columns[i]) {
+            SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
             const auto &[signature, signature_rc] = signature_pair;
 
             Seeder seeder = build_seeder(
@@ -236,10 +235,9 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                 aligner_core.align_one_direction(paths, is_reverse_complement,
                                                  seeder, extender);
             }
-
-            callback(header, std::move(paths));
         }
 
+        callback(header, std::move(paths));
         ++i;
     });
 }
@@ -252,18 +250,9 @@ inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                std::vector<node_index>&& base_nodes,
                const sdsl::bit_vector &signature) const -> Seeder {
     assert(base_nodes.size() == signature.size());
-
-    // mask out nodes not in present in target column
-    if (is_reverse_complement) {
-        for (size_t i = 0; i < base_nodes.size(); ++i) {
-            if (!signature[base_nodes.size() - i - 1])
-                base_nodes[i] = DeBruijnGraph::npos;
-        }
-    } else {
-        for (size_t i = 0; i < base_nodes.size(); ++i) {
-            if (!signature[i])
-                base_nodes[i] = DeBruijnGraph::npos;
-        }
+    for (size_t i = 0; i < base_nodes.size(); ++i) {
+        if (!signature[i])
+            base_nodes[i] = DeBruijnGraph::npos;
     }
 
     return Seeder(target_column, graph_, query, is_reverse_complement,

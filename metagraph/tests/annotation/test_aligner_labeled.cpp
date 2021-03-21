@@ -57,20 +57,30 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(k, sequences, labels);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     LabeledDBGAligner<> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") } }} }
+        { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") },
+                                       { std::string("B"), std::string("CGAATGCCT") },
+                                       { std::string("A"), std::string("TGCCT") } }} }
     }};
 
     for (const auto &[query, targets] : exp_alignments) {
-        for (const auto &alignment : aligner.align(query)) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(targets.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = targets.find(label);
-                ASSERT_TRUE(find != targets.end());
-                EXPECT_EQ(find->second, alignment.get_sequence());
+                ASSERT_TRUE(find != targets.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
             }
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -100,16 +110,26 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
     LabeledDBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") } }} }
+        { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
+                                        { std::string("B"), std::string("GAATGCCT") },
+                                        { std::string("A"), std::string("TGCCAT") } }} }
     }};
 
     for (const auto &[query, targets] : exp_alignments) {
-        for (const auto &alignment : aligner.align(query)) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(targets.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = targets.find(label);
                 ASSERT_TRUE(find != targets.end());
-                EXPECT_EQ(find->second, alignment.get_sequence());
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
             }
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -151,18 +171,20 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
         }};
 
         for (const auto &[query, targets] : exp_alignments) {
-            const auto &alignments = aligner.align(query);
-
+            auto alignments = aligner.align(query);
             EXPECT_EQ(targets.size(), alignments.size()) << query;
 
             for (const auto &alignment : alignments) {
+                bool found = false;
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                     auto find = targets.find(label);
                     ASSERT_TRUE(find != targets.end());
-
-                    EXPECT_EQ(find->second, alignment.get_sequence())
-                        << query << " " << label;
+                    if (alignment.get_sequence() == find->second) {
+                        found = true;
+                        break;
+                    }
                 }
+                EXPECT_TRUE(found) << alignment;
             }
         }
     }

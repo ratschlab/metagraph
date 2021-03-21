@@ -182,6 +182,9 @@ auto ILabeledDBGAligner
 
     // compute target columns and initialize signatures for each query
     BatchLabels target_columns(query_nodes.size());
+    std::vector<Signature> no_label;
+    no_label.reserve(query_nodes.size());
+
     for (size_t i = 0; i < column_counter.size(); ++i) {
         auto &counter = const_cast<std::vector<std::pair<uint64_t, uint64_t>>&>(
             column_counter[i].values_container()
@@ -205,7 +208,17 @@ auto ILabeledDBGAligner
                 });
             }
         }
+
+        no_label.emplace_back(
+            sdsl::bit_vector(query_nodes[i].first.size(), true),
+            config_.forward_and_reverse_complement
+                    && graph_.get_mode() != DeBruijnGraph::CANONICAL
+                ? sdsl::bit_vector(query_nodes[i].second.size(), true)
+                : sdsl::bit_vector()
+        );
     }
+
+    assert(no_label.size() == query_nodes.size());
 
     for (size_t i = 0; i < column_counter_rc.size(); ++i) {
         assert(config_.forward_and_reverse_complement
@@ -235,46 +248,45 @@ auto ILabeledDBGAligner
     for (size_t i = 0; i < annotation.size(); ++i) {
         for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].first) {
             for (uint64_t column : annotation[i]) {
-                if (target_columns[query_id].count(column))
+                if (target_columns[query_id].count(column)) {
                     target_columns[query_id][column].first[idx] = true;
+                    no_label[query_id].first[idx] = false;
+                }
             }
         }
 
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
-            if (graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-                for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].second) {
-                    for (uint64_t column : annotation[i]) {
-                        if (target_columns[query_id].count(column))
-                            target_columns[query_id][column].second[idx] = true;
-                    }
-                }
-            } else {
-                for (size_t j = 0; j < target_columns.size(); ++j) {
-                    for (auto it = target_columns[j].begin();
-                            it != target_columns[j].end(); ++it) {
-                        it.value().second = it.value().first;
-                        reverse_bit_vector(it.value().second);
+        if (config_.forward_and_reverse_complement
+                && graph_.get_mode() != DeBruijnGraph::CANONICAL) {
+            for (const auto &[query_id, idx] : row_to_query_idx[rows[i]].second) {
+                assert(no_label[query_id].second.size() == query_nodes[i].second.size());
+                for (uint64_t column : annotation[i]) {
+                    if (target_columns[query_id].count(column)) {
+                        target_columns[query_id][column].second[idx] = true;
+                        no_label[query_id].second[idx] = false;
                     }
                 }
             }
         }
     }
 
-    // if any of the queries has no associated labels, mark them as such
+    if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+        for (size_t i = 0; i < target_columns.size(); ++i) {
+            no_label[i].second = no_label[i].first;
+            reverse_bit_vector(no_label[i].second);
+            for (auto it = target_columns[i].begin(); it != target_columns[i].end(); ++it) {
+                it.value().second = it.value().first;
+                reverse_bit_vector(it.value().second);
+            }
+        }
+    }
+
+    // if any of the matched nodes have no associated labels, mark them as such
     for (size_t i = 0; i < target_columns.size(); ++i) {
-        if (target_columns[i].empty()) {
-            assert(!query_nodes[i].first[0]);
-            assert(std::equal(query_nodes[i].first.begin() + 1,
-                              query_nodes[i].first.end(),
-                              query_nodes[i].first.begin()));
-            target_columns[i].emplace(kNTarget, Signature {
-                sdsl::bit_vector(query_nodes[i].first.size(), true),
-                graph_.get_mode() == DeBruijnGraph::CANONICAL
-                        || config_.forward_and_reverse_complement
-                    ? sdsl::bit_vector(query_nodes[i].second.size(), true)
-                    : sdsl::bit_vector()
-            });
+        if (sdsl::util::cnt_one_bits(no_label[i].first)
+                || (config_.forward_and_reverse_complement
+                    && graph_.get_mode() != DeBruijnGraph::CANONICAL
+                    && sdsl::util::cnt_one_bits(no_label[i].second))) {
+            target_columns[i].emplace(kNTarget, std::move(no_label[i]));
         }
     }
 
