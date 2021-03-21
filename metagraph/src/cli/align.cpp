@@ -526,7 +526,7 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,aln_graph=graph](SeqBatch batch, uint64_t size) mutable {
-                if (graph->get_mode() == DeBruijnGraph::PRIMARY || graph->get_mode() == DeBruijnGraph::BASIC)
+                if (graph->get_mode() == DeBruijnGraph::PRIMARY)
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
 
                 std::unique_ptr<IDBGAligner> aligner;
