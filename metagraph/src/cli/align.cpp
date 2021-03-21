@@ -423,20 +423,6 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
     const auto &label_encoder = query_graph.get_annotation().get_label_encoder();
     size_t num_labels = label_encoder.size();
     for (const auto &path : paths) {
-        /*
-        if (path.get_offset()) {
-            labels.emplace_back(utils::join_strings(query_graph.get_labels(
-                graph.get_node_sequence(path[0]).substr(0, path.get_offset())
-                    + path.get_sequence(),
-            1.0), ";"));
-        } else {
-            labels.emplace_back(utils::join_strings(query_graph.get_labels(
-                path.get_sequence(),
-            1.0), ";"));
-        }
-        if (labels.back().empty())
-            labels.back() = "*";
-        */
         if (path.target_column < num_labels) {
             labels.emplace_back(label_encoder.decode(path.target_column));
         } else {
@@ -558,24 +544,6 @@ int align_to_graph(Config *config) {
                     aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                         results.emplace_back(header, std::move(paths));
                     });
-                    /*
-                    mtg::common::logger->trace("Constructing query graph for batch");
-                    auto query_graph = construct_query_graph(*aln_anno_graph, [&](auto callback) {
-                        for (const auto &[header, paths] : results) {
-                            for (const auto &path : paths) {
-                                if (path.get_offset()) {
-                                    callback(
-                                        aln_graph->get_node_sequence(path[0]).substr(0, path.get_offset())
-                                                + path.get_sequence()
-                                    );
-                                } else {
-                                    callback(path.get_sequence());
-                                }
-                            }
-                        }
-                    }, 1);
-                    mtg::common::logger->trace("Labeling alignment results");
-                    */
                     for (auto&& [header, paths] : results) {
                         process_alignments_labeled(*aln_graph, *aln_anno_graph, *config,
                                                    header, std::move(paths), *out,
