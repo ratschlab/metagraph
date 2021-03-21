@@ -1,7 +1,5 @@
 #include "aligner_extender_methods.hpp"
 
-#include <tsl/hopscotch_set.h>
-
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
@@ -336,20 +334,13 @@ bool update_column(const DeBruijnGraph &graph_,
     return updated;
 }
 
-template <typename NodeType, typename AlignNode, class Table, class StartSet>
-void backtrack(const Table &table_,
-               const Alignment<NodeType> &seed_,
-               const DeBruijnGraph &graph_,
-               const DBGAlignerConfig &config_,
-               score_t min_path_score,
-               AlignNode best_node,
-               StartSet &prev_starts,
-               size_t size,
-               std::string_view extend_window_,
-               std::string_view query,
-               std::vector<Alignment<NodeType>> &extensions) {
-    typedef DefaultColumnExtender<NodeType> Extender;
-
+template <typename NodeType>
+void DefaultColumnExtender<NodeType>
+::backtrack(score_t min_path_score,
+            AlignNode best_node,
+            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+            std::vector<DBGAlignment> &extensions) const {
+    size_t size = query_.size() - start_ + 1;
     Cigar cigar;
     std::vector<NodeType> path;
     std::string seq;
@@ -385,13 +376,13 @@ void backtrack(const Table &table_,
             break;
         } else if (pos == 1 && last_op != Cigar::DELETION) {
             assert(std::get<0>(prev) == graph_.max_index() + 1);
-            assert(std::get<0>(best_node) == seed_.back());
+            assert(std::get<0>(best_node) == seed_->back());
             assert(!std::get<2>(best_node));
-            assert(last_op == seed_.get_cigar().back().first);
-            assert(seed_.get_score() == S[pos - offset]);
+            assert(last_op == seed_->get_cigar().back().first);
+            assert(seed_->get_score() == S[pos - offset]);
 
             score -= S[pos - offset];
-            start_node = seed_.back();
+            start_node = seed_->back();
             break;
         }
 
@@ -406,14 +397,14 @@ void backtrack(const Table &table_,
                     == (graph_.get_node_sequence(std::get<0>(best_node)).back()
                         == extend_window_[pos - 1]));
                 switch (PS[pos - offset]) {
-                    case Extender::PREV: { best_node = prev; } break;
-                    case Extender::CUR: {} break;
-                    case Extender::NONE: { assert(false); }
+                    case PREV: { best_node = prev; } break;
+                    case CUR: {} break;
+                    case NONE: { assert(false); }
                 }
                 --pos;
             } break;
             case Cigar::INSERTION: {
-                assert(PS[pos - offset] == Extender::CUR);
+                assert(PS[pos - offset] == CUR);
                 while (last_op == Cigar::INSERTION) {
                     assert(pos);
                     last_op = OE[pos - offset];
@@ -433,9 +424,9 @@ void backtrack(const Table &table_,
                     seq += std::get<1>(best_node);
                     cigar.append(Cigar::DELETION);
                     switch (PF[pos - offset]) {
-                        case Extender::PREV: { best_node = prev; } break;
-                        case Extender::CUR: {} break;
-                        case Extender::NONE: { assert(false); }
+                        case PREV: { best_node = prev; } break;
+                        case CUR: {} break;
+                        case NONE: { assert(false); }
                     }
                     prev_starts.emplace(best_node);
                 }
@@ -457,15 +448,15 @@ void backtrack(const Table &table_,
     Alignment<NodeType> extension(
         { extend_window_.data() + pos, max_pos - pos },
         std::move(path), std::move(seq), score, std::move(cigar),
-        0, seed_.get_orientation(), graph_.get_k() - 1
+        0, seed_->get_orientation(), graph_.get_k() - 1
     );
 
     std::ignore = config_;
     assert(extension.is_valid(graph_, &config_));
-    extension.extend_query_end(query.data() + query.size());
+    extension.extend_query_end(query_.data() + query_.size());
 
     if (start_node) {
-        auto next_path = seed_;
+        auto next_path = *seed_;
         next_path.append(std::move(extension));
         next_path.trim_offset();
         assert(next_path.is_valid(graph_, &config_));
@@ -473,7 +464,7 @@ void backtrack(const Table &table_,
         DEBUG_LOG("Alignment (extended): {}", next_path);
         extensions.emplace_back(std::move(next_path));
     } else {
-        extension.extend_query_begin(query.data());
+        extension.extend_query_begin(query_.data());
         extension.trim_offset();
         assert(extension.is_valid(graph_, &config_));
 
@@ -490,7 +481,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     size_t size = query_.size() - start_ + 1;
     assert(start_ + size == partial_sums_.size());
 
-    std::string_view extend_window_{ align_start, size - 1 };
+    extend_window_ = std::string_view{ align_start, size - 1 };
     DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
 
@@ -653,8 +644,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
         } else {
             assert(OS[max_pos - offset] == Cigar::MATCH);
-            backtrack<NodeType>(table_, *seed_, graph_, config_, min_path_score, best_node,
-                                prev_starts, size, extend_window_, query_, extensions);
+            backtrack(min_path_score, best_node, prev_starts, extensions);
         }
 
         assert(extensions.size() < 2

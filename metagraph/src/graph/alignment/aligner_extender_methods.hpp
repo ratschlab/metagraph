@@ -2,6 +2,7 @@
 #define __DBG_ALIGNER_METHODS_HPP__
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
 
 #include "aligner_alignment.hpp"
 #include "common/aligned_vector.hpp"
@@ -72,6 +73,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
     std::string_view query_;
+    std::string_view extend_window_;
 
     typedef std::tuple<NodeType,
                        char /* last character of the node label */,
@@ -117,6 +119,11 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     virtual void add_scores_to_column(Column &column, Scores&& scores, const AlignNode&) {
         column.first.emplace_back(std::move(scores));
     }
+
+    virtual void backtrack(score_t min_path_score,
+                           AlignNode best_node,
+                           tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+                           std::vector<DBGAlignment> &extensions) const;
 
     static std::pair<size_t, size_t> get_band(const AlignNode &prev,
                                               const Column &column_prev,
