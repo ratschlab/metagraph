@@ -97,11 +97,10 @@ process_seq_path(const DeBruijnGraph &graph,
 }
 
 ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
-                                       const DBGAlignerConfig &config,
-                                       size_t num_top_labels)
+                                       const DBGAlignerConfig &config)
       : anno_graph_(anno_graph),
         graph_(anno_graph_.get_graph()),
-        config_(config), num_top_labels_(num_top_labels) {}
+        config_(config) {}
 
 auto ILabeledDBGAligner
 ::map_and_label_query_batch(const QueryGenerator &generate_query) const
@@ -189,7 +188,7 @@ auto ILabeledDBGAligner
         );
 
         // pick the top columns for each query sequence
-        size_t num_targets = std::min(counter.size(), num_top_labels_);
+        size_t num_targets = std::min(counter.size(), config_.num_top_labels);
 
         std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
         if (num_targets < counter.size())
@@ -216,7 +215,7 @@ auto ILabeledDBGAligner
         );
 
         // pick the top columns for each query sequence
-        size_t num_targets = std::min(counter.size(), num_top_labels_);
+        size_t num_targets = std::min(counter.size(), config_.num_top_labels);
 
         std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
         if (num_targets < counter.size())

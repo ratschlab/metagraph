@@ -24,8 +24,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     static constexpr uint64_t kNTarget = std::numeric_limits<uint64_t>::max() - 1;
 
     ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
-                       const DBGAlignerConfig &config,
-                       size_t num_top_labels = 1);
+                       const DBGAlignerConfig &config);
 
     virtual ~ILabeledDBGAligner() {}
 
@@ -42,7 +41,6 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     const AnnotatedDBG &anno_graph_;
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
-    size_t num_top_labels_;
 
     std::pair<BatchMapping, BatchLabels>
     map_and_label_query_batch(const QueryGenerator &generate_query) const;

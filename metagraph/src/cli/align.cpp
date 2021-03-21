@@ -40,6 +40,7 @@ DBGAlignerConfig initialize_aligner_config(size_t k, const Config &config) {
     aligner_config.max_seed_length = config.alignment_max_seed_length;
     aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
     aligner_config.max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char;
+    aligner_config.num_top_labels = config.num_top_labels;
     aligner_config.max_ram_per_alignment = config.alignment_max_ram;
     aligner_config.min_cell_score = config.alignment_min_cell_score;
     aligner_config.min_path_score = config.alignment_min_path_score;
@@ -419,7 +420,10 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
                                 std::ostream &out,
                                 std::mutex &mu) {
     std::vector<std::string> labels;
+    const auto &label_encoder = query_graph.get_annotation().get_label_encoder();
+    size_t num_labels = label_encoder.size();
     for (const auto &path : paths) {
+        /*
         if (path.get_offset()) {
             labels.emplace_back(utils::join_strings(query_graph.get_labels(
                 graph.get_node_sequence(path[0]).substr(0, path.get_offset())
@@ -432,6 +436,12 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
         }
         if (labels.back().empty())
             labels.back() = "*";
+        */
+        if (path.target_column < num_labels) {
+            labels.emplace_back(label_encoder.decode(path.target_column));
+        } else {
+            labels.emplace_back("*");
+        }
     }
 
     std::string res = format_alignment(header, paths, graph, config, labels);
@@ -548,6 +558,7 @@ int align_to_graph(Config *config) {
                     aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                         results.emplace_back(header, std::move(paths));
                     });
+                    /*
                     mtg::common::logger->trace("Constructing query graph for batch");
                     auto query_graph = construct_query_graph(*aln_anno_graph, [&](auto callback) {
                         for (const auto &[header, paths] : results) {
@@ -562,10 +573,11 @@ int align_to_graph(Config *config) {
                                 }
                             }
                         }
-                    }, 1 /* num_threads */);
+                    }, 1);
                     mtg::common::logger->trace("Labeling alignment results");
+                    */
                     for (auto&& [header, paths] : results) {
-                        process_alignments_labeled(*aln_graph, *query_graph, *config,
+                        process_alignments_labeled(*aln_graph, *aln_anno_graph, *config,
                                                    header, std::move(paths), *out,
                                                    print_mutex);
                     }
