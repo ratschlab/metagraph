@@ -359,15 +359,17 @@ std::string format_alignment(std::string_view header,
                              const DBGAligner<>::DBGQueryAlignment &paths,
                              const DeBruijnGraph &graph,
                              const Config &config,
-                             const std::vector<std::string> labels) {
+                             const std::vector<std::string> *labels = nullptr) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*{}",
+                                config.alignment_min_path_score,
+                                labels ? "\t*" : "");
         } else {
             for (size_t i = 0; i < paths.size(); ++i) {
-                sout += fmt::format("\t{}\t{}", paths[i], labels[i]);
+                sout += fmt::format("\t{}{}", paths[i], labels ? (*labels)[i] : "");
             }
         }
 
@@ -379,10 +381,10 @@ std::string format_alignment(std::string_view header,
         bool secondary = false;
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
-            const std::string &label = labels[i];
 
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph, secondary, header, label);
+                                                 graph, secondary, header,
+                                                 labels ? (*labels)[i] : "");
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
@@ -406,8 +408,7 @@ void process_alignments(const DeBruijnGraph &graph,
                         IDBGAligner::DBGQueryAlignment&& paths,
                         std::ostream &out,
                         std::mutex &mu) {
-    std::string res = format_alignment(header, paths, graph, config,
-                                       std::vector<std::string>(paths.size()));
+    std::string res = format_alignment(header, paths, graph, config);
     std::lock_guard<std::mutex> lock(mu);
     out << res;
 }
@@ -424,13 +425,13 @@ void process_alignments_labeled(const DeBruijnGraph &graph,
     size_t num_labels = label_encoder.size();
     for (const auto &path : paths) {
         if (path.target_column < num_labels) {
-            labels.emplace_back(label_encoder.decode(path.target_column));
+            labels.emplace_back("\t" + label_encoder.decode(path.target_column));
         } else {
-            labels.emplace_back("*");
+            labels.emplace_back("\t*");
         }
     }
 
-    std::string res = format_alignment(header, paths, graph, config, labels);
+    std::string res = format_alignment(header, paths, graph, config, &labels);
     std::lock_guard<std::mutex> lock(mu);
     out << res;
 }
