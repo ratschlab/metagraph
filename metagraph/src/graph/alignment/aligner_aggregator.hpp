@@ -44,6 +44,8 @@ class AlignmentAggregator {
         return size;
     }
 
+    size_t num_targets() const { return path_queue_.size(); }
+
     bool empty() const { return path_queue_.empty(); }
 
     const tsl::hopscotch_map<uint64_t, PathQueue>& data() const { return path_queue_; }

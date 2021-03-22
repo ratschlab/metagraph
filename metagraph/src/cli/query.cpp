@@ -832,7 +832,7 @@ void align_sequence(std::string &name, std::string &seq,
                     const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
     auto alignments
-        = build_aligner<align::LabeledDBGAligner>(anno_graph, aligner_config)->align(seq);
+        = build_aligner<align::DBGAligner>(graph, aligner_config)->align(seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 

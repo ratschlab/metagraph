@@ -224,6 +224,8 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             aligner_core.align_one_direction(is_reverse_complement, seeder, extender);
         }
 
+        assert(aligner_core.get_aggregator().num_targets() <= 1);
+
         aligner_core.flush();
         assert(aligner_core.get_paths().size() <= config_.num_alternative_paths);
 
