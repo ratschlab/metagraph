@@ -382,9 +382,12 @@ std::string format_alignment(std::string_view header,
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
 
+            std::string_view label;
+            if (labels)
+                label = (*labels)[i];
+
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph, secondary, header,
-                                                 labels ? (*labels)[i] : "");
+                                                 graph, secondary, header, label);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;

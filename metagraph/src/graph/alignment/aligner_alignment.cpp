@@ -439,10 +439,6 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
 
-    if (label.data())
-        alignment["sample_name"] = std::string(label);
-
-
     // Unused flags (for now)
     //alignment["quality"]; // bytes
     //alignment["mapping_quality"]; // int32
