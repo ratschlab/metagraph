@@ -55,6 +55,7 @@ void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     assert(seed.get_cigar().size());
     assert(seed.get_cigar().back().first == Cigar::MATCH
         || seed.get_cigar().back().first == Cigar::MISMATCH);
+    assert(seed.is_valid(graph_, &config_));
 
     seed_ = &seed;
     reset();

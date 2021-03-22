@@ -60,6 +60,7 @@ class LabeledSeeder : public BaseSeeder {
     virtual std::vector<Seed> get_seeds() const override {
         std::vector<Seed> seeds = BaseSeeder::get_seeds();
         for (Seed &seed : seeds) {
+            assert(seed.get_offset() || target_column_ != ILabeledDBGAligner::kNTarget);
             seed.target_column = !seed.get_offset()
                 ? target_column_
                 : ILabeledDBGAligner::kNTarget;
@@ -153,6 +154,29 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         );
     }
 
+    virtual void backtrack(score_t min_path_score,
+                           AlignNode best_node,
+                           tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+                           std::vector<DBGAlignment> &extensions) const override {
+        size_t old_size = extensions.size();
+        DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
+                                                   prev_starts, extensions);
+        assert(extensions.size() - old_size <= 1);
+        if (extensions.size() > old_size) {
+            assert(extensions.back().get_offset()
+                || align_node_to_target_.count(best_node));
+            assert(extensions.back().target_column == ILabeledDBGAligner::kNTarget
+                || extensions.back().target_column
+                    == target_columns_[align_node_to_target_[best_node]]);
+            if (extensions.back().target_column == ILabeledDBGAligner::kNTarget) {
+                extensions.back().target_column
+                    = target_columns_[align_node_to_target_[best_node]];
+            }
+            assert(extensions.back().get_offset()
+                || extensions.back().target_column != ILabeledDBGAligner::kNTarget);
+        }
+    }
+
   private:
     const AnnotatedDBG &anno_graph_;
     mutable std::vector<uint64_t> target_columns_;
@@ -203,6 +227,11 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                          const auto &callback) {
+                    assert(std::all_of(rev_comp_seeds.begin(), rev_comp_seeds.end(),
+                           [&](const DBGAlignment &a) {
+                        return a.get_offset()
+                            || a.target_column != ILabeledDBGAligner::kNTarget;
+                    }));
                     callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)));
                 };
 

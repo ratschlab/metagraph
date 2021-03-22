@@ -310,6 +310,8 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     align_node_to_target_.clear();
 
     assert(path.target_column != std::numeric_limits<uint64_t>::max());
+    assert(path.get_offset() || path.target_column != ILabeledDBGAligner::kNTarget);
+
     size_t target_column_idx = std::find(target_columns_.begin(), target_columns_.end(),
                                          path.target_column) - target_columns_.begin();
 
@@ -326,18 +328,18 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     if (std::get<0>(node) == this->graph_.max_index() + 1)
         return DefaultColumnExtender<NodeType>::get_outgoing(node);
 
-    const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+    assert(std::get<3>(node));
 
     uint64_t target_column_idx = align_node_to_target_[node];
     uint64_t target_column = target_columns_.at(target_column_idx);
 
     if (target_column == ILabeledDBGAligner::kNTarget) {
+        assert(this->seed_->get_offset() >= std::get<3>(node));
         assert(this->seed_->get_offset());
-        assert(this->seed_->get_offset() + 1 >= std::get<3>(node));
-        size_t next_offset = this->seed_->get_offset() + 1 - std::get<3>(node);
+        size_t next_offset = this->seed_->get_offset() - std::get<3>(node);
 
         Edges edges = DefaultColumnExtender<NodeType>::get_outgoing(node);
-        if (next_offset)
+        if (next_offset || edges.empty())
             return edges;
 
         std::string seq(this->graph_.get_k(), '#');
@@ -358,10 +360,12 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
         Edges out_edges;
         for (size_t i = 0; i < rows.size(); ++i) {
-            AlignNode next { edges[i].first, edges[i].second, 0, std::get<3>(node) + 1 };
+            size_t depth = 0;
             auto find = this->table_.find(edges[i].first);
             if (find != this->table_.end())
-                std::get<2>(next) = find->second.first.size();
+                depth = find->second.first.size();
+
+            AlignNode next { edges[i].first, edges[i].second, depth, std::get<3>(node) + 1 };
 
             for (uint64_t target : annotation[i]) {
                 target_column_idx = std::find(target_columns_.begin(),
@@ -422,6 +426,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     auto &path = const_cast<std::vector<node_index>&>(visited.values_container());
     node_index cur_node = std::get<0>(node);
     std::vector<std::pair<node_index, char>> outgoing;
+
+    const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
 
     while (cur_node != DeBruijnGraph::npos) {
         outgoing.clear();
