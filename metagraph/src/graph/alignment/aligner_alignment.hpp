@@ -228,9 +228,14 @@ struct LocalAlignmentGreater {
 template <typename NodeType = uint64_t>
 class QueryAlignment {
   public:
+    typedef typename std::vector<Alignment<NodeType>>::iterator iterator;
     typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
 
-    QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+    explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+
+    explicit QueryAlignment(std::shared_ptr<std::string> query,
+                            std::shared_ptr<std::string> query_rc)
+          : query_(query), query_rc_(query_rc) {}
 
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
@@ -251,13 +256,21 @@ class QueryAlignment {
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
+    void resize(size_t size) { alignments_.resize(size); }
+
     const std::string& get_query(bool reverse_complement = false) const {
         return !reverse_complement ? *query_ : *query_rc_;
     }
 
+    std::shared_ptr<std::string> get_query_ptr(bool reverse_complement = false) const {
+        return !reverse_complement ? query_ : query_rc_;
+    }
+
     const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
-    const_iterator begin() const { return alignments_.cbegin(); }
-    const_iterator end() const { return alignments_.cend(); }
+    iterator begin() { return alignments_.begin(); }
+    iterator end() { return alignments_.end(); }
+    const_iterator begin() const { return alignments_.begin(); }
+    const_iterator end() const { return alignments_.end(); }
     const_iterator cbegin() const { return alignments_.cbegin(); }
     const_iterator cend() const { return alignments_.cend(); }
 

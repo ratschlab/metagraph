@@ -3,6 +3,7 @@
 
 
 #include <priority_deque.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "aligner_alignment.hpp"
 
@@ -15,6 +16,9 @@ class AlignmentAggregator {
   public:
     typedef Alignment<NodeType> DBGAlignment;
     typedef typename DBGAlignment::score_t score_t;
+    typedef boost::container::priority_deque<DBGAlignment,
+                                             std::vector<DBGAlignment>,
+                                             AlignmentCompare> PathQueue;
 
     AlignmentAggregator(std::string_view query,
                         std::string_view rc_query,
@@ -32,45 +36,56 @@ class AlignmentAggregator {
 
     void call_alignments(const std::function<void(DBGAlignment&&)> &callback);
 
-    size_t size() const { return path_queue_.size(); }
+    size_t size() const {
+        size_t size = 0;
+        for (const auto &[target, queue] : path_queue_)
+            size += queue.size();
+
+        return size;
+    }
+
     bool empty() const { return path_queue_.empty(); }
+
+    const tsl::hopscotch_map<uint64_t, PathQueue>& data() const { return path_queue_; }
 
   private:
     std::string_view query_;
     std::string_view rc_query_;
     const DBGAlignerConfig &config_;
-    boost::container::priority_deque<DBGAlignment,
-                                     std::vector<DBGAlignment>,
-                                     AlignmentCompare> path_queue_;
+
+    tsl::hopscotch_map<uint64_t, PathQueue> path_queue_;
 };
 
 
 template <typename NodeType, class AlignmentCompare>
 inline void AlignmentAggregator<NodeType, AlignmentCompare>
 ::add_alignment(DBGAlignment&& alignment) {
-    if (path_queue_.size() < config_.num_alternative_paths) {
-        path_queue_.emplace(std::move(alignment));
-    } else if (!AlignmentCompare()(alignment, path_queue_.minimum())) {
-        path_queue_.update(path_queue_.begin(), std::move(alignment));
+    auto &cur_queue = path_queue_[alignment.target_column];
+
+    if (cur_queue.size() < config_.num_alternative_paths) {
+        cur_queue.emplace(std::move(alignment));
+    } else if (!AlignmentCompare()(alignment, cur_queue.minimum())) {
+        cur_queue.update(cur_queue.begin(), std::move(alignment));
     }
 }
 
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
-::get_min_path_score(const DBGAlignment &) const -> score_t {
-    return path_queue_.size() ? path_queue_.minimum().get_score()
-                              : config_.min_path_score;
+::get_min_path_score(const DBGAlignment &alignment) const -> score_t {
+    auto find = path_queue_.find(alignment.target_column);
+    return find == path_queue_.end() || find->second.empty()
+        ? config_.min_path_score
+        : find->second.minimum().get_score();
 }
 
 template <typename NodeType, class AlignmentCompare>
 inline void AlignmentAggregator<NodeType, AlignmentCompare>
 ::call_alignments(const std::function<void(DBGAlignment&&)> &callback) {
-    if (path_queue_.empty())
-        return;
-
-    while (path_queue_.size()) {
-        callback(DBGAlignment(path_queue_.maximum()));
-        path_queue_.pop_maximum();
+    for (auto it = path_queue_.begin(); it != path_queue_.end(); ++it) {
+        while (it.value().size()) {
+            callback(DBGAlignment(it.value().maximum()));
+            it.value().pop_maximum();
+        }
     }
 }
 
