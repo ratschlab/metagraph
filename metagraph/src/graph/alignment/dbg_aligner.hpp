@@ -225,6 +225,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         aligner_core.flush();
+        assert(aligner_core.get_paths().size() <= config_.num_alternative_paths);
 
         callback(header, std::move(aligner_core.get_paths()));
     });
