@@ -80,7 +80,7 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
+            EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
         }
     }
 }
@@ -111,8 +111,8 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
-                                        { std::string("B"), std::string("GAATGCCT") },
-                                        { std::string("A"), std::string("TGCCAT") } }} }
+                                        // { std::string("A"), std::string("TGCCT") },
+                                        { std::string("B"), std::string("AATGCCT") } }} }
     }};
 
     for (const auto &[query, targets] : exp_alignments) {
@@ -129,7 +129,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
+            EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
         }
     }
 }
@@ -184,7 +184,7 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment;
+                EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
             }
         }
     }

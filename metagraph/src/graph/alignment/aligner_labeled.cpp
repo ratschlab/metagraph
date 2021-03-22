@@ -388,8 +388,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
     if (cached_edge_sets_.count(std::get<0>(node))) {
         const auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
-        if (target_column_idx < edge_sets.size())
-            return edge_sets[target_column_idx];
+        if (edge_sets.count(target_column_idx))
+            return edge_sets.find(target_column_idx)->second;
     }
 
     typedef std::tuple<NodeType /* parent */,
@@ -442,7 +442,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             if (path.size())
                 push_path(seq, path);
         } else if (outgoing.size() > 1 || visited.count(outgoing[0].first)
-                || cached_edge_sets_.count(outgoing[0].first)
+                || (cached_edge_sets_.count(outgoing[0].first)
+                    && target_column_idx < cached_edge_sets_[outgoing[0].first].size())
                 || (path.size() && canonical
                     && (canonical->get_base_node(path.back()) == path.back())
                         != (canonical->get_base_node(outgoing[0].first)
@@ -492,10 +493,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     assert(parent_node == std::get<0>(node));
                     edges.emplace_back(child_node, c);
                 } else {
-                    auto &parent_edge_sets = cached_edge_sets_[parent_node];
-                    if (target_column_idx >= parent_edge_sets.size())
-                        parent_edge_sets.resize(target_column_idx + 1);
-
                     cached_edge_sets_[parent_node][target_column_idx].emplace_back(
                         child_node, c
                     );
@@ -505,14 +502,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     }
 
     auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
-    if (target_column_idx >= edge_sets.size()) {
-        edge_sets.resize(target_column_idx + 1);
-        edge_sets[target_column_idx] = edges;
-#ifndef NDEBUG
-    } else {
-        assert(edge_sets[target_column_idx] == edges);
-#endif
-    }
+    assert(!edge_sets.count(target_column_idx));
+    edge_sets[target_column_idx] = edges;
 
     return edges;
 }

@@ -163,6 +163,10 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
                                                    prev_starts, extensions);
         assert(extensions.size() - old_size <= 1);
         if (extensions.size() > old_size) {
+            extensions.back().target_column = std::min(
+                extensions.back().target_column,
+                ILabeledDBGAligner::kNTarget
+            );
             assert(extensions.back().get_offset()
                 || align_node_to_target_.count(best_node));
             assert(extensions.back().target_column == ILabeledDBGAligner::kNTarget
@@ -180,8 +184,8 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   private:
     const AnnotatedDBG &anno_graph_;
     mutable std::vector<uint64_t> target_columns_;
-    mutable tsl::hopscotch_map<NodeType, std::vector<Edges>> cached_edge_sets_;
-    mutable tsl::hopscotch_map<AlignNode, uint8_t, AlignNodeHash> align_node_to_target_;
+    mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, Edges>> cached_edge_sets_;
+    mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
 };
 
 
@@ -189,29 +193,39 @@ template <class BaseSeeder, class Extender, class AlignmentCompare>
 inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
+    typedef SeedAndExtendAlignerCore<AlignmentCompare> AlignerCore;
     auto mapped_batch = map_and_label_query_batch(generate_query);
 
     size_t i = 0;
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        const auto &[query_nodes_pair, target_columns] = mapped_batch;
+        assert(config_.num_alternative_paths);
+        AlignerCore main_aligner_core(graph_, config_, query, is_reverse_complement);
+        tsl::hopscotch_map<uint64_t, AlignerCore> labeled_aligner_cores;
 
-        DBGQueryAlignment paths(query, is_reverse_complement);
+        DBGQueryAlignment &paths = main_aligner_core.get_paths();
         std::string_view this_query = paths.get_query(is_reverse_complement);
         std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
 
-        assert(config_.num_alternative_paths);
+        Extender extender(anno_graph_, config_, this_query);
+        Extender extender_rc(anno_graph_, config_, reverse);
+
+        const auto &[query_nodes_pair, target_columns] = mapped_batch;
         assert(target_columns[i].size());
 
         const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 
-        Extender extender(anno_graph_, config_, this_query);
-        Extender extender_rc(anno_graph_, config_, reverse);
-
         for (const auto &[target_column, signature_pair] : target_columns[i]) {
-            SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
+            assert(target_column <= ILabeledDBGAligner::kNTarget);
+            AlignerCore &aligner_core = labeled_aligner_cores.emplace(
+                target_column,
+                AlignerCore { graph_, config_, paths.get_query_ptr(false),
+                              paths.get_query_ptr(true)
+                }
+            ).first.value();
+
             const auto &[signature, signature_rc] = signature_pair;
 
             Seeder seeder = build_seeder(
@@ -227,11 +241,12 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                          const auto &callback) {
-                    assert(std::all_of(rev_comp_seeds.begin(), rev_comp_seeds.end(),
-                           [&](const DBGAlignment &a) {
-                        return a.get_offset()
-                            || a.target_column != ILabeledDBGAligner::kNTarget;
-                    }));
+#ifndef NDEBUG
+                    for (const auto &a : rev_comp_seeds) {
+                        assert(a.get_offset()
+                            || a.target_column < ILabeledDBGAligner::kNTarget);
+                    }
+#endif
                     callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)));
                 };
 
@@ -244,7 +259,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                 std::vector<node_index>(nodes_rc),
                                                 signature_rc);
 
-                aligner_core.align_both_directions(paths, seeder, seeder_rc,
+                aligner_core.align_both_directions(seeder, seeder_rc,
                                                    extender, extender_rc,
                                                    build_rev_comp_alignment_core);
 
@@ -257,15 +272,31 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                                                 std::vector<node_index>(nodes_rc),
                                                 signature_rc);
 
-                aligner_core.align_best_direction(paths, seeder, seeder_rc,
-                                                  extender, extender_rc);
+                aligner_core.align_best_direction(seeder, seeder_rc, extender, extender_rc);
 
             } else {
-                aligner_core.align_one_direction(paths, is_reverse_complement,
-                                                 seeder, extender);
+                aligner_core.align_one_direction(is_reverse_complement, seeder, extender);
             }
         }
 
+        for (auto it = labeled_aligner_cores.begin(); it != labeled_aligner_cores.end(); ++it) {
+            AlignerCore &aligner_core = it.value();
+            aligner_core.flush();
+            main_aligner_core.align_aggregate([&](const auto &callback, const auto &) {
+                for (DBGAlignment &path : aligner_core.get_paths()) {
+                    assert(path.target_column <= ILabeledDBGAligner::kNTarget);
+                    if (path.target_column < ILabeledDBGAligner::kNTarget)
+                        callback(std::move(path));
+                }
+            });
+        }
+
+        main_aligner_core.flush();
+        auto it = std::remove_if(paths.begin(), paths.end(), [&](const DBGAlignment &path) {
+            assert(path.target_column <= ILabeledDBGAligner::kNTarget);
+            return path.target_column == ILabeledDBGAligner::kNTarget;
+        });
+        paths.resize(it - paths.begin());
         callback(header, std::move(paths));
         ++i;
     });
