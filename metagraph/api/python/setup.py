@@ -33,6 +33,7 @@ setup(
     description="Metagraph Toolkit",
     entry_points={
         'console_scripts': [
+            'metagraph-utils=metagraph.cli.cli:main'
         ],
     },
     install_requires=requirements,

@@ -1,0 +1,8 @@
+k: 31
+default_disk_mb: 10000
+
+annotation_formats: ['relax.brwt']
+max_memory_mb: 2000
+
+base_name: 'graph'
+exec_cmd: 'metagraph'

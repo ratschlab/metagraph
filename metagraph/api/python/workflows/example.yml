@@ -1,0 +1,9 @@
+k: 10
+base_name: 'example_k10'
+annotation_formats: ['relax.row_diff_brwt']
+
+output_directory: 'output_dir_example'
+
+input_files_list_path: 'transcript_paths.txt'
+
+annotation_labels_source: 'sequence_headers'

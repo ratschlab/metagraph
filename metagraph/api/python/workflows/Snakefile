@@ -1,0 +1,290 @@
+import os
+from pathlib import Path
+
+from psutil import virtual_memory
+
+from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
+
+
+def take_value_or_default(key, default):
+    return config[key] if (key in config.keys() and config[key]) else default
+
+input_files_list_path=config['input_files_list_path']
+wdir=Path(config['output_directory'])
+
+graph=config['base_name']
+build_primary=take_value_or_default('build_primary', False)
+
+annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
+
+# validate values
+for af in annotation_formats:
+    AnnotationFormats(af)
+    # TODO: make a nicer error
+
+annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
+
+exec_cmd=config['exec_cmd']
+
+max_threads=take_value_or_default('max_threads', workflow.cores)
+
+# if not set, use half of the installed memory. Arbitary heuristic. Not using
+# available memory, as otherwise behaviour between runs could change significantly
+# for no apparent reason
+max_memory_mb=take_value_or_default('max_memory_mb', virtual_memory().total/1024**2/2)
+
+verbose = config['verbose'] if 'verbose' in config else False
+verbose_opt=' -v ' if verbose else ''
+
+write_logs = take_value_or_default('write_logs', False)
+
+log_dir=wdir/'logs'
+if write_logs:
+    log_dir.mkdir(exist_ok=True, parents=True)
+
+def get_log_opt(rule):
+    return f" | tee {log_dir}/{graph}_{rule}.log" if write_logs else ''
+
+DONE="DONE"
+
+## Paths
+graph_path=wdir/f'{graph}.dbg'
+annotation_cols_path=wdir/'columns'
+annotation_path_done=annotation_cols_path/DONE
+
+columns_file=wdir/'columns.txt'
+
+localrules: generate_column_list
+
+rule all:
+     input:
+        graph_path,
+        [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
+
+include: 'build.smk'
+
+def generate_col_paths(seq_file):
+    with open(seq_file) as f:
+        return [ annotation_cols_path/f"{f.strip().split('/')[-1]}.column.annodbg" for f in f.readlines()]
+
+rule annotate:
+    input:
+        seqs=input_files_list_path,
+        dbg_graph=graph_path,
+    output:
+        done=touch(annotation_path_done),
+        column_anno_files=generate_col_paths(input_files_list_path)
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("annotate"),
+    shell:
+        """
+        OUT_DIR=$(dirname {output.done})
+        mkdir -p $OUT_DIR
+        cat {input.seqs} | {exec_cmd} annotate \
+          {verbose_opt} \
+          --parallel {threads} \
+          -i {input.dbg_graph} \
+          {annotation_labels_opt} \
+          --anno-type column \
+          --separately \
+          -o $OUT_DIR 2>&1 {params.log_writing}
+        """
+
+rule generate_column_list:
+    input: rules.annotate.output.column_anno_files
+    output: columns_file
+    run:
+        with open(output[0], 'w') as f:
+            f.write('\n'.join([str(l) for l in input]))
+
+
+max_path_length=None
+
+rule generate_brwt_linkage:
+    input:
+        columns_file=columns_file,
+    output:
+        linkage=wdir/f"{graph}.linkage.txt"
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("brwt_linkage"),
+    shell:
+        """        
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type brwt \
+            --linkage \
+            --greedy \
+            --subsample 10000000 \
+            --parallel {threads} \
+            -o {output.linkage} 2>&1 {params.log_writing}
+        """
+
+ruleorder: relax_brwt > transform_annotation # more specific rule has priority
+
+rule transform_annotation:
+    input:
+        columns_file=columns_file,
+    output:
+        annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("annotate_{anno_type}")
+    shell:
+        """        
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type {wildcards.anno_type} \
+            --parallel {threads} \
+            -o {output.annotations} 2>&1 {params.log_writing}
+        """
+
+
+rule annotate_brwt:
+    input:
+        linkage=wdir/f"{graph}.linkage.txt",
+        columns_file=columns_file,
+    output:
+        annotations=wdir/f'{graph}.brwt.annodbg',
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("annotate_brwt")
+    shell:
+        """        
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type brwt \
+            --parallel-nodes 10 \
+            --greedy \
+            --parallel {threads} \
+            -o {output.annotations} 2>&1 {params.log_writing}
+        """
+
+
+rule relax_brwt:
+    input:
+        brwt_annots=wdir/f'{graph}.{{brwt_fmt}}.annodbg',
+    output:
+        annotations=wdir/f'{graph}.relax.{{brwt_fmt}}.annodbg',
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("relax_brwt"),
+    shell:
+        """        
+        {exec_cmd} relax_brwt \
+            -o {output.annotations} \
+            {verbose_opt} \
+            --relax-arity 15 \
+            --parallel {threads} \
+            {input.brwt_annots} 2>&1 {params.log_writing}
+        """
+
+
+def columns_size_mb(columns_file):
+    with open(columns_file) as f:
+        col_file_size_bytes = sum(os.stat(l.strip()).st_size for l in f)
+        return col_file_size_bytes/1024**2
+
+
+transform_row_diff_overhead_mb=2000
+
+rule transform_row_diff:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+    output:
+        anchors=wdir/f'{graph}.dbg.anchors.unopt',
+        succ=wdir/f'{graph}.dbg.succ',
+        pred=wdir/f'{graph}.dbg.pred',
+        pred_boundary=wdir/f'{graph}.dbg.pred_boundary',
+        columns_rd_done=touch(wdir/f'{graph}_rd_cols'/DONE)
+    threads: max_threads
+    resources:
+        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+    params:
+        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        max_path_length_str= f"--max-path-length {config['max_path_length']}" if 'max_path_length' in config else '',
+        log_writing=get_log_opt("transform_row_diff_opt")
+    shell:
+        """
+        COLS_DIR=$(dirname {output.columns_rd_done})
+        mkdir -p $COLS_DIR
+        
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            -i {input.dbg_graph} \
+            {params.max_path_length_str} \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_cap} \
+            -o $COLS_DIR/DUMMY 2>&1 {params.log_writing}
+        """
+
+rule transform_row_diff_opt:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+        anchors_unopt=wdir/f'{graph}.dbg.anchors.unopt',
+    output:
+        succ=wdir/f'{graph}.dbg.succ',
+        pred=wdir/f'{graph}.dbg.pred',
+        pred_boundary=wdir/f'{graph}.dbg.pred_boundary',
+        anchors=wdir/f'{graph}.dbg.anchors',
+        cols_rd_done=touch(wdir/f'{graph}_rd_cols'/'DONE_OPT')
+    threads: max_threads
+    resources:
+        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+    params:
+        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        max_path_length_str= f"--max-path-length {config['max_path_length']}" if 'max_path_length' in config else '',
+        log_writing=get_log_opt("transform_row_diff_opt")
+    shell:
+        """
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            -i {input.dbg_graph} \
+            {params.max_path_length_str} \
+            --optimize \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_cap} \
+            -o $(dirname {output.cols_rd_done})/DUMMY 2>&1 {params.log_writing}
+        """
+
+
+rule annotate_row_diff_brwt:
+    input:
+        anchors=wdir/f'{graph}.dbg.anchors',
+        cols_rd_done=wdir/f'{graph}_rd_cols'/'DONE_OPT',
+        linkage=rules.generate_brwt_linkage.output.linkage,
+    output:
+        annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("annotate_row_diff_brwt"),
+    shell:
+        """
+        find $(dirname {input.cols_rd_done}) -name \*.row_diff.annodbg | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_brwt \
+            --anchors-file {input.anchors} \
+            --parallel-nodes 5 \
+            --greedy \
+            --parallel {threads} \
+            -i {input.linkage} \
+            -o {output.annotations} 2>&1 {params.log_writing}
+        """
+
+
+rule relax_row_diff_brwt:
+    input:
+        brwt_annots=rules.annotate_row_diff_brwt.output.annotations,
+    output:
+        annotations_relaxed=wdir/f'{graph}.relax.row_diff_brwt.annodbg',
+    threads: max_threads
+    params:
+        log_writing=get_log_opt("relax_row_diff_brwt"),
+    shell:
+        """        
+        {exec_cmd} relax_brwt \
+            -o {output.annotations_relaxed} \
+            {verbose_opt} \
+            --relax-arity 15 \
+            --parallel {threads} \
+            {input.brwt_annots} 2>&1 {params.log_writing}
+        """
