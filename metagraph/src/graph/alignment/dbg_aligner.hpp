@@ -146,7 +146,7 @@ class SeedAndExtendAlignerCore {
     // and add the top ones to paths.
     void align_aggregate(const AlignmentGenerator &alignment_generator);
 
-    const AlignmentAggregator<node_index, AlignmentCompare>& get_aggregator() const {
+    AlignmentAggregator<node_index, AlignmentCompare>& get_aggregator() {
         return aggregator_;
     }
 

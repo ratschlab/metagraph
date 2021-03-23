@@ -5,6 +5,7 @@
 
 #include "dbg_aligner.hpp"
 #include "common/vector_map.hpp"
+#include "common/utils/template_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -291,12 +292,25 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             });
         }
 
+        auto &aggregator = main_aligner_core.get_aggregator().data();
+        if (aggregator.size() > config_.num_top_labels) {
+            std::vector<std::pair<uint64_t, score_t>> scored_labels;
+            scored_labels.reserve(aggregator.size());
+            for (const auto &[target, path_queue] : aggregator) {
+                scored_labels.emplace_back(target, path_queue.maximum().get_score());
+            }
+
+            std::sort(scored_labels.begin(), scored_labels.end(), utils::GreaterSecond());
+            auto start = scored_labels.begin() + config_.num_top_labels - 1;
+            auto it = std::find_if(start + 1, scored_labels.end(), [&](const auto &a) {
+                return a.second < start->second;
+            });
+            for ( ; it != scored_labels.end(); ++it) {
+                aggregator.erase(it->first);
+            }
+        }
+
         main_aligner_core.flush();
-        auto it = std::remove_if(paths.begin(), paths.end(), [&](const DBGAlignment &path) {
-            assert(path.target_column <= ILabeledDBGAligner::kNTarget);
-            return path.target_column == ILabeledDBGAligner::kNTarget;
-        });
-        paths.resize(it - paths.begin());
         callback(header, std::move(paths));
         ++i;
     });

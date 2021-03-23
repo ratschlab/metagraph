@@ -194,8 +194,13 @@ auto ILabeledDBGAligner
         size_t num_targets = std::min(counter.size(), config_.num_top_labels);
 
         std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
-        if (num_targets < counter.size())
-            counter.resize(num_targets);
+        if (num_targets < counter.size()) {
+            auto start = counter.begin() + num_targets - 1;
+            auto it = std::find_if(start + 1, counter.end(), [&](const auto &a) {
+                return a.second < start->second;
+            });
+            counter.erase(it, counter.end());
+        }
 
         for (const auto &[column, count] : counter) {
             if (!target_columns[i].count(column)) {
@@ -231,8 +236,13 @@ auto ILabeledDBGAligner
         size_t num_targets = std::min(counter.size(), config_.num_top_labels);
 
         std::sort(counter.begin(), counter.end(), utils::GreaterSecond());
-        if (num_targets < counter.size())
-            counter.resize(num_targets);
+        if (num_targets < counter.size()) {
+            auto start = counter.begin() + num_targets - 1;
+            auto it = std::find_if(start + 1, counter.end(), [&](const auto &a) {
+                return a.second < start->second;
+            });
+            counter.erase(it, counter.end());
+        }
 
         for (const auto &[column, count] : counter) {
             if (!target_columns[i].count(column)) {
