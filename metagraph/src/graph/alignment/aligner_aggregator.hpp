@@ -3,9 +3,9 @@
 
 
 #include <priority_deque.hpp>
-#include <tsl/hopscotch_map.h>
 
 #include "aligner_alignment.hpp"
+#include "common/vector_map.hpp"
 
 namespace mtg {
 namespace graph {
@@ -48,14 +48,14 @@ class AlignmentAggregator {
 
     bool empty() const { return path_queue_.empty(); }
 
-    const tsl::hopscotch_map<uint64_t, PathQueue>& data() const { return path_queue_; }
+    VectorMap<uint64_t, PathQueue>& data() { return path_queue_; }
 
   private:
     std::string_view query_;
     std::string_view rc_query_;
     const DBGAlignerConfig &config_;
 
-    tsl::hopscotch_map<uint64_t, PathQueue> path_queue_;
+    VectorMap<uint64_t, PathQueue> path_queue_;
 };
 
 
