@@ -24,7 +24,7 @@
 namespace mtg {
 namespace cli {
 
-const size_t kRowBatchSize = 100'000;
+const size_t kRowBatchSize = 10'000'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
