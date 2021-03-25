@@ -1,8 +1,9 @@
+import importlib
+import logging
 import sys
 from pathlib import Path
 from typing import Iterable, Optional
-import logging
-import importlib
+
 import snakemake
 
 from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
@@ -72,26 +73,32 @@ def run_build_workflow(
 
 
 def setup_parser(parser):
-    # TODO: group options together?
-    #parser = argparse.ArgumentParser(description='metagraph wrapper')
     parser.add_argument('sample_list_path', type=Path)
     parser.add_argument('output_dir', type=Path)
-    parser.add_argument('-k', type=int, default=None)
-    parser.add_argument('--annotation-format', action='append',
-                        default=[])
-    parser.add_argument('--annotation-labels-source',
-                        type=AnnotationLabelsSource,
-                        default=None,
-                        help=f"What should be used as column labels. Possible values: "
-                             f"{', '.join([v.value for v in AnnotationLabelsSource])}")
-    parser.add_argument('--threads', type=int, default=None)
-    parser.add_argument('--base-name', default=None)
-    parser.add_argument('--build-primary-graph', default=False,
-                        action='store_true')
-    parser.add_argument('--force', default=False, action='store_true')
-    parser.add_argument('--verbose', default=False, action='store_true')
-    parser.add_argument('--dryrun', default=False, action='store_true')
-    parser.add_argument('--exec-cmd', type=str, default=None)
+
+    graph = parser.add_argument_group('graph', 'arguments for graph building')
+    graph.add_argument('-k', type=int, default=None)
+    graph.add_argument('--base-name', default=None)
+    graph.add_argument('--build-primary-graph', default=False,
+                       action='store_true')
+
+    annotation = parser.add_argument_group('annotation',
+                                           'arguments for annotations')
+    annotation.add_argument('--annotation-format', action='append',
+                            default=[])
+    annotation.add_argument('--annotation-labels-source',
+                            type=AnnotationLabelsSource,
+                            default=None,
+                            help=f"What should be used as column labels. Possible values: "
+                                 f"{', '.join([v.value for v in AnnotationLabelsSource])}")
+
+    workflow = parser.add_argument_group('workflow',
+                                         'arguments for the workflow')
+    workflow.add_argument('--threads', type=int, default=None)
+    workflow.add_argument('--force', default=False, action='store_true')
+    workflow.add_argument('--verbose', default=False, action='store_true')
+    workflow.add_argument('--dryrun', default=False, action='store_true')
+    workflow.add_argument('--exec-cmd', type=str, default=None)
 
     parser.set_defaults(func=init_build)
 
