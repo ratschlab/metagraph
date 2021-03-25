@@ -1,3 +1,4 @@
+import itertools
 import os
 from pathlib import Path
 
@@ -65,7 +66,12 @@ include: 'build.smk'
 
 def generate_col_paths(seq_file):
     with open(seq_file) as f:
-        return [ annotation_cols_path/f"{f.strip().split('/')[-1]}.column.annodbg" for f in f.readlines()]
+        column_names = [f"{f.strip().split('/')[-1]}" for f in f.readlines()]
+
+        duplicate_col_names = [grp_key for (grp_key, names_lst) in itertools.groupby(sorted(column_names)) if len(list(names_lst)) > 1]
+        assert not duplicate_col_names, f"Found duplicate filenames: { ', '.join(duplicate_col_names)}"
+
+        return [ annotation_cols_path/f"{c}.column.annodbg" for c in column_names]
 
 rule annotate:
     input:
@@ -186,87 +192,110 @@ def columns_size_mb(columns_file):
 
 transform_row_diff_overhead_mb=2000
 
-rule transform_row_diff:
+rd_cols_dir = wdir/f'{graph}_rd_cols'
+
+rule transform_row_diff_stage0:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
     output:
-        anchors=wdir/f'{graph}.dbg.anchors.unopt',
-        succ=wdir/f'{graph}.dbg.succ',
-        pred=wdir/f'{graph}.dbg.pred',
-        pred_boundary=wdir/f'{graph}.dbg.pred_boundary',
-        columns_rd_done=touch(wdir/f'{graph}_rd_cols'/DONE)
+        columns_rd_row_count=rd_cols_dir/'vector.row_count'
     threads: max_threads
     resources:
         mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
     params:
         mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
-        max_path_length_str= f"--max-path-length {config['max_path_length']}" if 'max_path_length' in config else '',
         log_writing=get_log_opt("transform_row_diff_opt")
     shell:
         """
-        COLS_DIR=$(dirname {output.columns_rd_done})
+        COLS_DIR=$(dirname {output.columns_rd_row_count})
         mkdir -p $COLS_DIR
         
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
+            --row-diff-stage 0 \
             -i {input.dbg_graph} \
-            {params.max_path_length_str} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o $COLS_DIR/DUMMY 2>&1 {params.log_writing}
+            -o {output.columns_rd_row_count} 2>&1 {params.log_writing}
         """
 
-rule transform_row_diff_opt:
+rule transform_row_diff_stage1:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
-        anchors_unopt=wdir/f'{graph}.dbg.anchors.unopt',
+        columns_rd_row_count=rd_cols_dir/'vector.row_count'
     output:
-        succ=wdir/f'{graph}.dbg.succ',
-        pred=wdir/f'{graph}.dbg.pred',
-        pred_boundary=wdir/f'{graph}.dbg.pred_boundary',
-        anchors=wdir/f'{graph}.dbg.anchors',
-        cols_rd_done=touch(wdir/f'{graph}_rd_cols'/'DONE_OPT')
+        pred=wdir / f'{graph}.dbg.pred',
+        pred_boundary=wdir / f'{graph}.dbg.pred_boundary',
+        rd_succ=wdir / f'{graph}.dbg.rd_succ',
+        succ=wdir / f'{graph}.dbg.succ',
+        succ_boundary=wdir / f'{graph}.dbg.succ_boundary',
+        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
     threads: max_threads
     resources:
         mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
     params:
         mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
-        max_path_length_str= f"--max-path-length {config['max_path_length']}" if 'max_path_length' in config else '',
         log_writing=get_log_opt("transform_row_diff_opt")
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
+            --row-diff-stage 1 \
             -i {input.dbg_graph} \
-            {params.max_path_length_str} \
-            --optimize \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o $(dirname {output.cols_rd_done})/DUMMY 2>&1 {params.log_writing}
+            -o {output.cols_rd_vectors} 2>&1 {params.log_writing}
+        """
+
+rule transform_row_diff_stage2:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+    output:
+        anchors=wdir/f'{graph}.dbg.anchors',
+        rd_cols_done=touch(rd_cols_dir/DONE)
+    threads: max_threads
+    resources:
+        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+    params:
+        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        log_writing=get_log_opt("transform_row_diff_opt")
+    shell:
+        """
+        cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            --row-diff-stage 2 \
+            -i {input.dbg_graph} \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_cap} \
+            -o {output.rd_cols_done} 2>&1 {params.log_writing}
         """
 
 
 rule annotate_row_diff_brwt:
     input:
-        anchors=wdir/f'{graph}.dbg.anchors',
-        cols_rd_done=wdir/f'{graph}_rd_cols'/'DONE_OPT',
-        linkage=rules.generate_brwt_linkage.output.linkage,
+        anchors=rules.transform_row_diff_stage2.output.anchors,
+        rd_cols_done=rules.transform_row_diff_stage2.output.rd_cols_done,
+        dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
+        linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
     threads: max_threads
     params:
         log_writing=get_log_opt("annotate_row_diff_brwt"),
     shell:
         """
-        find $(dirname {input.cols_rd_done}) -name \*.row_diff.annodbg | {exec_cmd} transform_anno {verbose_opt} \
+        echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt \
-            --anchors-file {input.anchors} \
-            --parallel-nodes 5 \
             --greedy \
+            --fast \
+            --parallel-nodes 5 \
             --parallel {threads} \
-            -i {input.linkage} \
+            -i {input.dbg_graph} \
             -o {output.annotations} 2>&1 {params.log_writing}
         """
 
