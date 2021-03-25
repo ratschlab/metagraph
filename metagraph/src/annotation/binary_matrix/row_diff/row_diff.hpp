@@ -12,6 +12,7 @@
 #include "common/vector.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/unix_tools.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -177,6 +178,8 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
+    Timer timer;
+
     const graph::boss::BOSS &boss = graph_->get_boss();
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -210,6 +213,8 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
         }
     }
+
+    common::logger->trace("Traversed row-diff paths and reached anchors in {} sec", timer.elapsed());
 
     node_to_rd = VectorMap<Row, size_t>();
 
