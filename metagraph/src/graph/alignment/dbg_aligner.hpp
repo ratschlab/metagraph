@@ -51,6 +51,18 @@ class ISeedAndExtendAligner : public IDBGAligner {
     virtual const DBGAlignerConfig& get_config() const = 0;
 };
 
+class ISeedFilter {
+  public:
+    typedef IDBGAligner::DBGAlignment DBGAlignment;
+    typedef IDBGAligner::node_index node_index;
+    typedef std::function<void(node_index, uint64_t, size_t, size_t)> LabeledNodeRangeCallback;
+    typedef std::function<void(const LabeledNodeRangeCallback&)> LabeledNodeRangeGenerator;
+
+    virtual ~ISeedFilter() {}
+    virtual Vector<uint64_t> labels_to_keep(const DBGAlignment&) = 0;
+    virtual void update_seed_filter(const LabeledNodeRangeGenerator&) = 0;
+};
+
 
 template <class AlignmentCompare = LocalAlignmentLess>
 class SeedAndExtendAlignerCore;
@@ -84,6 +96,17 @@ class DBGAligner : public ISeedAndExtendAligner {
     DBGAlignerConfig config_;
 };
 
+class SeedFilter : public ISeedFilter {
+  public:
+    SeedFilter(size_t k) : k_(k) {}
+    Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
+    void update_seed_filter(const LabeledNodeRangeGenerator &generator);
+
+  private:
+    size_t k_;
+    tsl::hopscotch_map<node_index, std::pair<size_t, size_t>> visited_nodes_;
+};
+
 template <class AlignmentCompare>
 class SeedAndExtendAlignerCore {
   public:
@@ -104,8 +127,11 @@ class SeedAndExtendAlignerCore {
     template <typename... Args>
     SeedAndExtendAlignerCore(const DeBruijnGraph &graph,
                              const DBGAlignerConfig &config,
+                             ISeedFilter &seed_filter,
                              Args&&... args)
-          : graph_(graph), config_(config), paths_(std::forward<Args>(args)...),
+          : graph_(graph), config_(config),
+            seed_filter_(std::shared_ptr<ISeedFilter>{}, &seed_filter),
+            paths_(std::forward<Args>(args)...),
             aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
 
     void flush() {
@@ -160,9 +186,9 @@ class SeedAndExtendAlignerCore {
 
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
-    DBGQueryAlignment paths_;
 
-    tsl::hopscotch_map<node_index, std::pair<size_t, size_t>> visited_nodes_;
+    std::shared_ptr<ISeedFilter> seed_filter_;
+    DBGQueryAlignment paths_;
     AlignmentAggregator<node_index, AlignmentCompare> aggregator_;
 };
 
@@ -174,8 +200,9 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
+        SeedFilter seed_filter(graph_.get_k());
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
-            graph_, config_, query, is_reverse_complement
+            graph_, config_, seed_filter, query, is_reverse_complement
         );
         std::string_view this_query = aligner_core.get_paths().get_query(is_reverse_complement);
         std::string_view reverse = aligner_core.get_paths().get_query(!is_reverse_complement);

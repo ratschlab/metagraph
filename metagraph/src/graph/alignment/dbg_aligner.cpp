@@ -30,6 +30,47 @@ void IDBGAligner
     }, callback);
 }
 
+Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
+    size_t found_count = 0;
+    std::pair<size_t, size_t> idx_range {
+        seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
+    };
+    for (node_index node : seed) {
+        auto emplace = visited_nodes_.emplace(node, idx_range);
+        auto &range = emplace.first.value();
+        if (emplace.second) {
+        } else if (range.first > idx_range.first || range.second < idx_range.second) {
+            DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
+            range.first = std::min(range.first, idx_range.first);
+            range.second = std::max(range.second, idx_range.second);
+            DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
+        } else {
+            ++found_count;
+        }
+
+        if (idx_range.second - idx_range.first == k_)
+            ++idx_range.first;
+
+        ++idx_range.second;
+    }
+
+    if (found_count == seed.size())
+        return {};
+
+    return { 0 };
+}
+
+void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
+    generator([&](node_index node, uint64_t, size_t begin, size_t end) {
+        auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
+        auto &range = emplace.first.value();
+        if (!emplace.second) {
+            range.first = std::min(range.first, begin);
+            range.second = std::max(range.second, end);
+        }
+    });
+}
+
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
@@ -48,46 +89,12 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         // check if this seed has been explored before in an alignment and discard
         // it if so
         if (filter_seeds) {
-            size_t found_count = 0;
-            std::pair<size_t, size_t> idx_range {
-                seed.get_clipping(),
-                seed.get_clipping() + graph_.get_k() - seed.get_offset()
-            };
-            for (node_index node : seed) {
-                auto emplace = visited_nodes_.emplace(node, idx_range);
-                auto &range = emplace.first.value();
-                if (emplace.second) {
-                } else if (range.first > idx_range.first || range.second < idx_range.second) {
-                    DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
-                    range.first = std::min(range.first, idx_range.first);
-                    range.second = std::max(range.second, idx_range.second);
-                    DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-                } else {
-                    ++found_count;
-                }
+            seed.target_columns = seed_filter_->labels_to_keep(seed);
 
-                if (idx_range.second - idx_range.first == graph_.get_k())
-                    ++idx_range.first;
-
-                ++idx_range.second;
-            }
-
-            if (found_count == seed.size()) {
+            if (seed.target_columns.empty()) {
                 DEBUG_LOG("Skipping seed: {}", seed);
                 continue;
             }
-        }
-
-        if (seed.get_query().data() + seed.get_query().size()
-                == query.data() + query.size()) {
-            if (seed.get_score() >= min_path_score) {
-                seed.trim_offset();
-                assert(seed.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment: {}", seed);
-                callback(std::move(seed));
-            }
-
-            continue;
         }
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
@@ -98,13 +105,21 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
         // table to allow for seed filtration
         if (filter_seeds) {
-            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-                auto &range = emplace.first.value();
-                if (!emplace.second) {
-                    range.first = std::min(range.first, begin);
-                    range.second = std::max(range.second, end);
-                }
+            tsl::hopscotch_set<uint64_t> targets;
+            for (const DBGAlignment &extension : extensions) {
+                targets.insert(extension.target_columns.begin(),
+                              extension.target_columns.end());
+            }
+
+            if (targets.empty())
+                targets.insert(std::numeric_limits<uint64_t>::max());
+
+            seed_filter_->update_seed_filter([&](const auto &callback) {
+                extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+                    for (uint64_t target : targets) {
+                        callback(node, target, begin, end);
+                    }
+                });
             });
         }
 
@@ -174,7 +189,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 if (path.get_score() >= min_path_score)
                     alignment_callback(DBGAlignment(path));
 
-                if (!path.get_clipping())
+                if (!path.get_clipping() || path.get_offset())
                     return;
 
                 auto rev = path;

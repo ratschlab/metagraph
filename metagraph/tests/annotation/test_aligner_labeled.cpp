@@ -80,7 +80,7 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -129,7 +129,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -184,7 +184,7 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment << " " << alignment.target_column;
+                EXPECT_TRUE(found) << alignment;
             }
         }
     }

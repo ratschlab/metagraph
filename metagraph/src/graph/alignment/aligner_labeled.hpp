@@ -5,7 +5,9 @@
 
 #include "dbg_aligner.hpp"
 #include "common/vector_map.hpp"
+#include "common/vector_set.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/hashers/hash.hpp"
 
 namespace mtg {
 namespace graph {
@@ -20,9 +22,7 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     typedef IDBGAligner::node_index node_index;
     typedef IDBGAligner::DBGAlignment DBGAlignment;
     typedef IDBGAligner::QueryGenerator QueryGenerator;
-
-    // undefined target column
-    static constexpr uint64_t kNTarget = std::numeric_limits<uint64_t>::max() - 1;
+    typedef Vector<uint64_t> Targets;
 
     ILabeledDBGAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config);
 
@@ -36,7 +36,8 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     typedef std::pair<sdsl::bit_vector /* forward */,
                       sdsl::bit_vector /* reverse complement */ > Signature;
     typedef std::vector<Mapping> BatchMapping;
-    typedef std::vector<VectorMap<uint64_t, Signature>> BatchLabels;
+    typedef std::vector<std::pair<Targets, Signature>> QueryLabels;
+    typedef std::vector<QueryLabels> BatchLabels;
 
     const AnnotatedDBG &anno_graph_;
     const DeBruijnGraph &graph_;
@@ -46,32 +47,45 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     map_and_label_query_batch(const QueryGenerator &generate_query) const;
 };
 
+class LabeledSeedFilter : public ISeedFilter {
+  public:
+    LabeledSeedFilter(size_t k) : k_(k) {}
+    Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
+    void update_seed_filter(const LabeledNodeRangeGenerator &generator);
+
+  private:
+    size_t k_;
+    tsl::hopscotch_map<node_index, tsl::hopscotch_map<uint64_t, std::pair<size_t, size_t>>> visited_nodes_;
+};
+
 template <class BaseSeeder>
 class LabeledSeeder : public BaseSeeder {
   public:
     typedef typename BaseSeeder::node_index node_index;
     typedef typename BaseSeeder::Seed Seed;
+    typedef ILabeledDBGAligner::Targets Targets;
 
     template <typename... Args>
-    LabeledSeeder(uint64_t target_column, Args&&... args)
-          : BaseSeeder(std::forward<Args>(args)...), target_column_(target_column) {}
+    LabeledSeeder(Targets&& target_columns, Args&&... args)
+          : BaseSeeder(std::forward<Args>(args)...),
+            target_columns_(std::move(target_columns)) {}
 
     virtual ~LabeledSeeder() {}
 
     virtual std::vector<Seed> get_seeds() const override {
         std::vector<Seed> seeds = BaseSeeder::get_seeds();
-        for (Seed &seed : seeds) {
-            assert(seed.get_offset() || target_column_ != ILabeledDBGAligner::kNTarget);
-            seed.target_column = !seed.get_offset()
-                ? target_column_
-                : ILabeledDBGAligner::kNTarget;
+        if (target_columns_.size()) {
+            for (Seed &seed : seeds) {
+                if (!seed.get_offset())
+                    seed.target_columns = target_columns_;
+            }
         }
 
         return seeds;
     }
 
   private:
-    uint64_t target_column_;
+    Targets target_columns_;
 };
 
 template <typename NodeType = typename DeBruijnGraph::node_index>
@@ -103,7 +117,7 @@ class LabeledDBGAligner : public ILabeledDBGAligner {
   protected:
     typedef LabeledSeeder<BaseSeeder> Seeder;
 
-    Seeder build_seeder(uint64_t target_column,
+    Seeder build_seeder(Vector<uint64_t>&& target_columns,
                         std::string_view query,
                         bool is_reverse_complement,
                         std::vector<node_index>&& base_nodes,
@@ -116,6 +130,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::node_index node_index;
+    typedef ILabeledDBGAligner::Targets Targets;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
@@ -140,15 +155,8 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         const AlignNode &prev = std::get<6>(scores);
         assert(align_node_to_target_.count(prev));
 
-        if (!align_node_to_target_.count(node)) {
+        if (!align_node_to_target_.count(node))
             align_node_to_target_[node] = align_node_to_target_[prev];
-#ifndef NDEBUG
-        } else {
-            assert(align_node_to_target_[prev] == align_node_to_target_[node]
-                || target_columns_.at(align_node_to_target_[prev])
-                    == ILabeledDBGAligner::kNTarget);
-#endif
-        }
 
         DefaultColumnExtender<NodeType>::add_scores_to_column(
             column, std::move(scores), node
@@ -163,30 +171,21 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
                                                    prev_starts, extensions);
         assert(extensions.size() - old_size <= 1);
-        if (extensions.size() > old_size) {
-            extensions.back().target_column = std::min(
-                extensions.back().target_column,
-                ILabeledDBGAligner::kNTarget
-            );
-            assert(extensions.back().get_offset()
-                || align_node_to_target_.count(best_node));
-            assert(extensions.back().target_column == ILabeledDBGAligner::kNTarget
-                || extensions.back().target_column
-                    == target_columns_[align_node_to_target_[best_node]]);
-            if (extensions.back().target_column == ILabeledDBGAligner::kNTarget) {
-                extensions.back().target_column
-                    = target_columns_[align_node_to_target_[best_node]];
-            }
-            assert(extensions.back().get_offset()
-                || extensions.back().target_column != ILabeledDBGAligner::kNTarget);
+        if (extensions.size() > old_size && extensions.back().target_columns.empty()) {
+            size_t target_columns_idx = align_node_to_target_.find(best_node)->second;
+            assert(target_columns_idx < target_columns_.size());
+            extensions.back().target_columns
+                = *(target_columns_.begin() + target_columns_idx);
         }
     }
 
   private:
     const AnnotatedDBG &anno_graph_;
-    mutable std::vector<uint64_t> target_columns_;
+    mutable VectorSet<Targets, utils::VectorHash> target_columns_;
     mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, Edges>> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
+
+    AlignNode get_next_align_node(NodeType node, char c, size_t dist_from_origin) const;
 };
 
 
@@ -202,10 +201,10 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
                        std::string_view query,
                        bool is_reverse_complement) {
         assert(config_.num_alternative_paths);
-        AlignerCore main_aligner_core(graph_, config_, query, is_reverse_complement);
-        tsl::hopscotch_map<uint64_t, AlignerCore> labeled_aligner_cores;
+        LabeledSeedFilter seed_filter(this->graph_.get_k());
+        AlignerCore aligner_core(graph_, config_, seed_filter, query, is_reverse_complement);
+        DBGQueryAlignment &paths = aligner_core.get_paths();
 
-        DBGQueryAlignment &paths = main_aligner_core.get_paths();
         std::string_view this_query = paths.get_query(is_reverse_complement);
         std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
@@ -218,19 +217,11 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
         const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 
-        for (const auto &[target_column, signature_pair] : target_columns[i]) {
-            assert(target_column <= ILabeledDBGAligner::kNTarget);
-            AlignerCore &aligner_core = labeled_aligner_cores.emplace(
-                target_column,
-                AlignerCore { graph_, config_, paths.get_query_ptr(false),
-                              paths.get_query_ptr(true)
-                }
-            ).first.value();
-
+        for (const auto &[target_columns, signature_pair] : target_columns[i]) {
             const auto &[signature, signature_rc] = signature_pair;
 
             Seeder seeder = build_seeder(
-                target_column,
+                Targets(target_columns),
                 this_query, // use this_query since paths stores a copy
                 is_reverse_complement,
                 std::vector<node_index>(nodes),
@@ -242,19 +233,13 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
                 auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                          const auto &callback) {
-#ifndef NDEBUG
-                    for (const auto &a : rev_comp_seeds) {
-                        assert(a.get_offset()
-                            || a.target_column < ILabeledDBGAligner::kNTarget);
-                    }
-#endif
                     callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)));
                 };
 
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
-                Seeder seeder_rc = build_seeder(target_column,
+                Seeder seeder_rc = build_seeder(Targets(target_columns),
                                                 reverse,
                                                 !is_reverse_complement,
                                                 std::vector<node_index>(nodes_rc),
@@ -267,7 +252,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             } else if (config_.forward_and_reverse_complement) {
                 assert(!is_reverse_complement);
 
-                Seeder seeder_rc = build_seeder(target_column,
+                Seeder seeder_rc = build_seeder(Targets(target_columns),
                                                 reverse,
                                                 !is_reverse_complement,
                                                 std::vector<node_index>(nodes_rc),
@@ -280,19 +265,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             }
         }
 
-        for (auto it = labeled_aligner_cores.begin(); it != labeled_aligner_cores.end(); ++it) {
-            AlignerCore &aligner_core = it.value();
-            aligner_core.flush();
-            main_aligner_core.align_aggregate([&](const auto &callback, const auto &) {
-                for (DBGAlignment &path : aligner_core.get_paths()) {
-                    assert(path.target_column <= ILabeledDBGAligner::kNTarget);
-                    if (path.target_column < ILabeledDBGAligner::kNTarget)
-                        callback(std::move(path));
-                }
-            });
-        }
-
-        auto &aggregator = main_aligner_core.get_aggregator().data();
+        auto &aggregator = aligner_core.get_aggregator().data();
         if (aggregator.size() > config_.num_top_labels) {
             std::vector<std::pair<uint64_t, score_t>> scored_labels;
             scored_labels.reserve(aggregator.size());
@@ -310,7 +283,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             }
         }
 
-        main_aligner_core.flush();
+        aligner_core.flush();
         callback(header, std::move(paths));
         ++i;
     });
@@ -318,7 +291,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
 template <class BaseSeeder, class Extender, class AlignmentCompare>
 inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
-::build_seeder(uint64_t target_column,
+::build_seeder(Vector<uint64_t>&& target_columns,
                std::string_view query,
                bool is_reverse_complement,
                std::vector<node_index>&& base_nodes,
@@ -329,7 +302,7 @@ inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             base_nodes[i] = DeBruijnGraph::npos;
     }
 
-    return Seeder(target_column, graph_, query, is_reverse_complement,
+    return Seeder(std::move(target_columns), graph_, query, is_reverse_complement,
                   std::move(base_nodes), config_);
 }
 
