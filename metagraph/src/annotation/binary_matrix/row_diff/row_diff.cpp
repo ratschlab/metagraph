@@ -46,6 +46,8 @@ template <class BaseMatrix>
 Vector<size_t>
 RowDiff<BaseMatrix>::extend_maximal(const std::vector<Row> &rows,
                                     const SetBitPositions &columns) const {
+    return BinaryMatrix::extend_maximal(rows, columns);
+
     if (rows.empty() || columns.empty())
         return {};
 
