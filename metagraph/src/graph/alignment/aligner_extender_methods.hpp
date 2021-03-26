@@ -125,6 +125,9 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
                            std::vector<DBGAlignment> &extensions) const;
 
+    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &extensions,
+                                      const AlignNode &node) const;
+
     static std::pair<size_t, size_t> get_band(const AlignNode &prev,
                                               const Column &column_prev,
                                               score_t xdrop_cutoff);

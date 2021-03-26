@@ -47,6 +47,9 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
     map_and_label_query_batch(const QueryGenerator &generate_query) const;
 };
 
+bool check_targets(const AnnotatedDBG &anno_graph,
+                   const Alignment<DeBruijnGraph::node_index> &path);
+
 class LabeledSeedFilter : public ISeedFilter {
   public:
     LabeledSeedFilter(size_t k) : k_(k) {}
@@ -142,6 +145,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
   protected:
     typedef std::vector<std::pair<NodeType, char>> Edges;
+    typedef std::vector<std::tuple<NodeType, char, size_t>> LabeledEdges;
     typedef typename DefaultColumnExtender<NodeType>::Column Column;
     typedef typename DefaultColumnExtender<NodeType>::Scores Scores;
     typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
@@ -163,6 +167,19 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         );
     }
 
+    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &,
+                                      const AlignNode &node) const override {
+        assert(align_node_to_target_.count(node));
+        size_t target_columns_idx = align_node_to_target_[node];
+
+        auto find = backtrack_start_counter_.find(target_columns_idx);
+        assert(find == backtrack_start_counter_.end()
+            || find->second <= this->config_.num_alternative_paths);
+
+        return find != backtrack_start_counter_.end()
+            && find->second == this->config_.num_alternative_paths;
+    }
+
     virtual void backtrack(score_t min_path_score,
                            AlignNode best_node,
                            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
@@ -171,19 +188,29 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
                                                    prev_starts, extensions);
         assert(extensions.size() - old_size <= 1);
-        if (extensions.size() > old_size && extensions.back().target_columns.empty()) {
+        if (extensions.size() > old_size) {
+            if (extensions.back().get_offset()) {
+                extensions.pop_back();
+                return;
+            }
+
             size_t target_columns_idx = align_node_to_target_.find(best_node)->second;
             assert(target_columns_idx < target_columns_.size());
+
+            ++backtrack_start_counter_[target_columns_idx];
             extensions.back().target_columns
                 = *(target_columns_.begin() + target_columns_idx);
+
+            assert(check_targets(anno_graph_, extensions.back()));
         }
     }
 
   private:
     const AnnotatedDBG &anno_graph_;
     mutable VectorSet<Targets, utils::VectorHash> target_columns_;
-    mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, Edges>> cached_edge_sets_;
+    mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, LabeledEdges>> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
+    mutable tsl::hopscotch_map<size_t, size_t> backtrack_start_counter_;
 
     AlignNode get_next_align_node(NodeType node, char c, size_t dist_from_origin) const;
 };
@@ -266,6 +293,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         }
 
         auto &aggregator = aligner_core.get_aggregator().data();
+        aggregator.erase(std::numeric_limits<uint64_t>::max());
         if (aggregator.size() > config_.num_top_labels) {
             std::vector<std::pair<uint64_t, score_t>> scored_labels;
             scored_labels.reserve(aggregator.size());

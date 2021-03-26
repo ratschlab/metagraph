@@ -5,27 +5,29 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "common/hashers/hash.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 namespace mtg {
 namespace graph {
 namespace align {
 
 
-inline void reverse_bit_vector(sdsl::bit_vector &v) {
-    size_t begin = 0;
-    for ( ; begin + begin + 128 <= v.size(); begin += 64) {
-        uint64_t a = sdsl::bits::rev(v.get_int(begin));
-        uint64_t b = sdsl::bits::rev(v.get_int(v.size() - begin - 64));
-        v.set_int(begin, b);
-        v.set_int(v.size() - begin - 64, a);
+bool check_targets(const AnnotatedDBG &anno_graph,
+                   const Alignment<DeBruijnGraph::node_index> &path) {
+    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
+    tsl::hopscotch_set<uint64_t> ref_targets;
+    for (const std::string &label : anno_graph.get_labels(path.get_sequence(), 1.0)) {
+        ref_targets.emplace(label_encoder.encode(label));
     }
 
-    size_t size = (v.size() % 128) / 2;
-    uint64_t a = sdsl::bits::rev(v.get_int(begin, size)) >> (64 - size);
-    uint64_t b = sdsl::bits::rev(v.get_int(v.size() - begin - size, size)) >> (64 - size);
-    v.set_int(begin, b, size);
-    v.set_int(v.size() - begin - size, a, size);
+    for (uint64_t target : path.target_columns) {
+        if (!ref_targets.count(target))
+            return false;
+    }
+
+    return true;
 }
+
 
 void
 process_seq_path(const DeBruijnGraph &graph,
@@ -142,7 +144,13 @@ Vector<uint64_t> LabeledSeedFilter::labels_to_keep(const DBGAlignment &seed) {
     std::pair<size_t, size_t> idx_range {
         seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
     };
-    for (uint64_t target : seed.target_columns) {
+
+    auto targets = seed.target_columns;
+
+    if (targets.empty())
+        targets.push_back(std::numeric_limits<uint64_t>::max());
+
+    for (uint64_t target : targets) {
         size_t found_count = 0;
         for (node_index node : seed) {
             auto emplace = visited_nodes_[target].emplace(node, idx_range);
@@ -309,6 +317,9 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     assert(!path.get_offset() || path.target_columns.empty());
     DefaultColumnExtender<NodeType>::initialize(path);
     align_node_to_target_.clear();
+    backtrack_start_counter_.clear();
+
+    assert(check_targets(anno_graph_, path));
 
     auto it = target_columns_.emplace(path.target_columns).first;
     size_t target_column_idx = it - target_columns_.begin();
@@ -341,7 +352,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     assert(target_column_idx < target_columns_.size());
 
     if ((target_columns_.begin() + target_column_idx)->empty()) {
-        std::cerr << "seed\ta\t" << *this->seed_ << " " << this->seed_->target_columns.size() << " " << depth << "\n";
         assert(this->seed_->get_offset() >= depth);
         assert(this->seed_->get_offset());
         size_t next_offset = this->seed_->get_offset() - depth;
@@ -381,7 +391,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         return edges;
 #ifndef NDEBUG
     } else {
-        std::cerr << "seed\tb\t" << *this->seed_ << " " << this->seed_->target_columns.size() << " " << depth << "\n";
         assert(this->seed_->get_offset() < depth);
         assert(this->graph_.get_node_sequence(std::get<0>(node)).find(boss::BOSS::kSentinel)
             == std::string::npos);
@@ -390,8 +399,18 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
     if (cached_edge_sets_.count(std::get<0>(node))) {
         const auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
-        if (edge_sets.count(target_column_idx))
-            return edge_sets.find(target_column_idx)->second;
+        if (edge_sets.count(target_column_idx)) {
+            const LabeledEdges &labeled_edges = edge_sets.find(target_column_idx)->second;
+            Edges edges;
+            edges.reserve(labeled_edges.size());
+            for (auto [node, c, target_column_idx] : labeled_edges) {
+                edges.emplace_back(node, c);
+                AlignNode next = get_next_align_node(node, c, depth + 1);
+                assert(!align_node_to_target_.count(next));
+                align_node_to_target_[next] = target_column_idx;
+            }
+            return edges;
+        }
     }
 
     // prefetch the next unitig
@@ -432,10 +451,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 seq += '#';
                 path.push_back(0);
                 for (const auto &[next, c] : outgoing) {
-                    if (visited.count(next) || (cached_edge_sets_.count(next)
-                            && cached_edge_sets_[next].count(target_column_idx))) {
+                    if (visited.count(next))
                         continue;
-                    }
 
                     seq.back() = c;
                     path.back() = next;
@@ -444,9 +461,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             } else {
                 seq_paths.emplace_back(std::move(seq), std::move(path));
             }
-        } else if (visited.count(outgoing[0].first)
-                || (cached_edge_sets_.count(outgoing[0].first)
-                    && cached_edge_sets_[outgoing[0].first].count(target_column_idx))) {
+        } else if (visited.count(outgoing[0].first)) {
         } else if ((path.size() && canonical
                     && (canonical->get_base_node(path.back()) == path.back())
                         != (canonical->get_base_node(outgoing[0].first)
@@ -471,6 +486,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     }
 
     Edges edges;
+    LabeledEdges labeled_edges;
     for (const auto &[seq, path] : seq_paths) {
         if (path.size() > 1) {
             assert(path[0] == std::get<0>(node));
@@ -479,65 +495,46 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 *(target_columns_.begin() + target_column_idx)
             );
             std::sort(extensions.begin(), extensions.end(), utils::LessSecond());
-            size_t max_ext = extensions.back().second;
 
-            if (max_ext <= 1)
+            if (extensions.back().second <= 1)
                 continue;
 
             edges.emplace_back(path[1], seq[this->graph_.get_k()]);
 
-            auto it = std::find_if(extensions.begin(), extensions.end(),
-                                   [&](const auto &a) { return a.second > 1; });
-            Targets targets(extensions.end() - it);
-            for (auto jt = it; jt != extensions.end(); ++jt) {
-                targets[jt - it] = jt->first;
-            }
-            Targets sorted_targets = targets;
-            std::sort(sorted_targets.begin(), sorted_targets.end());
-            size_t cur_target_column_idx = target_column_idx;
-            if (it != extensions.begin()) {
-                auto jt = target_columns_.emplace(sorted_targets).first;
-                cur_target_column_idx = jt - target_columns_.begin();
+            if (extensions.front().second == 1) {
+                auto it = std::find_if(extensions.begin(), extensions.end(),
+                                       [&](const auto &a) { return a.second > 1; });
+                Targets targets(extensions.end() - it);
+                for (auto jt = it; jt != extensions.end(); ++jt) {
+                    targets[jt - it] = jt->first;
+                }
+                std::sort(targets.begin(), targets.end());
+
+                auto jt = target_columns_.emplace(targets).first;
+                size_t cur_target_column_idx = jt - target_columns_.begin();
                 assert(cur_target_column_idx < target_columns_.size());
 
                 AlignNode next = get_next_align_node(
                     path[1], seq[this->graph_.get_k()], depth + 1);
                 assert(!align_node_to_target_.count(next));
                 align_node_to_target_[next] = cur_target_column_idx;
+                labeled_edges.emplace_back(edges.back().first, edges.back().second, cur_target_column_idx);
                 continue;
+            } else {
+                labeled_edges.emplace_back(edges.back().first, edges.back().second, target_column_idx);
             }
 
-            for (size_t i = 2; i < max_ext; ++i) {
-                if (it->second < i)
-                    break;
-
-                cached_edge_sets_[path[i - 1]][cur_target_column_idx].emplace_back(
-                    path[i], seq[i + this->graph_.get_k() - 1]
+            for (size_t i = 2; i < extensions.front().second; ++i) {
+                cached_edge_sets_[path[i - 1]][target_column_idx].emplace_back(
+                    path[i], seq[i + this->graph_.get_k() - 1], target_column_idx
                 );
-                // if (it->second < i) {
-                    // auto jt = std::find_if(it + 1, extensions.end(),
-                    //                        [&](const auto &a) { return a.second >= i; });
-                    // assert(it + targets.size() >= jt);
-                    // targets.erase(targets.begin(), targets.begin() + (jt - it));
-                    // sorted_targets = targets;
-                    // std::sort(sorted_targets.begin(), sorted_targets.end());
-                    // it = jt;
-                    // auto kt = target_columns_.emplace(targets).first;
-                    // cur_target_column_idx = kt - target_columns_.begin();
-                    // assert(cur_target_column_idx < target_columns_.size());
-                // }
-
-                AlignNode next = get_next_align_node(
-                    path[i], seq[i + this->graph_.get_k() - 1], depth + i);
-                assert(!align_node_to_target_.count(next));
-                align_node_to_target_[next] = cur_target_column_idx;
             }
         }
     }
 
     auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
     assert(!edge_sets.count(target_column_idx));
-    edge_sets[target_column_idx] = edges;
+    edge_sets[target_column_idx] = labeled_edges;
 
     return edges;
 }

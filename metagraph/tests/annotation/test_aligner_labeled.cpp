@@ -25,7 +25,23 @@ using namespace mtg::kmer;
 inline std::vector<std::string>
 get_alignment_labels(const AnnotatedDBG &anno_graph,
                      const LabeledDBGAligner<>::DBGAlignment &alignment) {
-    return anno_graph.get_labels(alignment.get_sequence(), 1.0);
+    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
+    auto labels = anno_graph.get_labels(alignment.get_sequence(), 1.0);
+    EXPECT_GE(labels.size(), alignment.target_columns.size());
+
+    std::unordered_set<uint64_t> enc_labels;
+    for (const auto &label : labels) {
+        enc_labels.emplace(label_encoder.encode(label));
+    }
+
+    std::vector<std::string> dec_labels;
+    for (uint64_t target : alignment.target_columns) {
+        EXPECT_TRUE(enc_labels.count(target))
+            << alignment << " " << label_encoder.decode(target);
+        dec_labels.emplace_back(label_encoder.decode(target));
+    }
+
+    return dec_labels;
 }
 
 template <typename GraphAnnotationPair>
@@ -80,7 +96,7 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
+            EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
         }
     }
 }
@@ -129,7 +145,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment;
+            EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
         }
     }
 }
@@ -184,7 +200,7 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment;
+                EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
             }
         }
     }

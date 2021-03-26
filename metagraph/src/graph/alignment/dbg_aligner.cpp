@@ -79,6 +79,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) {
     bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
+    constexpr uint64_t nlabel = std::numeric_limits<uint64_t>::max();
 
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
@@ -89,12 +90,17 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         // check if this seed has been explored before in an alignment and discard
         // it if so
         if (filter_seeds) {
-            seed.target_columns = seed_filter_->labels_to_keep(seed);
+            if (seed.target_columns.empty())
+                seed.target_columns.push_back(nlabel);
 
+            seed.target_columns = seed_filter_->labels_to_keep(seed);
             if (seed.target_columns.empty()) {
                 DEBUG_LOG("Skipping seed: {}", seed);
                 continue;
             }
+
+            if (seed.target_columns.size() == 1 && seed.target_columns[0] == nlabel)
+                seed.target_columns.clear();
         }
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
@@ -112,7 +118,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             }
 
             if (targets.empty())
-                targets.insert(std::numeric_limits<uint64_t>::max());
+                targets.insert(nlabel);
 
             seed_filter_->update_seed_filter([&](const auto &callback) {
                 extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {

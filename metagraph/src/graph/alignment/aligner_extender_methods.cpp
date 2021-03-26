@@ -341,6 +341,7 @@ void DefaultColumnExtender<NodeType>
             AlignNode best_node,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
             std::vector<DBGAlignment> &extensions) const {
+    assert(std::get<3>(best_node));
     size_t size = query_.size() - start_ + 1;
     Cigar cigar;
     std::vector<NodeType> path;
@@ -625,7 +626,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     std::vector<DBGAlignment> extensions;
     for (const auto &[best_node, max_score] : starts) {
-        if (prev_starts.count(best_node))
+        if (skip_backtrack_start(extensions, best_node) || prev_starts.count(best_node))
             continue;
 
         assert(table_.count(std::get<0>(best_node)));
@@ -650,12 +651,16 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
         assert(extensions.size() < 2
             || extensions.back().get_score() <= extensions[extensions.size() - 2].get_score());
-
-        if (extensions.size() == config_.num_alternative_paths)
-            break;
     }
 
     return extensions;
+}
+
+template <typename NodeType>
+bool DefaultColumnExtender<NodeType>
+::skip_backtrack_start(const std::vector<DBGAlignment> &extensions,
+                       const AlignNode &) const {
+    return extensions.size() == config_.num_alternative_paths;
 }
 
 template <typename NodeType>
