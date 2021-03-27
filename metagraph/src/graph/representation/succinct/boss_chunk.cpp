@@ -1,5 +1,7 @@
 #include "boss_chunk.hpp"
 
+#include <iostream>
+
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
@@ -137,6 +139,18 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
 }
 
 BOSS::Chunk::~Chunk() {
+    try {
+        W_.close(true);
+        last_.close(true);
+        weights_.close(true);
+
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk";
+    }
+
     // remove the temp directory, but only if it was initialized
     if (!dir_.empty())
         utils::remove_temp_dir(dir_);
@@ -208,7 +222,7 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     }
 }
 
-void BOSS::Chunk::extend(const Chunk &other) {
+void BOSS::Chunk::extend(Chunk &other) {
     assert(!weights_.size() || weights_.size() == W_.size());
     assert(!other.weights_.size() || other.weights_.size() == other.W_.size());
 
@@ -227,13 +241,11 @@ void BOSS::Chunk::extend(const Chunk &other) {
         exit(1);
     }
 
-    auto &other_W = const_cast<sdsl::int_vector_buffer<>&>(other.W_);
-    for (auto it = other_W.begin() + 1; it != other_W.end(); ++it) {
+    for (auto it = other.W_.begin() + 1; it != other.W_.end(); ++it) {
         W_.push_back(*it);
     }
 
-    auto &other_last = const_cast<sdsl::int_vector_buffer<1>&>(other.last_);
-    for (auto it = other_last.begin() + 1; it != other_last.end(); ++it) {
+    for (auto it = other.last_.begin() + 1; it != other.last_.end(); ++it) {
         last_.push_back(*it);
     }
 
@@ -243,8 +255,7 @@ void BOSS::Chunk::extend(const Chunk &other) {
     }
 
     if (other.weights_.size()) {
-        auto &other_weights = const_cast<sdsl::int_vector_buffer<>&>(other.weights_);
-        for (auto it = other_weights.begin() + 1; it != other_weights.end(); ++it) {
+        for (auto it = other.weights_.begin() + 1; it != other.weights_.end(); ++it) {
             weights_.push_back(*it);
         }
     }
@@ -356,15 +367,15 @@ bool BOSS::Chunk::load(const std::string &infbase) {
     }
 }
 
-void BOSS::Chunk::serialize(const std::string &outbase) const {
+void BOSS::Chunk::serialize(const std::string &outbase) {
     std::string fname
         = utils::remove_suffix(outbase, kFileExtension) + kFileExtension;
 
-    const_cast<sdsl::int_vector_buffer<>&>(W_).flush();
+    W_.flush();
     fs::copy(W_.filename(), fname + ".W", fs::copy_options::overwrite_existing);
-    const_cast<sdsl::int_vector_buffer<1>&>(last_).flush();
+    last_.flush();
     fs::copy(last_.filename(), fname + ".last", fs::copy_options::overwrite_existing);
-    const_cast<sdsl::int_vector_buffer<>&>(weights_).flush();
+    weights_.flush();
     fs::copy(weights_.filename(), fname + ".weights", fs::copy_options::overwrite_existing);
 
     std::ofstream outstream(fname, std::ios::binary);

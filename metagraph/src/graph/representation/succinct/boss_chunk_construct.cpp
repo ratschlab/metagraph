@@ -2,7 +2,7 @@
 
 #include <ips4o.hpp>
 
-#include "common/elias_fano_file_merger.hpp"
+#include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/logger.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
 #include "common/sorted_sets/sorted_multiset_disk.hpp"
@@ -356,9 +356,9 @@ BOSS::Chunk construct_boss_chunk(KmerCollector &kmer_collector,
 }
 
 template <typename T>
-using Encoder = common::EliasFanoEncoderBuffered<T>;
+using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
 template <typename T>
-using Decoder = common::EliasFanoDecoder<T>;
+using Decoder = mtg::elias_fano::EliasFanoDecoder<T>;
 
 /**
  * Split k-mers from chunk |chunk_fname| into Sigma^2 chunks by F and W.
@@ -464,12 +464,12 @@ generate_dummy_1_kmers(size_t k,
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
-        common::MergeDecoder<T_INT_REAL> it(F_chunks, false);
+        elias_fano::MergeDecoder<T_INT_REAL> it(F_chunks, false);
         std::vector<std::string> W_chunks;  // chunks with k-mers of the form ****F
         for (TAlphabet c = 0; c < alphabet_size; ++c) {
             W_chunks.push_back(real_F_W[c * alphabet_size + F]);
         }
-        common::ConcatDecoder<KMER_INT_REAL> sink_gen_it(W_chunks);
+        elias_fano::ConcatDecoder<KMER_INT_REAL> sink_gen_it(W_chunks);
 
         while (!it.empty()) {
             T_REAL v(it.pop());
@@ -525,7 +525,7 @@ generate_dummy_1_kmers(size_t k,
     }
 
     // remove all unmerged chunks
-    common::remove_chunks(real_F_W);
+    elias_fano::remove_chunks(real_F_W);
 
     uint64_t num_sink = 0;
     uint64_t num_source = 0;
@@ -604,6 +604,8 @@ void add_reverse_complements(size_t k,
         }
     }
 
+    uint64_t total_num_kmers = 0;
+
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < rc_set.size(); ++j) {
         // start merging original with reverse_complements kmers
@@ -613,8 +615,12 @@ void add_reverse_complements(size_t k,
         Encoder<T_INT_REAL> out(real_F_W[j] + "_new", ENCODER_BUFFER_SIZE);
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        common::merge_files(chunks_to_merge, write);
+        elias_fano::merge_files(chunks_to_merge, write);
         out.finish();
+        logger->trace("Augmented chunk {} with reverse complement k-mers."
+                      " Total number of k-mers: {}", real_F_W[j], out.size());
+        #pragma omp atomic
+        total_num_kmers += out.size();
 
         rc_set[j].reset();
         std::filesystem::remove_all(real_F_W[j] + "_rc");
@@ -624,11 +630,8 @@ void add_reverse_complements(size_t k,
                 std::filesystem::rename(real_F_W[j] + "_new" + suffix,
                                         real_F_W[j] + suffix);
         }
-
-        logger->trace("Augmented chunk {} with reverse complement k-mers."
-                      " New size: {} bytes", real_F_W[j],
-                      std::filesystem::file_size(real_F_W[j]));
     }
+    logger->trace("Total number of real k-mers: {}", total_num_kmers);
 }
 
 template <typename KMER>
@@ -688,6 +691,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
 
+    uint64_t total_num_kmers = 0;
     // merge each group of chunks into a single one for each F and W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < real_F_W.size(); ++j) {
@@ -700,16 +704,19 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         // merge chunks into a single one and remove them
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        common::merge_files(chunks_to_merge, write, true);
+        elias_fano::merge_files(chunks_to_merge, write);
         out.finish();
-        logger->trace("Merged {} chunks into {} of size: {} bytes",
-                      chunks_to_merge.size(), real_F_W[j],
-                      std::filesystem::file_size(real_F_W[j]));
+        logger->trace("Merged {} chunks into {} with {} k-mers",
+                      chunks_to_merge.size(), real_F_W[j], out.size());
+        #pragma omp atomic
+        total_num_kmers += out.size();
     }
 
     if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
         // compute reverse complements k-mers and update the blocks #real_F_W
         add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
+    } else {
+        logger->trace("Total number of real k-mers: {}", total_num_kmers);
     }
 
     // k-mer blocks split by F
@@ -759,7 +766,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
             }
 
             KMER prev_kmer(0);
-            const std::function<void(const KMER_INT &)> &write_dummy = [&](const KMER_INT &v) {
+            const std::function<void(const KMER_INT &)> write_dummy = [&](const KMER_INT &v) {
                 dummy_chunk.add(v);
                 // ***F*
                 KMER kmer(v);
@@ -774,7 +781,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
             };
             std::vector<std::string> F_chunk_names(names.begin() + F * alphabet_size,
                                                    names.begin() + (F + 1) * alphabet_size);
-            common::merge_files(F_chunk_names, write_dummy, true);
+            elias_fano::merge_files(F_chunk_names, write_dummy);
 
             dummy_chunk.finish();
             std::for_each(dummy_next_chunks.begin(), dummy_next_chunks.end(),
@@ -788,7 +795,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
         names = std::move(next_names);
     }
     // remove the last chunks with .up and .count
-    common::remove_chunks(names);
+    elias_fano::remove_chunks(names);
 
     return result;
 }
@@ -820,7 +827,7 @@ BOSS::Chunk build_boss_chunk(bool is_first_chunk,
     async_worker.enqueue([kmers_out, real_name, dummy_names]() {
         Decoder<T_INT> decoder(real_name, true);
 
-        common::Transformed<common::MergeDecoder<KMER_INT>, T_INT> decoder_dummy(
+        elias_fano::Transformed<elias_fano::MergeDecoder<KMER_INT>, T_INT> decoder_dummy(
             [](const KMER_INT &v) {
                 if constexpr(utils::is_pair_v<T>) {
                     return std::make_pair(v, 0);
@@ -874,18 +881,18 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
         // Concatenate blocks and build a full BOSS table.
         logger->trace("Concatenating blocks of real k-mers ({} -> 1)...", real_names.size());
         std::string real_name = dir/"real_kmers";
-        common::concat(real_names, real_name);
+        elias_fano::concat(real_names, real_name);
 
         logger->trace("Concatenating blocks of dummy sink k-mers ({} -> 1)...",
                       dummy_sink_names.size());
         std::vector<std::string> dummy_names { dir/"dummy_sink" };
-        common::concat(dummy_sink_names, dummy_names.back());
+        elias_fano::concat(dummy_sink_names, dummy_names.back());
 
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
             logger->trace("Concatenating blocks of dummy-{} source k-mers ({} -> 1)...",
                           i + 1, dummy_source_names[i].size());
             dummy_names.push_back(dir/fmt::format("dummy_source_{}", i));
-            common::concat(dummy_source_names[i], dummy_names.back());
+            elias_fano::concat(dummy_source_names[i], dummy_names.back());
         }
 
         return build_boss_chunk<T>(true, real_name, dummy_names,
@@ -1014,7 +1021,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
 
 #define CONSTRUCT_CHUNK(KMER) \
     using T_FINAL = utils::replace_first_t<KMER, T>; \
-    if constexpr(utils::is_instance_v<typename KmerCollector::Data, common::ChunkedWaitQueue>) { \
+    if constexpr(utils::is_instance_v<typename KmerCollector::Data, ChunkedWaitQueue>) { \
         result = construct_boss_chunk_disk<T_FINAL>(kmer_collector_, bits_per_count_, swap_dir_); \
     } else { \
         result = construct_boss_chunk<T_FINAL>(kmer_collector_, bits_per_count_, swap_dir_); \

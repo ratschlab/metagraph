@@ -50,7 +50,7 @@ void push_sequences(const std::vector<std::string> &files,
                 batcher.push_and_pay(seq.size(), seq, count);
             }
         );
-        logger->trace("Extracted all sequences from file '{}' in {} sec",
+        logger->trace("Extracted all sequences from file {} in {} sec",
                       files[i], timer.elapsed());
     }
 }
@@ -283,7 +283,7 @@ int build_graph(Config *config) {
                 [&graph](std::string_view seq) { graph->add_sequence(seq); },
                 [&graph](std::string_view seq, uint32_t) { graph->add_sequence(seq); }
             );
-            logger->trace("Extracted all sequences from file '{}' in {} sec",
+            logger->trace("Extracted all sequences from file {} in {} sec",
                           file, timer.elapsed());
         }
 
@@ -310,7 +310,7 @@ int build_graph(Config *config) {
                         );
                     }
                 );
-                logger->trace("Extracted all sequences from file '{}' in {} sec",
+                logger->trace("Extracted all sequences from file {} in {} sec",
                               file, timer.elapsed());
             }
 
@@ -445,9 +445,7 @@ int concatenate_graph_chunks(Config *config) {
     if (logger->level() <= spdlog::level::level_enum::trace) {
         print_stats(*graph);
         if (config->graph_type == Config::GraphType::SUCCINCT) {
-            print_boss_stats(
-                dynamic_cast<DBGSuccinct*>(graph.get())->get_boss()
-            );
+            print_boss_stats(dynamic_cast<DBGSuccinct&>(*graph).get_boss());
         }
     }
 

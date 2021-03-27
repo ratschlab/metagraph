@@ -1,6 +1,8 @@
 #include "bitmap_builder.hpp"
 
-#include "common/elias_fano.hpp"
+#include <iostream>
+
+#include "common/elias_fano/elias_fano.hpp"
 #include "common/utils/file_utils.hpp"
 
 
@@ -16,7 +18,16 @@ bitmap_builder_set_disk::bitmap_builder_set_disk(uint64_t size,
         set_bit_positions_(num_threads, buffer_size, tmp_dir_, -1, 16) {}
 
 bitmap_builder_set_disk::~bitmap_builder_set_disk() {
-    utils::remove_temp_dir(tmp_dir_);
+    try {
+        set_bit_positions_.clear();
+        utils::remove_temp_dir(tmp_dir_);
+
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk";
+    }
 }
 
 bitmap_builder_set_disk::InitializationData
@@ -24,8 +35,8 @@ bitmap_builder_set_disk::get_initialization_data() {
     if (merged_)
         throw std::runtime_error("ERROR: Trying to flush the bitmap twice");
 
-    mtg::common::EliasFanoEncoderBuffered<uint64_t> encoder(tmp_dir_/"merged",
-                                                            kStreamBufferSize);
+    mtg::elias_fano::EliasFanoEncoderBuffered<uint64_t> encoder(tmp_dir_/"merged",
+                                                                kStreamBufferSize);
     auto &merged = set_bit_positions_.data();
     uint64_t num_set_bits = 0;
     for (auto &it = merged.begin(); it != merged.end(); ++it) {
@@ -38,7 +49,7 @@ bitmap_builder_set_disk::get_initialization_data() {
     set_bit_positions_.clear();
 
     auto call_indexes = [&](auto callback) {
-        mtg::common::EliasFanoDecoder<uint64_t> decoder(tmp_dir_/"merged", true);
+        mtg::elias_fano::EliasFanoDecoder<uint64_t> decoder(tmp_dir_/"merged", true);
         while (std::optional<uint64_t> next = decoder.next()) {
             callback(next.value());
         }

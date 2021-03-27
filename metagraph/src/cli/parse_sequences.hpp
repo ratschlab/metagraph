@@ -32,7 +32,7 @@ void parse_sequences(const std::string &file,
                      const Config &config,
                      Callback call_sequence,
                      CallWeighted call_weighted_sequence) {
-    mtg::common::logger->trace("Parsing '{}'", file);
+    mtg::common::logger->trace("Parsing {}", file);
 
     if (config.graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
         mtg::common::logger->error("Primary graphs can only be constructed from"
@@ -80,7 +80,7 @@ void parse_sequences(const std::string &file,
             file,
             [&](std::string_view sequence, uint32_t count) {
                 if (!warning_different_k && sequence.size() != config.k) {
-                    mtg::common::logger->warn("k-mers parsed from KMC database '{}' have "
+                    mtg::common::logger->warn("k-mers parsed from KMC database {} have "
                                              "length {} but graph is constructed for k={}",
                                              file, sequence.size(), config.k);
                     warning_different_k = true;
@@ -106,13 +106,13 @@ void parse_sequences(const std::string &file,
         if (config.count_kmers
             && std::filesystem::exists(utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz")) {
 
-            mtg::common::logger->trace("Parsing k-mer counts from '{}'",
+            mtg::common::logger->trace("Parsing k-mer counts from {}",
                 utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
             );
             read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
                 [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
                     if (k != config.k) {
-                        mtg::common::logger->error("File '{}' contains counts for k-mers of "
+                        mtg::common::logger->error("File {} contains counts for k-mers of "
                                                   "length {} but graph is constructed with k={}",
                                                   file, k, config.k);
                         exit(1);

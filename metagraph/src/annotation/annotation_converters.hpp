@@ -31,24 +31,25 @@ std::unique_ptr<StaticAnnotation> convert(ColumnCompressed<Label>&& annotation);
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename);
 
+// TODO: remove
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_simple_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
-
+// TODO: remove
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_simple_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t grouping_arity = 2,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1);
-
+// TODO: remove
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_greedy_BRWT(ColumnCompressed<std::string>&& annotation,
                        size_t num_parallel_nodes = 1,
                        size_t num_threads = 1,
                        uint64_t num_rows_subsampled = 1'000'000);
-
+// TODO: remove
 std::unique_ptr<RowDiffBRWTAnnotator>
 convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
                        size_t num_parallel_nodes = 1,
@@ -58,7 +59,7 @@ convert_to_greedy_BRWT(RowDiffColumnAnnotator &&annotation,
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(const std::vector<std::string> &annotation_files,
-                const std::string &linkage_matrix_file,
+                const std::vector<std::vector<uint64_t>> &linkage_matrix,
                 size_t num_parallel_nodes = 1,
                 size_t num_threads = 1,
                 const std::filesystem::path &tmp_dir = "");
