@@ -36,9 +36,6 @@ class BinaryMatrix {
     // get all selected rows appended with -1 and concatenated
     virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
-    virtual Vector<size_t> extend_maximal(const std::vector<Row> &rows,
-                                          const SetBitPositions &columns) const;
-
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
 

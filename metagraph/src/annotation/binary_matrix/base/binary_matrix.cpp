@@ -23,17 +23,6 @@ BinaryMatrix::has_column(const std::vector<Row> &row_ids, const SetBitPositions 
     return row_masks;
 }
 
-Vector<size_t> BinaryMatrix::extend_maximal(const std::vector<Row> &rows,
-                                            const SetBitPositions &columns) const {
-    Vector<size_t> result(columns.size(), 0);
-    std::vector<sdsl::bit_vector> masks = has_column(rows, columns);
-    for (size_t j = 0; j < columns.size(); ++j) {
-        sdsl::bit_vector &mask = masks[j];
-        for ( ; result[j] < mask.size() && mask[result[j]]; ++result[j]) {}
-    }
-    return result;
-}
-
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());

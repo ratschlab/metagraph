@@ -80,7 +80,8 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<sdsl::bit_vector> BRWT::has_column(const std::vector<Row> &row_ids, const SetBitPositions &columns) const {
+std::vector<sdsl::bit_vector> BRWT::has_column(const std::vector<Row> &row_ids,
+                                               const SetBitPositions &columns) const {
     std::vector<sdsl::bit_vector> results;
     results.reserve(columns.size());
     for (size_t i = 0; i < columns.size(); ++i) {

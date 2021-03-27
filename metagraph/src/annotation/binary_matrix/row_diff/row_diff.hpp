@@ -76,8 +76,6 @@ class RowDiff : public IRowDiff {
 
     bool get(Row row, Column column) const override;
     std::vector<sdsl::bit_vector> has_column(const std::vector<Row> &rows, const SetBitPositions &columns) const override;
-    Vector<size_t> extend_maximal(const std::vector<Row> &rows,
-                                  const SetBitPositions &columns) const override;
 
     /**
      * Returns the given column.
