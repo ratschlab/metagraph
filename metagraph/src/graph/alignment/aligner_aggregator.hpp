@@ -71,9 +71,9 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         auto &cur_queue = path_queue_[target];
 
         if (cur_queue.size() < config_.num_alternative_paths) {
-            cur_queue.emplace(alignment);
+            cur_queue.emplace(std::move(this_alignment));
         } else if (!cmp_.operator()(alignment, cur_queue.minimum())) {
-            cur_queue.update(cur_queue.begin(), alignment);
+            cur_queue.update(cur_queue.begin(), std::move(this_alignment));
         }
     };
 
