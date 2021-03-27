@@ -91,36 +91,37 @@ process_seq_path(const DeBruijnGraph &graph,
     }
 }
 
-std::vector<std::pair<uint64_t, size_t>>
+std::vector<std::vector<std::pair<uint64_t, size_t>>>
 traverse_maximal_by_label(const AnnotatedDBG &anno_graph,
-                          const std::string &seq,
-                          const std::vector<DeBruijnGraph::node_index> &nodes,
+                          const std::vector<std::pair<std::string, std::vector<DeBruijnGraph::node_index>>> &seq_paths,
                           const Vector<uint64_t> &targets) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    assert(seq.size() == nodes.size() + graph.get_k() - 1);
-    assert(std::find(nodes.begin(), nodes.end(), DeBruijnGraph::npos) == nodes.end());
+    std::vector<AnnotatedDBG::row_index> rows;
 
-    assert(std::all_of(nodes.begin(), nodes.end(), [&](auto node) {
-        return graph.get_node_sequence(node).back() != boss::BOSS::kSentinel;
-    }));
+    for (const auto &[seq, nodes] : seq_paths) {
+        assert(seq.size() == nodes.size() + graph.get_k() - 1);
+        assert(std::find(nodes.begin(), nodes.end(), DeBruijnGraph::npos) == nodes.end());
 
-    std::vector<AnnotatedDBG::row_index> rows(nodes.size());
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph)) {
-        for (size_t i = 0; i < nodes.size(); ++i) {
-            rows[i] = AnnotatedDBG::graph_to_anno_index(canonical->get_base_node(nodes[i]));
+        assert(std::all_of(nodes.begin(), nodes.end(), [&](auto node) {
+            return graph.get_node_sequence(node).back() != boss::BOSS::kSentinel;
+        }));
+
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph)) {
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                rows.push_back(AnnotatedDBG::graph_to_anno_index(canonical->get_base_node(nodes[i])));
+            }
+        } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
+            for (DeBruijnGraph::node_index node : nodes) {
+                rows.push_back(AnnotatedDBG::graph_to_anno_index(node));
+            }
+        } else {
+            assert(seq.front() == '#');
+            graph.map_to_nodes(graph.get_node_sequence(nodes[0]) + seq.substr(graph.get_k()),
+                               [&](DeBruijnGraph::node_index node) {
+                assert(node);
+                rows.push_back(AnnotatedDBG::graph_to_anno_index(node));
+            });
         }
-    } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
-        std::transform(nodes.begin(), nodes.end(), rows.begin(),
-                       AnnotatedDBG::graph_to_anno_index);
-    } else {
-        assert(seq.front() == '#');
-        size_t i = 0;
-        graph.map_to_nodes(graph.get_node_sequence(nodes[0]) + seq.substr(graph.get_k()),
-                           [&](DeBruijnGraph::node_index node) {
-            assert(node);
-            rows[i++] = AnnotatedDBG::graph_to_anno_index(node);
-        });
-        assert(i == nodes.size());
     }
 
     assert(std::all_of(rows.begin(), rows.end(), [&](auto row) {
@@ -128,12 +129,26 @@ traverse_maximal_by_label(const AnnotatedDBG &anno_graph,
             != boss::BOSS::kSentinel;
     }));
 
-    auto extensions = anno_graph.get_annotation().get_matrix().extend_maximal(rows, targets);
-    std::vector<std::pair<uint64_t, size_t>> result;
-    result.reserve(extensions.size());
-    for (size_t i = 0; i < extensions.size(); ++i) {
-        result.emplace_back(targets[i], extensions[i]);
+
+    std::vector<std::vector<std::pair<uint64_t, size_t>>> result(seq_paths.size());
+
+    const auto &matrix = anno_graph.get_annotation().get_matrix();
+    for (uint64_t target : targets) {
+        size_t l = 0;
+        size_t i = 0;
+        result[l].emplace_back(target, 1);
+        call_ones(matrix.has_column(rows, target), [&](size_t j) {
+            assert(i + seq_paths.at(l).second.size() >= j);
+            if (j == i + seq_paths[l].second.size()) {
+                i += seq_paths[++l].second.size();
+                result[l].emplace_back(target, 1);
+            } else {
+                result[l].back().second = j - i + 1;
+            }
+
+        });
     }
+
     return result;
 }
 
@@ -286,8 +301,13 @@ auto ILabeledDBGAligner
     }
 
     if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-        for (auto &vmap : batch_labels) {
-            for (auto it = vmap.begin(); it != vmap.end(); ++it) {
+        for (size_t i = 0; i < batch_labels.size(); ++i) {
+            assert(batch_labels[i].size()
+                || (std::all_of(query_nodes[i].first.begin(), query_nodes[i].first.end(),
+                                [](auto j) { return !j; })
+                    && std::all_of(query_nodes[i].second.begin(), query_nodes[i].second.end(),
+                                   [](auto j) { return !j; })));
+            for (auto it = batch_labels[i].begin(); it != batch_labels[i].end(); ++it) {
                 it.value().second = it.value().first;
                 reverse_bit_vector(it.value().second);
             }
@@ -487,13 +507,14 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
     Edges edges;
     LabeledEdges labeled_edges;
-    for (const auto &[seq, path] : seq_paths) {
+    auto all_extensions = traverse_maximal_by_label(
+        anno_graph_, seq_paths, *(target_columns_.begin() + target_column_idx)
+    );
+    for (size_t j = 0; j < seq_paths.size(); ++j) {
+        const auto &[seq, path] = seq_paths[j];
+        auto &extensions = all_extensions[j];
         if (path.size() > 1) {
             assert(path[0] == std::get<0>(node));
-            auto extensions = traverse_maximal_by_label(
-                anno_graph_, seq, path,
-                *(target_columns_.begin() + target_column_idx)
-            );
             std::sort(extensions.begin(), extensions.end(), utils::LessSecond());
 
             if (extensions.back().second <= 1)

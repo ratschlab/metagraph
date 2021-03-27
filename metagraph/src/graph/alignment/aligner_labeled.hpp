@@ -227,7 +227,9 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
+        const auto &[query_nodes_pair, target_columns] = mapped_batch;
         assert(config_.num_alternative_paths);
+
         LabeledSeedFilter seed_filter(this->graph_.get_k());
         AlignerCore aligner_core(graph_, config_, seed_filter, query, is_reverse_complement);
         DBGQueryAlignment &paths = aligner_core.get_paths();
@@ -238,9 +240,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 
         Extender extender(anno_graph_, config_, this_query);
         Extender extender_rc(anno_graph_, config_, reverse);
-
-        const auto &[query_nodes_pair, target_columns] = mapped_batch;
-        assert(target_columns[i].size());
 
         const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 
