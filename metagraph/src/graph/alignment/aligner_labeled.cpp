@@ -406,8 +406,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             for (auto [node, c, target_column_idx] : labeled_edges) {
                 edges.emplace_back(node, c);
                 AlignNode next = get_next_align_node(node, c, depth + 1);
-                assert(!align_node_to_target_.count(next));
-                align_node_to_target_[next] = target_column_idx;
+                if (!align_node_to_target_.count(next))
+                    align_node_to_target_[next] = target_column_idx;
             }
             return edges;
         }

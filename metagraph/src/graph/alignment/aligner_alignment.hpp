@@ -200,7 +200,7 @@ bool spell_path(const DeBruijnGraph &graph,
 
 struct LocalAlignmentLess {
     template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) const {
         // 1) score is less, or
         // 2) more of the query is covered, or
         // 3) if it is in the reverse orientation, or
@@ -214,7 +214,7 @@ struct LocalAlignmentLess {
 
 struct LocalAlignmentGreater {
     template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) const {
         // 1) score is higher, or
         // 2) less of the query is covered, or
         // 3) if it is in the forward orientation, or

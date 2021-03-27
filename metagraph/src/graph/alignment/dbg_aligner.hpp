@@ -134,11 +134,11 @@ class SeedAndExtendAlignerCore {
             paths_(std::forward<Args>(args)...),
             aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
 
-    void flush() {
+    void flush(const std::function<bool()> &terminate = []() { return false; }) {
         aggregator_.call_alignments([&](auto&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
             paths_.emplace_back(std::move(alignment));
-        });
+        }, terminate);
     }
 
     DBGQueryAlignment& get_paths() { return paths_; }
@@ -204,8 +204,9 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
             graph_, config_, seed_filter, query, is_reverse_complement
         );
-        std::string_view this_query = aligner_core.get_paths().get_query(is_reverse_complement);
-        std::string_view reverse = aligner_core.get_paths().get_query(!is_reverse_complement);
+        auto &paths = aligner_core.get_paths();
+        std::string_view this_query = paths.get_query(is_reverse_complement);
+        std::string_view reverse = paths.get_query(!is_reverse_complement);
         assert(this_query == query);
 
         std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
@@ -216,7 +217,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             std::string dummy(query);
             nodes_rc = nodes;
             reverse_complement_seq_path(graph_, dummy, nodes_rc);
-            assert(dummy == aligner_core.get_paths().get_query(true));
+            assert(dummy == paths.get_query(true));
             assert(nodes_rc.size() == nodes.size());
         }
 
@@ -251,12 +252,12 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             aligner_core.align_one_direction(is_reverse_complement, seeder, extender);
         }
 
-        assert(aligner_core.get_aggregator().num_targets() <= 1);
+        aligner_core.flush([this,&paths]() {
+            assert(paths.size() <= config_.num_alternative_paths);
+            return paths.size() == config_.num_alternative_paths;
+        });
 
-        aligner_core.flush();
-        assert(aligner_core.get_paths().size() <= config_.num_alternative_paths);
-
-        callback(header, std::move(aligner_core.get_paths()));
+        callback(header, std::move(paths));
     });
 }
 

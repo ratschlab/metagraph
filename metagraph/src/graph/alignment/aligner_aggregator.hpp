@@ -34,7 +34,8 @@ class AlignmentAggregator {
     const DBGAlignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
 
-    void call_alignments(const std::function<void(DBGAlignment&&)> &callback);
+    void call_alignments(const std::function<void(DBGAlignment&&)> &callback,
+                         const std::function<bool()> &terminate = []() { return false; });
 
     size_t size() const {
         size_t size = 0;
@@ -56,6 +57,7 @@ class AlignmentAggregator {
     const DBGAlignerConfig &config_;
 
     VectorMap<uint64_t, PathQueue> path_queue_;
+    AlignmentCompare cmp_;
 };
 
 
@@ -70,7 +72,7 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 
         if (cur_queue.size() < config_.num_alternative_paths) {
             cur_queue.emplace(alignment);
-        } else if (!AlignmentCompare()(alignment, cur_queue.minimum())) {
+        } else if (!cmp_.operator()(alignment, cur_queue.minimum())) {
             cur_queue.update(cur_queue.begin(), alignment);
         }
     };
@@ -87,8 +89,12 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
 ::get_min_path_score(const DBGAlignment &alignment) const -> score_t {
-    if (alignment.target_columns.empty())
-        return config_.min_path_score;
+    if (alignment.target_columns.empty()) {
+        auto find = path_queue_.find(std::numeric_limits<uint64_t>::max());
+        return find == path_queue_.end() || find->second.empty()
+            ? config_.min_path_score
+            : find->second.minimum().get_score();
+    }
 
     score_t min_score = std::numeric_limits<score_t>::max();
     for (uint64_t target : alignment.target_columns) {
@@ -104,13 +110,44 @@ inline auto AlignmentAggregator<NodeType, AlignmentCompare>
 
 template <typename NodeType, class AlignmentCompare>
 inline void AlignmentAggregator<NodeType, AlignmentCompare>
-::call_alignments(const std::function<void(DBGAlignment&&)> &callback) {
-    for (auto it = path_queue_.begin(); it != path_queue_.end(); ++it) {
-        while (it.value().size()) {
-            callback(DBGAlignment(it.value().maximum()));
-            it.value().pop_maximum();
+::call_alignments(const std::function<void(DBGAlignment&&)> &callback,
+                  const std::function<bool()> &terminate) {
+    typedef std::pair<uint64_t, PathQueue> queue_value;
+    auto queues = const_cast<std::vector<queue_value>&&>(path_queue_.values_container());
+
+    if (queues.empty())
+        return;
+
+    auto cmp = [acmp=AlignmentCompare()](const queue_value &a, const queue_value &b) {
+        return b.second.size()
+            && (a.second.empty()
+                || acmp.operator()(a.second.maximum(), b.second.maximum()));
+    };
+
+    std::make_heap(queues.begin(), queues.end(), cmp);
+
+    auto begin = queues.begin();
+    auto end = queues.end();
+    while (!terminate() && queues.size() && queues[0].second.size()) {
+        callback(DBGAlignment(queues[0].second.maximum()));
+        queues[0].second.pop_maximum();
+        std::pop_heap(queues.begin(), queues.end(), cmp);
+        if (queues.back().second.empty()) {
+            queues.pop_back();
+            if (queues.empty())
+                break;
+
+            begin = queues.begin();
+            end = queues.end();
+        }
+
+        if (--end == begin && begin->second.size()) {
+            end = queues.end();
+            std::make_heap(begin, end, cmp);
         }
     }
+
+    path_queue_.clear();
 }
 
 
