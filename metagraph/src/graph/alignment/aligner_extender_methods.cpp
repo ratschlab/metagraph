@@ -604,7 +604,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 assert(xdrop_cutoff_ == best_start.second - config_.xdrop);
 
                 if (*max_it >= xdrop_cutoff_ && extendable) {
-                    if (outgoing.size() == 1) {
+                    if (outgoing.size() == 1
+                            && (stack.empty() || *max_it > stack.top().second)) {
                         prev = cur;
                         continue_traversal = true;
                     } else {
