@@ -132,12 +132,13 @@ traverse_maximal_by_label(const AnnotatedDBG &anno_graph,
 
     std::vector<std::vector<std::pair<uint64_t, size_t>>> result(seq_paths.size());
 
-    const auto &matrix = anno_graph.get_annotation().get_matrix();
-    for (uint64_t target : targets) {
+    auto masks = anno_graph.get_annotation().get_matrix().has_column(rows, targets);
+    for (size_t m = 0; m < masks.size(); ++m) {
+        uint64_t target = targets[m];
         size_t l = 0;
         size_t i = 0;
         result[l].emplace_back(target, 1);
-        call_ones(matrix.has_column(rows, target), [&](size_t j) {
+        call_ones(masks[m], [&](size_t j) {
             assert(i + seq_paths.at(l).second.size() >= j);
             if (j == i + seq_paths[l].second.size()) {
                 i += seq_paths[++l].second.size();

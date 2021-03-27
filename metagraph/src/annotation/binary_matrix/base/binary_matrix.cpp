@@ -7,23 +7,28 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-sdsl::bit_vector
-BinaryMatrix::has_column(const std::vector<Row> &row_ids, Column column) const {
-    sdsl::bit_vector row_mask(row_ids.size(), false);
+std::vector<sdsl::bit_vector>
+BinaryMatrix::has_column(const std::vector<Row> &row_ids, const SetBitPositions &columns) const {
+    std::vector<sdsl::bit_vector> row_masks;
+    row_masks.reserve(columns.size());
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        if (get(row_ids[i], column))
-            row_mask[i] = true;
+    for (Column column : columns) {
+        sdsl::bit_vector &row_mask = row_masks.emplace_back(row_ids.size(), false);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (get(row_ids[i], column))
+                row_mask[i] = true;
+        }
     }
 
-    return row_mask;
+    return row_masks;
 }
 
 Vector<size_t> BinaryMatrix::extend_maximal(const std::vector<Row> &rows,
                                             const SetBitPositions &columns) const {
     Vector<size_t> result(columns.size(), 0);
+    std::vector<sdsl::bit_vector> masks = has_column(rows, columns);
     for (size_t j = 0; j < columns.size(); ++j) {
-        sdsl::bit_vector mask = has_column(rows, columns[j]);
+        sdsl::bit_vector &mask = masks[j];
         for ( ; result[j] < mask.size() && mask[result[j]]; ++result[j]) {}
     }
     return result;

@@ -79,7 +79,7 @@ RowDiff<BaseMatrix>::extend_maximal(const std::vector<Row> &rows,
 
         Vector<size_t> result(columns.size());
         for (size_t i = 0; i < columns.size(); ++i) {
-            sdsl::bit_vector mask = diffs_.has_column(rows, columns[i]);
+            sdsl::bit_vector mask = diffs_.has_column(rows, Vector<uint64_t>{ columns[i] })[0];
             if (!num_anchors) {
                 result[i] = std::min(rows.size(), sdsl::util::next_bit(mask, 0) + 1);
             } else {
@@ -111,7 +111,7 @@ RowDiff<BaseMatrix>::extend_maximal(const std::vector<Row> &rows,
     if (reverse) {
         Vector<size_t> result(columns.size());
         for (size_t i = 0; i < columns.size(); ++i) {
-            sdsl::bit_vector mask = diffs_.has_column(rows, columns[i]);
+            sdsl::bit_vector mask = diffs_.has_column(rows, SetBitPositions{ columns[i] })[0];
             if (!num_anchors) {
                 result[i] = sdsl::util::next_bit(mask, 1);
             } else {
@@ -143,12 +143,16 @@ template <typename Key, class Hash = std::hash<Key>, class EqualTo = std::equal_
 using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, Size>;
 
 template <class BaseMatrix>
-sdsl::bit_vector
-RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) const {
-    sdsl::bit_vector result(row_ids.size(), false);
+std::vector<sdsl::bit_vector>
+RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, const SetBitPositions &columns) const {
+    std::vector<sdsl::bit_vector> results;
+    results.reserve(columns.size());
+    for (size_t i = 0; i < columns.size(); ++i) {
+        results.emplace_back(row_ids.size(), false);
+    }
 
     if (row_ids.empty())
-        return result;
+        return results;
 
     const graph::boss::BOSS &boss = graph_->get_boss();
 
@@ -182,18 +186,22 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids, Column column) 
         }
     }
 
-    sdsl::bit_vector row_set_mask = diffs_.has_column(row_set.values_container(), column);
+    std::vector<sdsl::bit_vector> row_set_masks = diffs_.has_column(row_set.values_container(), columns);
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        bool found = row_set_mask[rd_paths_trunc[i].back()];
-        for (auto it = rd_paths_trunc[i].rbegin() + 1; it != rd_paths_trunc[i].rend(); ++it) {
-            row_set_mask[*it] = (found ^= row_set_mask[*it]);
+    for (size_t j = 0; j < columns.size(); ++j) {
+        sdsl::bit_vector &result = results[j];
+        sdsl::bit_vector &row_set_mask = row_set_masks[j];
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            bool found = row_set_mask[rd_paths_trunc[i].back()];
+            for (auto it = rd_paths_trunc[i].rbegin() + 1; it != rd_paths_trunc[i].rend(); ++it) {
+                row_set_mask[*it] = (found ^= row_set_mask[*it]);
+            }
+
+            result[i] = found;
         }
-
-        result[i] = found;
     }
 
-    return result;
+    return results;
 }
 
 template

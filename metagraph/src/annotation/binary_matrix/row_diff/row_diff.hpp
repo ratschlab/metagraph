@@ -75,7 +75,7 @@ class RowDiff : public IRowDiff {
     void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
     bool get(Row row, Column column) const override;
-    sdsl::bit_vector has_column(const std::vector<Row> &rows, Column column) const override;
+    std::vector<sdsl::bit_vector> has_column(const std::vector<Row> &rows, const SetBitPositions &columns) const override;
     Vector<size_t> extend_maximal(const std::vector<Row> &rows,
                                   const SetBitPositions &columns) const override;
 

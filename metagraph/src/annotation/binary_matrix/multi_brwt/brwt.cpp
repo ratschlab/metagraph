@@ -3,6 +3,8 @@
 #include <queue>
 #include <numeric>
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
@@ -78,25 +80,31 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-sdsl::bit_vector BRWT::has_column(const std::vector<Row> &row_ids, Column column) const {
-    assert(column < num_columns());
+std::vector<sdsl::bit_vector> BRWT::has_column(const std::vector<Row> &row_ids, const SetBitPositions &columns) const {
+    std::vector<sdsl::bit_vector> results;
+    results.reserve(columns.size());
+    for (size_t i = 0; i < columns.size(); ++i) {
+        assert(columns[i] < num_columns());
+        results.emplace_back(row_ids.size(), false);
+    }
 
-    sdsl::bit_vector result(row_ids.size(), false);
     auto num_nonzero_rows = nonzero_rows_->num_set_bits();
 
     // check if the column is empty
     if (!num_nonzero_rows)
-        return result;
+        return results;
 
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the overlap with the index column
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            if ((*nonzero_rows_)[row_ids[i]])
-                result[i] = true;
+        for (sdsl::bit_vector &result : results) {
+            for (size_t i = 0; i < row_ids.size(); ++i) {
+                if ((*nonzero_rows_)[row_ids[i]])
+                    result[i] = true;
+            }
         }
 
-        return result;
+        return results;
     }
 
     std::vector<Row> child_rows;
@@ -109,17 +117,28 @@ sdsl::bit_vector BRWT::has_column(const std::vector<Row> &row_ids, Column column
         }
     }
 
-    auto child_node = assignments_.group(column);
-    auto child_rows_mask = child_nodes_[child_node]->has_column(
-        child_rows, assignments_.rank(column)
-    );
-
-    for (size_t i = 0; i < child_rows.size(); ++i) {
-        if (child_rows_mask[i])
-            result[child_row_ids[i]] = true;
+    tsl::hopscotch_map<size_t, std::pair<SetBitPositions, SetBitPositions>> children;
+    for (size_t j = 0; j < columns.size(); ++j) {
+        auto &cur = children[assignments_.group(columns[j])];
+        cur.first.push_back(j);
+        cur.second.push_back(assignments_.rank(columns[j]));
     }
 
-    return result;
+    for (const auto &[child_node, assignments] : children) {
+        const auto &[orig_idx, child_columns] = assignments;
+        auto child_rows_masks = child_nodes_[child_node]->has_column(
+            child_rows, child_columns
+        );
+
+        for (size_t j = 0; j < orig_idx.size(); ++j) {
+            for (size_t i = 0; i < child_rows.size(); ++i) {
+                if (child_rows_masks[j][i])
+                    results[orig_idx[j]][child_row_ids[i]] = true;
+            }
+        }
+    }
+
+    return results;
 }
 
 std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) const {

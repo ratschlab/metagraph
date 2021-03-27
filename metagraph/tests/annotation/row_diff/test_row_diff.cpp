@@ -153,14 +153,16 @@ TEST(RowDiff, HasColumn) {
         }
     }
 
-    for (uint64_t i : { 0, 1 }) {
-        auto it = has_columns[i].begin();
-        call_ones(annot.has_column(rows, i), [&](auto j) {
-            ASSERT_NE(has_columns[i].end(), it);
+    Vector<uint64_t> columns_select{ 0, 1};
+    auto masks = annot.has_column(rows, columns_select);
+    for (size_t i = 0; i < columns_select.size(); ++i) {
+        auto it = has_columns[columns_select[i]].begin();
+        call_ones(masks[i], [&](auto j) {
+            ASSERT_NE(has_columns[columns_select[i]].end(), it);
             EXPECT_EQ(*it, rows[j]);
             ++it;
         });
-        EXPECT_EQ(has_columns[i].end(), it);
+        EXPECT_EQ(has_columns[columns_select[i]].end(), it);
     }
 }
 
