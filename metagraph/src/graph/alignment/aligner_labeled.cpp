@@ -522,33 +522,49 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
             edges.emplace_back(path[1], seq[this->graph_.get_k()]);
 
-            if (extensions.front().second == 1) {
-                auto it = std::find_if(extensions.begin(), extensions.end(),
-                                       [&](const auto &a) { return a.second > 1; });
-                Targets targets(extensions.end() - it);
-                for (auto jt = it; jt != extensions.end(); ++jt) {
-                    targets[jt - it] = jt->first;
-                }
-                std::sort(targets.begin(), targets.end());
+            auto it = std::find_if(extensions.begin(), extensions.end(),
+                                   [&](const auto &a) { return a.second > 1; });
+            Targets targets(extensions.end() - it);
+            for (auto jt = it; jt != extensions.end(); ++jt) {
+                targets[jt - it] = jt->first;
+            }
+            std::sort(targets.begin(), targets.end());
+            auto jt = target_columns_.emplace(targets).first;
+            size_t cur_target_column_idx = jt - target_columns_.begin();
+            assert(cur_target_column_idx < target_columns_.size());
 
-                auto jt = target_columns_.emplace(targets).first;
-                size_t cur_target_column_idx = jt - target_columns_.begin();
-                assert(cur_target_column_idx < target_columns_.size());
-
+            if (it != extensions.begin()) {
                 AlignNode next = get_next_align_node(
                     path[1], seq[this->graph_.get_k()], depth + 1);
                 assert(!align_node_to_target_.count(next));
                 align_node_to_target_[next] = cur_target_column_idx;
-                labeled_edges.emplace_back(edges.back().first, edges.back().second, cur_target_column_idx);
-                continue;
-            } else {
-                labeled_edges.emplace_back(edges.back().first, edges.back().second, target_column_idx);
             }
 
+            labeled_edges.emplace_back(edges.back().first, edges.back().second, cur_target_column_idx);
+
             for (size_t i = 2; i < extensions.front().second; ++i) {
-                cached_edge_sets_[path[i - 1]][target_column_idx].emplace_back(
-                    path[i], seq[i + this->graph_.get_k() - 1], target_column_idx
+                cached_edge_sets_[path[i - 1]][cur_target_column_idx].emplace_back(
+                    path[i], seq[i + this->graph_.get_k() - 1], cur_target_column_idx
                 );
+                if (it->second < i) {
+                    auto jt = std::find_if(it + 1, extensions.end(),
+                                           [&](const auto &a) { return a.second >= i; });
+                    assert(it + targets.size() >= jt);
+                    targets.resize(extensions.end() - jt);
+                    for (auto kt = jt; kt != extensions.end(); ++kt) {
+                        targets[kt - jt] = kt->first;
+                    }
+                    std::sort(targets.begin(), targets.end());
+                    it = jt;
+                    auto kt = target_columns_.emplace(targets).first;
+                    cur_target_column_idx = kt - target_columns_.begin();
+                    assert(cur_target_column_idx < target_columns_.size());
+                }
+
+                AlignNode next = get_next_align_node(
+                    path[i], seq[i + this->graph_.get_k() - 1], depth + i);
+                assert(!align_node_to_target_.count(next));
+                align_node_to_target_[next] = cur_target_column_idx;
             }
         }
     }
