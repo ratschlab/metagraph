@@ -137,7 +137,8 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
-                          std::string_view query);
+                          std::string_view query,
+                          LabeledSeedFilter &seed_filter);
 
     virtual ~LabeledColumnExtender() {}
 
@@ -207,6 +208,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     const AnnotatedDBG &anno_graph_;
+    std::shared_ptr<LabeledSeedFilter> seed_filter_;
     mutable VectorSet<Targets, utils::VectorHash> target_columns_;
     mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, LabeledEdges>> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
@@ -238,8 +240,8 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
 
-        Extender extender(anno_graph_, config_, this_query);
-        Extender extender_rc(anno_graph_, config_, reverse);
+        Extender extender(anno_graph_, config_, this_query, seed_filter);
+        Extender extender_rc(anno_graph_, config_, reverse, seed_filter);
 
         const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 

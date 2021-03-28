@@ -358,9 +358,11 @@ template <typename NodeType>
 LabeledColumnExtender<NodeType>
 ::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                         const DBGAlignerConfig &config,
-                        std::string_view query)
+                        std::string_view query,
+                        LabeledSeedFilter &seed_filter)
       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
-        anno_graph_(anno_graph) {}
+        anno_graph_(anno_graph),
+        seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter) {}
 
 template <typename NodeType>
 void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
@@ -429,7 +431,25 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
         auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
 
+        Edges out_edges;
+        out_edges.reserve(edges.size());
         for (size_t i = 0; i < rows.size(); ++i) {
+            DBGAlignment dummy_seed(
+                std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
+                std::vector<node_index>{ edges[i].first },
+                std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
+                this->seed_->get_orientation()
+            );
+            dummy_seed.target_columns = std::move(annotation[i]);
+            annotation[i] = seed_filter_->labels_to_keep(dummy_seed);
+            if (annotation[i].empty() || (annotation[i].size() == 1
+                    && annotation[i][0] == std::numeric_limits<uint64_t>::max())) {
+                DEBUG_LOG("Skipping seed: {}", dummy_seed);
+                continue;
+            }
+
+            out_edges.emplace_back(std::move(edges[i]));
+
             AlignNode next = get_next_align_node(edges[i].first, edges[i].second, depth + 1);
             auto it = target_columns_.emplace(annotation[i]).first;
             target_column_idx = it - target_columns_.begin();
@@ -438,7 +458,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             align_node_to_target_[next] = target_column_idx;
         }
 
-        return edges;
+        return out_edges;
 #ifndef NDEBUG
     } else {
         assert(this->seed_->get_offset() < depth);
