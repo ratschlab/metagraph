@@ -299,7 +299,7 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
             std::vector<std::pair<uint64_t, score_t>> scored_labels;
             scored_labels.reserve(aggregator.size());
             for (const auto &[target, path_queue] : aggregator) {
-                scored_labels.emplace_back(target, path_queue.maximum().get_score());
+                scored_labels.emplace_back(target, path_queue.maximum()->get_score());
             }
 
             std::sort(scored_labels.begin(), scored_labels.end(), utils::GreaterSecond());
