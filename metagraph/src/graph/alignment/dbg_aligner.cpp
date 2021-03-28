@@ -57,7 +57,7 @@ Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
     if (found_count == seed.size())
         return {};
 
-    return { 0 };
+    return { std::numeric_limits<uint64_t>::max() };
 }
 
 void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
@@ -90,9 +90,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         // check if this seed has been explored before in an alignment and discard
         // it if so
         if (filter_seeds) {
-            if (seed.target_columns.empty())
-                seed.target_columns.push_back(nlabel);
-
             seed.target_columns = seed_filter_->labels_to_keep(seed);
             if (seed.target_columns.empty()) {
                 DEBUG_LOG("Skipping seed: {}", seed);
@@ -114,7 +111,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             tsl::hopscotch_set<uint64_t> targets;
             for (const DBGAlignment &extension : extensions) {
                 targets.insert(extension.target_columns.begin(),
-                              extension.target_columns.end());
+                               extension.target_columns.end());
             }
 
             if (targets.empty())

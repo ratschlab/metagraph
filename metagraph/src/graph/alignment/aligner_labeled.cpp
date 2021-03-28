@@ -146,7 +146,6 @@ traverse_maximal_by_label(const AnnotatedDBG &anno_graph,
             } else {
                 result[l].back().second = j - i + 1;
             }
-
         });
     }
 
@@ -260,12 +259,13 @@ auto ILabeledDBGAligner
     // get annotations for each row
     auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
 
-    tsl::hopscotch_map<Vector<uint64_t>, std::vector<uint64_t>, utils::VectorHash> unique_rows;
+    tsl::hopscotch_map<Vector<uint64_t>, std::vector<uint64_t>,
+                       utils::VectorHash> unique_rows;
     for (size_t i = 0; i < annotation.size(); ++i) {
         unique_rows[annotation[i]].push_back(rows[i]);
     }
 
-    std::vector<VectorMap<Vector<uint64_t>, Signature,
+    std::vector<VectorMap<Vector<uint64_t>, std::pair<Signature, size_t>,
                           uint64_t, utils::VectorHash>> batch_labels(
         query_nodes.size()
     );
@@ -273,29 +273,35 @@ auto ILabeledDBGAligner
         for (auto row : rows) {
             for (const auto &[i, idx] : row_to_query_idx[row].first) {
                 if (!batch_labels[i].count(targets)) {
-                    batch_labels[i].emplace(targets, Signature {
+                    batch_labels[i].emplace(targets, std::make_pair(Signature {
                         { query_nodes[i].first.size(), false },
                         config_.forward_and_reverse_complement
                                 && graph_.get_mode() != DeBruijnGraph::CANONICAL
                             ? sdsl::bit_vector(query_nodes[i].second.size(), false)
                             : sdsl::bit_vector()
-                    });
+                    }, (size_t)0));
                 }
 
-                batch_labels[i][targets].first[idx] = true;
+                if (!batch_labels[i][targets].first.first[idx]) {
+                    batch_labels[i][targets].first.first[idx] = true;
+                    ++batch_labels[i][targets].second;
+                }
             }
 
             if (config_.forward_and_reverse_complement
                     && graph_.get_mode() != DeBruijnGraph::CANONICAL) {
                 for (const auto &[i, idx] : row_to_query_idx[row].second) {
                     if (!batch_labels[i].count(targets)) {
-                        batch_labels[i].emplace(targets, Signature {
+                        batch_labels[i].emplace(targets, std::make_pair(Signature {
                             { query_nodes[i].first.size(), false },
                             { query_nodes[i].second.size(), false }
-                        });
+                        }, (size_t)0));
                     }
 
-                    batch_labels[i][targets].second[idx] = true;
+                    if (!batch_labels[i][targets].first.second[idx]) {
+                        batch_labels[i][targets].first.second[idx] = true;
+                        ++batch_labels[i][targets].second;
+                    }
                 }
             }
         }
@@ -304,22 +310,45 @@ auto ILabeledDBGAligner
     if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
         for (size_t i = 0; i < batch_labels.size(); ++i) {
             assert(batch_labels[i].size()
-                || (std::all_of(query_nodes[i].first.begin(), query_nodes[i].first.end(),
+                || (std::all_of(query_nodes[i].first.begin(),
+                                query_nodes[i].first.end(),
                                 [](auto j) { return !j; })
-                    && std::all_of(query_nodes[i].second.begin(), query_nodes[i].second.end(),
+                    && std::all_of(query_nodes[i].second.begin(),
+                                   query_nodes[i].second.end(),
                                    [](auto j) { return !j; })));
             for (auto it = batch_labels[i].begin(); it != batch_labels[i].end(); ++it) {
-                it.value().second = it.value().first;
-                reverse_bit_vector(it.value().second);
+                it.value().first.second = it.value().first.first;
+                reverse_bit_vector(it.value().first.second);
+                it.value().second *= 2;
             }
         }
     }
 
     BatchLabels target_columns(query_nodes.size());
     for (size_t i = 0; i < target_columns.size(); ++i) {
-        target_columns[i] = std::move(const_cast<QueryLabels&&>(
+        auto batch_labels_vec = const_cast<std::vector<std::pair<Vector<uint64_t>,
+                                                                 std::pair<Signature, size_t>>>&&>(
             batch_labels[i].values_container()
-        ));
+        );
+        if (batch_labels_vec.size() > config_.num_top_labels) {
+            std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
+                      [](const auto &a, const auto &b) {
+                return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
+                    < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
+            });
+            batch_labels_vec.resize(
+                config_.num_top_labels + (batch_labels_vec[0].first.empty())
+            );
+            if (batch_labels_vec[0].first.empty()) {
+                std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
+                            batch_labels_vec.end());
+            }
+        }
+
+        for (auto&& [targets, signature_counts] : batch_labels_vec) {
+            target_columns[i].emplace_back(std::move(targets),
+                                           std::move(signature_counts.first));
+        }
     }
 
     return { std::move(query_nodes), std::move(target_columns) };
