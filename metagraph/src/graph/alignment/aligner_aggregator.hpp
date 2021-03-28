@@ -126,8 +126,16 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         return;
 
     auto cmp = [this](const queue_value &a, const queue_value &b) {
-        return b.second.size()
-            && (a.second.empty() || cmp_(a.second.maximum(), b.second.maximum()));
+        if (b.second.empty())
+            return false;
+
+        if (a.second.empty() || cmp_(a.second.maximum(), b.second.maximum()))
+            return true;
+
+        if (cmp_(b.second.maximum(), a.second.maximum()))
+            return false;
+
+        return a.second.maximum().get() < b.second.maximum().get();
     };
 
     std::make_heap(queues.begin(), queues.end(), cmp);
@@ -137,8 +145,11 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
     std::shared_ptr<DBGAlignment> last_alignment;
     while (!terminate() && queues.size() && queues[0].second.size()) {
         if (queues[0].second.maximum().get() != last_alignment.get()) {
-            if (last_alignment)
+            if (last_alignment) {
+                assert(last_alignment->size());
                 callback(std::move(*last_alignment));
+                *last_alignment = DBGAlignment();
+            }
 
             last_alignment = queues[0].second.maximum();
         }
@@ -160,8 +171,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         }
     }
 
-    if (last_alignment)
+    if (last_alignment) {
+        assert(last_alignment->size());
         callback(std::move(*last_alignment));
+    }
 
     path_queue_.clear();
 }

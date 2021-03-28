@@ -243,7 +243,10 @@ template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_aggregate(const AlignmentGenerator &alignment_generator) {
     alignment_generator(
-        [&](DBGAlignment&& alignment) { aggregator_.add_alignment(std::move(alignment)); },
+        [&](DBGAlignment&& alignment) {
+            assert(alignment.is_valid(graph_, &config_));
+            aggregator_.add_alignment(std::move(alignment));
+        },
         [&](const DBGAlignment &seed) { return aggregator_.get_min_path_score(seed); }
     );
 }
