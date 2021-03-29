@@ -547,15 +547,11 @@ int align_to_graph(Config *config) {
                 }
 
                 if (aln_anno_graph) {
-                    std::vector<std::pair<std::string, IDBGAligner::DBGQueryAlignment>> results;
                     aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                        results.emplace_back(header, std::move(paths));
-                    });
-                    for (auto&& [header, paths] : results) {
                         process_alignments_labeled(*aln_graph, *aln_anno_graph, *config,
                                                    header, std::move(paths), *out,
                                                    print_mutex);
-                    }
+                    });
                 } else {
                     aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                         process_alignments(*aln_graph, *config, header,
