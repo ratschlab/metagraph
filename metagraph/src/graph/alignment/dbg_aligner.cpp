@@ -92,6 +92,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         if (filter_seeds) {
             seed.target_columns = seed_filter_->labels_to_keep(seed);
             if (seed.target_columns.empty()) {
+                std::cerr << "get_filter\n";
                 DEBUG_LOG("Skipping seed: {}", seed);
                 continue;
             }
@@ -103,6 +104,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
         extender.initialize(seed);
+        std::cerr << "get_init\n";
         auto extensions = extender.get_extensions(min_path_score);
 
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
