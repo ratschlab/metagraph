@@ -13,10 +13,10 @@ namespace mtg {
 namespace annot {
 
 /**
- * TaxoClassifier imports the data from TaxonomicDB and implements a method for taxonomic
+ * TaxClassifier imports the data from TaxonomicDB and implements a method for taxonomic
  * classification given a query sequence.
  */
-class TaxoClassifier {
+class TaxClassifier {
   public:
     using TaxId = std::uint64_t;
     using Annotator = annot::MultiLabelEncoded<std::string>;
@@ -24,12 +24,12 @@ class TaxoClassifier {
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
     /**
-     * Construct a TaxoClassifier
+     * Construct a TaxClassifier
      *
      * @param [input] filepath to the file exported by TaxonomyDB.
      */
-    TaxoClassifier(const std::string &filepath);
-    TaxoClassifier(){};
+    TaxClassifier(const std::string &filepath);
+    TaxClassifier(){};
 
     /**
      * Assign a LCA taxid to a given sequence.
@@ -43,21 +43,9 @@ class TaxoClassifier {
                        const double &lca_coverage_threshold) const;
 
   private:
-    TaxId root_node;
-
-    /**
-     * node_parent[node] returns the taxid of node's parent.
-    */
-    tsl::hopscotch_map<TaxId, TaxId> node_parent;
-
-    /**
-     * taxonomic_map returns the taxid LCA for a given kmer.
-     */
-    sdsl::int_vector<> taxonomic_map;
-
     /**
      * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
-     * from the given taxoDB filepath (created by './metagraph transform_anno_tax').
+     * from the given taxDB filepath (created by './metagraph transform_anno_tax').
      */
     void import_taxonomy(const std::string &filepath);
 
@@ -79,6 +67,17 @@ class TaxoClassifier {
                                 tsl::hopscotch_set<TaxId> &nodes_already_propagated,
                                 TaxId &best_lca,
                                 uint64_t &best_lca_dist_to_root) const;
+    TaxId root_node;
+
+    /**
+     * node_parent[node] returns the taxid of node's parent.
+    */
+    tsl::hopscotch_map<TaxId, TaxId> node_parent;
+
+    /**
+     * taxonomic_map returns the taxid LCA for a given kmer.
+     */
+    sdsl::int_vector<> taxonomic_map;
 };
 
 } // namespace annot
