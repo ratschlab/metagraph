@@ -536,7 +536,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 seq_paths.emplace_back(std::move(seq), std::move(path));
             }
         } else if (visited.count(outgoing[0].first)) {
-            if (path.size())
+            if (path.size() > 1)
                 seq_paths.emplace_back(std::move(seq), std::move(path));
         } else if ((path.size() && canonical
                     && (canonical->get_base_node(path.back()) == path.back())
