@@ -1,6 +1,6 @@
-#include "taxo_classify.hpp"
+#include "tax_classify.hpp"
 
-#include "annotation/taxonomy/taxo_classifier.hpp"
+#include "annotation/taxonomy/tax_classifier.hpp"
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "config/config.hpp"
@@ -18,20 +18,24 @@ using mtg::common::logger;
 void execute_fasta_file(const string &file,
                         ThreadPool &thread_pool,
                         const mtg::graph::DeBruijnGraph &graph,
-                        mtg::annot::TaxoClassifier &taxo_classifier,
-                        const std::function<void(const std::string &, const uint64_t &)> &callback,
+                        const mtg::annot::TaxClassifier &tax_classifier,
+                        std::vector<std::pair<std::string, uint64_t> > &results,
                         const Config &config) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file);
+    std::mutex result_mutex;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool.enqueue([&](){
-            uint64_t taxid = taxo_classifier.assign_class(graph,
-                                                          std::string(kseq.seq.s),
+        std::string curr_seq = std::string(kseq.seq.s);
+        std::string curr_seq_name = std::string(kseq.name.s);
+        thread_pool.enqueue([&](std::string curr_seq, std::string curr_seq_name){
+            uint64_t taxid = tax_classifier.assign_class(graph,
+                                                          curr_seq,
                                                           config.lca_coverage_threshold);
-            callback(std::string(kseq.name.s), taxid);
-        });
+            std::unique_lock<std::mutex> lock(result_mutex);
+            results.push_back({curr_seq_name, taxid});
+        }, std::move(curr_seq), std::move(curr_seq_name));
     }
 }
 
@@ -42,7 +46,7 @@ int taxonomic_classification(Config *config) {
 
     Timer timer;
     logger->trace("Loading TaxonomyDB ...");
-    mtg::annot::TaxoClassifier taxo_classifier(config->taxonomic_tree);
+    mtg::annot::TaxClassifier tax_classifier(config->taxonomic_tree);
     logger->trace("Finished loading TaxonomyDB in {}", timer.elapsed());
 
     timer.reset();
@@ -53,20 +57,22 @@ int taxonomic_classification(Config *config) {
     timer.reset();
     logger->trace("Processing the classification");
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
+    std::vector<std::pair<std::string, uint64_t> > results;
     for (const std::string &file: files) {
         logger->trace("Start processing file '{}'.", file);
         execute_fasta_file(file,
                            thread_pool,
                            *graph,
-                           taxo_classifier,
-                           [](const std::string name_seq, const uint64_t &taxid) {
-                             std::string result = fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
-                                                              name_seq, taxid);
-                             std::cout << result << std::endl;
-                           },
+                           tax_classifier,
+                           results,
                            *config);
     }
     thread_pool.join();
+    for (const std::pair<std::string, uint64_t> &result: results) {
+        std::string output = fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
+                                         result.first, result.second);
+        std::cout << output << std::endl;
+    }
     logger->trace("Finished processing all the classification in {}", timer.elapsed());
 
     return 0;

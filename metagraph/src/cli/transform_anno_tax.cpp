@@ -22,8 +22,8 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
 
     for (const std::string &path: paths) {
         if (! filesystem::is_directory(path)) {
-            if (!utils::ends_with(path, ".annodbg")) {
-                logger->warn("File '{}' is not an '.annodbg' file. No evaluation for this file.", path);
+            if (std::filesystem::path(path).extension() != ".annodbg") {
+                logger->warn("File '{}' is not an '.annodbg' file. File skipped.", path);
                 continue;
             }
             filenames.push_back(path);
@@ -31,7 +31,7 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
         }
         logger->trace("Looking for anno files in directory: '{}'", path);
         for (auto &rec_file: filesystem::recursive_directory_iterator(path)) {
-            if (utils::ends_with(rec_file.path().string(), ".annodbg")) {
+            if (std::filesystem::path(rec_file.path().string()).extension() == ".annodbg") {
                 logger->trace("Found anno file '{}'", rec_file.path().string());
                 filenames.push_back(rec_file.path().string());
             }
@@ -71,8 +71,8 @@ int transform_anno_tax(Config *config) {
             exit(1);
         }
         auto file_labels = annot->get_all_labels();
-        for (const std::string &it: file_labels) {
-            all_labels.insert(annot::TaxonomyDB::get_accession_version_from_label(it));
+        for (const std::string &label: file_labels) {
+            all_labels.insert(annot::TaxonomyDB::get_accession_version_from_label(label));
         }
     }
 
@@ -103,7 +103,7 @@ int transform_anno_tax(Config *config) {
         call_taxonomy_map_updates(taxonomy, file_batch, config);
     }
 
-    taxonomy.export_to_file(config->outfbase + ".taxo");
+    taxonomy.export_to_file(config->outfbase + ".taxdb");
     return 0;
 }
 

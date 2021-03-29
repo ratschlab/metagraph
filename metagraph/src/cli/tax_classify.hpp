@@ -1,5 +1,5 @@
-#ifndef __TAXO_CLASSIFY_HPP__
-#define __TAXO_CLASSIFY_HPP__
+#ifndef __TAX_CLASSIFY_HPP__
+#define __TAX_CLASSIFY_HPP__
 
 namespace mtg {
 namespace cli {
@@ -11,4 +11,4 @@ int taxonomic_classification(Config *config);
 } // namespace cli
 } // namespace mtg
 
-#endif // __TAXO_CLASSIFY_HPP__
+#endif // __TAX_CLASSIFY_HPP__

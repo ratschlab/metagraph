@@ -45,12 +45,12 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId &node,
     this->node_depth[node] = depth + 1;
 }
 
-void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
+void TaxonomyDB::read_tree(const std::string &tax_tree_filepath,
                            ChildrenList *tree,
                            NormalizedTaxId *root_node) {
-    std::ifstream f(taxo_tree_filepath);
+    std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
-        logger->error("Failed to open Taxonomic Tree file: '{}'", taxo_tree_filepath);
+        logger->error("Failed to open Taxonomic Tree file: '{}'", tax_tree_filepath);
         exit(1);
     }
 
@@ -58,12 +58,12 @@ void TaxonomyDB::read_tree(const std::string &taxo_tree_filepath,
     tsl::hopscotch_map<TaxId, TaxId> full_parents_list;
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("The Taxonomic Tree file contains empty lines. Please make sure that this file was not manually modified: '{}'", taxo_tree_filepath);
+            logger->error("The Taxonomic Tree file contains empty lines. Please make sure that this file was not manually modified: '{}'", tax_tree_filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() < 2) {
-            logger->error("The Taxonomic tree filepath contains incomplete lines. Please make sure that this file was not manually modified: '{}'", taxo_tree_filepath);
+            logger->error("The Taxonomic tree filepath contains incomplete lines. Please make sure that this file was not manually modified: '{}'", tax_tree_filepath);
             exit(1);
         }
         uint64_t act = static_cast<uint64_t>(std::stoull(parts[0]));
@@ -188,12 +188,12 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
     }
 }
 
-TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
+TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
                        const std::string &label_taxid_map_filepath,
                        const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
 
-    if (!std::filesystem::exists(taxo_tree_filepath)) {
-        logger->error("Can't open taxonomic tree file '{}'.", taxo_tree_filepath);
+    if (!std::filesystem::exists(tax_tree_filepath)) {
+        logger->error("Can't open taxonomic tree file '{}'.", tax_tree_filepath);
         std::exit(1);
     }
     if (!std::filesystem::exists(label_taxid_map_filepath)) {
@@ -210,7 +210,7 @@ TaxonomyDB::TaxonomyDB(const std::string &taxo_tree_filepath,
     logger->trace("Parsing taxonomic tree..");
     TaxonomyDB::ChildrenList tree;
     NormalizedTaxId root_node;
-    read_tree(taxo_tree_filepath, &tree, &root_node);
+    read_tree(tax_tree_filepath, &tree, &root_node);
     logger->trace("Finished parsing taxonomic tree in '{}' sec", timer.elapsed());
 
     timer.reset();
@@ -271,7 +271,6 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version, Norma
 
 void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot) {
     std::vector<std::string> all_labels = annot.get_all_labels();
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (uint64_t il = 0; il < all_labels.size(); ++il) {
         const std::string &label = all_labels[il];
         AccessionVersion accession_version = get_accession_version_from_label(label);
@@ -285,7 +284,6 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
             }
             if (index >= taxonomic_map.size()) {
                 // Double the size of taxonomic_map until the current 'index' fits inside.
-                std::lock_guard<std::mutex> lock(taxo_mutex);
                 uint64_t new_size = taxonomic_map.size();
                 while (index >= new_size) {
                     new_size = new_size * 2 + 1;
@@ -298,16 +296,12 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
                 for (uint64_t i = 0; i < aux_taxonomic_map.size(); ++i) {
                     taxonomic_map[i] = aux_taxonomic_map[i];
                 }
-                taxonomic_map[index] = taxid;
-                return;
             }
 
             if (taxonomic_map[index] == 0) {
-                std::lock_guard<std::mutex> lock(taxo_mutex);
                 taxonomic_map[index] = taxid;
             } else {
                 NormalizedTaxId lca = find_lca(std::vector<uint64_t>{taxonomic_map[index], taxid});
-                std::lock_guard<std::mutex> lock(taxo_mutex);
                 taxonomic_map[index] = lca;
           }
         });

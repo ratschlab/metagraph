@@ -16,7 +16,7 @@
 #include "cli/transform_graph.hpp"
 #include "cli/transform_annotation.hpp"
 #include "cli/transform_anno_tax.hpp"
-#include "cli/taxo_classify.hpp"
+#include "cli/tax_classify.hpp"
 
 using namespace mtg;
 using mtg::common::logger;
