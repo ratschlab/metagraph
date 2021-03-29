@@ -110,14 +110,15 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
         // table to allow for seed filtration
         if (filter_seeds) {
-            tsl::hopscotch_set<uint64_t> targets;
-            for (const DBGAlignment &extension : extensions) {
-                targets.insert(extension.target_columns.begin(),
-                               extension.target_columns.end());
+            tsl::hopscotch_set<uint64_t> targets(seed.target_columns.begin(),
+                                                 seed.target_columns.end());
+            targets.insert(nlabel);
+            if (seed.target_columns.empty()) {
+                for (const DBGAlignment &extension : extensions) {
+                    targets.insert(extension.target_columns.begin(),
+                                   extension.target_columns.end());
+                }
             }
-
-            if (targets.empty())
-                targets.insert(nlabel);
 
             seed_filter_->update_seed_filter([&](const auto &callback) {
                 extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {

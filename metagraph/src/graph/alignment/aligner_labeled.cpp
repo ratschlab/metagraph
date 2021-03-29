@@ -156,16 +156,15 @@ Vector<uint64_t> LabeledSeedFilter::labels_to_keep(const DBGAlignment &seed) {
     Vector<uint64_t> labels;
     labels.reserve(seed.target_columns.size());
 
-    std::pair<size_t, size_t> idx_range {
-        seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
-    };
-
     auto targets = seed.target_columns;
 
     if (targets.empty())
         targets.push_back(std::numeric_limits<uint64_t>::max());
 
     for (uint64_t target : targets) {
+        std::pair<size_t, size_t> idx_range {
+            seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
+        };
         size_t found_count = 0;
         for (node_index node : seed) {
             auto emplace = visited_nodes_[target].emplace(node, idx_range);
