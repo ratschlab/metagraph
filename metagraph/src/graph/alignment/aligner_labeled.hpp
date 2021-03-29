@@ -134,11 +134,16 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef ILabeledDBGAligner::Targets Targets;
+    typedef VectorSet<Targets, utils::VectorHash> TargetColumnsSet;
+    typedef std::vector<std::tuple<NodeType, char, size_t>> LabeledEdges;
+    typedef tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, LabeledEdges>> EdgeSetCache;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
                           std::string_view query,
-                          LabeledSeedFilter &seed_filter);
+                          LabeledSeedFilter &seed_filter,
+                          TargetColumnsSet &target_columns,
+                          EdgeSetCache &cached_edge_sets);
 
     virtual ~LabeledColumnExtender() {}
 
@@ -146,7 +151,6 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
   protected:
     typedef std::vector<std::pair<NodeType, char>> Edges;
-    typedef std::vector<std::tuple<NodeType, char, size_t>> LabeledEdges;
     typedef typename DefaultColumnExtender<NodeType>::Column Column;
     typedef typename DefaultColumnExtender<NodeType>::Scores Scores;
     typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
@@ -196,11 +200,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
             }
 
             size_t target_columns_idx = align_node_to_target_.find(best_node)->second;
-            assert(target_columns_idx < target_columns_.size());
+            assert(target_columns_idx < target_columns_->size());
 
             ++backtrack_start_counter_[target_columns_idx];
             extensions.back().target_columns
-                = *(target_columns_.begin() + target_columns_idx);
+                = *(target_columns_->begin() + target_columns_idx);
 
             assert(check_targets(anno_graph_, extensions.back()));
         }
@@ -209,8 +213,8 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   private:
     const AnnotatedDBG &anno_graph_;
     std::shared_ptr<LabeledSeedFilter> seed_filter_;
-    mutable VectorSet<Targets, utils::VectorHash> target_columns_;
-    mutable tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, LabeledEdges>> cached_edge_sets_;
+    std::shared_ptr<TargetColumnsSet> target_columns_;
+    std::shared_ptr<EdgeSetCache> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
     mutable tsl::hopscotch_map<size_t, size_t> backtrack_start_counter_;
 
@@ -223,7 +227,12 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
     typedef SeedAndExtendAlignerCore<AlignmentCompare> AlignerCore;
+    typedef typename Extender::TargetColumnsSet TargetColumnsSet;
+    typedef typename Extender::EdgeSetCache EdgeSetCache;
     auto mapped_batch = map_and_label_query_batch(generate_query);
+
+    TargetColumnsSet target_columns_set;
+    EdgeSetCache cached_edge_sets;
 
     size_t i = 0;
     generate_query([&](std::string_view header,
@@ -240,8 +249,10 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
 
-        Extender extender(anno_graph_, config_, this_query, seed_filter);
-        Extender extender_rc(anno_graph_, config_, reverse, seed_filter);
+        Extender extender(anno_graph_, config_, this_query, seed_filter,
+                          target_columns_set, cached_edge_sets);
+        Extender extender_rc(anno_graph_, config_, reverse, seed_filter,
+                             target_columns_set, cached_edge_sets);
 
         const auto &[nodes, nodes_rc] = query_nodes_pair[i];
 

@@ -359,10 +359,14 @@ LabeledColumnExtender<NodeType>
 ::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                         const DBGAlignerConfig &config,
                         std::string_view query,
-                        LabeledSeedFilter &seed_filter)
+                        LabeledSeedFilter &seed_filter,
+                        TargetColumnsSet &target_columns,
+                        EdgeSetCache &cached_edge_sets)
       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
         anno_graph_(anno_graph),
-        seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter) {}
+        seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter),
+        target_columns_(std::shared_ptr<TargetColumnsSet>{}, &target_columns),
+        cached_edge_sets_(std::shared_ptr<EdgeSetCache>{}, &cached_edge_sets) {}
 
 template <typename NodeType>
 void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
@@ -373,9 +377,9 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
 
     assert(check_targets(anno_graph_, path));
 
-    auto it = target_columns_.emplace(path.target_columns).first;
-    size_t target_column_idx = it - target_columns_.begin();
-    assert(target_column_idx < target_columns_.size());
+    auto it = target_columns_->emplace(path.target_columns).first;
+    size_t target_column_idx = it - target_columns_->begin();
+    assert(target_column_idx < target_columns_->size());
     align_node_to_target_[this->start_node_] = target_column_idx;
 }
 
@@ -401,9 +405,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     assert(depth);
 
     uint64_t target_column_idx = align_node_to_target_[node];
-    assert(target_column_idx < target_columns_.size());
+    assert(target_column_idx < target_columns_->size());
 
-    if ((target_columns_.begin() + target_column_idx)->empty()) {
+    if ((target_columns_->begin() + target_column_idx)->empty()) {
         assert(this->seed_->get_offset() >= depth);
         assert(this->seed_->get_offset());
         size_t next_offset = this->seed_->get_offset() - depth;
@@ -451,9 +455,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             out_edges.emplace_back(std::move(edges[i]));
 
             AlignNode next = get_next_align_node(edges[i].first, edges[i].second, depth + 1);
-            auto it = target_columns_.emplace(annotation[i]).first;
-            target_column_idx = it - target_columns_.begin();
-            assert(target_column_idx < target_columns_.size());
+            auto it = target_columns_->emplace(annotation[i]).first;
+            target_column_idx = it - target_columns_->begin();
+            assert(target_column_idx < target_columns_->size());
             assert(!align_node_to_target_.count(next));
             align_node_to_target_[next] = target_column_idx;
         }
@@ -467,8 +471,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 #endif
     }
 
-    if (cached_edge_sets_.count(std::get<0>(node))) {
-        const auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
+    if (cached_edge_sets_->count(std::get<0>(node))) {
+        const auto &edge_sets = (*cached_edge_sets_)[std::get<0>(node)];
         if (edge_sets.count(target_column_idx)) {
             const LabeledEdges &labeled_edges = edge_sets.find(target_column_idx)->second;
             Edges edges;
@@ -560,7 +564,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     Edges edges;
     LabeledEdges labeled_edges;
     auto all_extensions = traverse_maximal_by_label(
-        anno_graph_, seq_paths, *(target_columns_.begin() + target_column_idx)
+        anno_graph_, seq_paths, *(target_columns_->begin() + target_column_idx)
     );
     for (size_t j = 0; j < seq_paths.size(); ++j) {
         const auto &[seq, path] = seq_paths[j];
@@ -581,9 +585,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 targets[jt - it] = jt->first;
             }
             std::sort(targets.begin(), targets.end());
-            auto jt = target_columns_.emplace(targets).first;
-            size_t cur_target_column_idx = jt - target_columns_.begin();
-            assert(cur_target_column_idx < target_columns_.size());
+            auto jt = target_columns_->emplace(targets).first;
+            size_t cur_target_column_idx = jt - target_columns_->begin();
+            assert(cur_target_column_idx < target_columns_->size());
 
             if (it != extensions.begin()) {
                 AlignNode next = get_next_align_node(
@@ -595,7 +599,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             labeled_edges.emplace_back(edges.back().first, edges.back().second, cur_target_column_idx);
 
             for (size_t i = 2; i < extensions.front().second; ++i) {
-                cached_edge_sets_[path[i - 1]][cur_target_column_idx].emplace_back(
+                (*cached_edge_sets_)[path[i - 1]][cur_target_column_idx].emplace_back(
                     path[i], seq[i + this->graph_.get_k() - 1], cur_target_column_idx
                 );
                 if (it->second < i) {
@@ -608,9 +612,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     }
                     std::sort(targets.begin(), targets.end());
                     it = jt;
-                    auto kt = target_columns_.emplace(targets).first;
-                    cur_target_column_idx = kt - target_columns_.begin();
-                    assert(cur_target_column_idx < target_columns_.size());
+                    auto kt = target_columns_->emplace(targets).first;
+                    cur_target_column_idx = kt - target_columns_->begin();
+                    assert(cur_target_column_idx < target_columns_->size());
                 }
 
                 AlignNode next = get_next_align_node(
@@ -621,7 +625,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         }
     }
 
-    auto &edge_sets = cached_edge_sets_[std::get<0>(node)];
+    auto &edge_sets = (*cached_edge_sets_)[std::get<0>(node)];
     assert(!edge_sets.count(target_column_idx));
     edge_sets[target_column_idx] = labeled_edges;
 
