@@ -87,13 +87,12 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
             } else {
                 static_assert(std::is_same_v<T, binmat::SparseColumn>);
 
-                auto &size = subvector->size;
-                auto &set_bits = subvector->set_bits;
+                uint64_t &size = subvector->size;
+                std::vector<uint64_t> &set_bits = subvector->set_bits;
 
-                size = std::min(column->num_set_bits() <= num_rows_subsampled
+                size = column->num_set_bits() <= num_rows_subsampled
                                     ? column->size()
-                                    : column->select1(num_rows_subsampled),
-                                (uint64_t)std::numeric_limits<std::decay_t<decltype(size)>>::max());
+                                    : column->select1(num_rows_subsampled);
 
                 set_bits.reserve(column->rank1(size));
                 column->call_ones_in_range(0, size,
