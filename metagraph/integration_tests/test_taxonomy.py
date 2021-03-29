@@ -1,6 +1,7 @@
 import unittest
 import subprocess
 from subprocess import PIPE
+from parameterized import parameterized
 
 from tempfile import TemporaryDirectory
 import os
@@ -11,40 +12,53 @@ import os
 METAGRAPH = './metagraph'
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
-TAXO_DATA_DIR = TEST_DATA_DIR + "/taxo_data"
+TAX_DATA_DIR = TEST_DATA_DIR + "/taxonomic_data"
 
-NUM_THREADS = 4
+tax_tests = {
+    'one_thread': {
+        'threads': 1,
+    },
+    '5_threads': {
+        'threads': 5,
+    },
+    '16_threads': {
+        'threads': 16,
+    }
+}
+
+test_params = [name for name, _ in tax_tests.items()]
 
 class TestTaxonomy(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
-        self.taxo_parent = {}
-        self.taxo_root = -1
-        taxo_lines = open(TAXO_DATA_DIR + '/dumb_nodes.dmp').readlines()
-        for line in taxo_lines:
+        self.tax_parent = {}
+        self.tax_root = -1
+        tax_lines = open(TAX_DATA_DIR + '/dumb_nodes.dmp').readlines()
+        for line in tax_lines:
             act_node = line.split('\t')[0].strip()
             act_parent = line.split('\t')[2].strip()
-            self.taxo_parent[act_node] = act_parent
+            self.tax_parent[act_node] = act_parent
             if act_node == act_parent:
-                self.taxo_root = act_node
+                self.tax_root = act_node
 
     def is_descendant(self, node: str, query: str) -> bool:
-        while query != self.taxo_root:
-            query = self.taxo_parent[query]
+        while query != self.tax_root:
+            query = self.tax_parent[query]
             if query == node:
                 return True
         return False
 
+    @parameterized.expand(test_params)
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-    def test_taxonomy(self):
+    def test_taxonomy(self, tax_test):
         k = 20
         lca_coverage = 0.9
         construct_command = '{exe} build -p {num_threads} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            num_threads=NUM_THREADS,
+            num_threads=tax_tests[tax_test]['threads'],
             k=k,
             outfile=self.tempdir.name + '/graph',
-            input=TAXO_DATA_DIR + '/taxo_input.fa'
+            input=TAX_DATA_DIR + '/tax_input.fa'
         )
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -53,30 +67,32 @@ class TestTaxonomy(unittest.TestCase):
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             anno=self.tempdir.name + '/annotation',
-            num_threads=NUM_THREADS,
-            input_fasta=TAXO_DATA_DIR + '/taxo_input.fa'
+            num_threads=tax_tests[tax_test]['threads'],
+            input_fasta=TAX_DATA_DIR + '/tax_input.fa'
         )
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
         transform_anno_tax_command = '{exe} transform_anno_tax --taxonomic-tree {tax_tree} \
-                                     --label-taxid-map {lookup_table} -o {output} {anno}'.format(
+                                     --label-taxid-map {lookup_table} -o {output} -p {num_threads} {anno}'.format(
             exe=METAGRAPH,
-            tax_tree=TAXO_DATA_DIR + '/dumb_nodes.dmp',
-            lookup_table=TAXO_DATA_DIR + '/dumb.accession2taxid',
-            output=self.tempdir.name + '/taxoDB',
+            tax_tree=TAX_DATA_DIR + '/dumb_nodes.dmp',
+            lookup_table=TAX_DATA_DIR + '/dumb.accession2taxid',
+            output=self.tempdir.name + '/taxDB',
+            num_threads=tax_tests[tax_test]['threads'],
             anno=self.tempdir.name + '/annotation.column.annodbg'
         )
         res = subprocess.run([transform_anno_tax_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxoDB} \
-                            --lca-coverage-threshold {lca_coverage}'.format(
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxDB} \
+                            --lca-coverage-threshold {lca_coverage} -p {num_threads}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
-            fasta_queries=TAXO_DATA_DIR + '/taxo_query.fa',
-            taxoDB=self.tempdir.name + '/taxoDB.taxo',
-            lca_coverage=lca_coverage
+            fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
+            taxDB=self.tempdir.name + '/taxDB.taxdb',
+            lca_coverage=lca_coverage,
+            num_threads=tax_tests[tax_test]['threads'],
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)

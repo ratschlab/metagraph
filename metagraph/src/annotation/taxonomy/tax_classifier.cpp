@@ -1,4 +1,4 @@
-#include "taxo_classifier.hpp"
+#include "tax_classifier.hpp"
 
 #include <cmath>
 #include <filesystem>
@@ -20,9 +20,9 @@ namespace mtg {
 namespace annot {
 
 using mtg::common::logger;
-using TaxId = TaxoClassifier::TaxId;
+using TaxId = TaxClassifier::TaxId;
 
-void TaxoClassifier::import_taxonomy(const std::string &filepath) {
+void TaxClassifier::import_taxonomy(const std::string &filepath) {
     Timer timer;
     logger->trace("Importing metagraph taxonomic data..");
 
@@ -45,7 +45,7 @@ void TaxoClassifier::import_taxonomy(const std::string &filepath) {
     logger->trace("Finished with importing metagraph taxonomicDB after '{}' sec", timer.elapsed());
 }
 
-TaxoClassifier::TaxoClassifier(const std::string &filepath) {
+TaxClassifier::TaxClassifier(const std::string &filepath) {
     Timer timer;
     logger->trace("Constructing Classifier object..");
     import_taxonomy(filepath);
@@ -56,10 +56,10 @@ TaxoClassifier::TaxoClassifier(const std::string &filepath) {
             break;
         }
     }
-    logger->trace("Finished the TaxoClassifier construction in '{}' sec", timer.elapsed());
+    logger->trace("Finished the TaxClassifier construction in '{}' sec", timer.elapsed());
 }
 
-void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
+void TaxClassifier::update_scores_and_lca(const TaxId start_node,
                                            const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
                                            const uint64_t &desired_number_kmers,
                                            tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
@@ -119,11 +119,11 @@ void TaxoClassifier::update_scores_and_lca(const TaxId start_node,
     }
 }
 
-TaxId TaxoClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
+TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                    const std::string &sequence,
                                    const double &lca_coverage_threshold) const {
     if (lca_coverage_threshold <= 0.5 || lca_coverage_threshold > 1) {
-        logger->error("Error: received lca coverage threshold must be in (0.5, 1], current value is: {}. Please modify its value to be a percent strictly greater than 0.5 for having a unique taxid lca solution.", lca_coverage_threshold);
+        logger->error("Error: received lca coverage threshold must have a value 0.5 < lca_coverage_threshold <= 1, current value is: {}. Please modify its value to be a percent strictly greater than 0.5 for having a unique taxid lca solution.", lca_coverage_threshold);
         exit(1);
     }
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
