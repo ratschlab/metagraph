@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 #include "annotation/taxonomy/taxonomic_db.hpp"
-#include "annotation/taxonomy/taxo_classifier.hpp"
+#include "annotation/taxonomy/tax_classifier.hpp"
 #include "../test_annotated_dbg_helpers.hpp"
 #include "seq_io/sequence_io.hpp"
 
@@ -16,10 +16,10 @@
 namespace mtg {
 namespace test {
 
-const std::string test_data_dir = "../tests/data/taxo_data/";
+const std::string test_data_dir = "../tests/data/taxonomic_data/";
 const std::string lookup_filepath = test_data_dir + "dumb.accession2taxid";
 const std::string taxonomic_filepath = test_data_dir + "dumb_nodes.dmp";
-const std::string input_filepath = test_data_dir + "taxo_input.fa";
+const std::string input_filepath = test_data_dir + "tax_input.fa";
 
 
 tsl::hopscotch_set<std::string> get_all_labels_from_file(const std::string &filepath) {
@@ -46,11 +46,11 @@ void get_sequences_and_labels_from_file(const std::string &filepath,
 
 TEST (TaxonomyTest, DfsStatistics) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB taxo(taxonomic_filepath, lookup_filepath, labels);
-    taxo.node_depth.clear();
-    taxo.node_depth.resize(9);
-    taxo.node_to_linearization_idx.clear();
-    taxo.node_to_linearization_idx.resize(9);
+    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
+    tax.node_depth.clear();
+    tax.node_depth.resize(9);
+    tax.node_to_linearization_idx.clear();
+    tax.node_to_linearization_idx.resize(9);
 
     std::vector<std::vector<uint64_t>> tree {
         {1, 2, 3},      // node 0 -> root
@@ -75,23 +75,23 @@ TEST (TaxonomyTest, DfsStatistics) {
     };
 
     std::vector<uint64_t> tree_linearization;
-    taxo.dfs_statistics(0, tree, &tree_linearization);
+    tax.dfs_statistics(0, tree, &tree_linearization);
     EXPECT_EQ(expected_linearization, tree_linearization);
-    EXPECT_EQ(expected_node_depths, taxo.node_depth);
-    EXPECT_EQ(expected_node_to_linearization_idx, taxo.node_to_linearization_idx);
+    EXPECT_EQ(expected_node_depths, tax.node_depth);
+    EXPECT_EQ(expected_node_to_linearization_idx, tax.node_to_linearization_idx);
 }
 
 TEST (TaxonomyTest, RmqPreprocessing) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB taxo(taxonomic_filepath, lookup_filepath, labels);
+    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
 
-    for (uint64_t i = 0; i < taxo.rmq_data.size(); ++i) {
-        taxo.rmq_data[i].clear();
+    for (uint64_t i = 0; i < tax.rmq_data.size(); ++i) {
+        tax.rmq_data[i].clear();
     }
-    taxo.rmq_data.clear();
-    taxo.precalc_log2.clear();
-    taxo.precalc_pow2.clear();
-    taxo.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
+    tax.rmq_data.clear();
+    tax.precalc_log2.clear();
+    tax.precalc_pow2.clear();
+    tax.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
 
     std::vector<uint64_t> linearization = {
             0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0
@@ -108,15 +108,15 @@ TEST (TaxonomyTest, RmqPreprocessing) {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     };
 
-    taxo.rmq_preprocessing(linearization);
-    EXPECT_EQ(expected_pow2, taxo.precalc_pow2);
-    EXPECT_EQ(expected_log2, taxo.precalc_log2);
-    EXPECT_EQ(expected_rmq, taxo.rmq_data);
+    tax.rmq_preprocessing(linearization);
+    EXPECT_EQ(expected_pow2, tax.precalc_pow2);
+    EXPECT_EQ(expected_log2, tax.precalc_log2);
+    EXPECT_EQ(expected_rmq, tax.rmq_data);
 }
 
 TEST (TaxonomyTest, FindLca) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB taxo(taxonomic_filepath, lookup_filepath, labels);
+    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
 
     /*
      * Tree configuration:
@@ -127,17 +127,17 @@ TEST (TaxonomyTest, FindLca) {
      *      node 4 -> 7 8
      */
 
-    taxo.rmq_data = {
+    tax.rmq_data = {
         {0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0},
         {0, 1, 4, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0, 3, 3, 0, 0},
         {0, 1, 4, 4, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         {0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     };
-    taxo.node_to_linearization_idx = {0, 1, 11, 13, 2, 8, 14, 3, 5};
-    taxo.precalc_pow2 = {1, 2, 4, 8, 16};
-    taxo.precalc_log2 = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4};
-    taxo.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
+    tax.node_to_linearization_idx = {0, 1, 11, 13, 2, 8, 14, 3, 5};
+    tax.precalc_pow2 = {1, 2, 4, 8, 16};
+    tax.precalc_log2 = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4};
+    tax.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
 
     struct query_lca {
         std::string test_id;
@@ -161,19 +161,19 @@ TEST (TaxonomyTest, FindLca) {
 
     for(const auto &it: queries) {
         EXPECT_EQ(make_pair(it.test_id, it.expected),
-                  make_pair(it.test_id, taxo.find_lca(it.nodes)));
+                  make_pair(it.test_id, tax.find_lca(it.nodes)));
     }
 }
 
 TEST (TaxonomyTest, KmerToTaxidUpdate) {
     tsl::hopscotch_set<std::string> labels_set = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB taxo(taxonomic_filepath, lookup_filepath, labels_set);
+    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels_set);
 
     std::vector<std::string> all_sequences;
     std::vector<std::string> all_labels;
 
     /*
-     * Tree configuration in '../tests/data/taxo_data/dumb_nodes.dmp'
+     * Tree configuration in '../tests/data/taxonomic_data/dumb_nodes.dmp'
      *
      *
      *                        0(normalized650)
@@ -196,35 +196,35 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
     get_sequences_and_labels_from_file(input_filepath, all_sequences, all_labels);
 
-    ASSERT_TRUE(taxo.taxonomic_map.size() == 0);
+    ASSERT_TRUE(tax.taxonomic_map.size() == 0);
 
     // Iterating a hopscotch_map on linux and on darwin returns the objects in a different order.
     // Thus, the normalization ids are different and we need to compute all of them here.
     uint64_t normalized_taxid_seq1;
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ1]),
+    ASSERT_TRUE(tax.get_normalized_taxid(tax.get_accession_version_from_label(all_labels[SEQ1]),
         &normalized_taxid_seq1));
 
     uint64_t normalized_taxid_seq2;
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ2]),
+    ASSERT_TRUE(tax.get_normalized_taxid(tax.get_accession_version_from_label(all_labels[SEQ2]),
         &normalized_taxid_seq2));
 
     uint64_t normalized_taxid_seq3;
-    ASSERT_TRUE(taxo.get_normalized_taxid(taxo.get_accession_version_from_label(all_labels[SEQ3]),
+    ASSERT_TRUE(tax.get_normalized_taxid(tax.get_accession_version_from_label(all_labels[SEQ3]),
         &normalized_taxid_seq3));
 
-    uint64_t normalized_lca_seq23 = taxo.find_lca({normalized_taxid_seq2,
+    uint64_t normalized_lca_seq23 = tax.find_lca({normalized_taxid_seq2,
                                                     normalized_taxid_seq3});
-    uint64_t normalized_lca_seq123 = taxo.find_lca({normalized_taxid_seq1,
+    uint64_t normalized_lca_seq123 = tax.find_lca({normalized_taxid_seq1,
                                                     normalized_taxid_seq2,
                                                     normalized_taxid_seq3});
 
-    struct query_taxo_map_update {
+    struct query_tax_map_update {
         std::string test_id;
         tsl::hopscotch_map<uint64_t, uint64_t> expected_freq_taxid;
         std::vector<uint64_t> seq_list;
     };
 
-    std::vector<query_taxo_map_update> tests = {
+    std::vector<query_tax_map_update> tests = {
         {"test1", {{normalized_taxid_seq1, 979}}, {SEQ1}},
         {"test2", {
                            {normalized_lca_seq123, 201},
@@ -248,11 +248,11 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
     for (const auto &test: tests) {
         // Clean taxonomic_map after the last test.
-        for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
-            taxo.taxonomic_map[i] = 0;
+        for (uint64_t i = 0; i < tax.taxonomic_map.size(); ++i) {
+            tax.taxonomic_map[i] = 0;
         }
         // Resize taxonomic_map to 0 for testing the piece of code which does taxonomic_map resizing.
-        taxo.taxonomic_map.resize(0);
+        tax.taxonomic_map.resize(0);
 
         std::vector<std::string> test_sequences;
         std::vector<std::string> test_labels;
@@ -264,11 +264,11 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
         auto anno_graph_seq =
                 build_anno_graph<DBGSuccinct>(k + 1, test_sequences, test_labels);
 
-        taxo.kmer_to_taxid_map_update(anno_graph_seq->get_annotation());
+        tax.kmer_to_taxid_map_update(anno_graph_seq->get_annotation());
         tsl::hopscotch_map<uint64_t, uint64_t> frequencies_taxid;
-        for (uint64_t i = 0; i < taxo.taxonomic_map.size(); ++i) {
-            if (taxo.taxonomic_map[i] > 0) {
-                ++frequencies_taxid[taxo.taxonomic_map[i]];
+        for (uint64_t i = 0; i < tax.taxonomic_map.size(); ++i) {
+            if (tax.taxonomic_map[i] > 0) {
+                ++frequencies_taxid[tax.taxonomic_map[i]];
             }
         }
 
@@ -278,10 +278,10 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 }
 
 TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
-    mtg::annot::TaxoClassifier taxo_classifier;
+    mtg::annot::TaxClassifier tax_classifier;
 
-    taxo_classifier.root_node = 1;
-    taxo_classifier.node_parent = {        {1, 1},
+    tax_classifier.root_node = 1;
+    tax_classifier.node_parent = {         {1, 1},
                                     {2, 1},       {3, 1},
                                              {4, 3},    {5, 3},
                                         {6, 4}, {7, 4}
@@ -291,7 +291,7 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
         {1, 20}, {2, 1}, {3, 15}, {4, 25}, {5, 6}, {6, 15}, {7, 3}  // leaves 2, 7 and 5 have a smaller number of kmers.
     };
 
-    struct query_taxo_map_update {
+    struct query_tax_map_update {
         std::string test_id;
         std::string description;
         uint64_t desired_number_kmers;
@@ -314,7 +314,7 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
             {3, 5, 6, 7, 2}
     };
 
-    std::vector<query_taxo_map_update> tests = {
+    std::vector<query_tax_map_update> tests = {
         {   "test1",
             "desired_number_kmers is equal to node_score[6]; expect LCA taxid = 6",
             75,
@@ -393,11 +393,11 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
         for (std::vector<uint64_t> nodes_set: test.ordered_node_sets) {
             tsl::hopscotch_set<uint64_t> nodes_already_propagated;
             tsl::hopscotch_map<uint64_t, uint64_t> node_scores;
-            uint64_t best_lca = taxo_classifier.root_node;
+            uint64_t best_lca = tax_classifier.root_node;
             uint64_t best_lca_dist_to_root = 1;
 
             for (uint64_t node: nodes_set) {
-                taxo_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
+                tax_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
                                                       node_scores, nodes_already_propagated,
                                                       best_lca, best_lca_dist_to_root);
             }
