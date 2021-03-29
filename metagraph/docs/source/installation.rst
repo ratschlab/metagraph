@@ -166,3 +166,8 @@ When configuring :code:`cmake .. <arguments>` additional arguments can be provid
 - :code:`-DWITH_AVX=[ON|OFF]` -- compile with *avx* instructions (:code:`ON` by default, if available)
 - :code:`-DWITH_MSSE42=[ON|OFF]` -- compile with *msse4.2* instructions (:code:`ON` by default, if available)
 - :code:`-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (:code:`DNA` by default)
+
+
+Install API
+----------------------------
+See :ref:`API Install<install api>`.
