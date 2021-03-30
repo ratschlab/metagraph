@@ -65,7 +65,7 @@ rule build_canonical_graph:
         k=config['k'],
     shell:
         """
-        cat {input} | {exec_cmd} build --parallel {threads} --canonical -k {params.k} -o {output}
+        cat {input} | {exec_cmd} build --parallel {threads} --mode canonical -k {params.k} -o {output}
         """
 
 rule primarize_canonical_graph:
@@ -74,7 +74,7 @@ rule primarize_canonical_graph:
     threads: max_threads
     shell:
         """
-        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} --canonical -o {output}
+        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} --mode canonical -o {output}
         """
 
 
@@ -86,5 +86,5 @@ rule build_primary:
         k=config['k'],
     shell:
         """
-        {exec_cmd} build --parallel {threads} -c -k {params.k} -o {output} {input}
+        {exec_cmd} build --parallel {threads} -k {params.k} -o {output} {input}
         """

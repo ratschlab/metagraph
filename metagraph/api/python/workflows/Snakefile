@@ -14,7 +14,7 @@ input_files_list_path=config['input_files_list_path']
 wdir=Path(config['output_directory'])
 
 graph=config['base_name']
-build_primary=take_value_or_default('build_primary', False)
+build_primary=take_value_or_default('build_primary_graph', False)
 
 annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
 

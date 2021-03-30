@@ -7,3 +7,5 @@ output_directory: 'output_dir_example'
 input_files_list_path: 'transcript_paths.txt'
 
 annotation_labels_source: 'sequence_headers'
+
+build_primary_graph: True
