@@ -330,7 +330,6 @@ auto ILabeledDBGAligner
             batch_labels[i].values_container()
         );
 
-        // //TODO: FIX THIS SHIT
         // if (batch_labels_vec.size() > config_.num_top_labels) {
         //     std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
         //               [](const auto &a, const auto &b) {

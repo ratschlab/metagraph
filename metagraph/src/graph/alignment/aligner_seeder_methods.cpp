@@ -2,7 +2,6 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
@@ -410,7 +409,7 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
 
 template <class BaseSeeder>
 auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
-    std::vector<Seed> base_seeds;
+    std::vector<Seed> seeds;
     std::vector<node_index> base_nodes = std::move(this->query_nodes_);
 
     std::cerr << "get_init_seeding\n";
@@ -430,39 +429,17 @@ auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
             if (targets_[i].size() && !seed.get_offset())
                 seed.target_columns = targets_[i];
 
-            base_seeds.emplace_back(std::move(seed));
+            seeds.emplace_back(std::move(seed));
         }
     }
 
     std::swap(this->query_nodes_, base_nodes);
     this->num_matching_ = this->num_exact_matching();
 
-    std::sort(base_seeds.begin(), base_seeds.end(), [&](const auto &a, const auto &b) {
+    std::sort(seeds.begin(), seeds.end(), [&](const auto &a, const auto &b) {
         return a.get_query().data() + a.get_query().size()
             < b.get_query().data() + b.get_query().size();
     });
-
-    if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL || base_seeds.empty())
-        return base_seeds;
-
-    std::vector<Seed> seeds;
-    for (size_t i = 0; i < base_seeds.size() - 1; ++i) {
-        size_t end_diff = base_seeds[i + 1].get_query().data()
-                + base_seeds[i + 1].get_query().size()
-                - base_seeds[i].get_query().data() - base_seeds[i].get_query().size();
-        if (end_diff != 1) {
-            seeds.emplace_back(base_seeds[i]);
-        } else {
-            uint64_t intersection = utils::count_intersection(
-                base_seeds[i].target_columns.begin(), base_seeds[i].target_columns.end(),
-                base_seeds[i + 1].target_columns.begin(), base_seeds[i + 1].target_columns.end()
-            );
-            if (intersection)
-                seeds.emplace_back(base_seeds[i]);
-        }
-    }
-
-    seeds.push_back(base_seeds.back());
 
     return seeds;
 }

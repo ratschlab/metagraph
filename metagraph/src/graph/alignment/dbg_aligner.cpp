@@ -1,5 +1,7 @@
 #include "dbg_aligner.hpp"
 
+#include "common/algorithms.hpp"
+
 namespace mtg {
 namespace graph {
 namespace align {
@@ -83,14 +85,34 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
     std::cerr << "foo_\t" << seeds.size() << "\n";
-    std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
-    for (DBGAlignment &seed : seeds) {
+    constexpr auto get_end_ptr = [](const DBGAlignment &a) {
+        return a.get_query().data() + a.get_query().size();
+    };
+
+    if (!filter_seeds) {
+        std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
+    } else {
+        std::sort(seeds.begin(), seeds.end(), [&](const auto &a, const auto &b) {
+            return get_end_ptr(a) < get_end_ptr(b);
+        });
+    }
+
+    for (size_t i = 0; i < seeds.size(); ++i) {
+        DBGAlignment &seed = seeds[i];
         score_t min_path_score = get_min_path_score(seed);
 
         // check if this seed has been explored before in an alignment and discard
         // it if so
+        // std::cerr << "get_init\t" << seed;
+        // for (uint64_t target : seed.target_columns) {
+        //     std::cerr << "\t" << target;
+        // }
+        // std::cerr << "\n";
         if (filter_seeds) {
+            // std::cerr << "get_init\tfilter\t" << i + 1 << " " << seeds.size() << " "
+            //           << (i + 1 < seeds.size() ? get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) : 4000) << " "
+            //           << seed.target_columns.size() << " " << (i + 1 < seeds.size() ? seeds[i + 1].target_columns.size() : 5000) << "\n";
             seed.target_columns = seed_filter_->labels_to_keep(seed);
             if (seed.target_columns.empty()) {
                 std::cerr << "get_filter\n";
@@ -100,6 +122,29 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
             if (seed.target_columns.size() == 1 && seed.target_columns[0] == nlabel)
                 seed.target_columns.clear();
+
+            // std::cerr << "get_init\tfilter\t" << i + 1 << " " << seeds.size() << " "
+            //           << (i + 1 < seeds.size() ? get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) : 4000) << " "
+            //           << seed.target_columns.size() << " " << (i + 1 < seeds.size() ? seeds[i + 1].target_columns.size() : 5000) << "\n";
+
+            if (i + 1 < seeds.size()
+                    && get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) == 1
+                    && seed.target_columns.size()
+                    && seeds[i + 1].target_columns.size()
+                    && !utils::count_intersection(
+                        seed.target_columns.begin(), seed.target_columns.end(),
+                        seeds[i + 1].target_columns.begin(), seeds[i + 1].target_columns.end())) {
+                if (seed.get_score() >= min_path_score) {
+                    seed.extend_query_end(query.data() + query.size());
+                    seed.trim_offset();
+                    assert(seed.is_valid(graph_, &config_));
+                    DEBUG_LOG("Alignment (seed): {}", seed);
+                    callback(std::move(seed));
+                }
+
+                DEBUG_LOG("Skipping seed: {}", seed);
+                continue;
+            }
         }
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
