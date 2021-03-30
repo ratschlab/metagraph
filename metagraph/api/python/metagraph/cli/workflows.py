@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 import snakemake
 
 from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
-
+from metagraph.cli.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 WORKFLOW_ROOT = Path(__file__).parent.parent.parent / 'workflows'
 
 LOGGING_FORMAT='%(asctime)s - %(levelname)s: %(message)s'
@@ -16,8 +16,9 @@ logging.basicConfig(format=LOGGING_FORMAT, level=logging.WARNING)
 
 # TODO: use custom config object? fluent config?
 def run_build_workflow(
-        sample_list_path: Path,
         output_dir: Path,
+        seqs_file_list_path: Path = None,
+        seqs_dir_path: Path = None,
         k: Optional[int] = None,
         base_name: Optional[str] = None,
         build_primary_graph: bool = False,
@@ -36,7 +37,8 @@ def run_build_workflow(
 
     config = snakemake.load_configfile(default_path)
 
-    config['input_files_list_path'] = sample_list_path
+    config[SEQS_FILE_LIST_PATH] = seqs_file_list_path
+    config[SEQS_DIR_PATH] = seqs_dir_path
     config['output_directory'] = output_dir
 
     config['k'] = k if k else config['k']
@@ -72,9 +74,13 @@ def run_build_workflow(
     return was_successful
 
 
-def setup_parser(parser):
-    parser.add_argument('sample_list_path', type=Path)
+def setup_build_parser(parser):
     parser.add_argument('output_dir', type=Path)
+
+    input_seq_group = parser.add_argument_group('input sequences')
+    input_seq_group_xor = input_seq_group.add_mutually_exclusive_group(required=True)
+    input_seq_group_xor.add_argument('--seqs-file-list-path')
+    input_seq_group_xor.add_argument('--seqs-dir-path')
 
     graph = parser.add_argument_group('graph', 'arguments for graph building')
     graph.add_argument('-k', type=int, default=None)
@@ -105,8 +111,9 @@ def setup_parser(parser):
 
 def init_build(args):
     was_successful = run_build_workflow(
-        args.sample_list_path,
         args.output_dir,
+        seqs_file_list_path=args.seqs_file_list_path,
+        seqs_dir_path=args.seqs_dir_path,
         k=args.k,
         base_name=args.base_name,
         build_primary_graph=args.build_primary_graph,

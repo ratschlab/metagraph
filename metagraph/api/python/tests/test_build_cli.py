@@ -30,12 +30,15 @@ def test_build_workflow(primary, annotation_format, annotation_label_src, tmpdir
 
     output_dir = tmpdir
 
-    base_args = ['build', '--annotation-format', annotation_format.value,
+    base_args = ['build',
+                 '--seqs-file-list-path', sample_list_path,
+                 '-k', 5,
+                 '--annotation-format', annotation_format.value,
                  '--annotation-labels-source', annotation_label_src.value]
 
     base_args += ['--build-primary-graph'] if primary else []
 
-    ret = run_wrapper(base_args + [sample_list_path, output_dir])
+    ret = run_wrapper(base_args + [output_dir])
 
     if ret.returncode != 0:
         print("Workflow test was not successful:")

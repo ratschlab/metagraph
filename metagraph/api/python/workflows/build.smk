@@ -25,7 +25,7 @@ temp_dir_config = f"--disk-swap {config['tmpdir']}" if 'tmpdir' in config else '
 
 
 rule build:
-    input: input_files_list_path
+    input: seqs_file_list_path
     output: graph_path
     threads: max_threads 
     params:
@@ -58,7 +58,7 @@ rule build:
 canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 
 rule build_canonical_graph:
-    input: input_files_list_path
+    input: seqs_file_list_path
     output: canonical_graph_path
     threads: max_threads
     params:

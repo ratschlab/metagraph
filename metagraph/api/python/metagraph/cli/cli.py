@@ -11,7 +11,7 @@ def main(args=tuple(sys.argv[1:])):
                                        dest="command")
 
     build_parser = subparsers.add_parser("build", help="Create index")
-    workflows.setup_parser(build_parser)
+    workflows.setup_build_parser(build_parser)
 
     parsed_arguments = parser.parse_args(args)
 

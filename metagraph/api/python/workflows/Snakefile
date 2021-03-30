@@ -5,12 +5,13 @@ from pathlib import Path
 from psutil import virtual_memory
 
 from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
+from metagraph.cli import utils
+from metagraph.cli.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
 
 def take_value_or_default(key, default):
     return config[key] if (key in config.keys() and config[key]) else default
 
-input_files_list_path=config['input_files_list_path']
 wdir=Path(config['output_directory'])
 
 graph=config['base_name']
@@ -55,12 +56,25 @@ annotation_path_done=annotation_cols_path/DONE
 
 columns_file=wdir/'columns.txt'
 
+seqs_file_list_path=config.get(SEQS_FILE_LIST_PATH, None)
+
+if not seqs_file_list_path:
+    seqs_file_list_path = wdir/'sequence_file_list_path.txt'
+    seqs_dir_path = config.get(SEQS_DIR_PATH, None)
+
+    if not seqs_dir_path:
+        raise ValueError(f"Neither {SEQS_FILE_LIST_PATH} nor {SEQS_DIR_PATH} parameter are set. Need either to proceed")
+
+    utils.create_transcript_path_list(seqs_dir_path, seqs_file_list_path)
+
+
 localrules: generate_column_list
 
 rule all:
      input:
         graph_path,
         [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
+
 
 include: 'build.smk'
 
@@ -73,13 +87,14 @@ def generate_col_paths(seq_file):
 
         return [ annotation_cols_path/f"{c}.column.annodbg" for c in column_names]
 
+
 rule annotate:
     input:
-        seqs=input_files_list_path,
+        seqs=seqs_file_list_path,
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=generate_col_paths(input_files_list_path)
+        column_anno_files=generate_col_paths(seqs_file_list_path)
     threads: max_threads
     params:
         log_writing=get_log_opt("annotate"),
