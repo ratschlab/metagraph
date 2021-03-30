@@ -133,11 +133,11 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
 
         // Use the seeder that seeds to node suffixes
         if (aligner_config.max_seed_length == k) {
-            return std::make_unique<Aligner<SuffixSeeder<ExactSeeder<>>>>(
+            return std::make_unique<Aligner<ExactSeeder<>>>(
                 graph, aligner_config
             );
         } else {
-            return std::make_unique<Aligner<SuffixSeeder<UniMEMSeeder<>>>>(
+            return std::make_unique<Aligner<UniMEMSeeder<>>>(
                 graph, aligner_config
             );
         }

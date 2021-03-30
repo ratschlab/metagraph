@@ -329,20 +329,22 @@ auto ILabeledDBGAligner
                                                                  std::pair<Signature, size_t>>>&&>(
             batch_labels[i].values_container()
         );
-        if (batch_labels_vec.size() > config_.num_top_labels) {
-            std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
-                      [](const auto &a, const auto &b) {
-                return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
-                    < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
-            });
-            batch_labels_vec.resize(
-                config_.num_top_labels + (batch_labels_vec[0].first.empty())
-            );
-            if (batch_labels_vec[0].first.empty()) {
-                std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
-                            batch_labels_vec.end());
-            }
-        }
+
+        // //TODO: FIX THIS SHIT
+        // if (batch_labels_vec.size() > config_.num_top_labels) {
+        //     std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
+        //               [](const auto &a, const auto &b) {
+        //         return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
+        //             < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
+        //     });
+        //     batch_labels_vec.resize(
+        //         config_.num_top_labels + (batch_labels_vec[0].first.empty())
+        //     );
+        //     if (batch_labels_vec[0].first.empty()) {
+        //         std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
+        //                     batch_labels_vec.end());
+        //     }
+        // }
 
         for (auto&& [targets, signature_counts] : batch_labels_vec) {
             target_columns[i].emplace_back(std::move(targets),

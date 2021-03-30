@@ -58,10 +58,12 @@ class ExactSeeder : public ISeeder<NodeType> {
     const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
-    std::vector<NodeType> query_nodes_;
+    mutable std::vector<NodeType> query_nodes_;
     const DBGAlignerConfig &config_;
     std::vector<DBGAlignerConfig::score_t> partial_sum_;
-    size_t num_matching_;
+    mutable size_t num_matching_;
+
+    size_t num_exact_matching() const;
 };
 
 template <typename NodeType = uint64_t>
@@ -113,7 +115,7 @@ class SuffixSeeder : public BaseSeeder {
     template <typename... Args>
     SuffixSeeder(Args&&... args)
           : BaseSeeder(std::forward<Args>(args)...),
-            dbg_succ_(get_base_dbg_succ(this->graph_)) {
+            dbg_succ_(*get_base_dbg_succ(this->graph_)) {
         assert(this->config_.min_seed_length < this->graph_.get_k());
     }
 
@@ -122,11 +124,37 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> get_seeds() const override;
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
+    static const DBGSuccinct* get_base_dbg_succ(const DeBruijnGraph &graph);
 
   private:
     const DBGSuccinct &dbg_succ_;
 
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
+};
+
+template <class BaseSeeder>
+class LabeledSeeder : public BaseSeeder {
+  public:
+    typedef typename BaseSeeder::node_index node_index;
+    typedef typename BaseSeeder::Seed Seed;
+    typedef Vector<uint64_t> Targets;
+
+    template <typename... Args>
+    LabeledSeeder(const std::vector<Targets> &targets,
+                  const std::vector<std::unique_ptr<bitmap>> &signatures,
+                  Args&&... args)
+          : BaseSeeder(std::forward<Args>(args)...),
+            targets_(targets), signatures_(signatures) {
+        static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
+        assert(targets_.size() == signatures_.size());
+    }
+
+    virtual ~LabeledSeeder() {}
+
+    virtual std::vector<Seed> get_seeds() const override;
+
+  private:
+    const std::vector<Targets> &targets_;
+    const std::vector<std::unique_ptr<bitmap>> &signatures_;
 };
 
 } // namespace align

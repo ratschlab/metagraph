@@ -2,6 +2,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
@@ -23,22 +24,8 @@ ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
         orientation_(orientation),
         query_nodes_(std::move(nodes)),
         config_(config),
-        num_matching_(0) {
+        num_matching_(num_exact_matching()) {
     assert(config_.check_config_scores());
-
-    // count the number of matching nucleotides
-    size_t last_match_count = 0;
-    for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
-        if (*it) {
-            auto jt = std::find(it + 1, query_nodes_.end(), NodeType());
-            num_matching_ += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
-            last_match_count = graph_.get_k();
-            it = jt - 1;
-        } else if (last_match_count) {
-            --last_match_count;
-        }
-    }
-    assert(num_matching_ <= query_.size());
 
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
@@ -49,6 +36,25 @@ ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
     assert(config_.match_score(query_) == partial_sum_.back());
     assert(config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
     assert(!partial_sum_.front());
+}
+
+template <typename NodeType>
+size_t ExactSeeder<NodeType>::num_exact_matching() const {
+    size_t num_matching = 0;
+    size_t last_match_count = 0;
+    for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
+        if (*it) {
+            auto jt = std::find(it + 1, query_nodes_.end(), NodeType());
+            num_matching += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
+            last_match_count = graph_.get_k();
+            it = jt - 1;
+        } else if (last_match_count) {
+            --last_match_count;
+        }
+    }
+    assert(num_matching <= query_.size());
+
+    return num_matching;
 }
 
 template <typename NodeType>
@@ -327,12 +333,12 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
 }
 
 template <class BaseSeeder>
-const DBGSuccinct& SuffixSeeder<BaseSeeder>
+const DBGSuccinct* SuffixSeeder<BaseSeeder>
 ::get_base_dbg_succ(const DeBruijnGraph &graph) {
-    return dynamic_cast<const CanonicalDBG*>(&graph)
-        ? dynamic_cast<const DBGSuccinct&>(
-              dynamic_cast<const CanonicalDBG&>(graph).get_graph())
-        : dynamic_cast<const DBGSuccinct&>(graph);
+    if (auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+        return dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+
+    return dynamic_cast<const DBGSuccinct*>(&graph);
 }
 
 template <typename NodeType>
@@ -402,12 +408,73 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
+template <class BaseSeeder>
+auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
+    std::vector<Seed> base_seeds;
+    std::vector<node_index> base_nodes = std::move(this->query_nodes_);
+
+    std::cerr << "get_init_seeding\n";
+    for (size_t i = 0; i < targets_.size(); ++i) {
+        std::cerr << "get_init_targets";
+        for (uint64_t target : targets_[i]) {
+            std::cerr << "\t" << target;
+        }
+        std::cerr << "\n";
+        this->query_nodes_.assign(base_nodes.size(), DeBruijnGraph::npos);
+        call_ones(*signatures_[i], [&](size_t j) {
+            this->query_nodes_[j] = base_nodes[j];
+        });
+        this->num_matching_ = this->num_exact_matching();
+
+        for (Seed &seed : BaseSeeder::get_seeds()) {
+            if (targets_[i].size() && !seed.get_offset())
+                seed.target_columns = targets_[i];
+
+            base_seeds.emplace_back(std::move(seed));
+        }
+    }
+
+    std::swap(this->query_nodes_, base_nodes);
+    this->num_matching_ = this->num_exact_matching();
+
+    std::sort(base_seeds.begin(), base_seeds.end(), [&](const auto &a, const auto &b) {
+        return a.get_query().data() + a.get_query().size()
+            < b.get_query().data() + b.get_query().size();
+    });
+
+    if (this->graph_.get_mode() != DeBruijnGraph::CANONICAL || base_seeds.empty())
+        return base_seeds;
+
+    std::vector<Seed> seeds;
+    for (size_t i = 0; i < base_seeds.size() - 1; ++i) {
+        size_t end_diff = base_seeds[i + 1].get_query().data()
+                + base_seeds[i + 1].get_query().size()
+                - base_seeds[i].get_query().data() - base_seeds[i].get_query().size();
+        if (end_diff != 1) {
+            seeds.emplace_back(base_seeds[i]);
+        } else {
+            uint64_t intersection = utils::count_intersection(
+                base_seeds[i].target_columns.begin(), base_seeds[i].target_columns.end(),
+                base_seeds[i + 1].target_columns.begin(), base_seeds[i + 1].target_columns.end()
+            );
+            if (intersection)
+                seeds.emplace_back(base_seeds[i]);
+        }
+    }
+
+    seeds.push_back(base_seeds.back());
+
+    return seeds;
+}
+
 
 template class ExactSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
 template class SuffixSeeder<ExactSeeder<>>;
 template class SuffixSeeder<UniMEMSeeder<>>;
+template class SuffixSeeder<LabeledSeeder<UniMEMSeeder<>>>;
+template class SuffixSeeder<LabeledSeeder<ExactSeeder<>>>;
 
 } // namespace align
 } // namespace graph

@@ -82,6 +82,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     constexpr uint64_t nlabel = std::numeric_limits<uint64_t>::max();
 
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
+    std::cerr << "foo_\t" << seeds.size() << "\n";
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
     for (DBGAlignment &seed : seeds) {
@@ -104,7 +105,11 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
         extender.initialize(seed);
-        std::cerr << "get_init\n";
+        std::cerr << "get_init\t" << seed;
+        for (uint64_t target : seed.target_columns) {
+            std::cerr << "\t" << target;
+        }
+        std::cerr << "\n";
         auto extensions = extender.get_extensions(min_path_score);
 
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
@@ -142,6 +147,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             callback(std::move(extension));
         }
     }
+
+    std::cerr << "get_init\n";
 }
 
 template <class AlignmentCompare>

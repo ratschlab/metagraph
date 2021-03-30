@@ -221,7 +221,33 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(nodes_rc.size() == nodes.size());
         }
 
-        Seeder seeder(graph_, this_query, is_reverse_complement, std::move(nodes), config_);
+        std::shared_ptr<ISeeder<node_index>> seeder;
+        std::shared_ptr<ISeeder<node_index>> seeder_rc;
+        if (config_.min_seed_length < graph_.get_k()
+                && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
+            seeder = std::make_shared<SuffixSeeder<Seeder>>(
+                graph_, this_query, is_reverse_complement, std::move(nodes), config_
+            );
+        } else {
+            seeder = std::make_shared<Seeder>(
+                graph_, this_query, is_reverse_complement, std::move(nodes), config_
+            );
+        }
+
+        if (config_.forward_and_reverse_complement
+                || graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+            if (config_.min_seed_length < graph_.get_k()
+                    && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
+                seeder_rc = std::make_shared<SuffixSeeder<Seeder>>(
+                    graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
+                );
+            } else {
+                seeder_rc = std::make_shared<Seeder>(
+                    graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
+                );
+            }
+        }
+
         Extender extender(graph_, config_, this_query);
 
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
@@ -235,21 +261,16 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             // From a given seed, align forwards, then reverse complement and
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
-            Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
-                             std::move(nodes_rc), config_);
-            aligner_core.align_both_directions(seeder, seeder_rc,
+            aligner_core.align_both_directions(*seeder, *seeder_rc,
                                                extender, extender_rc,
                                                build_rev_comp_alignment_core);
 
         } else if (config_.forward_and_reverse_complement) {
             Extender extender_rc(graph_, config_, reverse);
-
-            Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
-                             std::move(nodes_rc), config_);
-            aligner_core.align_best_direction(seeder, seeder_rc, extender, extender_rc);
+            aligner_core.align_best_direction(*seeder, *seeder_rc, extender, extender_rc);
 
         } else {
-            aligner_core.align_one_direction(is_reverse_complement, seeder, extender);
+            aligner_core.align_one_direction(is_reverse_complement, *seeder, extender);
         }
 
         aligner_core.flush([this,&paths]() {

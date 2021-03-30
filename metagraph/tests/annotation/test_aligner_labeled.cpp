@@ -123,7 +123,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.min_seed_length = 2;
-    LabeledDBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*anno_graph, config);
+    LabeledDBGAligner<ExactSeeder<>> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
