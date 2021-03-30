@@ -412,13 +412,7 @@ auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     std::vector<Seed> seeds;
     std::vector<node_index> base_nodes = std::move(this->query_nodes_);
 
-    std::cerr << "get_init_seeding\n";
     for (size_t i = 0; i < targets_.size(); ++i) {
-        std::cerr << "get_init_targets";
-        for (uint64_t target : targets_[i]) {
-            std::cerr << "\t" << target;
-        }
-        std::cerr << "\n";
         this->query_nodes_.assign(base_nodes.size(), DeBruijnGraph::npos);
         call_ones(*signatures_[i], [&](size_t j) {
             this->query_nodes_[j] = base_nodes[j];

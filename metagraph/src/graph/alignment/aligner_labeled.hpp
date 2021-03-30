@@ -210,7 +210,6 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        std::cerr << "get_init_read\n";
         auto &[query_nodes_pair, target_columns] = mapped_batch;
         assert(config_.num_alternative_paths);
 
