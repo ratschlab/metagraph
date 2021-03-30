@@ -4,6 +4,7 @@
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
@@ -506,7 +507,10 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     visited.emplace(cur_node);
     std::vector<std::pair<node_index, char>> outgoing;
 
-    const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+    const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
+        &anno_graph_.get_annotation().get_matrix()
+    );
 
     while (cur_node != DeBruijnGraph::npos) {
         outgoing.clear();
