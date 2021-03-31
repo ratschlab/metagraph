@@ -143,6 +143,13 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
 
+    if (this->graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+        for (node_index node : this->query_nodes_) {
+            if (node)
+                return BaseSeeder::get_seeds();
+        }
+    }
+
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
     );

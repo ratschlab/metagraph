@@ -51,6 +51,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
+    std::cerr << "get_init\n";
     assert(seed.size());
     assert(seed.get_cigar().size());
     assert(seed.get_cigar().back().first == Cigar::MATCH
@@ -545,6 +546,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             size_t next_distance_from_origin = std::get<3>(prev) + 1;
 
             auto outgoing = get_outgoing(prev);
+            std::cerr << "get_outgoing\n";
 
             for (const auto &[next, c] : outgoing) {
                 auto &column_pair = table_[next];

@@ -331,20 +331,24 @@ auto ILabeledDBGAligner
             batch_labels[i].values_container()
         );
 
-        // if (batch_labels_vec.size() > config_.num_top_labels) {
-        //     std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
-        //               [](const auto &a, const auto &b) {
-        //         return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
-        //             < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
-        //     });
-        //     batch_labels_vec.resize(
-        //         config_.num_top_labels + (batch_labels_vec[0].first.empty())
-        //     );
-        //     if (batch_labels_vec[0].first.empty()) {
-        //         std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
-        //                     batch_labels_vec.end());
-        //     }
-        // }
+        if (batch_labels_vec.size() > config_.num_top_labels) {
+            std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
+                      [](const auto &a, const auto &b) {
+                return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
+                    < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
+            });
+            auto it = batch_labels_vec.begin() + batch_labels_vec[0].first.empty();
+            if (it != batch_labels_vec.end()) {
+                auto end = std::find_if(it, batch_labels_vec.end(), [&](const auto &a) {
+                    return a.second.second < it->second.second;
+                });
+                batch_labels_vec.erase(end, batch_labels_vec.end());
+                if (batch_labels_vec[0].first.empty()) {
+                    std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
+                                batch_labels_vec.end());
+                }
+            }
+        }
 
         for (auto&& [targets, signature_counts] : batch_labels_vec) {
             target_columns[i].emplace_back(std::move(targets),
@@ -508,9 +512,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     std::vector<std::pair<node_index, char>> outgoing;
 
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-    const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
-        &anno_graph_.get_annotation().get_matrix()
-    );
 
     while (cur_node != DeBruijnGraph::npos) {
         outgoing.clear();
@@ -562,6 +563,29 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
             if (cur_node == DeBruijnGraph::npos)
                 seq_paths.emplace_back(std::move(seq), std::move(path));
+        }
+    }
+
+    const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
+        &anno_graph_.get_annotation().get_matrix()
+    );
+
+    if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
+        for (auto &[seq, path] : seq_paths) {
+            if (path.size() <= 2)
+                continue;
+
+            size_t i = path.size() - 1;
+            for ( ; i > 0; --i) {
+                if (row_diff->is_anchor(AnnotatedDBG::graph_to_anno_index(canonical ? canonical->get_base_node(path[i]) : path[i]))) {
+                    break;
+                }
+            }
+
+            if (i) {
+                path.resize(i + 1);
+                seq.resize(path.size() + this->graph_.get_k() - 1);
+            }
         }
     }
 
