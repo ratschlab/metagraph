@@ -437,11 +437,6 @@ auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     std::swap(this->query_nodes_, base_nodes);
     this->num_matching_ = this->num_exact_matching();
 
-    std::sort(seeds.begin(), seeds.end(), [&](const auto &a, const auto &b) {
-        return a.get_query().data() + a.get_query().size()
-            < b.get_query().data() + b.get_query().size();
-    });
-
     return seeds;
 }
 

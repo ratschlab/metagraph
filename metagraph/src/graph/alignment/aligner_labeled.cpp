@@ -334,20 +334,14 @@ auto ILabeledDBGAligner
         if (batch_labels_vec.size() > config_.num_top_labels) {
             std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
                       [](const auto &a, const auto &b) {
-                return std::make_pair(static_cast<bool>(a.first.size()), a.second.second)
-                    < std::make_pair(static_cast<bool>(b.first.size()), b.second.second);
+                return a.second.second > b.second.second;
             });
-            auto it = batch_labels_vec.begin() + batch_labels_vec[0].first.empty();
-            if (it != batch_labels_vec.end()) {
-                auto end = std::find_if(it, batch_labels_vec.end(), [&](const auto &a) {
-                    return a.second.second < it->second.second;
-                });
-                batch_labels_vec.erase(end, batch_labels_vec.end());
-                if (batch_labels_vec[0].first.empty()) {
-                    std::rotate(batch_labels_vec.begin(), batch_labels_vec.begin() + 1,
-                                batch_labels_vec.end());
-                }
-            }
+            auto it = batch_labels_vec.begin() + config_.num_top_labels - 1;
+            auto end = std::find_if(it + 1, batch_labels_vec.end(),
+                                    [&](const auto &a) {
+                                        return a.second.second < it->second.second;
+                                    });
+            batch_labels_vec.erase(end, batch_labels_vec.end());
         }
 
         for (auto&& [targets, signature_counts] : batch_labels_vec) {

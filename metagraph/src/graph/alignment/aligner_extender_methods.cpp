@@ -51,7 +51,8 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
 
 template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
-    std::cerr << "get_init\n";
+    // std::cerr << "get_init\n";
+    // std::cerr << "len_\t" << seed.size() << "\n";
     assert(seed.size());
     assert(seed.get_cigar().size());
     assert(seed.get_cigar().back().first == Cigar::MATCH
@@ -333,6 +334,9 @@ bool update_column(const DeBruijnGraph &graph_,
             && OS[1 - offset] == seed_.get_cigar().back().first
             && PS[1 - offset] == Extender::PREV));
 
+    max_pos = (std::max_element(S.begin(), S.end()) - S.begin()) + offset;
+    assert(max_pos < size);
+
     return updated;
 }
 
@@ -485,6 +489,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(start_ + size == partial_sums_.size());
 
     extend_window_ = std::string_view{ align_start, size - 1 };
+    // std::cout << "bandstart\t" << extend_window_.size() << "\n";
     DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
 
@@ -522,7 +527,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
     while (stack.size()) {
         AlignNode prev = stack.top().first;
+        score_t last_score = stack.top().second;
         stack.pop();
+
+        if (last_score < xdrop_cutoff_)
+            continue;
 
         bool continue_traversal = true;
         while (continue_traversal) {
@@ -532,7 +541,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     > config_.max_ram_per_alignment) {
                 DEBUG_LOG("Alignment RAM limit reached, stopping extension");
                 stack = decltype(stack)();
-                std::cerr << "get_term\n";
                 break;
             }
 
@@ -540,7 +548,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     > config_.max_nodes_per_seq_char) {
                 DEBUG_LOG("Alignment node limit reached, stopping extension");
                 stack = decltype(stack)();
-                std::cerr << "get_term\n";
                 break;
             }
 
@@ -548,7 +555,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             size_t next_distance_from_origin = std::get<3>(prev) + 1;
 
             auto outgoing = get_outgoing(prev);
-            std::cerr << "get_outgoing\n";
+            // std::cerr << "get_outgoing\n";
 
             for (const auto &[next, c] : outgoing) {
                 auto &column_pair = table_[next];
@@ -568,6 +575,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 max_i = std::min(max_i + 1, size);
 
+                // std::cout << "band\t" << min_i << "," << max_i << "\t" << best_start.second << "," << last_score << "," << xdrop_cutoff_ << "\n";
+
                 size_t depth = column.size();
                 size_t cur_size = max_i - min_i;
 
@@ -586,9 +595,9 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
 
-                auto max_it = std::max_element(S.begin(), S.end());
-                max_pos = (max_it - S.begin()) + offset;
-                assert(max_pos < size);
+                auto max_it = S.begin() + (max_pos - offset);
+
+                // std::cout << "cur\t" << static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(next_distance_from_origin) << "\n";
 
                 converged = !updated || has_converged(column_pair, next_column);
 
@@ -636,6 +645,8 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
         }
     }
+
+    // std::cerr << "len_nc\t" << num_columns << "\t" << static_cast<double>(num_columns) / extend_window_.size() << "\n";
 
     std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
     assert(starts.empty() || starts[0].second == best_start.second);
