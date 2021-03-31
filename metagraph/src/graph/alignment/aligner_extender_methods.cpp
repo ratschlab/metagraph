@@ -532,6 +532,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     > config_.max_ram_per_alignment) {
                 DEBUG_LOG("Alignment RAM limit reached, stopping extension");
                 stack = decltype(stack)();
+                std::cerr << "get_term\n";
                 break;
             }
 
@@ -539,6 +540,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                     > config_.max_nodes_per_seq_char) {
                 DEBUG_LOG("Alignment node limit reached, stopping extension");
                 stack = decltype(stack)();
+                std::cerr << "get_term\n";
                 break;
             }
 
