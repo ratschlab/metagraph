@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from metagraph.cli import workflows
+from . import workflows
 
 
 def main(args=tuple(sys.argv[1:])):

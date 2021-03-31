@@ -2,13 +2,14 @@ import importlib
 import logging
 import sys
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 
 import snakemake
 
-from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
-from metagraph.cli.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
-WORKFLOW_ROOT = Path(__file__).parent.parent.parent / 'workflows'
+from .common import AnnotationLabelsSource, AnnotationFormats
+from .constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
+
+WORKFLOW_ROOT = Path(__file__).parent.parent / 'workflows'
 
 LOGGING_FORMAT='%(asctime)s - %(levelname)s: %(message)s'
 
@@ -77,10 +78,13 @@ def run_build_workflow(
 def setup_build_parser(parser):
     parser.add_argument('output_dir', type=Path)
 
-    input_seq_group = parser.add_argument_group('input sequences')
+    input_seq_group = parser.add_argument_group('input sequence paths', '')
+
     input_seq_group_xor = input_seq_group.add_mutually_exclusive_group(required=True)
-    input_seq_group_xor.add_argument('--seqs-file-list-path')
-    input_seq_group_xor.add_argument('--seqs-dir-path')
+    input_seq_group_xor.add_argument('--seqs-file-list-path',
+                                     help='Path to text file containing paths of sequences files')
+    input_seq_group_xor.add_argument('--seqs-dir-path',
+                                     help="Path to directory containing sequence files")
 
     graph = parser.add_argument_group('graph', 'arguments for graph building')
     graph.add_argument('-k', type=int, default=None)
@@ -91,10 +95,12 @@ def setup_build_parser(parser):
     annotation = parser.add_argument_group('annotation',
                                            'arguments for annotations')
     annotation.add_argument('--annotation-format', action='append',
-                            default=[])
+                            default=[],
+                            help=f"Annotation format (can be used multiple times). "
+                                 f"Possible values: {', '.join([v.value for v in AnnotationFormats])}")
     annotation.add_argument('--annotation-labels-source',
                             type=AnnotationLabelsSource,
-                            default=None,
+                            default=AnnotationLabelsSource.SEQUENCE_HEADERS,
                             help=f"What should be used as column labels. Possible values: "
                                  f"{', '.join([v.value for v in AnnotationLabelsSource])}")
 
@@ -118,7 +124,7 @@ def init_build(args):
         base_name=args.base_name,
         build_primary_graph=args.build_primary_graph,
         annotation_formats=[AnnotationFormats(af) for af in args.annotation_format],
-        annotation_labels_source=AnnotationLabelsSource.SEQUENCE_HEADERS,
+        annotation_labels_source=args.annotation_labels_source,
         exec_cmd=args.exec_cmd,
         threads=args.threads,
         force=args.force,
@@ -129,4 +135,3 @@ def init_build(args):
     if not was_successful:
         logging.error("Workflow did not run successfully")
         sys.exit(1)
-

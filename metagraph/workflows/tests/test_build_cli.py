@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from metagraph.cli import utils
-from metagraph.cli.common import AnnotationFormats, AnnotationLabelsSource
+from metagraph_workflows import utils
+from metagraph_workflows.common import AnnotationFormats, AnnotationLabelsSource
 
 WORKFLOW_ROOT = Path(__file__).parent.parent / 'workflows'
 
@@ -14,7 +14,7 @@ WORKFLOW_ROOT = Path(__file__).parent.parent / 'workflows'
 def run_wrapper(args_list):
     code_base = Path(os.path.realpath(__file__)).parent.parent
 
-    process_args = ['python', '-m', 'metagraph.cli.cli'] + args_list
+    process_args = ['python', '-m', 'metagraph_workflows.cli'] + args_list
 
     proc = subprocess.run([str(a) for a in process_args],
                           cwd=code_base, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

@@ -4,9 +4,9 @@ from pathlib import Path
 
 from psutil import virtual_memory
 
-from metagraph.cli.common import AnnotationLabelsSource, AnnotationFormats
-from metagraph.cli import utils
-from metagraph.cli.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
+from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
+from metagraph_workflows import utils
+from metagraph_workflows.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
 
 def take_value_or_default(key, default):

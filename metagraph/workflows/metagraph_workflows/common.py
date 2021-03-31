@@ -6,10 +6,12 @@ class AnnotationLabelsSource(Enum):
     SEQUENCE_FILE_NAMES = 'sequence_file_names'
 
     def to_annotation_cmd_option(self):
-        # TODO: check comparison
         if self == self.SEQUENCE_FILE_NAMES:
             return '--anno-filename'
-        return '--anno-header'
+        elif self == self.SEQUENCE_HEADERS:
+            return '--anno-header'
+        else:
+            raise ValueError(f"Invalid value of AnnotationLabelsSource: got {self}")
 
 
 class AnnotationFormats(Enum):
