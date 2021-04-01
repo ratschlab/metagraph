@@ -453,7 +453,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 
             out_edges.emplace_back(std::move(edges[i]));
 
-            AlignNode next = get_next_align_node(edges[i].first, edges[i].second, depth + 1);
+            AlignNode next = get_next_align_node(out_edges[i].first, out_edges[i].second, depth + 1);
             auto it = target_columns_->emplace(annotation[i]).first;
             target_column_idx = it - target_columns_->begin();
             assert(target_column_idx < target_columns_->size());
@@ -517,7 +517,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         cur_node = DeBruijnGraph::npos;
 
         if (outgoing.empty()) {
-            if (path.size())
+            if (path.size() > 1)
                 seq_paths.emplace_back(std::move(seq), std::move(path));
         } else if (outgoing.size() > 1) {
             if (path.size() == 1) {
@@ -563,6 +563,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
         &anno_graph_.get_annotation().get_matrix()
     );
+    assert(seq_paths.size() == this->graph_.outdegree(std::get<0>(node)));
 
     if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
         for (auto &[seq, path] : seq_paths) {
@@ -582,6 +583,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             }
         }
     }
+
+    if (seq_paths.empty())
+        return {};
 
     Edges edges;
     LabeledEdges labeled_edges;
