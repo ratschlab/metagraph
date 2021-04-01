@@ -150,10 +150,9 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
     uint64_t boss_edge = graph_->kmer_to_boss_index(
             graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
     const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     while (!anchor_[row]) {
-        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+        boss_edge = boss.row_diff_successor(boss_edge, fork_succ_);
 
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
@@ -186,7 +185,6 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
@@ -213,7 +211,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             if (anchor_[row])
                 break;
 
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            boss_edge = boss.row_diff_successor(boss_edge, fork_succ_);
         }
     }
 

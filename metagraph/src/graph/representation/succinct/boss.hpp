@@ -162,7 +162,7 @@ class BOSS {
         // make one traversal step
         edge = fwd(edge, d);
         // pick the row-diff successor
-        if (!get_last(edge - 1)) {
+        if (rd_succ.size() && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
                 edge--;
                 assert(!get_last(edge) && "a row-diff successor must exist");
