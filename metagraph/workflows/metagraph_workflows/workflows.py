@@ -2,7 +2,8 @@ import importlib
 import logging
 import sys
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Iterable, Optional, Union, Dict, Any
+import shlex
 
 import snakemake
 
@@ -15,6 +16,7 @@ LOGGING_FORMAT='%(asctime)s - %(levelname)s: %(message)s'
 
 logging.basicConfig(format=LOGGING_FORMAT, level=logging.WARNING)
 
+
 # TODO: use custom config object? fluent config?
 def run_build_workflow(
         output_dir: Path,
@@ -24,12 +26,13 @@ def run_build_workflow(
         base_name: Optional[str] = None,
         build_primary_graph: bool = False,
         annotation_formats: Iterable[AnnotationFormats] = (),
-        annotation_labels_source: Optional[AnnotationLabelsSource] = None,
+        annotation_labels_source: AnnotationLabelsSource = AnnotationLabelsSource.SEQUENCE_HEADERS,
         exec_cmd: str = None,
         threads: Optional[int] = None,
         force: bool = False,
         verbose: bool = False,
         dryrun: bool = False,
+        additional_snakemake_args: Optional[Dict[str, Any]] = None
 ) -> bool:
     # TODO: support str argumt?
 
@@ -38,9 +41,9 @@ def run_build_workflow(
 
     config = snakemake.load_configfile(default_path)
 
-    config[SEQS_FILE_LIST_PATH] = seqs_file_list_path
-    config[SEQS_DIR_PATH] = seqs_dir_path
-    config['output_directory'] = output_dir
+    config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
+    config[SEQS_DIR_PATH] = str(seqs_dir_path)
+    config['output_directory'] = str(output_dir)
 
     config['k'] = k if k else config['k']
 
@@ -66,10 +69,13 @@ def run_build_workflow(
         for k, v in sorted(config.items(), key=lambda t: t[0]):
             logging.info(f"\t{k}: {v}")
 
+    additional_args = additional_snakemake_args if additional_snakemake_args else {}
+
     was_successful = snakemake.snakemake(str(snakefile_path), config=config,
                                          scheduler='greedy',
                                          forceall=force,
-                                         dryrun=dryrun
+                                         dryrun=dryrun,
+                                         **additional_args
                                          )
 
     return was_successful
@@ -111,8 +117,41 @@ def setup_build_parser(parser):
     workflow.add_argument('--verbose', default=False, action='store_true')
     workflow.add_argument('--dryrun', default=False, action='store_true')
     workflow.add_argument('--exec-cmd', type=str, default=None)
+    workflow.add_argument('--additional-snakemake-args', type=str, default='',
+                          help='Additional arguments to pass to snakemake, e.g. --additional-snakemake-args="arg1=val1 arg2=val2"')
 
     parser.set_defaults(func=init_build)
+
+
+def _convert_type(v: str) -> Any:
+    if v.lower() == 'true' or v == '1':
+        return True
+    elif v.lower() == 'false' or v == '0':
+        return False
+
+    try:
+        return float(v)
+    except:
+        pass
+
+    try:
+        return int(v)
+    except:
+        pass
+
+    return v
+
+
+def _parse_additional_snakemake_args(arg: str) -> Dict[str, Any]:
+    ret = {}
+    for a in shlex.split(arg):
+        if '=' not in a:
+            raise ValueError("ex")
+
+        k, v = a.split('=')
+        ret[k] = _convert_type(v)
+
+    return ret
 
 
 def init_build(args):
@@ -129,7 +168,8 @@ def init_build(args):
         threads=args.threads,
         force=args.force,
         verbose=args.verbose,
-        dryrun=args.dryrun
+        dryrun=args.dryrun,
+        additional_snakemake_args=_parse_additional_snakemake_args(args.additional_snakemake_args)
     )
 
     if not was_successful:
