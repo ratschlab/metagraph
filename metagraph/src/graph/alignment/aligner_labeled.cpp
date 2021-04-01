@@ -375,11 +375,7 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     backtrack_start_counter_.clear();
 
     assert(check_targets(anno_graph_, path));
-
-    auto it = target_columns_->emplace(path.target_columns).first;
-    size_t target_column_idx = it - target_columns_->begin();
-    assert(target_column_idx < target_columns_->size());
-    align_node_to_target_[this->start_node_] = target_column_idx;
+    align_node_to_target_[this->start_node_] = get_target_id(path.target_columns);
 }
 
 template <typename NodeType>
@@ -406,7 +402,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     uint64_t target_column_idx = align_node_to_target_[node];
     assert(target_column_idx < target_columns_->size());
 
-    if ((target_columns_->begin() + target_column_idx)->empty()) {
+    if (!target_column_idx) {
         assert(this->seed_->get_offset() >= depth);
         assert(this->seed_->get_offset());
         size_t next_offset = this->seed_->get_offset() - depth;
@@ -451,28 +447,13 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 continue;
             }
 
-            if (cached_edge_sets_->count(std::get<0>(edges[i]))) {
-                Targets &old_targets = (*cached_edge_sets_)[std::get<0>(edges[i])].first;
-                Targets new_targets;
-                std::set_union(old_targets.begin(), old_targets.end(),
-                               annotation[i].begin(), annotation[i].end(),
-                               std::back_inserter(new_targets));
-                if (old_targets.size() < new_targets.size())
-                    (*cached_edge_sets_)[std::get<0>(edges[i])].second = false;
+            target_column_idx = get_target_id(annotation[i]);
 
-                // std::cout << "Updated short start " << std::get<0>(edges[i]) << " " << (*cached_edge_sets_)[std::get<0>(edges[i])].second << "\n";
-                std::swap(new_targets, old_targets);
-            } else {
-                cached_edge_sets_->emplace(std::get<0>(edges[i]), std::make_pair(annotation[i], false));
-                // std::cout << "Added short start " << std::get<0>(edges[i]) << " " << false << "\n";
-            }
+            update_target_cache(std::get<0>(edges[i]), target_column_idx);
 
             out_edges.emplace_back(std::move(edges[i]));
 
             const AlignNode &next = out_edges.back();
-            auto it = target_columns_->emplace(annotation[i]).first;
-            target_column_idx = it - target_columns_->begin();
-            assert(target_column_idx < target_columns_->size());
             assert(!align_node_to_target_.count(next));
             align_node_to_target_[next] = target_column_idx;
         }
@@ -486,44 +467,27 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 #endif
     }
 
-    const Targets &targets = *(target_columns_->begin() + target_column_idx);
-    if (cached_edge_sets_->count(std::get<0>(node))) {
-        Targets &edge_sets = (*cached_edge_sets_)[std::get<0>(node)].first;
-        if ((*cached_edge_sets_)[std::get<0>(node)].second
-                && std::includes(edge_sets.begin(), edge_sets.end(), targets.begin(), targets.end())) {
-            // std::cout << "Old start " << std::get<0>(node) << "\n";
-            Edges edges;
-            for (auto &edge : DefaultColumnExtender<NodeType>::get_outgoing(node)) {
-                assert(!align_node_to_target_.count(edge));
-                // std::cout << "\tChecking " << std::get<0>(edge) << "\n";
-                assert(cached_edge_sets_->count(std::get<0>(edge)));
-                const auto &next_edge_sets = (*cached_edge_sets_)[std::get<0>(edge)].first;
-                Targets next_targets;
-                std::set_intersection(targets.begin(), targets.end(),
-                                      next_edge_sets.begin(), next_edge_sets.end(),
-                                      std::back_inserter(next_targets));
-                if (next_targets.size()) {
-                    auto jt = target_columns_->emplace(next_targets).first;
-                    size_t cur_target_column_idx = jt - target_columns_->begin();
-                    assert(cur_target_column_idx < target_columns_->size());
-                    align_node_to_target_[edge] = cur_target_column_idx;
-                    edges.emplace_back(std::move(edge));
-                }
-            }
+    if (!update_target_cache(std::get<0>(node), target_column_idx)
+            && (*cached_edge_sets_)[std::get<0>(node)].second) {
+        Edges edges;
+        for (auto &edge : DefaultColumnExtender<NodeType>::get_outgoing(node)) {
+            assert(!align_node_to_target_.count(edge));
 
-            return edges;
-        } else {
-            // std::cout << "Updated start " << std::get<0>(node) << " " << true << "\n";
-            Targets new_targets;
-            std::set_union(edge_sets.begin(), edge_sets.end(), targets.begin(), targets.end(),
-                           std::back_inserter(new_targets));
-            std::swap(new_targets, edge_sets);
-            (*cached_edge_sets_)[std::get<0>(node)].second = true;
+            size_t next_target_column_idx = get_target_intersection(
+                get_cached_target_id(std::get<0>(edge)),
+                target_column_idx
+            );
+
+            if (next_target_column_idx) {
+                align_node_to_target_[edge] = next_target_column_idx;
+                edges.emplace_back(std::move(edge));
+            }
         }
-    } else {
-        // std::cout << "Added start " << std::get<0>(node) << " " << true << "\n";
-        cached_edge_sets_->emplace(std::get<0>(node), std::make_pair(targets, true));
+
+        return edges;
     }
+
+    (*cached_edge_sets_)[std::get<0>(node)].second = true;
 
     // prefetch the next unitig
     std::vector<std::pair<std::string, std::vector<NodeType>>> seq_paths;
@@ -599,7 +563,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         }
     }
 
-    // std::cout << "\tfoundpaths " << seq_paths.size() << " / " << this->graph_.outdegree(std::get<0>(node)) << "\n";
     assert(seq_paths.size() == this->graph_.outdegree(std::get<0>(node)));
 
     const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
@@ -629,9 +592,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         return {};
 
     Edges edges;
-    auto all_extensions = traverse_maximal_by_label(
-        anno_graph_, seq_paths, *(target_columns_->begin() + target_column_idx)
-    );
+    auto all_extensions = traverse_maximal_by_label(anno_graph_, seq_paths,
+                                                    get_targets(target_column_idx));
     for (size_t j = 0; j < seq_paths.size(); ++j) {
         const auto &[seq, path] = seq_paths[j];
         auto &extensions = all_extensions[j];
@@ -640,11 +602,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             std::sort(extensions.begin(), extensions.end(), utils::LessSecond());
 
             if (extensions.back().second <= 1) {
-                if (!cached_edge_sets_->count(path[1])) {
-                    // std::cout << "\tAdded later " << path[1] << " " << false << "\n";
-                    cached_edge_sets_->emplace(path[1], std::make_pair(Targets{}, false));
-                }
-
+                update_target_cache(path[1], 0);
                 continue;
             }
 
@@ -659,29 +617,13 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 targets[jt - it] = jt->first;
             }
             std::sort(targets.begin(), targets.end());
-            auto jt = target_columns_->emplace(targets).first;
-            size_t cur_target_column_idx = jt - target_columns_->begin();
-            assert(cur_target_column_idx < target_columns_->size());
 
-            // if (it != extensions.begin()) {
-                assert(!align_node_to_target_.count(edges.back()));
-                align_node_to_target_[edges.back()] = cur_target_column_idx;
-            // }
+            size_t cur_target_column_idx = get_target_id(targets);
 
-            if (cached_edge_sets_->count(path[1])) {
-                Targets &old_targets = (*cached_edge_sets_)[path[1]].first;
-                Targets new_targets;
-                std::set_union(old_targets.begin(), old_targets.end(), targets.begin(), targets.end(),
-                               std::back_inserter(new_targets));
-                if (old_targets.size() < new_targets.size())
-                    (*cached_edge_sets_)[path[1]].second = false;
+            assert(!align_node_to_target_.count(edges.back()));
+            align_node_to_target_[edges.back()] = cur_target_column_idx;
 
-                std::swap(new_targets, old_targets);
-                // std::cout << "\tUpdated later " << path[1] << " " << (*cached_edge_sets_)[path[1]].second << "\n";
-            } else {
-                // std::cout << "\tAdded later " << path[1] << " " << false << "\n";
-                cached_edge_sets_->emplace(path[1], std::make_pair(targets, false));
-            }
+            update_target_cache(path[1], cur_target_column_idx);
 
             for (size_t i = 2; i < extensions.front().second; ++i) {
                 if (it->second < i) {
@@ -694,30 +636,10 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     }
                     std::sort(targets.begin(), targets.end());
                     it = jt;
-                    // auto kt = target_columns_->emplace(targets).first;
-                    // cur_target_column_idx = kt - target_columns_->begin();
-                    // assert(cur_target_column_idx < target_columns_->size());
+                    cur_target_column_idx = get_target_id(targets);
                 }
 
-                // AlignNode next = get_next_align_node(
-                //     path[i], seq[i + this->graph_.get_k() - 1], depth + i);
-                // assert(!align_node_to_target_.count(next));
-                // align_node_to_target_[next] = cur_target_column_idx;
-
-                if (cached_edge_sets_->count(path[i])) {
-                    Targets &old_targets = (*cached_edge_sets_)[path[i]].first;
-                    Targets new_targets;
-                    std::set_union(old_targets.begin(), old_targets.end(), targets.begin(), targets.end(),
-                                   std::back_inserter(new_targets));
-                    if (old_targets.size() < new_targets.size())
-                        (*cached_edge_sets_)[path[i]].second = false;
-
-                    std::swap(new_targets, old_targets);
-                    // std::cout << "\tUpdated later " << path[i] << " " << (*cached_edge_sets_)[path[i]].second << "\n";
-                } else {
-                    cached_edge_sets_->emplace(path[i], std::make_pair(targets, false));
-                    // std::cout << "\tAdded later " << path[i] << " " << false << "\n";
-                }
+                update_target_cache(path[i], cur_target_column_idx);
             }
         }
     }

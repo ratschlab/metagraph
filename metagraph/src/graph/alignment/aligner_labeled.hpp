@@ -107,7 +107,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef ILabeledDBGAligner::Targets Targets;
     typedef VectorSet<Targets, utils::VectorHash> TargetColumnsSet;
-    typedef tsl::hopscotch_map<NodeType, std::pair<Targets, bool>> EdgeSetCache;
+    typedef tsl::hopscotch_map<NodeType, std::pair<size_t, bool>> EdgeSetCache;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
@@ -174,8 +174,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
             assert(target_columns_idx < target_columns_->size());
 
             ++backtrack_start_counter_[target_columns_idx];
-            extensions.back().target_columns
-                = *(target_columns_->begin() + target_columns_idx);
+            extensions.back().target_columns = get_targets(target_columns_idx);
 
             assert(check_targets(anno_graph_, extensions.back()));
         }
@@ -184,6 +183,75 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     virtual void pop(const AlignNode &node) override {
         if (align_node_to_target_.count(node))
             align_node_to_target_.erase(node);
+    }
+
+    const Targets& get_targets(size_t id) const {
+        assert(id < target_columns_->size());
+        const Targets &targets = *(target_columns_->begin() + id);
+        assert(std::is_sorted(targets.begin(), targets.end()));
+        return targets;
+    }
+
+    size_t get_target_id(const Targets &targets) const {
+        assert(std::is_sorted(targets.begin(), targets.end()));
+        auto find = target_columns_->emplace(targets).first;
+        return find - target_columns_->begin();
+    }
+
+    size_t get_cached_target_id(NodeType node) const {
+        assert(cached_edge_sets_->count(node));
+        return (*cached_edge_sets_)[node].first;
+    }
+
+    bool update_target_cache(NodeType node, size_t a) const {
+        if (cached_edge_sets_->count(node)) {
+            size_t cached_id = get_cached_target_id(node);
+            if (cached_id == a)
+                return false;
+
+            const Targets &cached_t = get_targets(cached_id);
+            const Targets &a_t = get_targets(a);
+
+            if (std::includes(cached_t.begin(), cached_t.end(), a_t.begin(), a_t.end()))
+                return false;
+
+            cached_id = get_target_union(cached_id, a);
+            (*cached_edge_sets_)[node].first = cached_id;
+            (*cached_edge_sets_)[node].second = false;
+
+            return cached_id != a;
+        }
+
+        cached_edge_sets_->emplace(node, std::make_pair(a, false));
+        return true;
+    }
+
+    size_t get_target_union(size_t a, size_t b) const {
+        if (a == b)
+            return a;
+
+        const Targets &a_t = get_targets(a);
+        const Targets &b_t = get_targets(b);
+
+        Targets new_targets;
+        std::set_union(a_t.begin(), a_t.end(), b_t.begin(), b_t.end(),
+                       std::back_inserter(new_targets));
+
+        return get_target_id(new_targets);
+    }
+
+    size_t get_target_intersection(size_t a, size_t b) const {
+        if (a == b)
+            return a;
+
+        const Targets &a_t = get_targets(a);
+        const Targets &b_t = get_targets(b);
+
+        Targets new_targets;
+        std::set_intersection(a_t.begin(), a_t.end(), b_t.begin(), b_t.end(),
+                              std::back_inserter(new_targets));
+
+        return get_target_id(new_targets);
     }
 
   private:
@@ -208,6 +276,8 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
     auto mapped_batch = map_and_label_query_batch(generate_query);
 
     TargetColumnsSet target_columns_set;
+    target_columns_set.emplace(Targets{});
+
     EdgeSetCache cached_edge_sets;
 
     size_t i = 0;
