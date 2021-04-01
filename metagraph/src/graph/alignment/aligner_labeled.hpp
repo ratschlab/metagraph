@@ -107,8 +107,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef ILabeledDBGAligner::Targets Targets;
     typedef VectorSet<Targets, utils::VectorHash> TargetColumnsSet;
-    typedef std::vector<std::tuple<NodeType, char, size_t>> LabeledEdges;
-    typedef tsl::hopscotch_map<NodeType, tsl::hopscotch_map<size_t, LabeledEdges>> EdgeSetCache;
+    typedef tsl::hopscotch_map<NodeType, std::pair<Targets, bool>> EdgeSetCache;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
@@ -122,11 +121,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     virtual void initialize(const DBGAlignment &path) override;
 
   protected:
-    typedef std::vector<std::pair<NodeType, char>> Edges;
     typedef typename DefaultColumnExtender<NodeType>::Column Column;
     typedef typename DefaultColumnExtender<NodeType>::Scores Scores;
     typedef typename DefaultColumnExtender<NodeType>::AlignNode AlignNode;
     typedef typename DefaultColumnExtender<NodeType>::AlignNodeHash AlignNodeHash;
+    typedef std::vector<AlignNode> Edges;
 
     virtual Edges get_outgoing(const AlignNode &node) const override;
 
@@ -180,6 +179,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
             assert(check_targets(anno_graph_, extensions.back()));
         }
+    }
+
+    virtual void pop(const AlignNode &node) override {
+        if (align_node_to_target_.count(node))
+            align_node_to_target_.erase(node);
     }
 
   private:

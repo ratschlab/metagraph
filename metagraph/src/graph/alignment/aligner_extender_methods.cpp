@@ -552,12 +552,12 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             }
 
             bool prev_converged = table_[std::get<0>(prev)].second;
-            size_t next_distance_from_origin = std::get<3>(prev) + 1;
 
             auto outgoing = get_outgoing(prev);
             // std::cerr << "get_outgoing\n";
 
-            for (const auto &[next, c] : outgoing) {
+            for (const auto &cur : outgoing) {
+                const auto &[next, c, depth, next_distance_from_origin] = cur;
                 auto &column_pair = table_[next];
                 auto &[column, converged] = column_pair;
                 if (prev_converged && converged)
@@ -577,7 +577,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 // std::cout << "band\t" << min_i << "," << max_i << "\t" << best_start.second << "," << last_score << "," << xdrop_cutoff_ << "\n";
 
-                size_t depth = column.size();
                 size_t cur_size = max_i - min_i;
 
                 Scores next_column(ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
@@ -609,7 +608,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 }
 
                 bool add_to_table = false;
-                AlignNode cur{ next, c, depth, next_distance_from_origin };
                 if (OS[max_pos - offset] == Cigar::MATCH && *max_it > best_start.second) {
                     best_start.first = cur;
                     best_start.second = *max_it;
@@ -639,8 +637,11 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                     add_scores_to_column(column_pair, std::move(next_column), cur);
 
-                } else if (!depth) {
-                    table_.erase(next);
+                } else {
+                    pop(cur);
+
+                    if (!depth)
+                        table_.erase(next);
                 }
             }
         }
@@ -797,15 +798,23 @@ void DefaultColumnExtender<NodeType>::sanitize(Scores &scores, score_t max_score
 }
 
 template <typename NodeType>
-std::vector<std::pair<NodeType, char>> DefaultColumnExtender<NodeType>
-::get_outgoing(const AlignNode &node) const {
-    std::vector<std::pair<NodeType, char>> outgoing;
+auto DefaultColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const
+        -> std::vector<AlignNode> {
+    std::vector<AlignNode> outgoing;
+    size_t next_distance_from_origin = std::get<3>(node) + 1;
     if (std::get<0>(node) == graph_.max_index() + 1) {
-        outgoing.emplace_back(seed_->back(), seed_->get_sequence().back());
+        node_index next = seed_->back();
+        auto find = table_.find(next);
+        size_t depth = find != table_.end() ? find->second.first.size() : 0;
+        outgoing.emplace_back(next, seed_->get_sequence().back(), depth,
+                              next_distance_from_origin);
     } else {
         graph_.call_outgoing_kmers(std::get<0>(node), [&](NodeType next, char c) {
-            if (c != boss::BOSS::kSentinel)
-                outgoing.emplace_back(next, c);
+            if (c != boss::BOSS::kSentinel) {
+                auto find = table_.find(next);
+                size_t depth = find != table_.end() ? find->second.first.size() : 0;
+                outgoing.emplace_back(next, c, depth, next_distance_from_origin);
+            }
         });
     }
 

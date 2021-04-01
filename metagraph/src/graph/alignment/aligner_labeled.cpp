@@ -422,7 +422,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         std::vector<AnnotatedDBG::row_index> rows;
         rows.reserve(edges.size());
 
-        for (const auto &[next_node, c] : edges) {
+        for (const auto &[next_node, c, depth, distance_from_origin] : edges) {
             seq.back() = c;
             process_seq_path(this->graph_, seq, std::vector<node_index>{ next_node },
                              [&](AnnotatedDBG::row_index row, size_t) {
@@ -439,7 +439,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         for (size_t i = 0; i < rows.size(); ++i) {
             DBGAlignment dummy_seed(
                 std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
-                std::vector<node_index>{ edges[i].first },
+                std::vector<node_index>{ std::get<0>(edges[i]) },
                 std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
                 this->seed_->get_orientation()
             );
@@ -451,9 +451,25 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                 continue;
             }
 
+            if (cached_edge_sets_->count(std::get<0>(edges[i]))) {
+                Targets &old_targets = (*cached_edge_sets_)[std::get<0>(edges[i])].first;
+                Targets new_targets;
+                std::set_union(old_targets.begin(), old_targets.end(),
+                               annotation[i].begin(), annotation[i].end(),
+                               std::back_inserter(new_targets));
+                if (old_targets.size() < new_targets.size())
+                    (*cached_edge_sets_)[std::get<0>(edges[i])].second = false;
+
+                // std::cout << "Updated short start " << std::get<0>(edges[i]) << " " << (*cached_edge_sets_)[std::get<0>(edges[i])].second << "\n";
+                std::swap(new_targets, old_targets);
+            } else {
+                cached_edge_sets_->emplace(std::get<0>(edges[i]), std::make_pair(annotation[i], false));
+                // std::cout << "Added short start " << std::get<0>(edges[i]) << " " << false << "\n";
+            }
+
             out_edges.emplace_back(std::move(edges[i]));
 
-            AlignNode next = get_next_align_node(out_edges[i].first, out_edges[i].second, depth + 1);
+            const AlignNode &next = out_edges.back();
             auto it = target_columns_->emplace(annotation[i]).first;
             target_column_idx = it - target_columns_->begin();
             assert(target_column_idx < target_columns_->size());
@@ -470,20 +486,43 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
 #endif
     }
 
+    const Targets &targets = *(target_columns_->begin() + target_column_idx);
     if (cached_edge_sets_->count(std::get<0>(node))) {
-        const auto &edge_sets = (*cached_edge_sets_)[std::get<0>(node)];
-        if (edge_sets.count(target_column_idx)) {
-            const LabeledEdges &labeled_edges = edge_sets.find(target_column_idx)->second;
+        Targets &edge_sets = (*cached_edge_sets_)[std::get<0>(node)].first;
+        if ((*cached_edge_sets_)[std::get<0>(node)].second
+                && std::includes(edge_sets.begin(), edge_sets.end(), targets.begin(), targets.end())) {
+            // std::cout << "Old start " << std::get<0>(node) << "\n";
             Edges edges;
-            edges.reserve(labeled_edges.size());
-            for (auto [node, c, target_column_idx] : labeled_edges) {
-                edges.emplace_back(node, c);
-                AlignNode next = get_next_align_node(node, c, depth + 1);
-                if (!align_node_to_target_.count(next))
-                    align_node_to_target_[next] = target_column_idx;
+            for (auto &edge : DefaultColumnExtender<NodeType>::get_outgoing(node)) {
+                // std::cout << "\tChecking " << std::get<0>(edge) << "\n";
+                assert(cached_edge_sets_->count(std::get<0>(edge)));
+                const auto &next_edge_sets = (*cached_edge_sets_)[std::get<0>(edge)].first;
+                Targets next_targets;
+                std::set_intersection(targets.begin(), targets.end(),
+                                      next_edge_sets.begin(), next_edge_sets.end(),
+                                      std::back_inserter(next_targets));
+                if (next_targets.size()) {
+                    auto jt = target_columns_->emplace(next_targets).first;
+                    size_t cur_target_column_idx = jt - target_columns_->begin();
+                    assert(cur_target_column_idx < target_columns_->size());
+                    assert(!align_node_to_target_.count(edge));
+                    align_node_to_target_[edge] = cur_target_column_idx;
+                    edges.emplace_back(std::move(edge));
+                }
             }
+
             return edges;
+        } else {
+            // std::cout << "Updated start " << std::get<0>(node) << " " << true << "\n";
+            Targets new_targets;
+            std::set_union(edge_sets.begin(), edge_sets.end(), targets.begin(), targets.end(),
+                           std::back_inserter(new_targets));
+            std::swap(new_targets, edge_sets);
+            (*cached_edge_sets_)[std::get<0>(node)].second = true;
         }
+    } else {
+        // std::cout << "Added start " << std::get<0>(node) << " " << true << "\n";
+        cached_edge_sets_->emplace(std::get<0>(node), std::make_pair(targets, true));
     }
 
     // prefetch the next unitig
@@ -560,35 +599,36 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
         }
     }
 
-    const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
-        &anno_graph_.get_annotation().get_matrix()
-    );
+    // std::cout << "\tfoundpaths " << seq_paths.size() << " / " << this->graph_.outdegree(std::get<0>(node)) << "\n";
     assert(seq_paths.size() == this->graph_.outdegree(std::get<0>(node)));
 
-    if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
-        for (auto &[seq, path] : seq_paths) {
-            if (path.size() <= 2)
-                continue;
+    // const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
+    //     &anno_graph_.get_annotation().get_matrix()
+    // );
 
-            size_t i = path.size() - 1;
-            for ( ; i > 0; --i) {
-                if (row_diff->is_anchor(AnnotatedDBG::graph_to_anno_index(canonical ? canonical->get_base_node(path[i]) : path[i]))) {
-                    break;
-                }
-            }
+    // if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
+    //     for (auto &[seq, path] : seq_paths) {
+    //         if (path.size() <= 2)
+    //             continue;
 
-            if (i) {
-                path.resize(i + 1);
-                seq.resize(path.size() + this->graph_.get_k() - 1);
-            }
-        }
-    }
+    //         size_t i = path.size() - 1;
+    //         for ( ; i > 0; --i) {
+    //             if (row_diff->is_anchor(AnnotatedDBG::graph_to_anno_index(canonical ? canonical->get_base_node(path[i]) : path[i]))) {
+    //                 break;
+    //             }
+    //         }
+
+    //         if (i) {
+    //             path.resize(i + 1);
+    //             seq.resize(path.size() + this->graph_.get_k() - 1);
+    //         }
+    //     }
+    // }
 
     if (seq_paths.empty())
         return {};
 
     Edges edges;
-    LabeledEdges labeled_edges;
     auto all_extensions = traverse_maximal_by_label(
         anno_graph_, seq_paths, *(target_columns_->begin() + target_column_idx)
     );
@@ -599,10 +639,18 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             assert(path[0] == std::get<0>(node));
             std::sort(extensions.begin(), extensions.end(), utils::LessSecond());
 
-            if (extensions.back().second <= 1)
-                continue;
+            if (extensions.back().second <= 1) {
+                if (!cached_edge_sets_->count(path[1])) {
+                    // std::cout << "\tAdded later " << path[1] << " " << false << "\n";
+                    cached_edge_sets_->emplace(path[1], std::make_pair(Targets{}, false));
+                }
 
-            edges.emplace_back(path[1], seq[this->graph_.get_k()]);
+                continue;
+            }
+
+            auto find = this->table_.find(path[1]);
+            size_t cnt = find != this->table_.end() ? find->second.first.size() : 0;
+            edges.emplace_back(path[1], seq[this->graph_.get_k()], cnt, depth + 1);
 
             auto it = std::find_if(extensions.begin(), extensions.end(),
                                    [&](const auto &a) { return a.second > 1; });
@@ -615,19 +663,27 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             size_t cur_target_column_idx = jt - target_columns_->begin();
             assert(cur_target_column_idx < target_columns_->size());
 
-            if (it != extensions.begin()) {
-                AlignNode next = get_next_align_node(
-                    path[1], seq[this->graph_.get_k()], depth + 1);
-                assert(!align_node_to_target_.count(next));
-                align_node_to_target_[next] = cur_target_column_idx;
+            // if (it != extensions.begin()) {
+                assert(!align_node_to_target_.count(edges.back()));
+                align_node_to_target_[edges.back()] = cur_target_column_idx;
+            // }
+
+            if (cached_edge_sets_->count(path[1])) {
+                Targets &old_targets = (*cached_edge_sets_)[path[1]].first;
+                Targets new_targets;
+                std::set_union(old_targets.begin(), old_targets.end(), targets.begin(), targets.end(),
+                               std::back_inserter(new_targets));
+                if (old_targets.size() < new_targets.size())
+                    (*cached_edge_sets_)[path[1]].second = false;
+
+                std::swap(new_targets, old_targets);
+                // std::cout << "\tUpdated later " << path[1] << " " << (*cached_edge_sets_)[path[1]].second << "\n";
+            } else {
+                // std::cout << "\tAdded later " << path[1] << " " << false << "\n";
+                cached_edge_sets_->emplace(path[1], std::make_pair(targets, false));
             }
 
-            labeled_edges.emplace_back(edges.back().first, edges.back().second, cur_target_column_idx);
-
             for (size_t i = 2; i < extensions.front().second; ++i) {
-                (*cached_edge_sets_)[path[i - 1]][cur_target_column_idx].emplace_back(
-                    path[i], seq[i + this->graph_.get_k() - 1], cur_target_column_idx
-                );
                 if (it->second < i) {
                     auto jt = std::find_if(it + 1, extensions.end(),
                                            [&](const auto &a) { return a.second >= i; });
@@ -638,22 +694,33 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     }
                     std::sort(targets.begin(), targets.end());
                     it = jt;
-                    auto kt = target_columns_->emplace(targets).first;
-                    cur_target_column_idx = kt - target_columns_->begin();
-                    assert(cur_target_column_idx < target_columns_->size());
+                    // auto kt = target_columns_->emplace(targets).first;
+                    // cur_target_column_idx = kt - target_columns_->begin();
+                    // assert(cur_target_column_idx < target_columns_->size());
                 }
 
-                AlignNode next = get_next_align_node(
-                    path[i], seq[i + this->graph_.get_k() - 1], depth + i);
-                assert(!align_node_to_target_.count(next));
-                align_node_to_target_[next] = cur_target_column_idx;
+                // AlignNode next = get_next_align_node(
+                //     path[i], seq[i + this->graph_.get_k() - 1], depth + i);
+                // assert(!align_node_to_target_.count(next));
+                // align_node_to_target_[next] = cur_target_column_idx;
+
+                if (cached_edge_sets_->count(path[i])) {
+                    Targets &old_targets = (*cached_edge_sets_)[path[i]].first;
+                    Targets new_targets;
+                    std::set_union(old_targets.begin(), old_targets.end(), targets.begin(), targets.end(),
+                                   std::back_inserter(new_targets));
+                    if (old_targets.size() < new_targets.size())
+                        (*cached_edge_sets_)[path[i]].second = false;
+
+                    std::swap(new_targets, old_targets);
+                    // std::cout << "\tUpdated later " << path[i] << " " << (*cached_edge_sets_)[path[i]].second << "\n";
+                } else {
+                    cached_edge_sets_->emplace(path[i], std::make_pair(targets, false));
+                    // std::cout << "\tAdded later " << path[i] << " " << false << "\n";
+                }
             }
         }
     }
-
-    auto &edge_sets = (*cached_edge_sets_)[std::get<0>(node)];
-    assert(!edge_sets.count(target_column_idx));
-    edge_sets[target_column_idx] = labeled_edges;
 
     return edges;
 }
