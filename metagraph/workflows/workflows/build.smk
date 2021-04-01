@@ -6,20 +6,6 @@ if build_primary:
 else:
     ruleorder: build > build_primary
 
-mem_cap_factor=0.9
-disk_cap_factor=0.9
-
-def get_mem(key):
-    return config[key] if key in config else max_memory_mb
-
-def get_disk(key):
-    return config[key] if key in config else config['default_disk_mb']
-
-def get_mem_cap(wildcards, resources):
-    return max(int(resources.mem_mb * mem_cap_factor/1024), 1)
-
-def get_disk_cap(wilcards, resources):
-    return max(int(resources.disk_mb * disk_cap_factor/1024), 1)
 
 temp_dir_config = f"--disk-swap {config['tmpdir']}" if 'tmpdir' in config else '',
 
