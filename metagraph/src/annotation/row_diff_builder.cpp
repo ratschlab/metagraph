@@ -306,6 +306,7 @@ void build_pred_succ(const std::string &graph_fname,
 
     const uint64_t BS = 1'000'000;
     // traverse BOSS table in parallel processing blocks of size |BS|
+    // use static scheduling to make threads process ordered contiguous blocks
     #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
     for (uint64_t start = 1; start <= graph.num_nodes(); start += BS) {
         std::vector<uint64_t> succ_buf;
@@ -313,7 +314,6 @@ void build_pred_succ(const std::string &graph_fname,
         std::vector<uint64_t> pred_buf;
         std::vector<bool> pred_boundary_buf;
 
-        // use static scheduling to make threads process ordered contiguous blocks
         for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
             if (!dummy[boss_idx]) {
