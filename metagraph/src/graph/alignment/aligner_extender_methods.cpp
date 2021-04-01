@@ -560,8 +560,13 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 const auto &[next, c, depth, next_distance_from_origin] = cur;
                 auto &column_pair = table_[next];
                 auto &[column, converged] = column_pair;
-                if (prev_converged && converged)
+                assert(depth == column.size());
+                assert(next_distance_from_origin == std::get<3>(prev) + 1);
+
+                if (prev_converged && converged) {
+                    pop(cur);
                     continue;
+                }
 
                 assert(table_.count(std::get<0>(prev)));
                 auto &column_prev = table_[std::get<0>(prev)];
@@ -570,8 +575,10 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 // compute bandwidth based on xdrop criterion
                 auto [min_i, max_i] = get_band(prev, column_prev, xdrop_cutoff_);
-                if (min_i >= max_i)
+                if (min_i >= max_i) {
+                    pop(cur);
                     continue;
+                }
 
                 max_i = std::min(max_i + 1, size);
 

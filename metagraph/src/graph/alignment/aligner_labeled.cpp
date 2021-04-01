@@ -494,6 +494,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
             // std::cout << "Old start " << std::get<0>(node) << "\n";
             Edges edges;
             for (auto &edge : DefaultColumnExtender<NodeType>::get_outgoing(node)) {
+                assert(!align_node_to_target_.count(edge));
                 // std::cout << "\tChecking " << std::get<0>(edge) << "\n";
                 assert(cached_edge_sets_->count(std::get<0>(edge)));
                 const auto &next_edge_sets = (*cached_edge_sets_)[std::get<0>(edge)].first;
@@ -505,7 +506,6 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
                     auto jt = target_columns_->emplace(next_targets).first;
                     size_t cur_target_column_idx = jt - target_columns_->begin();
                     assert(cur_target_column_idx < target_columns_->size());
-                    assert(!align_node_to_target_.count(edge));
                     align_node_to_target_[edge] = cur_target_column_idx;
                     edges.emplace_back(std::move(edge));
                 }
@@ -602,28 +602,28 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &node) const 
     // std::cout << "\tfoundpaths " << seq_paths.size() << " / " << this->graph_.outdegree(std::get<0>(node)) << "\n";
     assert(seq_paths.size() == this->graph_.outdegree(std::get<0>(node)));
 
-    // const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
-    //     &anno_graph_.get_annotation().get_matrix()
-    // );
+    const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(
+        &anno_graph_.get_annotation().get_matrix()
+    );
 
-    // if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
-    //     for (auto &[seq, path] : seq_paths) {
-    //         if (path.size() <= 2)
-    //             continue;
+    if (row_diff && (canonical || this->graph_.get_mode() != DeBruijnGraph::CANONICAL)) {
+        for (auto &[seq, path] : seq_paths) {
+            if (path.size() <= 2)
+                continue;
 
-    //         size_t i = path.size() - 1;
-    //         for ( ; i > 0; --i) {
-    //             if (row_diff->is_anchor(AnnotatedDBG::graph_to_anno_index(canonical ? canonical->get_base_node(path[i]) : path[i]))) {
-    //                 break;
-    //             }
-    //         }
+            size_t i = path.size() - 1;
+            for ( ; i > 0; --i) {
+                if (row_diff->is_anchor(AnnotatedDBG::graph_to_anno_index(canonical ? canonical->get_base_node(path[i]) : path[i]))) {
+                    break;
+                }
+            }
 
-    //         if (i) {
-    //             path.resize(i + 1);
-    //             seq.resize(path.size() + this->graph_.get_k() - 1);
-    //         }
-    //     }
-    // }
+            if (i) {
+                path.resize(i + 1);
+                seq.resize(path.size() + this->graph_.get_k() - 1);
+            }
+        }
+    }
 
     if (seq_paths.empty())
         return {};
