@@ -150,6 +150,7 @@ inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
 template <class Callback>
 void sum_and_call_counts(const fs::path &dir,
                          const std::string &file_extension,
+                         const std::string &counts_name,
                          const Callback &callback) {
     std::vector<sdsl::int_vector_buffer<>> vectors;
     for (const auto &p : fs::directory_iterator(dir)) {
@@ -177,7 +178,7 @@ void sum_and_call_counts(const fs::path &dir,
 
     std::vector<int32_t> buf;
 
-    ProgressBar progress_bar(vectors.front().size(), "Sum counts",
+    ProgressBar progress_bar(vectors.front().size(), "Sum " + counts_name,
                              std::cerr, !common::get_verbose());
 
     for (uint64_t i = 0; i < vectors.front().size(); i += BLOCK_SIZE) {
@@ -225,19 +226,21 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
         sdsl::bit_vector rd_succ_bv(last.size(), false);
 
-        sum_and_call_counts(count_vectors_dir, row_count_extension, [&](int32_t count) {
-            // TODO: skip single outgoing
-            outgoing_counts.push_back(count);
-            if (last[graph.kmer_to_boss_index(graph_idx)]) {
-                // pick the node with the largest count
-                size_t max_pos = std::max_element(outgoing_counts.rbegin(),
-                                                  outgoing_counts.rend())
-                                 - outgoing_counts.rbegin();
-                rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
-                outgoing_counts.resize(0);
+        sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
+            [&](int32_t count) {
+                // TODO: skip single outgoing
+                outgoing_counts.push_back(count);
+                if (last[graph.kmer_to_boss_index(graph_idx)]) {
+                    // pick the node with the largest count
+                    size_t max_pos = std::max_element(outgoing_counts.rbegin(),
+                                                      outgoing_counts.rend())
+                                     - outgoing_counts.rbegin();
+                    rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
+                    outgoing_counts.resize(0);
+                }
+                graph_idx++;
             }
-            graph_idx++;
-        });
+        );
 
         if (graph_idx != graph.num_nodes() + 1) {
             logger->error("Size the count vectors is incompatible with the"
@@ -394,13 +397,15 @@ void assign_anchors(const std::string &graph_fname,
         logger->trace("Making every row with negative reduction an anchor...");
 
         uint64_t i = 0;
-        sum_and_call_counts(count_vectors_dir, row_reduction_extension, [&](int32_t count) {
-            // check if the reduction is negative
-            if (count < 0)
-                anchors_bv[graph.kmer_to_boss_index(
-                    graph::AnnotatedSequenceGraph::anno_to_graph_index(i))] = true;
-            i++;
-        });
+        sum_and_call_counts(count_vectors_dir, row_reduction_extension, "row reduction",
+            [&](int32_t count) {
+                // check if the reduction is negative
+                if (count < 0)
+                    anchors_bv[graph.kmer_to_boss_index(
+                        graph::AnnotatedSequenceGraph::anno_to_graph_index(i))] = true;
+                i++;
+            }
+        );
 
         if (i != num_rows) {
             logger->error("Reduction vectors are incompatible with the graph size:"
