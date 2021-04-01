@@ -2409,7 +2409,7 @@ void update_terminal_bits(size_t max_length,
     // .........V..........V....*
     // ||||||||||
     // max_length
-    for (i = 0; i + max_length <= path.size(); i += max_length) {
+    for ( ; i + max_length <= path.size(); i += max_length) {
         for (uint64_t j = i; j + 1 < i + max_length; ++j) {
             assert(!fetch_bit(terminal->data(), path[j], async));
             assert(!fetch_bit(near_terminal->data(), path[j], async));
@@ -2455,7 +2455,7 @@ void update_terminal_bits(size_t max_length,
 void traverse_rd_path(const BOSS &boss,
                       const bit_vector &rd_succ,
                       edge_index edge,
-                      uint32_t max_length,
+                      size_t max_length,
                       sdsl::bit_vector *visited,
                       sdsl::bit_vector *terminal,
                       sdsl::bit_vector *near_terminal,
@@ -2700,6 +2700,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         assert(boss.get_W(edge) && !fetch_bit(dummy->data(), edge, async));
 
         // mark as visited
+        // also check if the node had already been visited (in case of loop)
         if (fetch_and_set_bit(visited->data(), edge, async))
             continue;
 
