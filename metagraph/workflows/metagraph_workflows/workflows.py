@@ -17,17 +17,19 @@ LOGGING_FORMAT='%(asctime)s - %(levelname)s: %(message)s'
 logging.basicConfig(format=LOGGING_FORMAT, level=logging.WARNING)
 
 
+default_path = Path(WORKFLOW_ROOT / 'default.yml')
+
 # TODO: use custom config object? fluent config?
 def run_build_workflow(
         output_dir: Path,
-        seqs_file_list_path: Path = None,
-        seqs_dir_path: Path = None,
+        seqs_file_list_path: Optional[Path] = None,
+        seqs_dir_path: Optional[Path] = None,
         k: Optional[int] = None,
         base_name: Optional[str] = None,
         build_primary_graph: bool = False,
         annotation_formats: Iterable[AnnotationFormats] = (),
-        annotation_labels_source: AnnotationLabelsSource = AnnotationLabelsSource.SEQUENCE_HEADERS,
-        exec_cmd: str = None,
+        annotation_labels_source: Optional[AnnotationLabelsSource] = None,
+        exec_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
         verbose: bool = False,
@@ -37,17 +39,23 @@ def run_build_workflow(
     # TODO: support str argumt?
 
     snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
-    default_path = Path(WORKFLOW_ROOT / 'default.yml')
 
     config = snakemake.load_configfile(default_path)
 
-    config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
-    config[SEQS_DIR_PATH] = str(seqs_dir_path)
+    if not seqs_file_list_path and not seqs_dir_path:
+        raise ValueError("seqs_file_list_path and seqs_dir_path cannot both be None")
+
+    if seqs_file_list_path:
+        config[SEQS_FILE_LIST_PATH] = str(seqs_file_list_path)
+    if seqs_dir_path:
+        config[SEQS_DIR_PATH] = str(seqs_dir_path)
+
     config['output_directory'] = str(output_dir)
 
     config['k'] = k if k else config['k']
 
-    config['annotation_labels_source'] = annotation_labels_source.value
+    if annotation_labels_source:
+        config['annotation_labels_source'] = annotation_labels_source.value
 
     config['base_name'] = base_name if base_name else config['base_name']
     config['build_primary_graph'] = build_primary_graph

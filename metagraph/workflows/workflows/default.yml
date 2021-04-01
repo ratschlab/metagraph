@@ -1,8 +1,16 @@
+# graph options
 k: 31
-default_disk_mb: 10000
+base_name: 'graph'
+build_primary_graph: False
 
-annotation_formats: ['relax.brwt']
+# annotation options
+annotation_formats: ['relax.row_diff_brwt']
+annotation_labels_source: 'sequence_headers'
+
+exec_cmd: 'metagraph'
+
+default_disk_mb: 10000
 max_memory_mb: 2000
 
-base_name: 'graph'
-exec_cmd: 'metagraph'
+
+
