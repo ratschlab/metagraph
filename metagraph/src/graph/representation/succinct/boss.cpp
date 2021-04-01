@@ -2392,7 +2392,7 @@ void call_paths(const BOSS &boss,
  *  2. The last node in the path merges into a node that is neither terminal nor near
  *     terminal
  */
-void update_terminal_bits(uint64_t max_length,
+void update_terminal_bits(size_t max_length,
                           edge_index next_edge,
                           std::vector<edge_index> &&path,
                           sdsl::bit_vector *terminal,
@@ -2402,7 +2402,7 @@ void update_terminal_bits(uint64_t max_length,
     if (path.empty())
         return;
 
-    uint64_t i = 0;
+    size_t i = 0;
     constexpr bool async = true;
 
     // set anchors
@@ -2419,7 +2419,7 @@ void update_terminal_bits(uint64_t max_length,
         set_bit(terminal->data(), path[i + max_length - 1], async);
     }
 
-    if (path.size() % max_length == 0) // last node is terminal
+    if (i == path.size()) // last node is terminal
         return;
 
     // current position |i|
@@ -2452,14 +2452,14 @@ void update_terminal_bits(uint64_t max_length,
  * A path ends when there are either no outgoing edges from the current node or
  * if the row-diff successor in a fork has already been visited.
  */
-void call_row_diff_path(const BOSS &boss,
-                        const bit_vector &rd_succ,
-                        edge_index edge,
-                        uint32_t max_length,
-                        sdsl::bit_vector *visited,
-                        sdsl::bit_vector *terminal,
-                        sdsl::bit_vector *near_terminal,
-                        ProgressBar &progress_bar) {
+void traverse_rd_path(const BOSS &boss,
+                      const bit_vector &rd_succ,
+                      edge_index edge,
+                      uint32_t max_length,
+                      sdsl::bit_vector *visited,
+                      sdsl::bit_vector *terminal,
+                      sdsl::bit_vector *near_terminal,
+                      ProgressBar &progress_bar) {
     assert(visited && terminal && near_terminal);
 
     // make sure it's not a dummy k-mer
@@ -2676,14 +2676,14 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 
 // Reach all k-mers that merge into anchor |edge| by following their diff paths.
 template <typename T>
-void traverse_diff_path_backward(const BOSS &boss,
-                                 const bit_vector &rd_succ,
-                                 edge_index edge,
-                                 T max_length,
-                                 sdsl::bit_vector *visited,
-                                 sdsl::bit_vector *terminal,
-                                 sdsl::bit_vector *dummy,
-                                 ProgressBar &progress_bar) {
+void traverse_rd_path_backward(const BOSS &boss,
+                               const bit_vector &rd_succ,
+                               edge_index edge,
+                               T max_length,
+                               sdsl::bit_vector *visited,
+                               sdsl::bit_vector *terminal,
+                               sdsl::bit_vector *dummy,
+                               ProgressBar &progress_bar) {
     constexpr bool async = true;
 
     assert(max_length);
@@ -2804,8 +2804,8 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // backward traversal
     traverse_path = [&](edge_index anchor) {
-        traverse_diff_path_backward(*this, rd_succ, anchor, max_length, &visited,
-                                    terminal, &dummy, progress_bar);
+        traverse_rd_path_backward(*this, rd_succ, anchor, max_length, &visited,
+                                  terminal, &dummy, progress_bar);
     };
 
     // run backward traversal from every anchor
@@ -2816,8 +2816,8 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // forward traversal
     traverse_path = [&](edge_index start) {
-        call_row_diff_path(*this, rd_succ, start, max_length, &visited,
-                           terminal, &near_terminal, progress_bar);
+        traverse_rd_path(*this, rd_succ, start, max_length, &visited,
+                         terminal, &near_terminal, progress_bar);
     };
     // start traversal from the dummy source edges first ($X...X)
     // they are marked as |dummy| AND NOT |visited|
