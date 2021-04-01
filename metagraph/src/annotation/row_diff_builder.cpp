@@ -329,24 +329,23 @@ void build_pred_succ(const std::string &graph_fname,
                     succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
                     succ_boundary_buf.push_back(0);
                 }
+                // compute predecessors only for row-diff successors
+                if (rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
+                    BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
+                    BOSS::edge_index back_idx = boss.bwd(boss_idx);
+                    boss.call_incoming_to_target(back_idx, d,
+                        [&](BOSS::edge_index pred) {
+                            // dummy predecessors are ignored
+                            if (!dummy[pred]) {
+                                uint64_t node_index = graph.boss_to_kmer_index(pred);
+                                pred_buf.push_back(to_row(node_index));
+                                pred_boundary_buf.push_back(0);
+                            }
+                        }
+                    );
+                }
             }
             succ_boundary_buf.push_back(1);
-            // compute predecessors only for row-diff successors
-            if (!dummy[boss_idx]
-                    && rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
-                BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
-                BOSS::edge_index back_idx = boss.bwd(boss_idx);
-                boss.call_incoming_to_target(back_idx, d,
-                    [&](BOSS::edge_index pred) {
-                        // dummy predecessors are ignored
-                        if (!dummy[pred]) {
-                            uint64_t node_index = graph.boss_to_kmer_index(pred);
-                            pred_buf.push_back(to_row(node_index));
-                            pred_boundary_buf.push_back(0);
-                        }
-                    }
-                );
-            }
             pred_boundary_buf.push_back(1);
             ++progress_bar;
         }
