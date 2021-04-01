@@ -754,8 +754,8 @@ int relax_multi_brwt(Config *config) {
     logger->trace("Relaxing BRWT tree...");
 
     const binmat::BRWT &matrix = anno_type == Config::BRWT
-            ? dynamic_cast<MultiBRWTAnnotator *>(annotator.get())->get_matrix()
-            : dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())->get_matrix().diffs();
+            ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
+            : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs();
     relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
                get_num_threads());
 
