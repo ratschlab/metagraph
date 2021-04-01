@@ -230,12 +230,13 @@ int transform_annotation(Config *config) {
 
     if (config->anno_type == Config::RowDiff && !files.size()) {
         // Only prepare for the row-diff transform:
+        //      Compute number of labels per row (if stage 0),
         //      Generate pred/succ/anchors (if stage 1) or optimize anchors (if stage 2).
         logger->trace("Passed no columns to transform. Only preparations will be performed.");
         auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
         convert_to_row_diff({}, config->infbase, config->memory_available * 1e9,
                             config->max_path_length, out_dir, config->tmp_dir,
-                            config->optimize);
+                            static_cast<RowDiffStage>(config->row_diff_stage));
         logger->trace("Done");
         return 0;
     }
@@ -479,7 +480,8 @@ int transform_annotation(Config *config) {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
                                     config->max_path_length, out_dir, config->tmp_dir,
-                                    config->optimize, config->outfbase);
+                                    static_cast<RowDiffStage>(config->row_diff_stage),
+                                    config->outfbase);
                 break;
             }
             case Config::RowCompressed: {
@@ -580,8 +582,12 @@ int transform_annotation(Config *config) {
             const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
             if (!std::filesystem::exists(anchors_file)) {
                 logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                              " transform followed by anchor optimization.",
-                              anchors_file);
+                              " transform followed by anchor optimization.", anchors_file);
+                std::exit(1);
+            }
+            const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+            if (!std::filesystem::exists(fork_succ_file)) {
+                logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
                 std::exit(1);
             }
             if (config->anno_type == Config::RowDiffBRWT) {
@@ -608,6 +614,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Serializing to '{}'", config->outfbase);
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
                         .load_anchor(anchors_file);
+                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                        .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
             } else { // RowDiff<RowSparse>
@@ -620,6 +628,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
                         .load_anchor(anchors_file);
+                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
+                        .load_fork_succ(fork_succ_file);
                 logger->trace("Serializing to '{}'", config->outfbase);
                 row_sparse->serialize(config->outfbase);
             }

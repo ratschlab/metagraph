@@ -57,7 +57,6 @@ class Config {
     bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
-    bool optimize = false;
 
     unsigned int k = 3;
 
@@ -88,6 +87,8 @@ class Config {
     unsigned int bloom_max_num_hash_functions = 10;
     unsigned int num_columns_cached = 10;
     unsigned int max_hull_forks = 4;
+    unsigned int row_diff_stage = 0;
+    unsigned int max_path_length = 100;
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
@@ -142,7 +143,6 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
-    uint32_t max_path_length = 50;
     std::string linkage_file;
 
     std::filesystem::path tmp_dir;
