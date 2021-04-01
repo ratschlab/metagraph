@@ -33,7 +33,7 @@ setup(
     description="Metagraph workflows",
     entry_points={
         'console_scripts': [
-            'metagraph-utils=metagraph_workflows.cli:main'
+            'metagraph-workflows=metagraph_workflows.cli:main'
         ],
     },
     install_requires=requirements,
