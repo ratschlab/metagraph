@@ -47,7 +47,7 @@ process_seq_path(const DeBruijnGraph &graph,
 
             size_t start = first - query_nodes.begin();
 
-            // if (canonical->get_base_node(*first) == *first) {
+            if (canonical->get_base_node(*first) == *first) {
                 for (size_t i = start; i < query_nodes.size(); ++i) {
                     if (query_nodes[i] != DeBruijnGraph::npos) {
                         callback(AnnotatedDBG::graph_to_anno_index(
@@ -55,15 +55,15 @@ process_seq_path(const DeBruijnGraph &graph,
                         ), i);
                     }
                 }
-            // } else {
-            //     for (size_t i = query_nodes.size(); i > start; --i) {
-            //         if (query_nodes[i - 1] != DeBruijnGraph::npos) {
-            //             callback(AnnotatedDBG::graph_to_anno_index(
-            //                 canonical->get_base_node(query_nodes[i - 1])
-            //             ), i - 1);
-            //         }
-            //     }
-            // }
+            } else {
+                for (size_t i = query_nodes.size(); i > start; --i) {
+                    if (query_nodes[i - 1] != DeBruijnGraph::npos) {
+                        callback(AnnotatedDBG::graph_to_anno_index(
+                            canonical->get_base_node(query_nodes[i - 1])
+                        ), i - 1);
+                    }
+                }
+            }
         }
     } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
         for (size_t i = 0; i < query_nodes.size(); ++i) {
@@ -379,7 +379,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
             target_column_idx = get_target_id(annotation[i]);
 
-            // update_target_cache(std::get<0>(edges[i]), target_column_idx);
+            update_target_cache(std::get<0>(edges[i]), target_column_idx);
 
             assert(!align_node_to_target_.count(edges[i]));
             align_node_to_target_[edges[i]] = target_column_idx;
@@ -396,55 +396,50 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
     Edges out_edges;
 
-    const Targets &start_targets = get_targets(target_column_idx);
-    std::vector<std::pair<std::string, std::vector<node_index>>> seq_paths;
+    Targets start_targets = get_targets(target_column_idx);
     std::vector<Targets> out_targets;
     out_targets.reserve(edges.size());
-    for (AlignNode &next : edges) {
-        const auto &[next_node, c, next_count, next_depth] = next;
+
+    VectorSet<AnnotatedDBG::row_index> visited;
+    std::vector<size_t> dist;
+    std::vector<AlignNode> next_nodes;
+
+    for (size_t i = 0; i < edges.size(); ++i) {
+        const auto &[next_node, c, next_count, next_depth] = edges[i];
         if (next_node == node) {
-            out_edges.emplace_back(std::move(next));
-            seq_paths.emplace_back();
             out_targets.emplace_back(start_targets);
+            out_edges.emplace_back(edges[i]);
             continue;
         }
 
         out_targets.emplace_back();
-
-        seq_paths.emplace_back(std::string(this->graph_.get_k() - 1, '#') + c,
-                               std::vector<node_index>{ next_node });
-    }
-
-    std::vector<AnnotatedDBG::row_index> rows;
-    rows.reserve(seq_paths.size());
-    for (const auto &[seq, path] : seq_paths) {
-        if (path.size()) {
-            process_seq_path(this->graph_, seq, path, [&](auto row, size_t) {
-                rows.push_back(row);
-            });
-        }
+        process_seq_path(this->graph_, std::string(this->graph_.get_k() - 1, '#') + c,
+                         std::vector<node_index>{ next_node }, [&](auto row, size_t d) {
+            if (visited.emplace(row).second) {
+                dist.push_back(d);
+                next_nodes.push_back(edges[i]);
+            }
+        });
     }
 
     auto masks = anno_graph_.get_annotation().get_matrix().has_column(
-        rows, get_targets(target_column_idx)
+        visited.values_container(), start_targets
     );
 
     for (size_t i = 0; i < masks.size(); ++i) {
-        uint64_t target = start_targets[i];
-        size_t offset = 0;
-        for (size_t j = 0; j < masks[i].size(); ++j) {
-            if (seq_paths[j + offset].second.empty())
-                ++offset;
-
-            if (masks[i][j])
-                out_targets[j + offset].push_back(target);
-        }
+        call_ones(masks[i], [&](size_t j) {
+            out_targets[j].push_back(start_targets[i]);
+        });
     }
 
     for (size_t i = 0; i < out_targets.size(); ++i) {
         if (size_t target_idx = get_target_id(out_targets[i])) {
-            align_node_to_target_[edges[i]] = target_idx;
-            out_edges.emplace_back(std::move(edges[i]));
+            if (!dist[i]) {
+                out_edges.push_back(next_nodes[i]);
+                align_node_to_target_[next_nodes[i]] = target_idx;
+            }
+
+            update_target_cache(std::get<0>(next_nodes[i]), target_idx);
         }
     }
 
