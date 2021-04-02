@@ -65,14 +65,8 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
-bool
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::merge_load(const std::vector<std::string> &filenames) {
-    if (filenames.size() > 1)
-        std::cerr << "Warning: Can't merge static annotators."
-                     " Only the first will be loaded." << std::endl;
-
-    std::ifstream instream(remove_suffix(filenames.at(0), kExtension) + kExtension,
+bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
+    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
                            std::ios::binary);
     if (!instream.good())
         return false;
@@ -206,47 +200,6 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
     }
 
     return !error_occurred;
-}
-
-// template specialization of merge_load for RowDiffColumnAnnotator
-template <>
-bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>
-::merge_load(const std::vector<std::string> &filenames) {
-    std::vector<std::unique_ptr<bit_vector>> columns;
-
-    bool no_errors = true;
-    bool merge_successful = merge_load_row_diff(
-        filenames,
-        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
-            uint64_t num_set_bits = column->num_set_bits();
-            common::logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
-                                  static_cast<double>(num_set_bits) / column->size(),
-                                  num_set_bits);
-
-            #pragma omp critical
-            {
-                if (columns.empty() || columns.back()->size() == column->size()) {
-                    size_t col = label_encoder_.insert_and_encode(label);
-                    if (col != columns.size()) {
-                        common::logger->error("Duplicate columns {}", label);
-                        no_errors = false;
-                    }
-                    columns.push_back(std::move(column));
-                } else {
-                    common::logger->error(
-                            "Column {} has {} rows, previous column has {} rows",
-                            label, columns.size(), columns.back()->size());
-                    no_errors = false;
-                }
-            }
-        },
-        filenames.size() > 1u ? get_num_threads() : 0
-    );
-
-    matrix_ = std::make_unique<binmat::RowDiff<binmat::ColumnMajor>>(
-            nullptr, binmat::ColumnMajor(std::move(columns)));
-
-    return no_errors && merge_successful;
 }
 
 template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;

@@ -364,21 +364,56 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
             num_parallel_nodes, num_threads);
 }
 
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator) {
-    uint64_t num_set_bits = annotator.num_relations();
-    uint64_t num_rows = annotator.num_objects();
-    uint64_t num_columns = annotator.num_labels();
+std::unique_ptr<RowDiffRowSparseAnnotator>
+convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
 
-    RowSparse matrix(
-        [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().diffs().data())
-                    .call_rows(callback);
+    uint64_t total_num_set_bits = 0;
+    bool load_successful = merge_load_row_diff(
+        filenames,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            #pragma omp critical
+            {
+                if (columns.size() && column->size() != columns.back()->size()) {
+                    logger->error("Column {} has {} rows, previous column has {} rows",
+                                  label, column->size(), columns.back()->size());
+                    exit(1);
+                }
+                size_t col = label_encoder.insert_and_encode(label);
+                if (col != columns.size()) {
+                    logger->error("Duplicate columns {}", label);
+                    exit(1);
+                }
+                columns.push_back(std::move(column));
+                total_num_set_bits += num_set_bits;
+            }
         },
-        num_columns, num_rows, num_set_bits
+        get_num_threads()
     );
-    auto rd = std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(matrix));
-    return std::make_unique<RowDiffRowSparseAnnotator>(std::move(rd),
-                                                       annotator.get_label_encoder());
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    RowSparse rd_matrix(
+        [&](auto callback) {
+            utils::RowsFromColumnsTransformer(columns).call_rows(callback);
+        },
+        num_columns, num_rows, total_num_set_bits
+    );
+    return std::make_unique<RowDiffRowSparseAnnotator>(
+                std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(rd_matrix)),
+                std::move(label_encoder));
 }
 
 

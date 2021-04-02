@@ -52,7 +52,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
-    bool merge_load(const std::vector<std::string> &filenames) override;
+    bool load(const std::string &filename) override;
+    bool merge_load(const std::vector<std::string> &filenames);
     using ColumnCallback = std::function<void(uint64_t offset,
                                               const Label &,
                                               std::unique_ptr<bit_vector>&&)>;

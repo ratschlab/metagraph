@@ -267,7 +267,7 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation...");
 
         if (config->anno_type == Config::ColumnCompressed) {
-            if (!annotation->merge_load(files)) {
+            if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
             }
@@ -331,7 +331,7 @@ int transform_annotation(Config *config) {
 
         // TODO: rename columns without loading the full annotation
         if (config->anno_type == Config::ColumnCompressed) {
-            if (!annotation->merge_load(files)) {
+            if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
             } else {
@@ -438,8 +438,7 @@ int transform_annotation(Config *config) {
         logger->trace("Serialization done in {} sec", timer.elapsed());
 
     } else if (input_anno_type == Config::ColumnCompressed) {
-        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
-                = initialize_annotation(files.at(0), *config);
+        std::unique_ptr<ColumnCompressed<>> annotator;
 
         // The entire annotation is loaded in all cases except for transforms
         // to BRWT or RbBRWT, for which the construction is done with streaming
@@ -447,18 +446,14 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::RowDiff) {
+            annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
-            if (!annotation->merge_load(files)) {
+            if (!annotator->merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
             }
             logger->trace("Annotation loaded in {} sec", timer.elapsed());
         }
-
-        std::unique_ptr<ColumnCompressed<>> annotator {
-            dynamic_cast<ColumnCompressed<> *>(annotation.release())
-        };
-        assert(annotator);
 
         switch (config->anno_type) {
             case Config::ColumnCompressed: {
@@ -526,7 +521,6 @@ int transform_annotation(Config *config) {
                         files, linkage, config->parallel_nodes,
                         get_num_threads(), config->tmp_dir);
 
-                annotator.reset();
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 logger->trace("Serializing to '{}'", config->outfbase);
@@ -619,11 +613,8 @@ int transform_annotation(Config *config) {
 
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
-                auto row_diff_anno = std::make_unique<RowDiffColumnAnnotator>();
-                if (!row_diff_anno->merge_load(files))
-                    std::exit(1);
                 std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
-                        = convert(*row_diff_anno);
+                        = convert_row_diff_to_RowDiffSparse(files);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
                         .load_anchor(anchors_file);

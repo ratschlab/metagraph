@@ -192,6 +192,60 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 }
 
 template <typename Label>
+bool ColumnCompressed<Label>::load(const std::string &filename) {
+    // release the columns stored
+    cached_columns_.Clear();
+    bitmatrix_.clear();
+
+    label_encoder_.clear();
+
+    const std::string &f = remove_suffix(filename, kExtension) + kExtension;
+    logger->trace("Loading annotations from file {}", f);
+
+    try {
+        std::ifstream instream(f, std::ios::binary);
+        if (!instream.good())
+            throw std::ifstream::failure("can't open file");
+
+        num_rows_ = load_number(instream);
+
+        if (!label_encoder_.load(instream))
+            throw std::ifstream::failure("can't load label encoder");
+
+        if (!label_encoder_.size())
+            logger->warn("No columns in {}", f);
+
+        for (size_t c = 0; c < label_encoder_.size(); ++c) {
+            auto column = std::make_unique<bit_vector_smart>();
+
+            if (!column->load(instream))
+                throw std::ifstream::failure("can't load next column");
+
+            if (column->size() != num_rows_)
+                throw std::ifstream::failure("inconsistent column size");
+
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("Column: {}, Density: {}, Set bits: {}",
+                          label_encoder_.decode(c),
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            bitmatrix_.emplace_back(std::move(column));
+        }
+
+    } catch (const std::exception &e) {
+        logger->error("Caught exception when loading columns from {}: {}", f, e.what());
+        return false;
+    } catch (...) {
+        logger->error("Unknown exception when loading columns from {}", f);
+        return false;
+    }
+
+    logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
+    return true;
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_columns_.Clear();
@@ -278,20 +332,18 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        logger->trace("Loading annotations from file {}", filename);
         try {
-            auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
-
-            logger->trace("Loading annotations from file {}", filename);
-
             std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
-                throw std::ifstream::failure("can't open stream " + filename);
+                throw std::ifstream::failure("can't open file");
 
             const auto num_rows = load_number(instream);
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
-                throw std::ifstream::failure("can't load label encoder from " + filename);
+                throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size())
                 logger->warn("No labels in {}", filename);
@@ -301,20 +353,20 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 auto new_column = std::make_unique<bit_vector_smart>();
 
                 if (!new_column->load(instream))
-                    throw std::ifstream::failure("can't load next column " + filename);
+                    throw std::ifstream::failure("can't load next column");
 
                 if (new_column->size() != num_rows)
-                    throw std::ifstream::failure("inconsistent column size " + filename);
+                    throw std::ifstream::failure("inconsistent column size");
 
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
                          std::move(new_column));
             }
         } catch (const std::exception &e) {
-            logger->error("Caught exception when loading columns: {}", e.what());
+            logger->error("Caught exception when loading columns from {}: {}", filename, e.what());
             error_occurred = true;
         } catch (...) {
-            logger->error("Unknown exception when loading columns");
+            logger->error("Unknown exception when loading columns from {}", filename);
             error_occurred = true;
         }
     }

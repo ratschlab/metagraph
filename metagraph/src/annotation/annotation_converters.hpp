@@ -121,7 +121,8 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 /**
  * Converts a RowDiff annotation into RowDiff<RowSparse>.
  */
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator);
+std::unique_ptr<RowDiffRowSparseAnnotator>
+convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames);
 
 /**
  * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this

@@ -27,9 +27,7 @@ class AnnotationCategory {
     virtual void set(IndexType i, const LabelType &label) = 0;
 
     virtual void serialize(const std::string &filename) const = 0;
-    virtual bool load(const std::string &filename) { return merge_load({ filename }); }
-    // TODO: remove merge_load and merge by annotation converters/mergers?
-    virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
+    virtual bool load(const std::string &filename) = 0;
 };
 
 
