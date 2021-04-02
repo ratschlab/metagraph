@@ -136,6 +136,50 @@ uint64_t ColumnMajor::num_relations() const {
     return num_set_bits;
 }
 
+std::vector<std::pair<ColumnMajor::Column, size_t /* count */>>
+ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+                       size_t min_count,
+                       size_t count_cap) const {
+    assert(count_cap >= min_count);
+
+    if (!count_cap)
+        return {};
+
+    min_count = std::max(min_count, size_t(1));
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> result;
+    result.reserve(num_columns());
+
+    for (size_t j = 0; j < num_columns(); ++j) {
+        size_t total_checked = 0;
+        size_t total_matched = 0;
+
+        const bit_vector &column = *(*columns_)[j];
+
+        for (auto [i, count] : index_counts) {
+            total_checked += count;
+            total_matched += count * column[i];
+
+            if (total_matched >= count_cap
+                    || total_matched + (total_sum_count - total_checked) < min_count)
+                break;
+        }
+
+        if (total_matched >= min_count)
+            result.emplace_back(j, std::min(total_matched, count_cap));
+    }
+
+    return result;
+}
+
 } // namespace binmat
 } // namespace annot
 } // namespace mtg

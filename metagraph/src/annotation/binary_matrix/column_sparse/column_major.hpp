@@ -33,6 +33,13 @@ class ColumnMajor : public BinaryMatrix {
     // number of ones in the matrix
     uint64_t num_relations() const override;
 
+    // Return all columns for which counts are greater than or equal to |min_count|.
+    // Stop counting if count is greater than |count_cap|.
+    std::vector<std::pair<Column, size_t /* count */>>
+    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+             size_t min_count = 1,
+             size_t count_cap = std::numeric_limits<size_t>::max()) const override;
+
     void update_pointer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
         columns_ = &columns;
     }

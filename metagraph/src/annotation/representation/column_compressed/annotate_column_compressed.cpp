@@ -342,53 +342,6 @@ void ColumnCompressed<Label>
     }
 }
 
-template <typename Label>
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-ColumnCompressed<Label>
-::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
-               size_t min_count,
-               size_t count_cap) const {
-
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
-    min_count = std::max(min_count, size_t(1));
-
-    size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(num_labels());
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        size_t total_checked = 0;
-        size_t total_matched = 0;
-
-        const auto &column = get_column(j);
-
-        for (auto [i, count] : index_counts) {
-            total_checked += count;
-            total_matched += count * column[i];
-
-            if (total_matched >= count_cap
-                    || total_matched + (total_sum_count - total_checked) < min_count)
-                break;
-        }
-
-        if (total_matched >= min_count)
-            label_counts.emplace_back(j, std::min(total_matched, count_cap));
-    }
-
-    return label_counts;
-}
-
 // For each pair (first, second) in the dictionary, renames
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
