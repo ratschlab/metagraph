@@ -324,10 +324,10 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
     assert(align_node_to_target_.count(align_node));
     const auto &[node, last_char, count, depth] = align_node;
 
-    Edges edges = DefaultColumnExtender<NodeType>::get_outgoing(align_node);
+    Edges base_edges = DefaultColumnExtender<NodeType>::get_outgoing(align_node);
 
-    if (node == this->graph_.max_index() + 1 || edges.empty())
-        return edges;
+    if (node == this->graph_.max_index() + 1 || base_edges.empty())
+        return base_edges;
 
     assert(depth);
 
@@ -342,13 +342,13 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
             == std::string::npos);
 
         if (next_offset)
-            return edges;
+            return base_edges;
 
         std::string seq(this->graph_.get_k(), '#');
         std::vector<AnnotatedDBG::row_index> rows;
-        rows.reserve(edges.size());
+        rows.reserve(base_edges.size());
 
-        for (const auto &[next_node, c, next_count, next_depth] : edges) {
+        for (const auto &[next_node, c, next_count, next_depth] : base_edges) {
             seq.back() = c;
             process_seq_path(this->graph_, seq, std::vector<node_index>{ next_node },
                              [&](AnnotatedDBG::row_index row, size_t) {
@@ -356,16 +356,16 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
             });
         }
 
-        assert(rows.size() == edges.size());
+        assert(rows.size() == base_edges.size());
 
         auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
 
         Edges out_edges;
-        out_edges.reserve(edges.size());
+        out_edges.reserve(base_edges.size());
         for (size_t i = 0; i < rows.size(); ++i) {
             DBGAlignment dummy_seed(
                 std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
-                std::vector<node_index>{ std::get<0>(edges[i]) },
+                std::vector<node_index>{ std::get<0>(base_edges[i]) },
                 std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
                 this->seed_->get_orientation()
             );
@@ -379,12 +379,12 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
             target_column_idx = get_target_id(annotation[i]);
 
-            update_target_cache(std::get<0>(edges[i]), target_column_idx);
+            update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
 
-            assert(!align_node_to_target_.count(edges[i]));
-            align_node_to_target_[edges[i]] = target_column_idx;
+            assert(!align_node_to_target_.count(base_edges[i]));
+            align_node_to_target_[base_edges[i]] = target_column_idx;
 
-            out_edges.emplace_back(std::move(edges[i]));
+            out_edges.emplace_back(std::move(base_edges[i]));
         }
 
         return out_edges;
@@ -404,17 +404,44 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
     std::vector<AlignNode> next_nodes;
     std::vector<node_index> nodes;
 
-    for (size_t i = 0; i < edges.size(); ++i) {
-        if (std::get<0>(edges[i]) == node) {
-            out_edges.emplace_back(edges[i]);
+    for (size_t i = 0; i < base_edges.size(); ++i) {
+        const auto &[next_node, c, next_count, next_depth] = base_edges[i];
+        visited.emplace(next_node);
+
+        if (next_node == node) {
+            align_node_to_target_[base_edges[i]] = target_column_idx;
+            out_edges.emplace_back(base_edges[i]);
+
         } else {
-            visited.emplace(std::get<0>(edges[i]));
-            next_nodes.emplace_back(edges[i]);
+            if (cached_edge_sets_->count(next_node)) {
+                auto [next_target_column_idx, used] = (*cached_edge_sets_)[next_node];
+                const Targets &next_targets = get_targets(next_target_column_idx);
+                if (std::includes(next_targets.begin(), next_targets.end(),
+                                  start_targets.begin(), start_targets.end())) {
+                    align_node_to_target_[base_edges[i]] = target_column_idx;
+                    out_edges.emplace_back(base_edges[i]);
+                    continue;
+                } else if (used) {
+                    size_t next_idx = get_target_intersection(
+                        (*cached_edge_sets_)[next_node].first,
+                        target_column_idx
+                    );
+                    if (next_idx) {
+                        align_node_to_target_[base_edges[i]] = next_idx;
+                        out_edges.emplace_back(base_edges[i]);
+                        continue;
+                    }
+                }
+            }
+
+            next_nodes.emplace_back(base_edges[i]);
         }
     }
 
-    for (size_t i = 0; i < edges.size(); ++i) {
-        const auto &[next_node, c, next_count, next_depth] = edges[i];
+    (*cached_edge_sets_)[node].second = true;
+
+    for (size_t i = 0; i < next_nodes.size(); ++i) {
+        const auto &[next_node, c, next_count, next_depth] = next_nodes[i];
 
         std::string seq(this->graph_.get_k() - 1, '#');
         seq += c;
