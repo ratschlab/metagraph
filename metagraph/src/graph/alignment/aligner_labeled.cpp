@@ -401,7 +401,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
     tsl::hopscotch_set<node_index> visited;
     std::vector<size_t> dist;
     std::vector<AnnotatedDBG::row_index> rows;
-    std::vector<AlignNode> next_nodes;
+    std::vector<std::pair<AlignNode, bool>> next_nodes;
     std::vector<node_index> nodes;
 
     for (size_t i = 0; i < base_edges.size(); ++i) {
@@ -435,7 +435,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 }
             }
 
-            next_nodes.emplace_back(base_edges[i]);
+            next_nodes.emplace_back(base_edges[i], false);
         }
     }
 
@@ -443,7 +443,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
     if (next_nodes.size()) {
         for (size_t i = 0; i < next_nodes.size(); ++i) {
-            const auto &[next_node, c, next_count, next_depth] = next_nodes[i];
+            const auto &[next_node, c, next_count, next_depth] = next_nodes[i].first;
 
             std::string seq(this->graph_.get_k() - 1, '#');
             seq += c;
@@ -487,6 +487,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 }
             }
 
+            next_nodes[i].second = path.size() > 1;
+
             process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
                 dist.push_back(d);
                 rows.push_back(row);
@@ -510,10 +512,12 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
                 if (!dist[i]) {
                     assert(it != next_nodes.end());
-                    assert(std::get<0>(*it) == nodes[i]);
-                    out_edges.push_back(*it);
-                    assert(!align_node_to_target_.count(*it));
-                    align_node_to_target_.emplace(*it, std::make_pair(target_idx, false));
+                    assert(std::get<0>(it->first) == nodes[i]);
+                    out_edges.push_back(it->first);
+                    assert(!align_node_to_target_.count(it->first));
+                    align_node_to_target_.emplace(
+                        it->first, std::make_pair(target_idx, it->second)
+                    );
                 }
             }
 

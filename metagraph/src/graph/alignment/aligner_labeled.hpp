@@ -4,7 +4,6 @@
 #include <tsl/hopscotch_map.h>
 
 #include "dbg_aligner.hpp"
-#include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/hashers/hash.hpp"
