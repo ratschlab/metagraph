@@ -107,7 +107,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     typedef typename IExtender<NodeType>::node_index node_index;
     typedef ILabeledDBGAligner::Targets Targets;
     typedef VectorSet<Targets, utils::VectorHash> TargetColumnsSet;
-    typedef tsl::hopscotch_map<NodeType, std::pair<size_t, bool>> EdgeSetCache;
+    typedef tsl::hopscotch_map<NodeType, size_t> EdgeSetCache;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
@@ -203,7 +203,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     size_t get_cached_target_id(NodeType node) const {
         assert(cached_edge_sets_->count(node));
-        return (*cached_edge_sets_)[node].first;
+        return (*cached_edge_sets_)[node];
     }
 
     bool update_target_cache(NodeType node, size_t a) const {
@@ -219,13 +219,12 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
                 return false;
 
             cached_id = get_target_union(cached_id, a);
-            (*cached_edge_sets_)[node].first = cached_id;
-            (*cached_edge_sets_)[node].second = false;
+            (*cached_edge_sets_)[node] = cached_id;
 
             return cached_id != a;
         }
 
-        cached_edge_sets_->emplace(node, std::make_pair(a, false));
+        cached_edge_sets_->emplace(node, a);
         return true;
     }
 

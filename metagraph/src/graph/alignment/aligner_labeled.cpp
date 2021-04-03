@@ -382,10 +382,8 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
             update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
 
             assert(!align_node_to_target_.count(base_edges[i]));
-            align_node_to_target_.emplace(
-                base_edges[i],
-                std::make_pair(target_column_idx, false)
-            );
+            align_node_to_target_.emplace(base_edges[i],
+                                          std::make_pair(target_column_idx, false));
 
             out_edges.emplace_back(std::move(base_edges[i]));
         }
@@ -419,24 +417,20 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
         } else {
             if (cached_edge_sets_->count(next_node)) {
-                size_t next_target_column_idx = (*cached_edge_sets_)[next_node].first;
-                const Targets &next_targets = get_targets(next_target_column_idx);
+                const Targets &next_targets = get_targets((*cached_edge_sets_)[next_node]);
                 size_t next_idx = 0;
                 if (std::includes(next_targets.begin(), next_targets.end(),
                                   start_targets.begin(), start_targets.end())) {
                     next_idx = target_column_idx;
                 } else if (used) {
-                    next_idx = get_target_intersection(
-                        (*cached_edge_sets_)[next_node].first,
-                        target_column_idx
-                    );
+                    next_idx = get_target_intersection((*cached_edge_sets_)[next_node],
+                                                       target_column_idx);
                 }
 
                 if (next_idx) {
                     assert(!align_node_to_target_.count(base_edges[i]));
-                    align_node_to_target_.emplace(
-                        base_edges[i], std::make_pair(next_idx, false)
-                    );
+                    align_node_to_target_.emplace(base_edges[i],
+                                                  std::make_pair(next_idx, false));
                     out_edges.emplace_back(base_edges[i]);
                     continue;
                 }
