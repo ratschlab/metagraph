@@ -450,7 +450,22 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
             seq += c;
 
             std::vector<node_index> path { next_node };
-            node_index cur = next_node;
+            node_index cur = DeBruijnGraph::npos;
+
+            const auto &column = this->table_.find(node)->second;
+            auto [min_i, max_i] = this->get_band(align_node, column, this->xdrop_cutoff_);
+            size_t offset = std::get<9>(column.first[count]);
+            const score_t *S_vec = std::get<0>(column.first[count]).data() + min_i - offset;
+            std::vector<score_t> S(S_vec, S_vec + (max_i - min_i));
+            std::string_view q_min = this->query_.substr(this->start_ + min_i);
+
+            const auto &score_row = this->config_.get_row(c);
+            for (size_t i = 0; i < S.size() && i + path.size() + 1 < q_min.size(); ++i) {
+                S[i] += score_row[q_min[i + path.size() + 1]];
+                if (S[i] >= this->xdrop_cutoff_)
+                    cur = next_node;
+            }
+
             while (cur != DeBruijnGraph::npos) {
                 std::vector<std::pair<node_index, char>> outgoing;
                 this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
@@ -461,7 +476,13 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
                     path.push_back(outgoing[0].first);
                     seq += outgoing[0].second;
-                    cur = outgoing[0].first;
+
+                    const auto &score_row = this->config_.get_row(seq.back());
+                    for (size_t i = 0; i < S.size() && i + path.size() + 1 < q_min.size(); ++i) {
+                        S[i] += score_row[q_min[i + path.size() + 1]];
+                        if (S[i] >= this->xdrop_cutoff_)
+                            cur = outgoing[0].first;
+                    }
                 }
             }
 
