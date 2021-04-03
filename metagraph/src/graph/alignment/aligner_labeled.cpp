@@ -315,7 +315,13 @@ void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
     backtrack_start_counter_.clear();
 
     assert(check_targets(anno_graph_, path));
-    align_node_to_target_[this->start_node_].first = get_target_id(path.target_columns);
+    size_t target_idx = get_target_id(path.target_columns);
+    target_columns_->increment(target_idx);
+
+    if (align_node_to_target_.count(this->start_node_))
+        target_columns_->decrement(align_node_to_target_[this->start_node_].first);
+
+    align_node_to_target_[this->start_node_].first = target_idx;
 }
 
 template <typename NodeType>
@@ -378,12 +384,13 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
             target_column_idx = get_target_id(annotation[i]);
 
-            update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
 
             assert(!align_node_to_target_.count(base_edges[i]));
+            target_columns_->increment(target_column_idx);
             align_node_to_target_.emplace(base_edges[i],
                                           std::make_pair(target_column_idx, 0));
 
+            update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
             out_edges.emplace_back(std::move(base_edges[i]));
         }
 
@@ -410,6 +417,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
         if (next_node == node) {
             assert(!align_node_to_target_.count(base_edges[i]));
+            target_columns_->increment(target_column_idx);
             align_node_to_target_.emplace(base_edges[i],
                                           std::make_pair(target_column_idx, lookahead));
             out_edges.emplace_back(base_edges[i]);
@@ -428,6 +436,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
                 if (next_idx) {
                     assert(!align_node_to_target_.count(base_edges[i]));
+                    target_columns_->increment(next_idx);
                     align_node_to_target_.emplace(base_edges[i],
                                                   std::make_pair(next_idx, lookahead ? lookahead - 1 : 0));
                     out_edges.emplace_back(base_edges[i]);
@@ -514,6 +523,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                     assert(!align_node_to_target_.count(it->first));
 
                     out_edges.push_back(it->first);
+                    target_columns_->increment(target_idx);
                     align_node_to_target_.emplace(
                         it->first, std::make_pair(target_idx, it->second)
                     );

@@ -187,6 +187,21 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
             return std::make_pair(old_it, true);
         }
+
+        void increment(size_t i) {
+            assert(i < targets_.size());
+            ++targets_[i].second;
+        }
+
+        void decrement(size_t i) {
+            assert(i < targets_.size());
+            --targets_[i].second;
+            if (!targets_[i].second) {
+                map_.erase(targets_[i].first);
+                targets_[i].first = Targets{};
+                empty_slots_.push_back(i);
+            }
+        }
     };
 
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
@@ -221,6 +236,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         assert(align_node_to_target_.count(prev));
 
         if (!align_node_to_target_.count(node)) {
+            target_columns_->increment(align_node_to_target_[prev].first);
             align_node_to_target_.emplace(
                 node,
                 std::make_pair(align_node_to_target_[prev].first,
@@ -273,8 +289,10 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     }
 
     virtual void pop(const AlignNode &node) override {
-        if (align_node_to_target_.count(node))
+        if (align_node_to_target_.count(node)) {
+            target_columns_->decrement(align_node_to_target_[node].first);
             align_node_to_target_.erase(node);
+        }
     }
 
     const Targets& get_targets(size_t id) const {
