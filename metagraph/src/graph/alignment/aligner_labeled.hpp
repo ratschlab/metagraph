@@ -135,8 +135,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
         const AlignNode &prev = std::get<6>(scores);
         assert(align_node_to_target_.count(prev));
 
-        if (!align_node_to_target_.count(node))
-            align_node_to_target_[node] = align_node_to_target_[prev];
+        if (!align_node_to_target_.count(node)) {
+            align_node_to_target_.emplace(
+                node, std::make_pair(align_node_to_target_[prev].first, false)
+            );
+        }
 
         DefaultColumnExtender<NodeType>::add_scores_to_column(
             column, std::move(scores), node
@@ -146,7 +149,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &,
                                       const AlignNode &node) const override {
         assert(align_node_to_target_.count(node));
-        size_t target_columns_idx = align_node_to_target_[node];
+        size_t target_columns_idx = align_node_to_target_[node].first;
 
         auto find = backtrack_start_counter_.find(target_columns_idx);
         assert(find == backtrack_start_counter_.end()
@@ -170,7 +173,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
                 return;
             }
 
-            size_t target_columns_idx = align_node_to_target_.find(best_node)->second;
+            size_t target_columns_idx = align_node_to_target_.find(best_node)->second.first;
             assert(target_columns_idx < target_columns_->size());
 
             ++backtrack_start_counter_[target_columns_idx];
@@ -259,7 +262,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     std::shared_ptr<LabeledSeedFilter> seed_filter_;
     std::shared_ptr<TargetColumnsSet> target_columns_;
     std::shared_ptr<EdgeSetCache> cached_edge_sets_;
-    mutable tsl::hopscotch_map<AlignNode, size_t, AlignNodeHash> align_node_to_target_;
+    mutable tsl::hopscotch_map<AlignNode, std::pair<size_t, bool>, AlignNodeHash> align_node_to_target_;
     mutable tsl::hopscotch_map<size_t, size_t> backtrack_start_counter_;
 
     AlignNode get_next_align_node(NodeType node, char c, size_t dist_from_origin) const;
