@@ -136,7 +136,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
         if (!align_node_to_target_.count(node)) {
             align_node_to_target_.emplace(
-                node, std::make_pair(align_node_to_target_[prev].first, false)
+                node,
+                std::make_pair(align_node_to_target_[prev].first,
+                               align_node_to_target_[prev].second
+                                   ? align_node_to_target_[prev].first - 1
+                                   : 0)
             );
         }
 
@@ -260,7 +264,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     std::shared_ptr<LabeledSeedFilter> seed_filter_;
     std::shared_ptr<TargetColumnsSet> target_columns_;
     std::shared_ptr<EdgeSetCache> cached_edge_sets_;
-    mutable tsl::hopscotch_map<AlignNode, std::pair<size_t, bool>, AlignNodeHash> align_node_to_target_;
+    mutable tsl::hopscotch_map<AlignNode, std::pair<size_t, size_t>, AlignNodeHash> align_node_to_target_;
     mutable tsl::hopscotch_map<size_t, size_t> backtrack_start_counter_;
 
     AlignNode get_next_align_node(NodeType node, char c, size_t dist_from_origin) const;

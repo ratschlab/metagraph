@@ -330,7 +330,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
     assert(depth);
 
-    auto [target_column_idx, used] = align_node_to_target_[align_node];
+    auto [target_column_idx, lookahead] = align_node_to_target_[align_node];
 
     if (!target_column_idx) {
         assert(this->seed_->get_offset() >= depth);
@@ -382,7 +382,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
             assert(!align_node_to_target_.count(base_edges[i]));
             align_node_to_target_.emplace(base_edges[i],
-                                          std::make_pair(target_column_idx, false));
+                                          std::make_pair(target_column_idx, 0));
 
             out_edges.emplace_back(std::move(base_edges[i]));
         }
@@ -401,7 +401,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
     tsl::hopscotch_set<node_index> visited;
     std::vector<size_t> dist;
     std::vector<AnnotatedDBG::row_index> rows;
-    std::vector<std::pair<AlignNode, bool>> next_nodes;
+    std::vector<std::pair<AlignNode, size_t>> next_nodes;
     std::vector<node_index> nodes;
 
     for (size_t i = 0; i < base_edges.size(); ++i) {
@@ -411,7 +411,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
         if (next_node == node) {
             assert(!align_node_to_target_.count(base_edges[i]));
             align_node_to_target_.emplace(base_edges[i],
-                                          std::make_pair(target_column_idx, false));
+                                          std::make_pair(target_column_idx, lookahead));
             out_edges.emplace_back(base_edges[i]);
 
         } else {
@@ -421,7 +421,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 if (std::includes(next_targets.begin(), next_targets.end(),
                                   start_targets.begin(), start_targets.end())) {
                     next_idx = target_column_idx;
-                } else if (used) {
+                } else if (lookahead) {
                     next_idx = get_target_intersection((*cached_edge_sets_)[next_node],
                                                        target_column_idx);
                 }
@@ -429,17 +429,15 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 if (next_idx) {
                     assert(!align_node_to_target_.count(base_edges[i]));
                     align_node_to_target_.emplace(base_edges[i],
-                                                  std::make_pair(next_idx, false));
+                                                  std::make_pair(next_idx, lookahead ? lookahead - 1 : 0));
                     out_edges.emplace_back(base_edges[i]);
                     continue;
                 }
             }
 
-            next_nodes.emplace_back(base_edges[i], false);
+            next_nodes.emplace_back(base_edges[i], 0);
         }
     }
-
-    align_node_to_target_[align_node].second = true;
 
     if (next_nodes.size()) {
         for (size_t i = 0; i < next_nodes.size(); ++i) {
@@ -487,7 +485,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 }
             }
 
-            next_nodes[i].second = path.size() > 1;
+            next_nodes[i].second = path.size() - 1;
 
             process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
                 dist.push_back(d);
@@ -513,8 +511,9 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
                 if (!dist[i]) {
                     assert(it != next_nodes.end());
                     assert(std::get<0>(it->first) == nodes[i]);
-                    out_edges.push_back(it->first);
                     assert(!align_node_to_target_.count(it->first));
+
+                    out_edges.push_back(it->first);
                     align_node_to_target_.emplace(
                         it->first, std::make_pair(target_idx, it->second)
                     );
@@ -524,6 +523,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
             if (!dist[i])
                 ++it;
         }
+
         assert(it == next_nodes.end());
     }
 
