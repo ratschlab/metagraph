@@ -6,7 +6,6 @@
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
-#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 
@@ -454,34 +453,36 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
             const auto &column = this->table_.find(node)->second;
             auto [min_i, max_i] = this->get_band(align_node, column, this->xdrop_cutoff_);
-            size_t offset = std::get<9>(column.first[count]);
-            const score_t *S_vec = std::get<0>(column.first[count]).data() + min_i - offset;
-            std::vector<score_t> S(S_vec, S_vec + (max_i - min_i));
-            std::string_view q_min = this->query_.substr(this->start_ + min_i);
+            if (this->start_ + min_i + 1 < this->query_.size()) {
+                std::string_view q_min = this->query_.substr(this->start_ + min_i + 1);
+                size_t offset = std::get<9>(column.first[count]);
+                const score_t *S_vec = std::get<0>(column.first[count]).data() + min_i - offset;
+                std::vector<score_t> S(S_vec, S_vec + (max_i - min_i));
 
-            const auto &score_row = this->config_.get_row(c);
-            for (size_t i = 0; i < S.size() && i + path.size() + 1 < q_min.size(); ++i) {
-                S[i] += score_row[q_min[i + path.size() + 1]];
-                if (S[i] >= this->xdrop_cutoff_)
-                    cur = next_node;
-            }
+                const auto &score_row = this->config_.get_row(c);
+                for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
+                    S[j] += score_row[q_min[j + path.size()]];
+                    if (S[j] >= this->xdrop_cutoff_)
+                        cur = next_node;
+                }
 
-            while (cur != DeBruijnGraph::npos) {
-                std::vector<std::pair<node_index, char>> outgoing;
-                this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
-                    outgoing.emplace_back(next, next_c);
-                });
-                cur = DeBruijnGraph::npos;
+                while (cur != DeBruijnGraph::npos) {
+                    std::vector<std::pair<node_index, char>> outgoing;
+                    this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
+                        outgoing.emplace_back(next, next_c);
+                    });
+                    cur = DeBruijnGraph::npos;
 
-                if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
-                    path.push_back(outgoing[0].first);
-                    seq += outgoing[0].second;
+                    if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
+                        path.push_back(outgoing[0].first);
+                        seq += outgoing[0].second;
 
-                    const auto &score_row = this->config_.get_row(seq.back());
-                    for (size_t i = 0; i < S.size() && i + path.size() + 1 < q_min.size(); ++i) {
-                        S[i] += score_row[q_min[i + path.size() + 1]];
-                        if (S[i] >= this->xdrop_cutoff_)
-                            cur = outgoing[0].first;
+                        const auto &score_row = this->config_.get_row(seq.back());
+                        for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
+                            S[j] += score_row[q_min[j + path.size()]];
+                            if (S[j] >= this->xdrop_cutoff_)
+                                cur = outgoing[0].first;
+                        }
                     }
                 }
             }
