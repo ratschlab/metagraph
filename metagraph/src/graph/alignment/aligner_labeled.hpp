@@ -101,11 +101,80 @@ class LabeledDBGAligner : public ILabeledDBGAligner {
 template <typename NodeType>
 class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
   public:
+    typedef ILabeledDBGAligner::Targets Targets;
+
+    struct TargetColumnsSet {
+        typedef std::vector<std::pair<Targets, size_t>> Storage;
+        typedef Storage::iterator iterator;
+        typedef Storage::const_iterator const_iterator;
+
+        Storage targets_;
+        tsl::hopscotch_map<Targets, size_t, utils::VectorHash> map_;
+
+        template <typename... Args>
+        std::pair<iterator, bool> emplace(Args&&... args) {
+            iterator ret;
+            auto [it, inserted] = map_.emplace(std::forward<Args>(args)..., targets_.size());
+            if (!inserted) {
+                ret = targets_.begin() + it->second;
+                ++ret->second;
+            } else {
+                targets_.emplace_back(it->first, 1);
+                ret = targets_.end() - 1;
+            }
+
+            return std::make_pair(ret, inserted);
+        }
+
+        iterator begin() { return targets_.begin(); }
+        iterator end() { return targets_.end(); }
+
+        size_t size() const {
+            assert(targets_.size() >= map_.size());
+            return targets_.size();
+        }
+
+        std::pair<iterator, bool> merge(iterator old_it, const Targets &update) {
+            const Targets &old_targets = old_it->first;
+            assert(old_it->second);
+            if (std::includes(old_targets.begin(), old_targets.end(),
+                              update.begin(), update.end())) {
+                return std::make_pair(old_it, false);
+            }
+
+            Targets target_union;
+            std::set_union(old_targets.begin(), old_targets.end(),
+                           update.begin(), update.end(),
+                           std::back_inserter(target_union));
+
+            --old_it->second;
+            if (!old_it->second) {
+                map_.erase(old_it->first);
+                auto [it, inserted] = map_.emplace(target_union, old_it - targets_.begin());
+                if (inserted) {
+                    old_it->first = target_union;
+                } else {
+                    old_it->first = Targets{};
+                    old_it = targets_.begin() + it->second;
+                }
+            } else {
+                auto [it, inserted] = map_.emplace(target_union, targets_.size());
+                if (inserted) {
+                    targets_.emplace_back(target_union, 0);
+                    old_it = targets_.end() - 1;
+                } else {
+                    old_it = targets_.begin() + it->second;
+                }
+            }
+
+            ++old_it->second;
+            return std::make_pair(old_it, true);
+        }
+    };
+
     typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
     typedef typename IExtender<NodeType>::score_t score_t;
     typedef typename IExtender<NodeType>::node_index node_index;
-    typedef ILabeledDBGAligner::Targets Targets;
-    typedef VectorSet<Targets, utils::VectorHash> TargetColumnsSet;
     typedef tsl::hopscotch_map<NodeType, size_t> EdgeSetCache;
 
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
@@ -193,7 +262,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
     const Targets& get_targets(size_t id) const {
         assert(id < target_columns_->size());
-        const Targets &targets = *(target_columns_->begin() + id);
+        const Targets &targets = (target_columns_->begin() + id)->first;
         assert(std::is_sorted(targets.begin(), targets.end()));
         return targets;
     }
@@ -215,16 +284,13 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
             if (cached_id == a)
                 return false;
 
-            const Targets &cached_t = get_targets(cached_id);
-            const Targets &a_t = get_targets(a);
+            auto [it, inserted] = target_columns_->merge(
+                target_columns_->begin() + cached_id,
+                get_targets(a)
+            );
 
-            if (std::includes(cached_t.begin(), cached_t.end(), a_t.begin(), a_t.end()))
-                return false;
-
-            cached_id = get_target_union(cached_id, a);
-            (*cached_edge_sets_)[node] = cached_id;
-
-            return cached_id != a;
+            (*cached_edge_sets_)[node] = it - target_columns_->begin();
+            return inserted;
         }
 
         cached_edge_sets_->emplace(node, a);
