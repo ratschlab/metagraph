@@ -442,62 +442,64 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
     align_node_to_target_[align_node].second = true;
 
-    for (size_t i = 0; i < next_nodes.size(); ++i) {
-        const auto &[next_node, c, next_count, next_depth] = next_nodes[i];
+    if (next_nodes.size()) {
+        for (size_t i = 0; i < next_nodes.size(); ++i) {
+            const auto &[next_node, c, next_count, next_depth] = next_nodes[i];
 
-        std::string seq(this->graph_.get_k() - 1, '#');
-        seq += c;
+            std::string seq(this->graph_.get_k() - 1, '#');
+            seq += c;
 
-        std::vector<node_index> path { next_node };
-        node_index cur = next_node;
-        while (cur != DeBruijnGraph::npos) {
-            std::vector<std::pair<node_index, char>> outgoing;
-            this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
-                outgoing.emplace_back(next, next_c);
+            std::vector<node_index> path { next_node };
+            node_index cur = next_node;
+            while (cur != DeBruijnGraph::npos) {
+                std::vector<std::pair<node_index, char>> outgoing;
+                this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
+                    outgoing.emplace_back(next, next_c);
+                });
+                cur = DeBruijnGraph::npos;
+
+                if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
+                    path.push_back(outgoing[0].first);
+                    seq += outgoing[0].second;
+                    cur = outgoing[0].first;
+                }
+            }
+
+            process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
+                dist.push_back(d);
+                rows.push_back(row);
+                nodes.push_back(path[d]);
             });
-            cur = DeBruijnGraph::npos;
-
-            if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
-                path.push_back(outgoing[0].first);
-                seq += outgoing[0].second;
-                cur = outgoing[0].first;
-            }
         }
 
-        process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
-            dist.push_back(d);
-            rows.push_back(row);
-            nodes.push_back(path[d]);
-        });
-    }
+        assert(static_cast<size_t>(std::count(dist.begin(), dist.end(), 0)) == next_nodes.size());
 
-    assert(static_cast<size_t>(std::count(dist.begin(), dist.end(), 0)) == next_nodes.size());
+        auto masks = anno_graph_.get_annotation().get_matrix().has_column(rows, start_targets);
 
-    auto masks = anno_graph_.get_annotation().get_matrix().has_column(rows, start_targets);
-
-    std::vector<Targets> out_targets(rows.size());
-    for (size_t i = 0; i < masks.size(); ++i) {
-        call_ones(masks[i], [&](size_t j) { out_targets[j].push_back(start_targets[i]); });
-    }
-
-    auto it = next_nodes.begin();
-    for (size_t i = 0; i < out_targets.size(); ++i) {
-        if (size_t target_idx = get_target_id(out_targets[i])) {
-            update_target_cache(nodes[i], target_idx);
-
-            if (!dist[i]) {
-                assert(it != next_nodes.end());
-                assert(std::get<0>(*it) == nodes[i]);
-                out_edges.push_back(*it);
-                assert(!align_node_to_target_.count(*it));
-                align_node_to_target_.emplace(*it, std::make_pair(target_idx, false));
-            }
+        std::vector<Targets> out_targets(rows.size());
+        for (size_t i = 0; i < masks.size(); ++i) {
+            call_ones(masks[i], [&](size_t j) { out_targets[j].push_back(start_targets[i]); });
         }
 
-        if (!dist[i])
-            ++it;
+        auto it = next_nodes.begin();
+        for (size_t i = 0; i < out_targets.size(); ++i) {
+            if (size_t target_idx = get_target_id(out_targets[i])) {
+                update_target_cache(nodes[i], target_idx);
+
+                if (!dist[i]) {
+                    assert(it != next_nodes.end());
+                    assert(std::get<0>(*it) == nodes[i]);
+                    out_edges.push_back(*it);
+                    assert(!align_node_to_target_.count(*it));
+                    align_node_to_target_.emplace(*it, std::make_pair(target_idx, false));
+                }
+            }
+
+            if (!dist[i])
+                ++it;
+        }
+        assert(it == next_nodes.end());
     }
-    assert(it == next_nodes.end());
 
     return out_edges;
 }
