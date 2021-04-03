@@ -396,52 +396,78 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
 
     Edges out_edges;
 
-    Targets start_targets = get_targets(target_column_idx);
-    std::vector<Targets> out_targets;
-    out_targets.reserve(edges.size());
+    const Targets &start_targets = get_targets(target_column_idx);
 
-    VectorSet<AnnotatedDBG::row_index> visited;
+    tsl::hopscotch_set<node_index> visited;
     std::vector<size_t> dist;
+    std::vector<AnnotatedDBG::row_index> rows;
     std::vector<AlignNode> next_nodes;
+    std::vector<node_index> nodes;
+
+    for (size_t i = 0; i < edges.size(); ++i) {
+        if (std::get<0>(edges[i]) == node) {
+            out_edges.emplace_back(edges[i]);
+        } else {
+            visited.emplace(std::get<0>(edges[i]));
+            next_nodes.emplace_back(edges[i]);
+        }
+    }
 
     for (size_t i = 0; i < edges.size(); ++i) {
         const auto &[next_node, c, next_count, next_depth] = edges[i];
-        if (next_node == node) {
-            out_targets.emplace_back(start_targets);
-            out_edges.emplace_back(edges[i]);
-            continue;
+
+        std::string seq(this->graph_.get_k() - 1, '#');
+        seq += c;
+
+        std::vector<node_index> path { next_node };
+        node_index cur = next_node;
+        while (cur != DeBruijnGraph::npos) {
+            std::vector<std::pair<node_index, char>> outgoing;
+            this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
+                outgoing.emplace_back(next, next_c);
+            });
+            cur = DeBruijnGraph::npos;
+
+            if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
+                path.push_back(outgoing[0].first);
+                seq += outgoing[0].second;
+                cur = outgoing[0].first;
+            }
         }
 
-        out_targets.emplace_back();
-        process_seq_path(this->graph_, std::string(this->graph_.get_k() - 1, '#') + c,
-                         std::vector<node_index>{ next_node }, [&](auto row, size_t d) {
-            if (visited.emplace(row).second) {
-                dist.push_back(d);
-                next_nodes.push_back(edges[i]);
-            }
+        process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
+            dist.push_back(d);
+            rows.push_back(row);
+            nodes.push_back(path[d]);
         });
     }
 
-    auto masks = anno_graph_.get_annotation().get_matrix().has_column(
-        visited.values_container(), start_targets
-    );
+    assert(static_cast<size_t>(std::count(dist.begin(), dist.end(), 0)) == next_nodes.size());
 
+    auto masks = anno_graph_.get_annotation().get_matrix().has_column(rows, start_targets);
+
+    std::vector<Targets> out_targets(rows.size());
     for (size_t i = 0; i < masks.size(); ++i) {
-        call_ones(masks[i], [&](size_t j) {
-            out_targets[j].push_back(start_targets[i]);
-        });
+        call_ones(masks[i], [&](size_t j) { out_targets[j].push_back(start_targets[i]); });
     }
 
+    auto it = next_nodes.begin();
     for (size_t i = 0; i < out_targets.size(); ++i) {
         if (size_t target_idx = get_target_id(out_targets[i])) {
-            if (!dist[i]) {
-                out_edges.push_back(next_nodes[i]);
-                align_node_to_target_[next_nodes[i]] = target_idx;
-            }
+            update_target_cache(nodes[i], target_idx);
 
-            update_target_cache(std::get<0>(next_nodes[i]), target_idx);
+            if (!dist[i]) {
+                assert(it != next_nodes.end());
+                assert(std::get<0>(*it) == nodes[i]);
+                out_edges.push_back(*it);
+                align_node_to_target_[*it] = target_idx;
+            }
         }
+
+        if (!dist[i])
+            ++it;
     }
+    assert(it == next_nodes.end());
 
     return out_edges;
 }
