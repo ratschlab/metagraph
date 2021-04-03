@@ -170,7 +170,8 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
             --old_it->second;
             if (!old_it->second) {
                 map_.erase(old_it->first);
-                auto [it, inserted] = map_.emplace(std::move(target_union), old_it - targets_.begin());
+                auto [it, inserted] = map_.emplace(std::move(target_union),
+                                                   old_it - targets_.begin());
                 if (inserted) {
                     old_it->first = it->first;
                 } else {
@@ -179,31 +180,11 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
                     empty_slots_.push_back(old_it - targets_.begin());
                     old_it = targets_.begin() + it->second;
                 }
+                ++old_it->second;
             } else {
-                auto [it, inserted] = map_.emplace(
-                    target_union, empty_slots_.size() ? empty_slots_.back() : targets_.size()
-                );
-                assert(it->second <= targets_.size());
-                if (it->second == targets_.size()) {
-                    assert(inserted);
-                    targets_.emplace_back(target_union, 0);
-                    old_it = targets_.end() - 1;
-                } else {
-                    assert(it->second < targets_.size());
-                    old_it = targets_.begin() + it->second;
-
-                    if (inserted) {
-                        assert(empty_slots_.size());
-                        assert(it->second == empty_slots_.back());
-                        assert(old_it->first.empty());
-
-                        old_it->first = target_union;
-                        empty_slots_.pop_back();
-                    }
-                }
+                old_it = emplace(std::move(target_union)).first;
             }
 
-            ++old_it->second;
             return std::make_pair(old_it, true);
         }
     };
