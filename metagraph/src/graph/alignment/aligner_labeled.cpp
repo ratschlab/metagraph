@@ -93,57 +93,6 @@ process_seq_path(const DeBruijnGraph &graph,
     }
 }
 
-Vector<uint64_t> LabeledSeedFilter::labels_to_keep(const DBGAlignment &seed) {
-    Vector<uint64_t> labels;
-    labels.reserve(seed.target_columns.size());
-
-    auto targets = seed.target_columns;
-
-    if (targets.empty())
-        targets.push_back(std::numeric_limits<uint64_t>::max());
-
-    for (uint64_t target : targets) {
-        std::pair<size_t, size_t> idx_range {
-            seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
-        };
-        size_t found_count = 0;
-        for (node_index node : seed) {
-            auto emplace = visited_nodes_[target].emplace(node, idx_range);
-            auto &range = emplace.first.value();
-            if (emplace.second) {
-            } else if (range.first > idx_range.first || range.second < idx_range.second) {
-                DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
-                range.first = std::min(range.first, idx_range.first);
-                range.second = std::max(range.second, idx_range.second);
-                DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-            } else {
-                ++found_count;
-            }
-
-            if (idx_range.second - idx_range.first == k_)
-                ++idx_range.first;
-
-            ++idx_range.second;
-        }
-
-        if (found_count != seed.size())
-            labels.push_back(target);
-    }
-
-    return labels;
-}
-
-void LabeledSeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
-    generator([&](node_index node, uint64_t label, size_t begin, size_t end) {
-        auto emplace = visited_nodes_[label].emplace(node, std::make_pair(begin, end));
-        auto &range = emplace.first.value();
-        if (!emplace.second) {
-            range.first = std::min(range.first, begin);
-            range.second = std::max(range.second, end);
-        }
-    });
-}
-
 ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
                                        const DBGAlignerConfig &config)
       : anno_graph_(anno_graph),
@@ -298,12 +247,10 @@ LabeledColumnExtender<NodeType>
 ::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                         const DBGAlignerConfig &config,
                         std::string_view query,
-                        LabeledSeedFilter &seed_filter,
                         TargetColumnsSet &target_columns,
                         EdgeSetCache &cached_edge_sets)
       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
         anno_graph_(anno_graph),
-        seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter),
         target_columns_(std::shared_ptr<TargetColumnsSet>{}, &target_columns),
         cached_edge_sets_(std::shared_ptr<EdgeSetCache>{}, &cached_edge_sets) {}
 
@@ -368,22 +315,7 @@ auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) 
         Edges out_edges;
         out_edges.reserve(base_edges.size());
         for (size_t i = 0; i < rows.size(); ++i) {
-            DBGAlignment dummy_seed(
-                std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
-                std::vector<node_index>{ std::get<0>(base_edges[i]) },
-                std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
-                this->seed_->get_orientation()
-            );
-            dummy_seed.target_columns = std::move(annotation[i]);
-            annotation[i] = seed_filter_->labels_to_keep(dummy_seed);
-            if (annotation[i].empty() || (annotation[i].size() == 1
-                    && annotation[i][0] == std::numeric_limits<uint64_t>::max())) {
-                DEBUG_LOG("Skipping seed: {}", dummy_seed);
-                continue;
-            }
-
             target_column_idx = get_target_id(annotation[i]);
-
 
             assert(!align_node_to_target_.count(base_edges[i]));
             target_columns_->increment(target_column_idx);

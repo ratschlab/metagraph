@@ -32,47 +32,6 @@ void IDBGAligner
     }, callback);
 }
 
-Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
-    size_t found_count = 0;
-    std::pair<size_t, size_t> idx_range {
-        seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
-    };
-    for (node_index node : seed) {
-        auto emplace = visited_nodes_.emplace(node, idx_range);
-        auto &range = emplace.first.value();
-        if (emplace.second) {
-        } else if (range.first > idx_range.first || range.second < idx_range.second) {
-            DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
-            range.first = std::min(range.first, idx_range.first);
-            range.second = std::max(range.second, idx_range.second);
-            DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-        } else {
-            ++found_count;
-        }
-
-        if (idx_range.second - idx_range.first == k_)
-            ++idx_range.first;
-
-        ++idx_range.second;
-    }
-
-    if (found_count == seed.size())
-        return {};
-
-    return { std::numeric_limits<uint64_t>::max() };
-}
-
-void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
-    generator([&](node_index node, uint64_t, size_t begin, size_t end) {
-        auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-        auto &range = emplace.first.value();
-        if (!emplace.second) {
-            range.first = std::min(range.first, begin);
-            range.second = std::max(range.second, end);
-        }
-    });
-}
-
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
@@ -81,9 +40,19 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) {
     bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
-    constexpr uint64_t nlabel = std::numeric_limits<uint64_t>::max();
 
     std::vector<DBGAlignment> seeds = seeder.get_seeds();
+
+    for (const DBGAlignment &seed : seeds) {
+        if (seed.get_score() >= get_min_path_score(seed)) {
+            DBGAlignment out_seed(seed);
+            out_seed.extend_query_end(query.data() + query.size());
+            out_seed.trim_offset();
+            assert(out_seed.is_valid(graph_, &config_));
+            DEBUG_LOG("Alignment (seed): {}", out_seed);
+            callback(std::move(out_seed));
+        }
+    }
 
     if (filter_seeds
             && std::any_of(seeds.begin(), seeds.end(),
@@ -108,14 +77,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
                 if (!cnt || (cnt == seed.target_columns.size()
                                 && graph_.get_mode() == DeBruijnGraph::CANONICAL)) {
-                    if (seed.get_score() >= get_min_path_score(seed)) {
-                        seed.extend_query_end(query.data() + query.size());
-                        seed.trim_offset();
-                        assert(seed.is_valid(graph_, &config_));
-                        DEBUG_LOG("Alignment (seed): {}", seed);
-                        callback(std::move(seed));
-                    }
-
                     DEBUG_LOG("Skipping seed: {}", seed);
                     seed = DBGAlignment();
                 }
@@ -125,64 +86,77 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
+    std::vector<sdsl::bit_vector> seed_nodes_covered;
+    std::vector<Vector<uint64_t>> seed_target_updates(seeds.size());
+    for (size_t i = 0; i < seeds.size(); ++i) {
+        seed_nodes_covered.emplace_back(seeds[i].size(), false);
+    }
+
     for (size_t i = 0; i < seeds.size(); ++i) {
         DBGAlignment &seed = seeds[i];
         if (seed.empty())
             continue;
 
         score_t min_path_score = get_min_path_score(seed);
-
-        // check if this seed has been explored before in an alignment and discard
-        // it if so
-        if (filter_seeds) {
-            // std::cerr << "get_init\tfilter\t" << i + 1 << " " << seeds.size() << " "
-            //           << (i + 1 < seeds.size() ? get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) : 4000) << " "
-            //           << seed.target_columns.size() << " " << (i + 1 < seeds.size() ? seeds[i + 1].target_columns.size() : 5000) << "\n";
-            seed.target_columns = seed_filter_->labels_to_keep(seed);
-            if (seed.target_columns.empty()) {
-                DEBUG_LOG("Skipping seed: {}", seed);
-                continue;
-            }
-
-            if (seed.target_columns.size() == 1 && seed.target_columns[0] == nlabel)
-                seed.target_columns.clear();
-
-            // std::cerr << "get_init\tfilter\t" << i + 1 << " " << seeds.size() << " "
-            //           << (i + 1 < seeds.size() ? get_end_ptr(seeds[i + 1]) - get_end_ptr(seed) : 4000) << " "
-            //           << seed.target_columns.size() << " " << (i + 1 < seeds.size() ? seeds[i + 1].target_columns.size() : 5000) << "\n";
-        }
-
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
         extender.initialize(seed);
-
-        // std::cerr << "get_init\t" << seed;
-        // for (uint64_t target : seed.target_columns) {
-        //     std::cerr << "\t" << target;
-        // }
-        // std::cerr << "\n";
 
         auto extensions = extender.get_extensions(min_path_score);
 
         // if the ManualSeeder is not used, then add nodes to the visited_nodes_
         // table to allow for seed filtration
         if (filter_seeds) {
-            tsl::hopscotch_set<uint64_t> targets(seed.target_columns.begin(),
-                                                 seed.target_columns.end());
-            targets.insert(nlabel);
-            if (seed.target_columns.empty()) {
-                for (const DBGAlignment &extension : extensions) {
-                    targets.insert(extension.target_columns.begin(),
-                                   extension.target_columns.end());
-                }
-            }
+            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
+                for (size_t j = i + 1; j < seeds.size(); ++j) {
+                    if (seeds[j].empty())
+                        continue;
 
-            seed_filter_->update_seed_filter([&](const auto &callback) {
-                extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-                    for (uint64_t target : targets) {
-                        callback(node, target, begin, end);
+                    assert(!seeds[j].get_offset() || seeds[j].size() == 1);
+                    size_t s_begin = seeds[j].get_clipping();
+                    size_t s_end = s_begin + graph_.get_k() - seeds[j].get_offset();
+
+                    assert(sdsl::util::cnt_one_bits(seed_nodes_covered[j]) < seeds[j].size());
+                    bool found = true;
+                    for (size_t l = 0; l < seeds[j].size(); ++l) {
+                        assert(s_end <= seeds[j].get_clipping() + seeds[j].get_query().size());
+                        if (seeds[j][l] == node && begin <= s_begin && end >= s_end) {
+                            found = true;
+                            seed_nodes_covered[j][l] = true;
+                        }
+
+                        assert(s_end - s_begin <= graph_.get_k());
+                        if (s_end - s_begin == graph_.get_k())
+                            ++s_begin;
+
+                        ++s_end;
                     }
-                });
+
+                    Vector<uint64_t> diff;
+                    if (found) {
+                        std::set_difference(seeds[j].target_columns.begin(),
+                                            seeds[j].target_columns.end(),
+                                            seed.target_columns.begin(),
+                                            seed.target_columns.end(),
+                                            std::back_inserter(diff));
+                        Vector<uint64_t> target_union;
+                        std::set_union(seed_target_updates[j].begin(), seed_target_updates[j].end(),
+                                       diff.begin(), diff.end(), std::back_inserter(target_union));
+                        std::swap(seed_target_updates[j], target_union);
+                    }
+
+                    if (sdsl::util::cnt_one_bits(seed_nodes_covered[j]) == seeds[j].size()) {
+                        assert(found);
+                        if (diff.empty()) {
+                            seeds[j] = DBGAlignment();
+                            seed_nodes_covered[j] = sdsl::bit_vector{};
+                        } else {
+                            std::swap(seed_target_updates[j], seeds[j].target_columns);
+                            sdsl::util::set_to_value(seed_nodes_covered[j], false);
+                        }
+                        seed_target_updates[j] = Vector<uint64_t>{};
+                    }
+                }
             });
         }
 
