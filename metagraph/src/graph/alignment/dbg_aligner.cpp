@@ -86,14 +86,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
-    std::vector<sdsl::bit_vector> seed_pos_exhausted;
-    seed_pos_exhausted.reserve(seeds.size());
-    std::vector<std::vector<Vector<uint64_t>>> seed_pos_target_updates(seeds.size());
-    for (size_t i = 0; i < seeds.size(); ++i) {
-        seed_pos_exhausted.emplace_back(seeds[i].get_query().size(), false);
-        seed_pos_target_updates[i].assign(seeds[i].get_query().size(), seeds[i].target_columns);
-    }
-
     for (size_t i = 0; i < seeds.size(); ++i) {
         DBGAlignment &seed = seeds[i];
         if (seed.empty())
@@ -106,8 +98,6 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
         auto extensions = extender.get_extensions(min_path_score);
 
-        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
-        // table to allow for seed filtration
         if (filter_seeds) {
             extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
                 for (size_t j = i + 1; j < seeds.size(); ++j) {
@@ -119,28 +109,19 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     size_t s_end = s_begin + graph_.get_k() - seeds[j].get_offset();
 
                     bool updated = false;
-                    for (size_t l = 0; l < seeds[j].size(); ++l) {
+                    for (node_index s_node : seeds[j]) {
                         assert(s_end <= seeds[j].get_clipping() + seeds[j].get_query().size());
 
-                        if (seeds[j][l] == node && s_begin <= end && begin <= s_end) {
-                            size_t r_begin = std::max(begin, s_begin);
-                            size_t r_end = std::min(end, s_end);
-                            for (size_t m = r_begin; m < r_end; ++m) {
-                                size_t idx = m - seeds[j].get_clipping();
-                                Vector<uint64_t> diff;
-                                std::set_difference(seed_pos_target_updates[j][idx].begin(),
-                                                    seed_pos_target_updates[j][idx].end(),
-                                                    seed.target_columns.begin(),
-                                                    seed.target_columns.end(),
-                                                    std::back_inserter(diff));
-
-                                if (diff.empty()) {
-                                    updated = true;
-                                    seed_pos_exhausted[j][idx] = true;
-                                }
-
-                                std::swap(seed_pos_target_updates[j][idx], diff);
-                            }
+                        if (s_node == node && s_begin <= end && begin <= s_end) {
+                            updated = true;
+                            Vector<uint64_t> diff;
+                            std::set_difference(seeds[j].target_columns.begin(),
+                                                seeds[j].target_columns.end(),
+                                                seed.target_columns.begin(),
+                                                seed.target_columns.end(),
+                                                std::back_inserter(diff));
+                            std::swap(seeds[j].target_columns, diff);
+                            break;
                         }
 
                         assert(s_end <= s_begin + graph_.get_k());
@@ -150,10 +131,8 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                         ++s_end;
                     }
 
-                    if (updated && sdsl::util::cnt_one_bits(seed_pos_exhausted[j]) == seeds[j].get_query().size()) {
+                    if (updated && seeds[j].target_columns.empty())
                         seeds[j] = DBGAlignment();
-                        seed_pos_target_updates[j].clear();
-                    }
                 }
             });
         }
