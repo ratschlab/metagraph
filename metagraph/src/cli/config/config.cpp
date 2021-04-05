@@ -1121,6 +1121,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tweigh k-mers with their counts annotated per label (requires count annotation) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
