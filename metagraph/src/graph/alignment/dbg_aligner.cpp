@@ -86,12 +86,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
-    std::vector<sdsl::bit_vector> seed_pos_exhausted;
-    seed_pos_exhausted.reserve(seeds.size());
-    std::vector<std::vector<Vector<uint64_t>>> seed_pos_target_updates(seeds.size());
+    std::vector<sdsl::bit_vector> seed_nodes_covered;
+    std::vector<Vector<uint64_t>> seed_target_updates(seeds.size());
     for (size_t i = 0; i < seeds.size(); ++i) {
-        seed_pos_exhausted.emplace_back(seeds[i].get_query().size(), false);
-        seed_pos_target_updates[i].assign(seeds[i].get_query().size(), seeds[i].target_columns);
+        seed_nodes_covered.emplace_back(seeds[i].size(), false);
     }
 
     for (size_t i = 0; i < seeds.size(); ++i) {
@@ -118,41 +116,45 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                     size_t s_begin = seeds[j].get_clipping();
                     size_t s_end = s_begin + graph_.get_k() - seeds[j].get_offset();
 
-                    bool updated = false;
+                    assert(sdsl::util::cnt_one_bits(seed_nodes_covered[j]) < seeds[j].size());
+                    bool found = true;
                     for (size_t l = 0; l < seeds[j].size(); ++l) {
                         assert(s_end <= seeds[j].get_clipping() + seeds[j].get_query().size());
-
-                        if (seeds[j][l] == node && s_begin <= end && begin <= s_end) {
-                            size_t r_begin = std::max(begin, s_begin);
-                            size_t r_end = std::min(end, s_end);
-                            for (size_t m = r_begin; m < r_end; ++m) {
-                                size_t idx = m - seeds[j].get_clipping();
-                                Vector<uint64_t> diff;
-                                std::set_difference(seed_pos_target_updates[j][idx].begin(),
-                                                    seed_pos_target_updates[j][idx].end(),
-                                                    seed.target_columns.begin(),
-                                                    seed.target_columns.end(),
-                                                    std::back_inserter(diff));
-
-                                if (diff.empty()) {
-                                    updated = true;
-                                    seed_pos_exhausted[j][idx] = true;
-                                }
-
-                                std::swap(seed_pos_target_updates[j][idx], diff);
-                            }
+                        if (seeds[j][l] == node && begin <= s_begin && end >= s_end) {
+                            found = true;
+                            seed_nodes_covered[j][l] = true;
                         }
 
-                        assert(s_end <= s_begin + graph_.get_k());
-                        if (s_end == s_begin + graph_.get_k())
+                        assert(s_end - s_begin <= graph_.get_k());
+                        if (s_end - s_begin == graph_.get_k())
                             ++s_begin;
 
                         ++s_end;
                     }
 
-                    if (updated && sdsl::util::cnt_one_bits(seed_pos_exhausted[j]) == seeds[j].get_query().size()) {
-                        seeds[j] = DBGAlignment();
-                        seed_pos_target_updates[j].clear();
+                    Vector<uint64_t> diff;
+                    if (found) {
+                        std::set_difference(seeds[j].target_columns.begin(),
+                                            seeds[j].target_columns.end(),
+                                            seed.target_columns.begin(),
+                                            seed.target_columns.end(),
+                                            std::back_inserter(diff));
+                        Vector<uint64_t> target_union;
+                        std::set_union(seed_target_updates[j].begin(), seed_target_updates[j].end(),
+                                       diff.begin(), diff.end(), std::back_inserter(target_union));
+                        std::swap(seed_target_updates[j], target_union);
+                    }
+
+                    if (sdsl::util::cnt_one_bits(seed_nodes_covered[j]) == seeds[j].size()) {
+                        assert(found);
+                        if (diff.empty()) {
+                            seeds[j] = DBGAlignment();
+                            seed_nodes_covered[j] = sdsl::bit_vector{};
+                        } else {
+                            std::swap(seed_target_updates[j], seeds[j].target_columns);
+                            sdsl::util::set_to_value(seed_nodes_covered[j], false);
+                        }
+                        seed_target_updates[j] = Vector<uint64_t>{};
                     }
                 }
             });
