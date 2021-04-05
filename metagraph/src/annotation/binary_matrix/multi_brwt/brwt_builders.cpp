@@ -203,13 +203,13 @@ BRWT BRWTBottomUpBuilder::build(
     if (!linkage.size())
         return BRWT();
 
-    std::function<void(BinaryMatrix&& node, uint64_t id)> dump_node;
+    std::function<void(BRWT&& node, uint64_t id)> dump_node;
     std::function<BRWT(uint64_t id)> get_node;
 
     if (!tmp_path.empty()) {
         // keep all temp nodes in |tmp_dir|
         std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_path, "brwt");
-        dump_node = [tmp_dir](BinaryMatrix&& node, uint64_t id) {
+        dump_node = [tmp_dir](BRWT&& node, uint64_t id) {
             std::ofstream out(tmp_dir/std::to_string(id), std::ios::binary);
             node.serialize(out);
             node = BRWT();
@@ -228,8 +228,8 @@ BRWT BRWTBottomUpBuilder::build(
     } else {
         // keep all temp nodes in memory
         auto temp_nodes = std::make_shared<std::vector<BRWT>>(linkage.size());
-        dump_node = [temp_nodes](BinaryMatrix&& node, uint64_t id) {
-            temp_nodes->at(id) = dynamic_cast<BRWT&&>(node);
+        dump_node = [temp_nodes](BRWT&& node, uint64_t id) {
+            temp_nodes->at(id) = std::move(node);
         };
         get_node = [temp_nodes](uint64_t id) {
             return std::move(temp_nodes->at(id));
@@ -318,7 +318,7 @@ BRWT BRWTBottomUpBuilder::build(
 
         // the child nodes will be serialized separately in order not
         // to load them together with the parent next time
-        std::vector<std::unique_ptr<BinaryMatrix>> child_nodes;
+        std::vector<std::unique_ptr<BRWT>> child_nodes;
         for (size_t r = 0; r < node.child_nodes_.size(); ++r) {
             child_nodes.push_back(std::make_unique<BRWT>());
         }
