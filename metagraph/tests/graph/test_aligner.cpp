@@ -1337,7 +1337,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         std::string query =                 "ACCTTTCGAGGCCAA";
         //                                    X
 
-        auto graph = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::CANONICAL);
+        auto graph = std::make_shared<DBGSuccinct>(k);
         graph->add_sequence(reference);
 
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
