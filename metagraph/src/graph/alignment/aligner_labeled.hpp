@@ -50,6 +50,17 @@ class ILabeledDBGAligner : public ISeedAndExtendAligner {
 bool check_targets(const AnnotatedDBG &anno_graph,
                    const Alignment<DeBruijnGraph::node_index> &path);
 
+class LabeledSeedFilter : public ISeedFilter {
+  public:
+    LabeledSeedFilter(size_t k) : k_(k) {}
+    Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
+    void update_seed_filter(const LabeledNodeRangeGenerator &generator);
+
+  private:
+    size_t k_;
+    tsl::hopscotch_map<node_index, tsl::hopscotch_map<uint64_t, std::pair<size_t, size_t>>> visited_nodes_;
+};
+
 template <typename NodeType = typename DeBruijnGraph::node_index>
 class LabeledColumnExtender;
 
@@ -201,6 +212,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
     LabeledColumnExtender(const AnnotatedDBG &anno_graph,
                           const DBGAlignerConfig &config,
                           std::string_view query,
+                          LabeledSeedFilter &seed_filter,
                           TargetColumnsSet &target_columns,
                           EdgeSetCache &cached_edge_sets);
 
@@ -350,6 +362,7 @@ class LabeledColumnExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     const AnnotatedDBG &anno_graph_;
+    std::shared_ptr<LabeledSeedFilter> seed_filter_;
     std::shared_ptr<TargetColumnsSet> target_columns_;
     std::shared_ptr<EdgeSetCache> cached_edge_sets_;
     mutable tsl::hopscotch_map<AlignNode, std::pair<size_t, size_t>, AlignNodeHash> align_node_to_target_;
@@ -380,16 +393,17 @@ inline void LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
         auto &[query_nodes_pair, target_columns] = mapped_batch;
         assert(config_.num_alternative_paths);
 
-        AlignerCore aligner_core(graph_, config_, query, is_reverse_complement);
+        LabeledSeedFilter seed_filter(this->graph_.get_k());
+        AlignerCore aligner_core(graph_, config_, seed_filter, query, is_reverse_complement);
         DBGQueryAlignment &paths = aligner_core.get_paths();
 
         std::string_view this_query = paths.get_query(is_reverse_complement);
         std::string_view reverse = paths.get_query(true);
         assert(this_query == query);
 
-        Extender extender(anno_graph_, config_, this_query,
+        Extender extender(anno_graph_, config_, this_query, seed_filter,
                           target_columns_set, cached_edge_sets);
-        Extender extender_rc(anno_graph_, config_, reverse,
+        Extender extender_rc(anno_graph_, config_, reverse, seed_filter,
                              target_columns_set, cached_edge_sets);
 
         std::vector<Targets> targets;
