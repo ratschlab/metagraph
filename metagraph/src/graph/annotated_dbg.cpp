@@ -197,7 +197,8 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                                      num_top_labels, min_count, with_kmer_counts);
 
     assert(std::all_of(top_labels.begin(), top_labels.end(),
-                       [&](const auto &pair) { return pair.second <= num_kmers; }));
+                       [&](const auto &pair) { return pair.second <= num_kmers; })
+            || with_kmer_counts);
 
     return top_labels;
 }

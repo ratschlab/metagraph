@@ -60,6 +60,12 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
+    using CountsCallback = std::function<void(uint64_t offset,
+                                              const Label &,
+                                              sdsl::int_vector<>&&)>;
+    static bool load_relation_counts(const std::vector<std::string> &filenames,
+                                     const CountsCallback &callback,
+                                     size_t num_threads = 1);
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
@@ -94,6 +100,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     std::string file_extension() const override { return kExtension; }
 
     static constexpr auto kExtension = ".column.annodbg";
+    static constexpr auto kCountExtension = ".column.annodbg.counts";
 
   private:
     void set(Index i, size_t j, bool value);

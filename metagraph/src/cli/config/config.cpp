@@ -666,6 +666,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
+        case CountBRWT:
+            return "count_brwt";
     }
     throw std::runtime_error("Never happens");
 }
@@ -695,6 +697,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
+    } else if (string == "count_brwt") {
+        return AnnotationType::CountBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -756,9 +760,9 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, count_brwt,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
-                                   "\t\t  row, flat, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {

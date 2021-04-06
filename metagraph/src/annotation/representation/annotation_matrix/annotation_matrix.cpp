@@ -224,5 +224,7 @@ template class StaticBinRelAnnotator<binmat::RowSparse, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
+template class StaticBinRelAnnotator<matrix::ColumnRankMatrix<binmat::BRWT>, std::string>;
+
 } // namespace annot
 } // namespace mtg

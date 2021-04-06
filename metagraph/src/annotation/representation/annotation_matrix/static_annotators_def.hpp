@@ -11,6 +11,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
+#include "annotation/count_matrix/extended/column_rank_matrix.hpp"
 
 
 namespace mtg {
@@ -38,6 +39,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
+typedef StaticBinRelAnnotator<matrix::ColumnRankMatrix<binmat::BRWT>, std::string> ExtendedMultiBRWTAnnotator;
+
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
@@ -61,6 +64,9 @@ template <>
 inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.annodbg";
 template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
+template <>
+inline const std::string ExtendedMultiBRWTAnnotator::kExtension = ".count_brwt.annodbg";
+
 } // namespace annot
 } // namespace mtg
 

@@ -155,11 +155,11 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     outstream.close();
 
-    outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
+    outstream.open(remove_suffix(filename, kExtension) + kCountExtension,
                    std::ios::binary);
     if (!outstream.good()) {
         logger->trace("Could not open {}",
-                      remove_suffix(filename, kExtension) + kExtension + ".counts");
+                      remove_suffix(filename, kExtension) + kCountExtension);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -367,6 +367,96 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             error_occurred = true;
         } catch (...) {
             logger->error("Unknown exception when loading columns from {}", filename);
+            error_occurred = true;
+        }
+    }
+
+    return !error_occurred;
+}
+
+template <typename Label>
+bool ColumnCompressed<Label>
+::load_relation_counts(const std::vector<std::string> &filenames,
+                       const CountsCallback &callback,
+                       size_t num_threads) {
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+
+        std::ifstream instream(filename, std::ios::binary);
+        if (!instream) {
+            logger->error("Can't read from {}", filename);
+            error_occurred = true;
+        }
+        std::ignore = load_number(instream);
+
+        LabelEncoder<Label> label_encoder;
+        if (!label_encoder.load(instream)) {
+            logger->error("Can't load label encoder from {}", filename);
+            error_occurred = true;
+        }
+
+        offsets[i] = label_encoder.size();
+    }
+
+    if (error_occurred)
+        return false;
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        logger->trace("Loading labels from {}", filename);
+        try {
+            std::ifstream instream(filename, std::ios::binary);
+            if (!instream)
+                throw std::ifstream::failure("can't open file");
+
+            std::ignore = load_number(instream);
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(instream))
+                throw std::ifstream::failure("can't load label encoder");
+
+            if (!label_encoder_load.size()) {
+                logger->warn("No labels in {}", filename);
+                continue;
+            }
+
+            const auto &counts_fname
+                = remove_suffix(filename, kExtension) + kCountExtension;
+
+            std::ifstream counts_in(counts_fname, std::ios::binary);
+            if (!counts_in)
+                throw std::ifstream::failure("can't open file with counts");
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                sdsl::int_vector<> column_counts;
+                try {
+                    column_counts.load(counts_in);
+                } catch (...) {
+                    logger->error("Can't load relation counts for column {} in {}",
+                                  c, filename);
+                    throw;
+                }
+
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
+                         std::move(column_counts));
+            }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading counts for {}: {}", filename, e.what());
+            error_occurred = true;
+        } catch (...) {
+            logger->error("Unknown exception when loading counts for {}", filename);
             error_occurred = true;
         }
     }
