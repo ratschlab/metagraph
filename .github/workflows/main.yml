@@ -236,7 +236,10 @@ jobs:
 
         - name: setup metagraph binary
           run: |
-            ln -s /usr/local/bin/metagraph artifacts/metagraph_DNA/metagraph_DNA
+            sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
+            sudo chmod +rx /usr/local/bin/metagraph
+            /usr/local/bin/metagraph --help
+            metagraph --help
 
         - name: Install python dependencies
           run: |
