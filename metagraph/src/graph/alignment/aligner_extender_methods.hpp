@@ -133,6 +133,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                                               score_t xdrop_cutoff);
 
     virtual void pop(const AlignNode &) {}
+    virtual void init_backtrack() const {}
 
   private:
     // compute perfect match scores for all suffixes

@@ -659,6 +659,7 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     std::sort(starts.begin(), starts.end(), utils::GreaterSecond());
     assert(starts.empty() || starts[0].second == best_start.second);
 
+    init_backtrack();
     tsl::hopscotch_set<AlignNode, AlignNodeHash> prev_starts;
 
     std::vector<DBGAlignment> extensions;
@@ -707,6 +708,9 @@ void DefaultColumnExtender<NodeType>
     size_t window_start = align_start - query_.data();
 
     for (const auto &[node, columns] : table_) {
+        if (node == graph_.max_index() + 1)
+            continue;
+
         size_t start = query_.size();
         size_t end = 0;
         size_t start_distance_from_origin = 0;

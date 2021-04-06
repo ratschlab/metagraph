@@ -24,7 +24,7 @@ using namespace mtg::kmer;
 
 inline std::vector<std::string>
 get_alignment_labels(const AnnotatedDBG &anno_graph,
-                     const LabeledDBGAligner<>::DBGAlignment &alignment) {
+                     const LabeledAligner<>::DBGAlignment &alignment) {
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     auto labels = anno_graph.get_labels(alignment.get_sequence(), 1.0);
     EXPECT_GE(labels.size(), alignment.target_columns.size());
@@ -45,16 +45,16 @@ get_alignment_labels(const AnnotatedDBG &anno_graph,
 }
 
 template <typename GraphAnnotationPair>
-class LabeledDBGAlignerTest : public ::testing::Test {};
+class LabeledAlignerTest : public ::testing::Test {};
 
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>> FewGraphAnnotationPairTypes;
 
-TYPED_TEST_SUITE(LabeledDBGAlignerTest, FewGraphAnnotationPairTypes);
+TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
-TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
+TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     size_t k = 3;
     /*  B                  AB  AB
        CGA                 GCC-CCT
@@ -74,7 +74,7 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
                                        typename TypeParam::second_type>(k, sequences, labels);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
-    LabeledDBGAligner<> aligner(*anno_graph, config);
+    LabeledAligner<> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") },
@@ -101,7 +101,7 @@ TYPED_TEST(LabeledDBGAlignerTest, SimpleTangleGraph) {
     }
 }
 
-TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
+TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     size_t k = 4;
     /*  B    B                  AB   AB
        TCGA-CGAA                TGCC-GCCT
@@ -123,7 +123,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.min_seed_length = 2;
-    LabeledDBGAligner<ExactSeeder<>> aligner(*anno_graph, config);
+    LabeledAligner<ExactSeeder<>> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
@@ -151,7 +151,7 @@ TEST(LabeledDBGAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
-TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
+TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB
        TTAGT-TAGTC             TCGAA-CGAAA
@@ -180,7 +180,7 @@ TYPED_TEST(LabeledDBGAlignerTest, CanonicalTangleGraph) {
         );
 
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-        LabeledDBGAligner<> aligner(*anno_graph, config);
+        LabeledAligner<> aligner(*anno_graph, config);
 
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
             { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") } }} }

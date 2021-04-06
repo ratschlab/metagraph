@@ -49,6 +49,10 @@ class ISeedAndExtendAligner : public IDBGAligner {
   public:
     virtual ~ISeedAndExtendAligner() {}
     virtual const DBGAlignerConfig& get_config() const = 0;
+
+  protected:
+    virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
+    build_extender(std::string_view query) const = 0;
 };
 
 class ISeedFilter {
@@ -94,6 +98,11 @@ class DBGAligner : public ISeedAndExtendAligner {
   protected:
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
+
+    std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
+    build_extender(std::string_view query) const override {
+        return std::make_shared<Extender>(graph_, config_, query);
+    }
 };
 
 class SeedFilter : public ISeedFilter {
@@ -248,10 +257,10 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
         }
 
-        Extender extender(graph_, config_, this_query);
+        auto extender = build_extender(this_query);
 
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-            Extender extender_rc(graph_, config_, reverse);
+            auto extender_rc = build_extender(reverse);
 
             auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                      const auto &callback) {
@@ -262,15 +271,15 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             // align backwards. The graph needs to be canonical to ensure that
             // all paths exist even when complementing.
             aligner_core.align_both_directions(*seeder, *seeder_rc,
-                                               extender, extender_rc,
+                                               *extender, *extender_rc,
                                                build_rev_comp_alignment_core);
 
         } else if (config_.forward_and_reverse_complement) {
-            Extender extender_rc(graph_, config_, reverse);
-            aligner_core.align_best_direction(*seeder, *seeder_rc, extender, extender_rc);
+            auto extender_rc = build_extender(reverse);
+            aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
 
         } else {
-            aligner_core.align_one_direction(is_reverse_complement, *seeder, extender);
+            aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
         }
 
         aligner_core.flush([this,&paths]() {

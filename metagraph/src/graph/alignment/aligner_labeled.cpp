@@ -8,6 +8,9 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/vector_map.hpp"
+#include "common/utils/template_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -144,403 +147,476 @@ void LabeledSeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &gene
     });
 }
 
-ILabeledDBGAligner::ILabeledDBGAligner(const AnnotatedDBG &anno_graph,
-                                       const DBGAlignerConfig &config)
-      : anno_graph_(anno_graph),
-        graph_(anno_graph_.get_graph()),
-        config_(config) {}
+template <typename NodeType>
+void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
+    std::vector<uint64_t> added_rows;
+    std::vector<node_index> added_nodes;
 
-auto ILabeledDBGAligner
-::map_and_label_query_batch(const QueryGenerator &generate_query) const
-        -> std::pair<BatchMapping, BatchLabels> {
-    // exact k-mer matchings of each query sequence
-    BatchMapping query_nodes;
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&this->graph_);
+    if (!dbg_succ) {
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_))
+            dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+    }
 
-    // map from Annotation row indices to (i,j), indicating position j in query i
-    typedef std::vector<std::pair<size_t, size_t>> RowMapping;
-    VectorMap<AnnotatedDBG::row_index, std::pair<RowMapping, RowMapping>> row_to_query_idx;
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-    // populate maps
-    generate_query([&](std::string_view, std::string_view query, bool) {
-        size_t i = query_nodes.size();
-
-        // map query sequence to the graph
-        query_nodes.emplace_back(map_sequence_to_nodes(graph_, query),
-                                 std::vector<node_index>{});
-
-        // update row_to_query_idx
-        process_seq_path(graph_, query, query_nodes.back().first,
-                         [&](AnnotatedDBG::row_index row, size_t j) {
-            row_to_query_idx[row].first.emplace_back(i, j);
-        });
-
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
-            query_nodes.back().second = query_nodes.back().first;
-            std::string query_rc(query);
-            reverse_complement_seq_path(graph_, query_rc, query_nodes.back().second);
-
-            if (graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-                process_seq_path(graph_, query_rc, query_nodes.back().second,
-                                 [&](AnnotatedDBG::row_index row, size_t j) {
-                    row_to_query_idx[row].second.emplace_back(i, j);
-                });
-            }
+    DefaultColumnExtender<NodeType>::call_visited_nodes([&](node_index node, size_t, size_t) {
+        auto [it, inserted] = targets_.emplace(node, Vector<uint64_t>{});
+        if (inserted) {
+            process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
+                             { node }, [&](auto row, size_t) {
+                if (!boss || boss->get_W(dbg_succ->kmer_to_boss_index(AnnotatedDBG::anno_to_graph_index(row)))) {
+                    added_rows.push_back(row);
+                    added_nodes.push_back(node);
+                }
+            });
         }
     });
 
-    // extract rows from the row index map
-    std::vector<AnnotatedDBG::row_index> rows;
-    rows.reserve(row_to_query_idx.size());
-    for (const auto &[row, mapping] : row_to_query_idx) {
-        rows.push_back(row);
+    auto it = added_nodes.begin();
+    for (auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
+        assert(it != added_nodes.end());
+        assert(targets_[*it].empty());
+        targets_[*it] = std::move(labels);
+        ++it;
     }
-
-    // get annotations for each row
-    auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
-
-    tsl::hopscotch_map<Vector<uint64_t>, std::vector<uint64_t>,
-                       utils::VectorHash> unique_rows;
-    for (size_t i = 0; i < annotation.size(); ++i) {
-        unique_rows[annotation[i]].push_back(rows[i]);
-    }
-
-    std::vector<VectorMap<Vector<uint64_t>, std::pair<Signature, size_t>,
-                          uint64_t, utils::VectorHash>> batch_labels(
-        query_nodes.size()
-    );
-    for (const auto &[targets, rows] : unique_rows) {
-        for (auto row : rows) {
-            for (const auto &[i, idx] : row_to_query_idx[row].first) {
-                if (!batch_labels[i].count(targets)) {
-                    batch_labels[i].emplace(targets, std::make_pair(Signature {
-                        { query_nodes[i].first.size(), false },
-                        config_.forward_and_reverse_complement
-                                && graph_.get_mode() != DeBruijnGraph::CANONICAL
-                            ? sdsl::bit_vector(query_nodes[i].second.size(), false)
-                            : sdsl::bit_vector()
-                    }, (size_t)0));
-                }
-
-                if (!batch_labels[i][targets].first.first[idx]) {
-                    batch_labels[i][targets].first.first[idx] = true;
-                    ++batch_labels[i][targets].second;
-                }
-            }
-
-            if (config_.forward_and_reverse_complement
-                    && graph_.get_mode() != DeBruijnGraph::CANONICAL) {
-                for (const auto &[i, idx] : row_to_query_idx[row].second) {
-                    if (!batch_labels[i].count(targets)) {
-                        batch_labels[i].emplace(targets, std::make_pair(Signature {
-                            { query_nodes[i].first.size(), false },
-                            { query_nodes[i].second.size(), false }
-                        }, (size_t)0));
-                    }
-
-                    if (!batch_labels[i][targets].first.second[idx]) {
-                        batch_labels[i][targets].first.second[idx] = true;
-                        ++batch_labels[i][targets].second;
-                    }
-                }
-            }
-        }
-    }
-
-    if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-        for (size_t i = 0; i < batch_labels.size(); ++i) {
-            assert(batch_labels[i].size()
-                || (std::all_of(query_nodes[i].first.begin(),
-                                query_nodes[i].first.end(),
-                                [](auto j) { return !j; })
-                    && std::all_of(query_nodes[i].second.begin(),
-                                   query_nodes[i].second.end(),
-                                   [](auto j) { return !j; })));
-            for (auto it = batch_labels[i].begin(); it != batch_labels[i].end(); ++it) {
-                it.value().first.second = it.value().first.first;
-                reverse_bit_vector(it.value().first.second);
-                it.value().second *= 2;
-            }
-        }
-    }
-
-    BatchLabels target_columns(query_nodes.size());
-    for (size_t i = 0; i < target_columns.size(); ++i) {
-        auto batch_labels_vec = const_cast<std::vector<std::pair<Vector<uint64_t>,
-                                                                 std::pair<Signature, size_t>>>&&>(
-            batch_labels[i].values_container()
-        );
-
-        if (batch_labels_vec.size() > config_.num_top_labels) {
-            std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
-                      [](const auto &a, const auto &b) {
-                return a.second.second > b.second.second;
-            });
-            auto it = batch_labels_vec.begin() + config_.num_top_labels - 1;
-            auto end = std::find_if(it + 1, batch_labels_vec.end(),
-                                    [&](const auto &a) {
-                                        return a.second.second < it->second.second;
-                                    });
-            batch_labels_vec.erase(end, batch_labels_vec.end());
-        }
-
-        for (auto&& [targets, signature_counts] : batch_labels_vec) {
-            target_columns[i].emplace_back(std::move(targets),
-                                           std::move(signature_counts.first));
-        }
-    }
-
-    return { std::move(query_nodes), std::move(target_columns) };
+    assert(it == added_nodes.end());
 }
 
 template <typename NodeType>
-LabeledColumnExtender<NodeType>
-::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
-                        const DBGAlignerConfig &config,
-                        std::string_view query,
-                        LabeledSeedFilter &seed_filter,
-                        TargetColumnsSet &target_columns,
-                        EdgeSetCache &cached_edge_sets)
-      : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
-        anno_graph_(anno_graph),
-        seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter),
-        target_columns_(std::shared_ptr<TargetColumnsSet>{}, &target_columns),
-        cached_edge_sets_(std::shared_ptr<EdgeSetCache>{}, &cached_edge_sets) {}
+void LabeledBacktrackingExtender<NodeType>
+::backtrack(score_t min_path_score,
+            AlignNode best_node,
+            tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+            std::vector<DBGAlignment> &extensions) const {
+    std::vector<DBGAlignment> next_extension;
+    DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
+                                               prev_starts, next_extension);
 
-template <typename NodeType>
-void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
-    assert(!path.get_offset() || path.target_columns.empty());
-    DefaultColumnExtender<NodeType>::initialize(path);
-    align_node_to_target_.clear();
-    backtrack_start_counter_.clear();
+    if (next_extension.empty())
+        return;
 
-    assert(check_targets(anno_graph_, path));
-    size_t target_idx = get_target_id(path.target_columns);
-    target_columns_->increment(target_idx);
+    assert(next_extension.size() == 1);
+    DBGAlignment alignment = std::move(next_extension[0]);
 
-    if (align_node_to_target_.count(this->start_node_))
-        target_columns_->decrement(align_node_to_target_[this->start_node_].first);
+    std::vector<const Vector<uint64_t>*> labels(alignment.size(), nullptr);
+    Vector<uint64_t> target_intersection;
+    bool found = false;
+    for (size_t i = 0; i < alignment.size(); ++i) {
+        if (targets_.count(alignment[i])) {
+            labels[i] = &targets_[alignment[i]];
+            if (!found) {
+                target_intersection = *labels[i];
+            } else if (target_intersection.size()) {
+                Vector<uint64_t> inter;
+                std::set_intersection(target_intersection.begin(), target_intersection.end(),
+                                      labels[i]->begin(), labels[i]->end(),
+                                      std::back_inserter(inter));
+                std::swap(inter, target_intersection);
+            }
+        }
+    }
 
-    align_node_to_target_[this->start_node_].first = target_idx;
+    if (target_intersection.size()) {
+        for (uint64_t target : target_intersection) {
+            extensions.push_back(alignment);
+            extensions.back().target_column = target;
+        }
+    }
 }
 
-template <typename NodeType>
-auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) const -> Edges {
-    assert(align_node_to_target_.count(align_node));
-    const auto &[node, last_char, count, depth] = align_node;
+// auto ILabeledDBGAligner
+// ::map_and_label_query_batch(const QueryGenerator &generate_query) const
+//         -> std::pair<BatchMapping, BatchLabels> {
+//     // exact k-mer matchings of each query sequence
+//     BatchMapping query_nodes;
 
-    Edges base_edges = DefaultColumnExtender<NodeType>::get_outgoing(align_node);
+//     // map from Annotation row indices to (i,j), indicating position j in query i
+//     typedef std::vector<std::pair<size_t, size_t>> RowMapping;
+//     VectorMap<AnnotatedDBG::row_index, std::pair<RowMapping, RowMapping>> row_to_query_idx;
 
-    if (node == this->graph_.max_index() + 1 || base_edges.empty())
-        return base_edges;
+//     // populate maps
+//     generate_query([&](std::string_view, std::string_view query, bool) {
+//         size_t i = query_nodes.size();
 
-    assert(depth);
+//         // map query sequence to the graph
+//         query_nodes.emplace_back(map_sequence_to_nodes(graph_, query),
+//                                  std::vector<node_index>{});
 
-    auto [target_column_idx, lookahead] = align_node_to_target_[align_node];
+//         // update row_to_query_idx
+//         process_seq_path(graph_, query, query_nodes.back().first,
+//                          [&](AnnotatedDBG::row_index row, size_t j) {
+//             row_to_query_idx[row].first.emplace_back(i, j);
+//         });
 
-    if (!target_column_idx) {
-        assert(this->seed_->get_offset() >= depth);
-        assert(this->seed_->get_offset());
-        size_t next_offset = this->seed_->get_offset() - depth;
+//         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+//                 || config_.forward_and_reverse_complement) {
+//             query_nodes.back().second = query_nodes.back().first;
+//             std::string query_rc(query);
+//             reverse_complement_seq_path(graph_, query_rc, query_nodes.back().second);
 
-        assert(this->graph_.get_node_sequence(node).substr(next_offset + 1).find(boss::BOSS::kSentinel)
-            == std::string::npos);
+//             if (graph_.get_mode() != DeBruijnGraph::CANONICAL) {
+//                 process_seq_path(graph_, query_rc, query_nodes.back().second,
+//                                  [&](AnnotatedDBG::row_index row, size_t j) {
+//                     row_to_query_idx[row].second.emplace_back(i, j);
+//                 });
+//             }
+//         }
+//     });
 
-        if (next_offset)
-            return base_edges;
+//     // extract rows from the row index map
+//     std::vector<AnnotatedDBG::row_index> rows;
+//     rows.reserve(row_to_query_idx.size());
+//     for (const auto &[row, mapping] : row_to_query_idx) {
+//         rows.push_back(row);
+//     }
 
-        std::string seq(this->graph_.get_k(), '#');
-        std::vector<AnnotatedDBG::row_index> rows;
-        rows.reserve(base_edges.size());
+//     // get annotations for each row
+//     auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
 
-        for (const auto &[next_node, c, next_count, next_depth] : base_edges) {
-            seq.back() = c;
-            process_seq_path(this->graph_, seq, std::vector<node_index>{ next_node },
-                             [&](AnnotatedDBG::row_index row, size_t) {
-                rows.emplace_back(row);
-            });
-        }
+//     tsl::hopscotch_map<Vector<uint64_t>, std::vector<uint64_t>,
+//                        utils::VectorHash> unique_rows;
+//     for (size_t i = 0; i < annotation.size(); ++i) {
+//         unique_rows[annotation[i]].push_back(rows[i]);
+//     }
 
-        assert(rows.size() == base_edges.size());
+//     std::vector<VectorMap<Vector<uint64_t>, std::pair<Signature, size_t>,
+//                           uint64_t, utils::VectorHash>> batch_labels(
+//         query_nodes.size()
+//     );
+//     for (const auto &[targets, rows] : unique_rows) {
+//         for (auto row : rows) {
+//             for (const auto &[i, idx] : row_to_query_idx[row].first) {
+//                 if (!batch_labels[i].count(targets)) {
+//                     batch_labels[i].emplace(targets, std::make_pair(Signature {
+//                         { query_nodes[i].first.size(), false },
+//                         config_.forward_and_reverse_complement
+//                                 && graph_.get_mode() != DeBruijnGraph::CANONICAL
+//                             ? sdsl::bit_vector(query_nodes[i].second.size(), false)
+//                             : sdsl::bit_vector()
+//                     }, (size_t)0));
+//                 }
 
-        auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
+//                 if (!batch_labels[i][targets].first.first[idx]) {
+//                     batch_labels[i][targets].first.first[idx] = true;
+//                     ++batch_labels[i][targets].second;
+//                 }
+//             }
 
-        Edges out_edges;
-        out_edges.reserve(base_edges.size());
-        for (size_t i = 0; i < rows.size(); ++i) {
-            DBGAlignment dummy_seed(
-                std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
-                std::vector<node_index>{ std::get<0>(base_edges[i]) },
-                std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
-                this->seed_->get_orientation()
-            );
-            dummy_seed.target_columns = std::move(annotation[i]);
-            annotation[i] = seed_filter_->labels_to_keep(dummy_seed);
-            if (annotation[i].empty() || (annotation[i].size() == 1
-                    && annotation[i][0] == std::numeric_limits<uint64_t>::max())) {
-                DEBUG_LOG("Skipping seed: {}", dummy_seed);
-                continue;
-            }
+//             if (config_.forward_and_reverse_complement
+//                     && graph_.get_mode() != DeBruijnGraph::CANONICAL) {
+//                 for (const auto &[i, idx] : row_to_query_idx[row].second) {
+//                     if (!batch_labels[i].count(targets)) {
+//                         batch_labels[i].emplace(targets, std::make_pair(Signature {
+//                             { query_nodes[i].first.size(), false },
+//                             { query_nodes[i].second.size(), false }
+//                         }, (size_t)0));
+//                     }
 
-            target_column_idx = get_target_id(annotation[i]);
+//                     if (!batch_labels[i][targets].first.second[idx]) {
+//                         batch_labels[i][targets].first.second[idx] = true;
+//                         ++batch_labels[i][targets].second;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+//         for (size_t i = 0; i < batch_labels.size(); ++i) {
+//             assert(batch_labels[i].size()
+//                 || (std::all_of(query_nodes[i].first.begin(),
+//                                 query_nodes[i].first.end(),
+//                                 [](auto j) { return !j; })
+//                     && std::all_of(query_nodes[i].second.begin(),
+//                                    query_nodes[i].second.end(),
+//                                    [](auto j) { return !j; })));
+//             for (auto it = batch_labels[i].begin(); it != batch_labels[i].end(); ++it) {
+//                 it.value().first.second = it.value().first.first;
+//                 reverse_bit_vector(it.value().first.second);
+//                 it.value().second *= 2;
+//             }
+//         }
+//     }
+
+//     BatchLabels target_columns(query_nodes.size());
+//     for (size_t i = 0; i < target_columns.size(); ++i) {
+//         auto batch_labels_vec = const_cast<std::vector<std::pair<Vector<uint64_t>,
+//                                                                  std::pair<Signature, size_t>>>&&>(
+//             batch_labels[i].values_container()
+//         );
+
+//         if (batch_labels_vec.size() > config_.num_top_labels) {
+//             std::sort(batch_labels_vec.begin(), batch_labels_vec.end(),
+//                       [](const auto &a, const auto &b) {
+//                 return a.second.second > b.second.second;
+//             });
+//             auto it = batch_labels_vec.begin() + config_.num_top_labels - 1;
+//             auto end = std::find_if(it + 1, batch_labels_vec.end(),
+//                                     [&](const auto &a) {
+//                                         return a.second.second < it->second.second;
+//                                     });
+//             batch_labels_vec.erase(end, batch_labels_vec.end());
+//         }
+
+//         for (auto&& [targets, signature_counts] : batch_labels_vec) {
+//             target_columns[i].emplace_back(std::move(targets),
+//                                            std::move(signature_counts.first));
+//         }
+//     }
+
+//     return { std::move(query_nodes), std::move(target_columns) };
+// }
+
+// template <typename NodeType>
+// LabeledColumnExtender<NodeType>
+// ::LabeledColumnExtender(const AnnotatedDBG &anno_graph,
+//                         const DBGAlignerConfig &config,
+//                         std::string_view query,
+//                         LabeledSeedFilter &seed_filter,
+//                         TargetColumnsSet &target_columns,
+//                         EdgeSetCache &cached_edge_sets)
+//       : DefaultColumnExtender<NodeType>(anno_graph.get_graph(), config, query),
+//         anno_graph_(anno_graph),
+//         seed_filter_(std::shared_ptr<LabeledSeedFilter>{}, &seed_filter),
+//         target_columns_(std::shared_ptr<TargetColumnsSet>{}, &target_columns),
+//         cached_edge_sets_(std::shared_ptr<EdgeSetCache>{}, &cached_edge_sets) {}
+
+// template <typename NodeType>
+// void LabeledColumnExtender<NodeType>::initialize(const DBGAlignment &path) {
+//     assert(!path.get_offset() || path.target_columns.empty());
+//     DefaultColumnExtender<NodeType>::initialize(path);
+//     align_node_to_target_.clear();
+//     backtrack_start_counter_.clear();
+
+//     assert(check_targets(anno_graph_, path));
+//     size_t target_idx = get_target_id(path.target_columns);
+//     target_columns_->increment(target_idx);
+
+//     if (align_node_to_target_.count(this->start_node_))
+//         target_columns_->decrement(align_node_to_target_[this->start_node_].first);
+
+//     align_node_to_target_[this->start_node_].first = target_idx;
+// }
+
+// template <typename NodeType>
+// auto LabeledColumnExtender<NodeType>::get_outgoing(const AlignNode &align_node) const -> Edges {
+//     assert(align_node_to_target_.count(align_node));
+//     const auto &[node, last_char, count, depth] = align_node;
+
+//     Edges base_edges = DefaultColumnExtender<NodeType>::get_outgoing(align_node);
+
+//     if (node == this->graph_.max_index() + 1 || base_edges.empty())
+//         return base_edges;
+
+//     assert(depth);
+
+//     auto [target_column_idx, lookahead] = align_node_to_target_[align_node];
+
+//     if (!target_column_idx) {
+//         assert(this->seed_->get_offset() >= depth);
+//         assert(this->seed_->get_offset());
+//         size_t next_offset = this->seed_->get_offset() - depth;
+
+//         assert(this->graph_.get_node_sequence(node).substr(next_offset + 1).find(boss::BOSS::kSentinel)
+//             == std::string::npos);
+
+//         if (next_offset)
+//             return base_edges;
+
+//         std::string seq(this->graph_.get_k(), '#');
+//         std::vector<AnnotatedDBG::row_index> rows;
+//         rows.reserve(base_edges.size());
+
+//         for (const auto &[next_node, c, next_count, next_depth] : base_edges) {
+//             seq.back() = c;
+//             process_seq_path(this->graph_, seq, std::vector<node_index>{ next_node },
+//                              [&](AnnotatedDBG::row_index row, size_t) {
+//                 rows.emplace_back(row);
+//             });
+//         }
+
+//         assert(rows.size() == base_edges.size());
+
+//         auto annotation = anno_graph_.get_annotation().get_matrix().get_rows(rows);
+
+//         Edges out_edges;
+//         out_edges.reserve(base_edges.size());
+//         for (size_t i = 0; i < rows.size(); ++i) {
+//             DBGAlignment dummy_seed(
+//                 std::string_view(this->seed_->get_query().data(), this->graph_.get_k()),
+//                 std::vector<node_index>{ std::get<0>(base_edges[i]) },
+//                 std::string(seq), 0, Cigar(), this->seed_->get_clipping(),
+//                 this->seed_->get_orientation()
+//             );
+//             dummy_seed.target_columns = std::move(annotation[i]);
+//             annotation[i] = seed_filter_->labels_to_keep(dummy_seed);
+//             if (annotation[i].empty() || (annotation[i].size() == 1
+//                     && annotation[i][0] == std::numeric_limits<uint64_t>::max())) {
+//                 DEBUG_LOG("Skipping seed: {}", dummy_seed);
+//                 continue;
+//             }
+
+//             target_column_idx = get_target_id(annotation[i]);
 
 
-            assert(!align_node_to_target_.count(base_edges[i]));
-            target_columns_->increment(target_column_idx);
-            align_node_to_target_.emplace(base_edges[i],
-                                          std::make_pair(target_column_idx, 0));
+//             assert(!align_node_to_target_.count(base_edges[i]));
+//             target_columns_->increment(target_column_idx);
+//             align_node_to_target_.emplace(base_edges[i],
+//                                           std::make_pair(target_column_idx, 0));
 
-            update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
-            out_edges.emplace_back(std::move(base_edges[i]));
-        }
+//             update_target_cache(std::get<0>(base_edges[i]), target_column_idx);
+//             out_edges.emplace_back(std::move(base_edges[i]));
+//         }
 
-        return out_edges;
-    }
+//         return out_edges;
+//     }
 
-    assert(this->seed_->get_offset() < depth);
-    assert(this->graph_.get_node_sequence(node).find(boss::BOSS::kSentinel)
-        == std::string::npos);
+//     assert(this->seed_->get_offset() < depth);
+//     assert(this->graph_.get_node_sequence(node).find(boss::BOSS::kSentinel)
+//         == std::string::npos);
 
-    Edges out_edges;
+//     Edges out_edges;
 
-    const Targets &start_targets = get_targets(target_column_idx);
+//     const Targets &start_targets = get_targets(target_column_idx);
 
-    tsl::hopscotch_set<node_index> visited;
-    std::vector<size_t> dist;
-    std::vector<AnnotatedDBG::row_index> rows;
-    std::vector<std::pair<AlignNode, size_t>> next_nodes;
-    std::vector<node_index> nodes;
+//     tsl::hopscotch_set<node_index> visited;
+//     std::vector<size_t> dist;
+//     std::vector<AnnotatedDBG::row_index> rows;
+//     std::vector<std::pair<AlignNode, size_t>> next_nodes;
+//     std::vector<node_index> nodes;
 
-    for (size_t i = 0; i < base_edges.size(); ++i) {
-        const auto &[next_node, c, next_count, next_depth] = base_edges[i];
-        visited.emplace(next_node);
+//     for (size_t i = 0; i < base_edges.size(); ++i) {
+//         const auto &[next_node, c, next_count, next_depth] = base_edges[i];
+//         visited.emplace(next_node);
 
-        if (next_node == node) {
-            assert(!align_node_to_target_.count(base_edges[i]));
-            target_columns_->increment(target_column_idx);
-            align_node_to_target_.emplace(base_edges[i],
-                                          std::make_pair(target_column_idx, lookahead));
-            out_edges.emplace_back(base_edges[i]);
+//         if (next_node == node) {
+//             assert(!align_node_to_target_.count(base_edges[i]));
+//             target_columns_->increment(target_column_idx);
+//             align_node_to_target_.emplace(base_edges[i],
+//                                           std::make_pair(target_column_idx, lookahead));
+//             out_edges.emplace_back(base_edges[i]);
 
-        } else {
-            if (cached_edge_sets_->count(next_node)) {
-                const Targets &next_targets = get_targets((*cached_edge_sets_)[next_node]);
-                size_t next_idx = 0;
-                if (std::includes(next_targets.begin(), next_targets.end(),
-                                  start_targets.begin(), start_targets.end())) {
-                    next_idx = target_column_idx;
-                } else if (lookahead) {
-                    next_idx = get_target_intersection((*cached_edge_sets_)[next_node],
-                                                       target_column_idx);
-                }
+//         } else {
+//             if (cached_edge_sets_->count(next_node)) {
+//                 const Targets &next_targets = get_targets((*cached_edge_sets_)[next_node]);
+//                 size_t next_idx = 0;
+//                 if (std::includes(next_targets.begin(), next_targets.end(),
+//                                   start_targets.begin(), start_targets.end())) {
+//                     next_idx = target_column_idx;
+//                 } else if (lookahead) {
+//                     next_idx = get_target_intersection((*cached_edge_sets_)[next_node],
+//                                                        target_column_idx);
+//                 }
 
-                if (next_idx) {
-                    assert(!align_node_to_target_.count(base_edges[i]));
-                    target_columns_->increment(next_idx);
-                    align_node_to_target_.emplace(base_edges[i],
-                                                  std::make_pair(next_idx, lookahead ? lookahead - 1 : 0));
-                    out_edges.emplace_back(base_edges[i]);
-                    continue;
-                }
-            }
+//                 if (next_idx) {
+//                     assert(!align_node_to_target_.count(base_edges[i]));
+//                     target_columns_->increment(next_idx);
+//                     align_node_to_target_.emplace(base_edges[i],
+//                                                   std::make_pair(next_idx, lookahead ? lookahead - 1 : 0));
+//                     out_edges.emplace_back(base_edges[i]);
+//                     continue;
+//                 }
+//             }
 
-            next_nodes.emplace_back(base_edges[i], 0);
-        }
-    }
+//             next_nodes.emplace_back(base_edges[i], 0);
+//         }
+//     }
 
-    if (next_nodes.size()) {
-        for (size_t i = 0; i < next_nodes.size(); ++i) {
-            const auto &[next_node, c, next_count, next_depth] = next_nodes[i].first;
+//     if (next_nodes.size()) {
+//         for (size_t i = 0; i < next_nodes.size(); ++i) {
+//             const auto &[next_node, c, next_count, next_depth] = next_nodes[i].first;
 
-            std::string seq(this->graph_.get_k() - 1, '#');
-            seq += c;
+//             std::string seq(this->graph_.get_k() - 1, '#');
+//             seq += c;
 
-            std::vector<node_index> path { next_node };
-            node_index cur = DeBruijnGraph::npos;
+//             std::vector<node_index> path { next_node };
+//             node_index cur = DeBruijnGraph::npos;
 
-            const auto &column = this->table_.find(node)->second;
-            auto [min_i, max_i] = this->get_band(align_node, column, this->xdrop_cutoff_);
-            if (this->start_ + min_i + 1 < this->query_.size()) {
-                std::string_view q_min = this->query_.substr(this->start_ + min_i + 1);
-                size_t offset = std::get<9>(column.first[count]);
-                const score_t *S_vec = std::get<0>(column.first[count]).data() + min_i - offset;
-                std::vector<score_t> S(S_vec, S_vec + (max_i - min_i));
+//             const auto &column = this->table_.find(node)->second;
+//             auto [min_i, max_i] = this->get_band(align_node, column, this->xdrop_cutoff_);
+//             if (this->start_ + min_i + 1 < this->query_.size()) {
+//                 std::string_view q_min = this->query_.substr(this->start_ + min_i + 1);
+//                 size_t offset = std::get<9>(column.first[count]);
+//                 const score_t *S_vec = std::get<0>(column.first[count]).data() + min_i - offset;
+//                 std::vector<score_t> S(S_vec, S_vec + (max_i - min_i));
 
-                const auto &score_row = this->config_.get_row(c);
-                for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
-                    S[j] += score_row[q_min[j + path.size()]];
-                    if (S[j] >= this->xdrop_cutoff_)
-                        cur = next_node;
-                }
+//                 const auto &score_row = this->config_.get_row(c);
+//                 for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
+//                     S[j] += score_row[q_min[j + path.size()]];
+//                     if (S[j] >= this->xdrop_cutoff_)
+//                         cur = next_node;
+//                 }
 
-                while (cur != DeBruijnGraph::npos) {
-                    std::vector<std::pair<node_index, char>> outgoing;
-                    this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
-                        outgoing.emplace_back(next, next_c);
-                    });
-                    cur = DeBruijnGraph::npos;
+//                 while (cur != DeBruijnGraph::npos) {
+//                     std::vector<std::pair<node_index, char>> outgoing;
+//                     this->graph_.call_outgoing_kmers(cur, [&](node_index next, char next_c) {
+//                         outgoing.emplace_back(next, next_c);
+//                     });
+//                     cur = DeBruijnGraph::npos;
 
-                    if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
-                        path.push_back(outgoing[0].first);
-                        seq += outgoing[0].second;
+//                     if (outgoing.size() == 1 && visited.emplace(outgoing[0].first).second) {
+//                         path.push_back(outgoing[0].first);
+//                         seq += outgoing[0].second;
 
-                        const auto &score_row = this->config_.get_row(seq.back());
-                        for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
-                            S[j] += score_row[q_min[j + path.size()]];
-                            if (S[j] >= this->xdrop_cutoff_)
-                                cur = outgoing[0].first;
-                        }
-                    }
-                }
-            }
+//                         const auto &score_row = this->config_.get_row(seq.back());
+//                         for (size_t j = 0; j < S.size() && j + path.size() < q_min.size(); ++j) {
+//                             S[j] += score_row[q_min[j + path.size()]];
+//                             if (S[j] >= this->xdrop_cutoff_)
+//                                 cur = outgoing[0].first;
+//                         }
+//                     }
+//                 }
+//             }
 
-            next_nodes[i].second = path.size() - 1;
+//             next_nodes[i].second = path.size() - 1;
 
-            process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
-                dist.push_back(d);
-                rows.push_back(row);
-                nodes.push_back(path[d]);
-            });
-        }
+//             process_seq_path(this->graph_, seq, path, [&](auto row, size_t d) {
+//                 dist.push_back(d);
+//                 rows.push_back(row);
+//                 nodes.push_back(path[d]);
+//             });
+//         }
 
-        assert(static_cast<size_t>(std::count(dist.begin(), dist.end(), 0)) == next_nodes.size());
+//         assert(static_cast<size_t>(std::count(dist.begin(), dist.end(), 0)) == next_nodes.size());
 
-        auto masks = anno_graph_.get_annotation().get_matrix().has_column(rows, start_targets);
+//         auto masks = anno_graph_.get_annotation().get_matrix().has_column(rows, start_targets);
 
-        std::vector<Targets> out_targets(rows.size());
-        for (size_t i = 0; i < masks.size(); ++i) {
-            call_ones(masks[i], [&](size_t j) { out_targets[j].push_back(start_targets[i]); });
-        }
+//         std::vector<Targets> out_targets(rows.size());
+//         for (size_t i = 0; i < masks.size(); ++i) {
+//             call_ones(masks[i], [&](size_t j) { out_targets[j].push_back(start_targets[i]); });
+//         }
 
-        auto it = next_nodes.begin();
-        for (size_t i = 0; i < out_targets.size(); ++i) {
-            if (size_t target_idx = get_target_id(out_targets[i])) {
-                update_target_cache(nodes[i], target_idx);
+//         auto it = next_nodes.begin();
+//         for (size_t i = 0; i < out_targets.size(); ++i) {
+//             if (size_t target_idx = get_target_id(out_targets[i])) {
+//                 update_target_cache(nodes[i], target_idx);
 
-                if (!dist[i]) {
-                    assert(it != next_nodes.end());
-                    assert(std::get<0>(it->first) == nodes[i]);
-                    assert(!align_node_to_target_.count(it->first));
+//                 if (!dist[i]) {
+//                     assert(it != next_nodes.end());
+//                     assert(std::get<0>(it->first) == nodes[i]);
+//                     assert(!align_node_to_target_.count(it->first));
 
-                    out_edges.push_back(it->first);
-                    target_columns_->increment(target_idx);
-                    align_node_to_target_.emplace(
-                        it->first, std::make_pair(target_idx, it->second)
-                    );
-                }
-            }
+//                     out_edges.push_back(it->first);
+//                     target_columns_->increment(target_idx);
+//                     align_node_to_target_.emplace(
+//                         it->first, std::make_pair(target_idx, it->second)
+//                     );
+//                 }
+//             }
 
-            if (!dist[i])
-                ++it;
-        }
+//             if (!dist[i])
+//                 ++it;
+//         }
 
-        assert(it == next_nodes.end());
-    }
+//         assert(it == next_nodes.end());
+//     }
 
-    return out_edges;
-}
+//     return out_edges;
+// }
 
-template class LabeledColumnExtender<>;
+// template class LabeledColumnExtender<>;
+template class LabeledBacktrackingExtender<>;
 
 } // namespace align
 } // namespace graph

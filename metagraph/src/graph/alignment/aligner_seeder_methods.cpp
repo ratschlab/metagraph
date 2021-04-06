@@ -150,6 +150,9 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         }
     }
 
+    if (this->query_.size() < this->config_.min_seed_length)
+        return {};
+
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
     );

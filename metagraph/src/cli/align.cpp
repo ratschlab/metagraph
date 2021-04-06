@@ -102,6 +102,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &con
 
 template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const Config&);
 template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const Config&);
+template std::unique_ptr<IDBGAligner> build_aligner<LabeledAligner, AnnotatedDBG>(const AnnotatedDBG&, const Config&);
 
 
 template <template <class ... Types> class Aligner, class Graph>
@@ -156,6 +157,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
 
 template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const DBGAlignerConfig&);
 template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
+template std::unique_ptr<IDBGAligner> build_aligner<LabeledAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
 
 
 void map_sequences_in_file(const std::string &file,
@@ -540,8 +542,8 @@ int align_to_graph(Config *config) {
                 std::unique_ptr<AnnotatedDBG> aln_anno_graph;
                 if (annotator) {
                     aln_anno_graph = std::make_unique<AnnotatedDBG>(aln_graph, annotator);
-                    aligner = build_aligner<LabeledDBGAligner>(*aln_anno_graph,
-                                                               aligner_config);
+                    aligner = build_aligner<LabeledAligner>(*aln_anno_graph,
+                                                            aligner_config);
                 } else {
                     aligner = build_aligner<DBGAligner>(*aln_graph, aligner_config);
                 }
@@ -590,7 +592,11 @@ int align_to_graph(Config *config) {
                 logger->trace("Num minibatches: {}, minibatch size: {} KB",
                               num_minibatches, mbatch_size / 1e3);
             } else {
-                thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+                if (it != end) {
+                    thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+                } else {
+                    process_batch(std::move(seq_batch), batch_size);
+                }
             }
         };
 
