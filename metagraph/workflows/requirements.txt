@@ -1,3 +1,2 @@
-# dependencies for 'silly_sum' example
-pandas>=0.22
-Click>=6.0
+snakemake>=5
+psutil
