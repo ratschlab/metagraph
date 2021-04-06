@@ -41,6 +41,13 @@ class BinaryMatrix {
 
     // number of ones in the matrix
     virtual uint64_t num_relations() const = 0;
+
+    // Return all columns for which counts are greater than or equal to |min_count|.
+    // Stop counting if count is greater than |count_cap|.
+    virtual std::vector<std::pair<Column, size_t /* count */>>
+    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+             size_t min_count = 1,
+             size_t count_cap = std::numeric_limits<size_t>::max()) const;
 };
 
 

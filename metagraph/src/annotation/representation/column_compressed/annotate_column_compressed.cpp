@@ -192,6 +192,60 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 }
 
 template <typename Label>
+bool ColumnCompressed<Label>::load(const std::string &filename) {
+    // release the columns stored
+    cached_columns_.Clear();
+    bitmatrix_.clear();
+
+    label_encoder_.clear();
+
+    const std::string &f = remove_suffix(filename, kExtension) + kExtension;
+    logger->trace("Loading annotations from file {}", f);
+
+    try {
+        std::ifstream instream(f, std::ios::binary);
+        if (!instream.good())
+            throw std::ifstream::failure("can't open file");
+
+        num_rows_ = load_number(instream);
+
+        if (!label_encoder_.load(instream))
+            throw std::ifstream::failure("can't load label encoder");
+
+        if (!label_encoder_.size())
+            logger->warn("No columns in {}", f);
+
+        for (size_t c = 0; c < label_encoder_.size(); ++c) {
+            auto column = std::make_unique<bit_vector_smart>();
+
+            if (!column->load(instream))
+                throw std::ifstream::failure("can't load next column");
+
+            if (column->size() != num_rows_)
+                throw std::ifstream::failure("inconsistent column size");
+
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("Column: {}, Density: {}, Set bits: {}",
+                          label_encoder_.decode(c),
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            bitmatrix_.emplace_back(std::move(column));
+        }
+
+    } catch (const std::exception &e) {
+        logger->error("Caught exception when loading columns from {}: {}", f, e.what());
+        return false;
+    } catch (...) {
+        logger->error("Unknown exception when loading columns from {}", f);
+        return false;
+    }
+
+    logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
+    return true;
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_columns_.Clear();
@@ -278,20 +332,18 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
     for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        logger->trace("Loading annotations from file {}", filename);
         try {
-            auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
-
-            logger->trace("Loading annotations from file {}", filename);
-
             std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
-                throw std::ifstream::failure("can't open stream " + filename);
+                throw std::ifstream::failure("can't open file");
 
             const auto num_rows = load_number(instream);
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
-                throw std::ifstream::failure("can't load label encoder from " + filename);
+                throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size())
                 logger->warn("No labels in {}", filename);
@@ -301,20 +353,20 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 auto new_column = std::make_unique<bit_vector_smart>();
 
                 if (!new_column->load(instream))
-                    throw std::ifstream::failure("can't load next column " + filename);
+                    throw std::ifstream::failure("can't load next column");
 
                 if (new_column->size() != num_rows)
-                    throw std::ifstream::failure("inconsistent column size " + filename);
+                    throw std::ifstream::failure("inconsistent column size");
 
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
                          std::move(new_column));
             }
         } catch (const std::exception &e) {
-            logger->error("Caught exception when loading columns: {}", e.what());
+            logger->error("Caught exception when loading columns from {}: {}", filename, e.what());
             error_occurred = true;
         } catch (...) {
-            logger->error("Unknown exception when loading columns");
+            logger->error("Unknown exception when loading columns from {}", filename);
             error_occurred = true;
         }
     }
@@ -340,53 +392,6 @@ void ColumnCompressed<Label>
     } catch (...) {
         return;
     }
-}
-
-template <typename Label>
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-ColumnCompressed<Label>
-::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
-               size_t min_count,
-               size_t count_cap) const {
-
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
-    min_count = std::max(min_count, size_t(1));
-
-    size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(num_labels());
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        size_t total_checked = 0;
-        size_t total_matched = 0;
-
-        const auto &column = get_column(j);
-
-        for (auto [i, count] : index_counts) {
-            total_checked += count;
-            total_matched += count * column[i];
-
-            if (total_matched >= count_cap
-                    || total_matched + (total_sum_count - total_checked) < min_count)
-                break;
-        }
-
-        if (total_matched >= min_count)
-            label_counts.emplace_back(j, std::min(total_matched, count_cap));
-    }
-
-    return label_counts;
 }
 
 // For each pair (first, second) in the dictionary, renames

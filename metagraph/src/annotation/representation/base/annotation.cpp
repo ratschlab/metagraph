@@ -114,61 +114,6 @@ MultiLabelEncoded<LabelType>::get(Index i) const {
     return labels;
 }
 
-template <typename LabelType>
-std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-MultiLabelEncoded<LabelType>
-::count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
-               size_t min_count,
-               size_t count_cap) const {
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
-    min_count = std::max(min_count, size_t(1));
-
-    size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    std::vector<size_t> code_counts(this->num_labels(), 0);
-    size_t max_matched = 0;
-    size_t total_checked = 0;
-
-    for (auto [i, count] : index_counts) {
-        if (max_matched + (total_sum_count - total_checked) < min_count)
-            break;
-
-        for (size_t label_code : get_matrix().get_row(i)) {
-            assert(label_code < code_counts.size());
-
-            code_counts[label_code] += count;
-            max_matched = std::max(max_matched, code_counts[label_code]);
-        }
-
-        total_checked += count;
-    }
-
-    if (max_matched < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> label_counts;
-    label_counts.reserve(code_counts.size());
-
-    for (size_t label_code = 0; label_code < code_counts.size(); ++label_code) {
-        if (code_counts[label_code] >= min_count) {
-            label_counts.emplace_back(label_code,
-                                      std::min(code_counts[label_code], count_cap));
-        }
-    }
-
-    return label_counts;
-}
-
 template <typename IndexType, typename LabelType>
 void MultiLabelAnnotation<IndexType, LabelType>
 ::add_label_counts(const std::vector<Index> &,

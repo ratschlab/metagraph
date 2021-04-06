@@ -321,8 +321,8 @@ Config::Config(int argc, char *argv[]) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
-        } else if (!strcmp(argv[i], "--optimize")) {
-            optimize = true;
+        } else if (!strcmp(argv[i], "--row-diff-stage")) {
+            row_diff_stage = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--linkage")) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
@@ -1082,7 +1082,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                       \t          ... ...........'\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "%s\n", annotation_list);
-            fprintf(stderr, "\t-i --infile-base [STR] \tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --linkage \t\tcluster columns and construct linkage matrix [off]\n");
@@ -1090,15 +1089,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
             fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
             fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
+            fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming / sparse subsampling [off]\n");
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
-            fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
-            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files [OUT_BASEDIR]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
+            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
-            fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [50]\n");
-            fprintf(stderr, "\t   --optimize \t\t\toptimize anchors in row_diff annotation [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --disk-swap [STR] \tdirectory for temporary files [OUT_BASEDIR]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());

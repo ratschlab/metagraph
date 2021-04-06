@@ -129,7 +129,7 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
                          size_t min_count) const {
     assert(check_compatibility());
 
-    auto code_counts = annotator_->count_labels(
+    auto code_counts = annotator_->get_matrix().sum_rows(
         index_counts,
         min_count,
         std::max(min_count, size_t(1))
@@ -321,7 +321,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
                              size_t min_count) const {
     assert(check_compatibility());
 
-    auto code_counts = annotator_->count_labels(index_counts, min_count);
+    auto code_counts = annotator_->get_matrix().sum_rows(index_counts, min_count);
 
     assert(std::all_of(
         code_counts.begin(), code_counts.end(),

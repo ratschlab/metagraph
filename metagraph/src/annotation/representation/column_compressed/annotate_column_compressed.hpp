@@ -52,7 +52,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
-    bool merge_load(const std::vector<std::string> &filenames) override;
+    bool load(const std::string &filename) override;
+    bool merge_load(const std::vector<std::string> &filenames);
     using ColumnCallback = std::function<void(uint64_t offset,
                                               const Label &,
                                               std::unique_ptr<bit_vector>&&)>;
@@ -74,15 +75,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
-
-    /**
-     * Return all labels for which counts are greater than or equal to |min_count|.
-     * Stop counting if count is greater than |count_cap|.
-     */
-    std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
-                 size_t min_count = 1,
-                 size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
     const bitmap& get_column(const Label &label) const;
 

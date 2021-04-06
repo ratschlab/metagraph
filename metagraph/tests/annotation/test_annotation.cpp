@@ -49,7 +49,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
             {0, 1}, {3, 2}, {1, 4}, {2, 2}
         })),
-        convert_to_set(this->annotation->count_labels(
+        convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
                 {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
             })
@@ -60,7 +60,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
             {0, 1}, {3, 2}, {1, 4}, {2, 2}
         })),
-        convert_to_set(this->annotation->count_labels(
+        convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
                 {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
             }), 0
@@ -71,7 +71,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
             {0, 1}, {3, 2}, {1, 2}, {2, 2}
         })),
-        convert_to_set(this->annotation->count_labels(
+        convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
                 {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
             }), 0, 2
@@ -82,7 +82,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
             {3, 2}, {1, 2}, {2, 2}
         })),
-        convert_to_set(this->annotation->count_labels(
+        convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
                 {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
             }), 2, 2
@@ -91,7 +91,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
 
     EXPECT_EQ(
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({})),
-        convert_to_set(this->annotation->count_labels(
+        convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
                 {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}
             }), 0, 0

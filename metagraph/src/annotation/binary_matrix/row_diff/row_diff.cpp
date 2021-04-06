@@ -61,6 +61,7 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids,
         return results;
 
     const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     VectorSet<Row> row_set;
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
@@ -85,10 +86,7 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids,
             if (!is_new || anchor()[row])
                 break;
 
-            graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
-            assert(boss_edge > 1 && w != 0);
-            // fwd always selects the last outgoing edge for a given node
-            boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
+            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
         }
     }
 
@@ -111,6 +109,21 @@ RowDiff<BaseMatrix>::has_column(const std::vector<Row> &row_ids,
     }
 
     return results;
+}
+
+template <class BaseMatrix>
+void RowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
+    if (!std::filesystem::exists(filename)) {
+        common::logger->error("Can't read fork successor file: {}", filename);
+        std::exit(1);
+    }
+    std::ifstream f(filename, ios::binary);
+    if (!f.good()) {
+        common::logger->error("Could not open fork successor file {}", filename);
+        std::exit(1);
+    }
+    fork_succ_.load(f);
+    f.close();
 }
 
 template

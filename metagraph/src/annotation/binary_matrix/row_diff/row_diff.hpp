@@ -22,6 +22,7 @@ namespace annot {
 namespace binmat {
 
 const std::string kRowDiffAnchorExt = ".anchors";
+const std::string kRowDiffForkSuccExt = ".rd_succ";
 
 const size_t RD_PATH_RESERVE_SIZE = 2;
 
@@ -58,6 +59,7 @@ template <class BaseMatrix>
 class RowDiff : public IRowDiff {
   public:
     using anchor_bv_type = bit_vector_small;
+    using fork_succ_bv_type = bit_vector_small;
 
     RowDiff() {}
 
@@ -94,6 +96,7 @@ class RowDiff : public IRowDiff {
     void serialize(const std::string &filename) const;
     bool load(const std::string &filename);
 
+    void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
     const anchor_bv_type& anchor() const { return anchor_; }
     bool is_anchor(Row row) const { return anchor_[row]; }
@@ -110,11 +113,13 @@ class RowDiff : public IRowDiff {
 
     BaseMatrix diffs_;
     anchor_bv_type anchor_;
+    fork_succ_bv_type fork_succ_;
 };
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
@@ -128,6 +133,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     std::vector<Row> result;
     for (Row row = 0; row < num_rows(); ++row) {
@@ -140,6 +146,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     Vector<uint64_t> result = get_diff(row);
     std::sort(result.begin(), result.end());
@@ -147,13 +154,11 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
     uint64_t boss_edge = graph_->kmer_to_boss_index(
             graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
     const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     while (!anchor_[row]) {
-        graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
-        assert(boss_edge > 1 && w != 0);
+        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
 
-        // fwd always selects the last outgoing edge for a given node
-        boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
 
@@ -168,6 +173,9 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
     rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
@@ -182,6 +190,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
@@ -208,10 +217,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             if (anchor_[row])
                 break;
 
-            graph::boss::BOSS::TAlphabet w = boss.get_W(boss_edge);
-            assert(boss_edge > 1 && w != 0);
-            // fwd always selects the last outgoing edge for a given node
-            boss_edge = boss.fwd(boss_edge, w % boss.alph_size);
+            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
         }
     }
 
@@ -240,16 +246,35 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(std::istream &f) {
-    if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
-        anchor_.load(f);
+    auto pos = f.tellg();
+    std::string version(4, '\0');
+    if (f.read(version.data(), 4) && version == "v2.0") {
+        if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            if (!anchor_.load(f) || !fork_succ_.load(f))
+                return false;
+        }
+    } else {
+        // backward compatibility
+        f.seekg(pos);
+        if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            if (!anchor_.load(f))
+                return false;
+
+            common::logger->warn(
+                "Loading old version of RowDiff without a fork routing bitmap."
+                " The last outgoing edges will be used as successors.");
+            fork_succ_ = fork_succ_bv_type();
+        }
     }
     return diffs_.load(f);
 }
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
+    f.write("v2.0", 4);
     if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
         anchor_.serialize(f);
+        fork_succ_.serialize(f);
     }
     diffs_.serialize(f);
 }

@@ -75,7 +75,7 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
         size_t out_count = 0;
         const size_t out_count_cutoff = label_out_factor * path.size();
 
-        for (const auto &pair : annotation.count_labels(index_counts.values_container())) {
+        for (const auto &pair : annotation.get_matrix().sum_rows(index_counts.values_container())) {
             if (labels_in_enc.find(pair.first) != labels_in_enc.end()) {
                 in_count += pair.second;
 

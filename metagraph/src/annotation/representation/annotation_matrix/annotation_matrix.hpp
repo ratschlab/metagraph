@@ -29,7 +29,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
-    bool merge_load(const std::vector<std::string> &filenames) override;
+    bool load(const std::string &filename) override;
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
@@ -55,11 +55,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
-
-// specialization of merge_load for RowDiff - it allows loading from multiple files
-template <>
-bool StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>>::merge_load(
-        const std::vector<std::string> &filenames);
 
 using ColumnCallback = std::function<void(uint64_t index,
                                           const std::string &label,
