@@ -263,6 +263,7 @@ BRWT::get_row_ranks(const std::vector<Row> &row_ids) const {
         auto row_end = row_begin;
         while (row_end->first != std::numeric_limits<Column>::max()) {
             ++row_end;
+            assert(row_end != slice.end());
         }
         row_ranks[i].assign(row_begin, row_end);
         row_begin = row_end + 1;
