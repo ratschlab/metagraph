@@ -101,7 +101,6 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph, const Config &con
 }
 
 template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const Config&);
-template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const Config&);
 template std::unique_ptr<IDBGAligner> build_aligner<LabeledAligner, AnnotatedDBG>(const AnnotatedDBG&, const Config&);
 
 
@@ -156,7 +155,6 @@ std::unique_ptr<IDBGAligner> build_aligner(const Graph &graph,
 }
 
 template std::unique_ptr<IDBGAligner> build_aligner<DBGAligner, DeBruijnGraph>(const DeBruijnGraph&, const DBGAlignerConfig&);
-template std::unique_ptr<IDBGAligner> build_aligner<LabeledDBGAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
 template std::unique_ptr<IDBGAligner> build_aligner<LabeledAligner, AnnotatedDBG>(const AnnotatedDBG&, const DBGAlignerConfig&);
 
 

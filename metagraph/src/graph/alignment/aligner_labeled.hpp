@@ -8,12 +8,10 @@
 #include "common/utils/template_utils.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/vectors/bitmap.hpp"
+#include "graph/annotated_dbg.hpp"
 
 namespace mtg {
 namespace graph {
-
-class AnnotatedDBG;
-
 namespace align {
 
 class ILabeledAligner : public ISeedAndExtendAligner {
@@ -56,6 +54,9 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     virtual void init_backtrack() const override;
 
+    virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &,
+                                      const AlignNode &) const override { return false; }
+
   private:
     const AnnotatedDBG &anno_graph_;
     mutable tsl::hopscotch_map<node_index, Vector<uint64_t>> targets_;
@@ -79,11 +80,13 @@ class LabeledAligner : public ILabeledAligner {
         generate_query([&](std::string_view header,
                            std::string_view query,
                            bool is_reverse_complement) {
+            SeedFilter seed_filter(graph_.get_k());
             SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
-                graph_, config_, query, is_reverse_complement
+                graph_, config_, seed_filter, query, is_reverse_complement
             );
-            std::string_view this_query = aligner_core.get_paths().get_query(is_reverse_complement);
-            std::string_view reverse = aligner_core.get_paths().get_query(!is_reverse_complement);
+            auto &paths = aligner_core.get_paths();
+            std::string_view this_query = paths.get_query(is_reverse_complement);
+            std::string_view reverse = paths.get_query(!is_reverse_complement);
             assert(this_query == query);
 
             std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
@@ -94,11 +97,37 @@ class LabeledAligner : public ILabeledAligner {
                 std::string dummy(query);
                 nodes_rc = nodes;
                 reverse_complement_seq_path(graph_, dummy, nodes_rc);
-                assert(dummy == aligner_core.get_paths().get_query(true));
+                assert(dummy == paths.get_query(true));
                 assert(nodes_rc.size() == nodes.size());
             }
 
-            Seeder seeder(graph_, this_query, is_reverse_complement, std::move(nodes), config_);
+            std::shared_ptr<ISeeder<node_index>> seeder;
+            std::shared_ptr<ISeeder<node_index>> seeder_rc;
+            if (config_.min_seed_length < graph_.get_k()
+                    && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
+                seeder = std::make_shared<SuffixSeeder<Seeder>>(
+                    graph_, this_query, is_reverse_complement, std::move(nodes), config_
+                );
+            } else {
+                seeder = std::make_shared<Seeder>(
+                    graph_, this_query, is_reverse_complement, std::move(nodes), config_
+                );
+            }
+
+            if (config_.forward_and_reverse_complement
+                    || graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+                if (config_.min_seed_length < graph_.get_k()
+                        && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
+                    seeder_rc = std::make_shared<SuffixSeeder<Seeder>>(
+                        graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
+                    );
+                } else {
+                    seeder_rc = std::make_shared<Seeder>(
+                        graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
+                    );
+                }
+            }
+
             auto extender = build_extender(this_query);
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
@@ -112,29 +141,24 @@ class LabeledAligner : public ILabeledAligner {
                 // From a given seed, align forwards, then reverse complement and
                 // align backwards. The graph needs to be canonical to ensure that
                 // all paths exist even when complementing.
-                Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
-                                 std::move(nodes_rc), config_);
-                aligner_core.align_both_directions(seeder, seeder_rc,
+                aligner_core.align_both_directions(*seeder, *seeder_rc,
                                                    *extender, *extender_rc,
                                                    build_rev_comp_alignment_core);
 
             } else if (config_.forward_and_reverse_complement) {
                 auto extender_rc = build_extender(reverse);
-
-                Seeder seeder_rc(graph_, reverse, !is_reverse_complement,
-                                 std::move(nodes_rc), config_);
-                aligner_core.align_best_direction(seeder, seeder_rc, *extender, *extender_rc);
+                aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
 
             } else {
-                aligner_core.align_one_direction(is_reverse_complement, seeder, *extender);
+                aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
             }
 
-            assert(aligner_core.get_aggregator().num_targets() <= 1);
+            aligner_core.flush([this,&paths]() {
+                assert(paths.size() <= config_.num_alternative_paths);
+                return paths.size() == config_.num_alternative_paths;
+            });
 
-            aligner_core.flush();
-            assert(aligner_core.get_paths().size() <= config_.num_alternative_paths);
-
-            callback(header, std::move(aligner_core.get_paths()));
+            callback(header, std::move(paths));
         });
     }
 
@@ -748,25 +772,25 @@ class LabeledSeedFilter : public ISeedFilter {
 //     });
 // }
 
-template <class BaseSeeder, class Extender, class AlignmentCompare>
-inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
-::build_seeder(std::string_view query,
-               bool is_reverse_complement,
-               std::vector<node_index>&& base_nodes,
-               const std::vector<Targets> &targets,
-               const std::vector<std::unique_ptr<bitmap>> &signatures) const
-        -> std::shared_ptr<ISeeder<node_index>> {
-    if (this->config_.min_seed_length < this->graph_.get_k()
-            && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
-        return std::make_shared<SuffixSeeder<Seeder>>(
-            targets, signatures, graph_, query, is_reverse_complement,
-            std::move(base_nodes), config_
-        );
-    }
+// template <class BaseSeeder, class Extender, class AlignmentCompare>
+// inline auto LabeledDBGAligner<BaseSeeder, Extender, AlignmentCompare>
+// ::build_seeder(std::string_view query,
+//                bool is_reverse_complement,
+//                std::vector<node_index>&& base_nodes,
+//                const std::vector<Targets> &targets,
+//                const std::vector<std::unique_ptr<bitmap>> &signatures) const
+//         -> std::shared_ptr<ISeeder<node_index>> {
+//     if (this->config_.min_seed_length < this->graph_.get_k()
+//             && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
+//         return std::make_shared<SuffixSeeder<Seeder>>(
+//             targets, signatures, graph_, query, is_reverse_complement,
+//             std::move(base_nodes), config_
+//         );
+//     }
 
-    return std::make_shared<Seeder>(targets, signatures, graph_, query,
-                                    is_reverse_complement, std::move(base_nodes), config_);
-}
+//     return std::make_shared<Seeder>(targets, signatures, graph_, query,
+//                                     is_reverse_complement, std::move(base_nodes), config_);
+// }
 
 } // namespace align
 } // namespace graph

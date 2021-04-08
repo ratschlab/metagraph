@@ -1,5 +1,7 @@
 #include "aligner_alignment.hpp"
 
+#include "aligner_prefix_suffix.hpp"
+
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -41,6 +43,112 @@ Alignment<NodeType>::Alignment(std::string_view query,
     assert(!(query_.size() - min_length) || (sequence_.size() - min_length));
     cigar_.append(Cigar::INSERTION, query_.size() - min_length);
     cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
+}
+
+template <typename NodeType>
+Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix) {
+    const auto &data = alignment_prefix.data();
+    assert(data.get_cigar().size());
+
+    offset_ = data.get_offset() + alignment_prefix.get_offset();
+    if (offset_ == alignment_prefix.get_graph().get_k()) {
+        *this = Alignment();
+        return;
+    }
+
+    const char *query_begin_ = data.get_query().data();
+    auto prefix_node = alignment_prefix.get_prefix_node();
+    if (prefix_node) {
+        nodes_.assign(&prefix_node, &prefix_node + 1);
+    } else {
+        nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it().base());
+    }
+
+    cigar_ = data.get_cigar();
+    orientation_ = data.get_orientation();
+    sequence_ = alignment_prefix.get_sequence();
+
+    score_ = alignment_prefix.get_score();
+    const char *query_end_ = alignment_prefix.get_query().data() + alignment_prefix.get_query().size();
+
+    query_ = std::string_view(query_begin_, query_end_ - query_begin_);
+
+    if (cigar_.back().first == Cigar::CLIPPED)
+        cigar_.pop_back();
+
+    for (size_t i = 0; i < alignment_prefix.get_trim(); ++i) {
+        --cigar_.back().second;
+
+        if (!cigar_.back().second)
+            cigar_.pop_back();
+    }
+}
+
+template <typename NodeType>
+Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix) {
+    const auto &data = alignment_suffix.data();
+    assert(data.get_cigar().size());
+
+    const char *query_end_ = data.get_query().data() + data.get_query().size();
+    orientation_ = data.get_orientation();
+    offset_ = data.get_offset();
+
+    score_ = alignment_suffix.get_score();
+    const char *query_begin_ = alignment_suffix.get_query().data();
+    sequence_ = alignment_suffix.get_sequence();
+    query_ = std::string_view(query_begin_, query_end_ - query_begin_);
+
+    CigarOpIterator end(
+        data.get_cigar(),
+        data.get_cigar().end() - static_cast<bool>(data.get_end_clipping())
+    );
+
+#ifndef NDEBUG
+    CigarOpIterator begin(data.get_cigar(), data.get_clipping());
+    assert(begin <= alignment_suffix.get_op_it());
+    assert(begin <= end);
+    assert(alignment_suffix.get_op_it() <= end);
+#endif
+
+    auto it = alignment_suffix.get_op_it();
+    assert(begin <= it);
+    assert(it <= end);
+
+#ifndef NDEBUG
+    auto node_it = data.begin();
+    size_t orig_offset = offset_;
+
+    while (begin < it) {
+        if (*begin != Cigar::INSERTION) {
+            if (node_it + 1 != data.end()) {
+                ++node_it;
+                if (offset_)
+                    --offset_;
+            } else {
+                ++offset_;
+            }
+        }
+        ++begin;
+    }
+
+    assert(offset_ == orig_offset + alignment_suffix.get_added_offset());
+    assert(node_it == alignment_suffix.get_node_begin_it());
+#endif
+
+    if (offset_ == alignment_suffix.get_graph().get_k()) {
+        *this = Alignment();
+        return;
+    }
+
+    while (it != end) {
+        assert(it < end);
+        cigar_.append(*it);
+        ++it;
+    }
+
+    nodes_.assign(alignment_suffix.get_node_begin_it(), data.end());
+
+    extend_query_begin(data.get_query().data());
 }
 
 template <typename NodeType>

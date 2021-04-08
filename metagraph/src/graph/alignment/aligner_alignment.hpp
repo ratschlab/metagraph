@@ -22,6 +22,12 @@ class DeBruijnGraph;
 
 namespace align {
 
+template <typename NodeType = uint64_t>
+class AlignmentPrefix;
+
+template <typename NodeType = uint64_t>
+class AlignmentSuffix;
+
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
@@ -73,6 +79,9 @@ class Alignment {
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0);
+
+    Alignment(const AlignmentPrefix<NodeType> &alignment_prefix);
+    Alignment(const AlignmentSuffix<NodeType> &alignment_suffix);
 
     void append(Alignment&& other);
 
@@ -174,9 +183,13 @@ class Alignment {
 
     typedef typename std::vector<NodeType>::iterator iterator;
     typedef typename std::vector<NodeType>::const_iterator const_iterator;
+    typedef typename std::vector<NodeType>::reverse_iterator reverse_iterator;
+    typedef typename std::vector<NodeType>::const_reverse_iterator const_reverse_iterator;
 
     const_iterator begin() const { return nodes_.cbegin(); }
     const_iterator end() const { return nodes_.cend(); }
+    const_reverse_iterator rbegin() const { return nodes_.crbegin(); }
+    const_reverse_iterator rend() const { return nodes_.crend(); }
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_

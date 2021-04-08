@@ -1,5 +1,7 @@
 #include "aligner_labeled.hpp"
 
+#include "aligner_prefix_suffix.hpp"
+
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
@@ -199,30 +201,94 @@ void LabeledBacktrackingExtender<NodeType>
     assert(next_extension.size() == 1);
     DBGAlignment alignment = std::move(next_extension[0]);
 
-    std::vector<const Vector<uint64_t>*> labels(alignment.size(), nullptr);
-    Vector<uint64_t> target_intersection;
-    bool found = false;
+    Vector<uint64_t> empty;
+    tsl::hopscotch_map<uintptr_t, std::vector<size_t>> labels;
     for (size_t i = 0; i < alignment.size(); ++i) {
-        if (targets_.count(alignment[i])) {
-            labels[i] = &targets_[alignment[i]];
-            if (!found) {
-                target_intersection = *labels[i];
-            } else if (target_intersection.size()) {
-                Vector<uint64_t> inter;
-                std::set_intersection(target_intersection.begin(), target_intersection.end(),
-                                      labels[i]->begin(), labels[i]->end(),
-                                      std::back_inserter(inter));
-                std::swap(inter, target_intersection);
-            }
-        }
+        auto find = targets_.find(alignment[i]);
+        uintptr_t target = static_cast<uintptr_t>(&empty);
+        if (find != targets_.end())
+            target = static_cast<uintptr_t>(&find->second);
+
+        labels[target].emplace_back(i);
     }
 
-    if (target_intersection.size()) {
-        for (uint64_t target : target_intersection) {
-            extensions.push_back(alignment);
-            extensions.back().target_column = target;
-        }
-    }
+
+
+    // std::cerr << "input: " << alignment << "\n";
+
+    // AlignmentPrefix<node_index> prefix(alignment, this->config_, this->graph_);
+
+    // Vector<uint64_t> target_intersection;
+
+    // for (size_t i = alignment.size(); i > 0; --i) {
+    //     if (!targets_.count(alignment[i - 1])) {
+    //         assert(!prefix.eof());
+    //         while (prefix.get_back_op() == Cigar::INSERTION) {
+    //             assert(!prefix.eof());
+    //             ++prefix;
+    //         }
+    //         assert(!prefix.eof());
+    //         ++prefix;
+    //     } else {
+    //         target_intersection = targets_[alignment[i - 1]];
+    //         break;
+    //     }
+    // }
+
+    // if (prefix.eof())
+    //     return;
+
+    // alignment = DBGAlignment(prefix);
+    // std::cerr << "\tstart: " << alignment << " " << target_intersection.size() << "\n";
+
+    // AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
+    // while (!suffix.eof())
+    //     ++suffix;
+
+    // auto suffix_shift = [&suffix]() {
+    //     assert(!suffix.reof());
+    //     --suffix;
+    //     assert(!suffix.reof());
+    //     while (suffix.get_front_op() == Cigar::INSERTION) {
+    //         assert(!suffix.reof());
+    //         --suffix;
+    //     }
+    //     assert(!suffix.reof());
+    // };
+
+    // suffix_shift();
+    // std::cerr << "\tshifted: " << DBGAlignment(suffix) << " " << target_intersection.size() << "\n";
+
+    // for (size_t i = alignment.size(); i > 0; --i) {
+    //     if (!targets_.count(alignment[i - 1]) || target_intersection.empty())
+    //         break;
+
+    //     const auto &cur_targets = targets_[alignment[i - 1]];
+    //     Vector<uint64_t> inter;
+    //     std::set_intersection(target_intersection.begin(), target_intersection.end(),
+    //                           cur_targets.begin(), cur_targets.end(),
+    //                           std::back_inserter(inter));
+
+    //     suffix_shift();
+
+    //     if (inter.size() < target_intersection.size()) {
+    //         if (suffix.get_front_op() == Cigar::MATCH || suffix.get_front_op() == Cigar::MISMATCH) {
+    //             extensions.emplace_back(suffix);
+    //             assert(extensions.back().size());
+    //             extensions.back().target_columns = target_intersection;
+    //             std::cerr << "\tnext: " << extensions.back() << " " << target_intersection.size() << " > " << inter.size() << "\n";
+    //         }
+    //         std::swap(inter, target_intersection);
+    //     }
+
+    // }
+
+    // if (target_intersection.size()) {
+    //     extensions.emplace_back(suffix);
+    //     assert(extensions.back().size());
+    //     std::cerr << "\tlast: " << extensions.back() << " " << target_intersection.size() << "\n";
+    //     extensions.back().target_columns = std::move(target_intersection);
+    // }
 }
 
 // auto ILabeledDBGAligner
