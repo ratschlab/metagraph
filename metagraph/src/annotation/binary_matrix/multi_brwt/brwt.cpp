@@ -58,15 +58,15 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
     return row_set_bits;
 }
 
-Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_row_ranks(Row row) const {
-    assert(row < num_rows());
+Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
+    assert(i < num_rows());
 
     // check if the row is empty
-    uint64_t rank = nonzero_rows_->conditional_rank1(row);
+    uint64_t rank = nonzero_rows_->conditional_rank1(i);
     if (!rank)
         return {};
 
-    Vector<std::pair<BRWT::Column, uint64_t>> row_ranks;
+    Vector<std::pair<BRWT::Column, uint64_t>> row;
 
     // check whether it is a leaf
     if (!child_nodes_.size()) {
@@ -74,22 +74,22 @@ Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_row_ranks(Row row) const {
 
         // the bit is set
         for (size_t j = 0; j < assignments_.size(); ++j) {
-            row_ranks.emplace_back(j, rank);
+            row.emplace_back(j, rank);
         }
-        return row_ranks;
+        return row;
     }
 
     // check all child nodes
     uint64_t index_in_child = rank - 1;
 
-    for (size_t i = 0; i < child_nodes_.size(); ++i) {
-        const auto &child = *child_nodes_[i];
+    for (size_t k = 0; k < child_nodes_.size(); ++k) {
+        const auto &child = *child_nodes_[k];
 
-        for (auto [col_id, rank] : child.get_row_ranks(index_in_child)) {
-            row_ranks.emplace_back(assignments_.get(i, col_id), rank);
+        for (auto [col_id, rank] : child.get_column_ranks(index_in_child)) {
+            row.emplace_back(assignments_.get(k, col_id), rank);
         }
     }
-    return row_ranks;
+    return row;
 }
 
 std::vector<BRWT::SetBitPositions>
@@ -120,7 +120,7 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 // If T = Column
 //      return positions of set bits.
 // If T = std::pair<Column, uint64_t>
-//      additionally return their ranks in the columns.
+//      return positions of set bits with their column ranks.
 template <typename T>
 std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
     std::vector<T> slice;
@@ -248,8 +248,8 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
 }
 
 std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
-BRWT::get_row_ranks(const std::vector<Row> &row_ids) const {
-    std::vector<Vector<std::pair<Column, uint64_t>>> row_ranks(row_ids.size());
+BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
+    std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
 
     std::vector<std::pair<Column, uint64_t>> slice
             = slice_rows<std::pair<Column, uint64_t>>(row_ids);
@@ -258,18 +258,18 @@ BRWT::get_row_ranks(const std::vector<Row> &row_ids) const {
 
     auto row_begin = slice.begin();
 
-    for (size_t i = 0; i < row_ranks.size(); ++i) {
+    for (size_t i = 0; i < rows.size(); ++i) {
         // every row in `slice` ends with `-1`
         auto row_end = row_begin;
         while (row_end->first != std::numeric_limits<Column>::max()) {
             ++row_end;
             assert(row_end != slice.end());
         }
-        row_ranks[i].assign(row_begin, row_end);
+        rows[i].assign(row_begin, row_end);
         row_begin = row_end + 1;
     }
 
-    return row_ranks;
+    return rows;
 }
 
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {

@@ -64,7 +64,7 @@ class ColumnRankMatrix : public CountMatrix {
 template <class BaseMatrix>
 inline typename ColumnRankMatrix<BaseMatrix>::ColumnCounts
 ColumnRankMatrix<BaseMatrix>::get_row_counts(Row row) const {
-    const auto &column_ranks = binary_matrix_.get_row_ranks(row);
+    const auto &column_ranks = binary_matrix_.get_column_ranks(row);
     ColumnCounts row_counts;
     row_counts.reserve(column_ranks.size());
     for (auto [j, r] : column_ranks) {
@@ -77,7 +77,7 @@ ColumnRankMatrix<BaseMatrix>::get_row_counts(Row row) const {
 template <class BaseMatrix>
 inline std::vector<typename ColumnRankMatrix<BaseMatrix>::ColumnCounts>
 ColumnRankMatrix<BaseMatrix>::get_row_counts(const std::vector<Row> &rows) const {
-    const auto &column_ranks = binary_matrix_.get_row_ranks(rows);
+    const auto &column_ranks = binary_matrix_.get_column_ranks(rows);
     std::vector<ColumnCounts> row_counts(rows.size());
     // TODO: reshape?
     for (size_t i = 0; i < rows.size(); ++i) {

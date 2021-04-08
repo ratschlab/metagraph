@@ -34,10 +34,10 @@ class BRWT : public BinaryMatrix {
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
-    // for each set bit return its rank in the column
-    Vector<std::pair<Column, uint64_t>> get_row_ranks(Row row) const;
+    // query row and get ranks of each set bit in its column
+    Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>
-    get_row_ranks(const std::vector<Row> &rows) const;
+    get_column_ranks(const std::vector<Row> &rows) const;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
@@ -57,9 +57,9 @@ class BRWT : public BinaryMatrix {
   private:
     // breadth-first traversal
     void BFT(std::function<void(const BRWT &node)> callback) const;
-    // helper function for querying rows
+    // helper function for querying rows in batches
     template <typename T>
-    std::vector<T> slice_rows(const std::vector<Row> &row_ids) const;
+    std::vector<T> slice_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
