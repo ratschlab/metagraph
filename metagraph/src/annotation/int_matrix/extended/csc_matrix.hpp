@@ -1,9 +1,9 @@
-#ifndef __COLUMN_RANK_MATRIX_HPP__
-#define __COLUMN_RANK_MATRIX_HPP__
+#ifndef __CSC_MATRIX_HPP__
+#define __CSC_MATRIX_HPP__
 
 #include <vector>
 
-#include "annotation/count_matrix/base/count_matrix.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/logger.hpp"
 
 
@@ -12,27 +12,27 @@ namespace annot {
 namespace matrix {
 
 /**
- * Column Rank-Extended Matrix
+ * Compressed Sparse Column Matrix (column-rank extended)
  *
  * Matrix which stores the non-zero values externally and indexes their
  * positions in a binary matrix. These values are indexed by rank1 called
  * on binary columns of the indexing matrix.
  */
 template <class BaseMatrix>
-class ColumnRankMatrix : public CountMatrix {
+class CSCMatrix : public IntMatrix {
   public:
-    ColumnRankMatrix() {}
+    CSCMatrix() {}
 
-    ColumnRankMatrix(BaseMatrix&& index_matrix,
-                     std::vector<sdsl::int_vector<>>&& count_columns)
+    CSCMatrix(BaseMatrix&& index_matrix,
+              std::vector<sdsl::int_vector<>>&& column_values)
       : binary_matrix_(std::move(index_matrix)),
-        count_columns_(count_columns) {}
+        column_values_(column_values) {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    ColumnCounts get_row_counts(Row row) const;
+    RowValues get_row_values(Row row) const;
 
-    std::vector<ColumnCounts>
-    get_row_counts(const std::vector<Row> &rows) const;
+    std::vector<RowValues>
+    get_row_values(const std::vector<Row> &rows) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -57,52 +57,52 @@ class ColumnRankMatrix : public CountMatrix {
 
   private:
     BaseMatrix binary_matrix_;
-    std::vector<sdsl::int_vector<>> count_columns_;
+    std::vector<sdsl::int_vector<>> column_values_;
 };
 
 
 template <class BaseMatrix>
-inline typename ColumnRankMatrix<BaseMatrix>::ColumnCounts
-ColumnRankMatrix<BaseMatrix>::get_row_counts(Row row) const {
+inline typename CSCMatrix<BaseMatrix>::RowValues
+CSCMatrix<BaseMatrix>::get_row_values(Row row) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(row);
-    ColumnCounts row_counts;
-    row_counts.reserve(column_ranks.size());
+    RowValues row_values;
+    row_values.reserve(column_ranks.size());
     for (auto [j, r] : column_ranks) {
         assert(r >= 1 && "matches can't have zero-rank");
-        row_counts.emplace_back(j, count_columns_[j][r - 1]);
+        row_values.emplace_back(j, column_values_[j][r - 1]);
     }
-    return row_counts;
+    return row_values;
 }
 
 template <class BaseMatrix>
-inline std::vector<typename ColumnRankMatrix<BaseMatrix>::ColumnCounts>
-ColumnRankMatrix<BaseMatrix>::get_row_counts(const std::vector<Row> &rows) const {
+inline std::vector<typename CSCMatrix<BaseMatrix>::RowValues>
+CSCMatrix<BaseMatrix>::get_row_values(const std::vector<Row> &rows) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(rows);
-    std::vector<ColumnCounts> row_counts(rows.size());
+    std::vector<RowValues> row_values(rows.size());
     // TODO: reshape?
     for (size_t i = 0; i < rows.size(); ++i) {
-        row_counts[i].reserve(column_ranks[i].size());
+        row_values[i].reserve(column_ranks[i].size());
         for (auto [j, r] : column_ranks[i]) {
             assert(r >= 1 && "matches can't have zero-rank");
-            row_counts[i].emplace_back(j, count_columns_[j][r - 1]);
+            row_values[i].emplace_back(j, column_values_[j][r - 1]);
         }
     }
-    return row_counts;
+    return row_values;
 }
 
 template <class BaseMatrix>
-inline bool ColumnRankMatrix<BaseMatrix>::load(std::istream &in) {
-    count_columns_.clear();
+inline bool CSCMatrix<BaseMatrix>::load(std::istream &in) {
+    column_values_.clear();
 
     if (!binary_matrix_.load(in))
         return false;
 
-    count_columns_.resize(num_columns());
-    for (size_t j = 0; j < count_columns_.size(); ++j) {
+    column_values_.resize(num_columns());
+    for (size_t j = 0; j < column_values_.size(); ++j) {
         try {
-            count_columns_[j].load(in);
+            column_values_[j].load(in);
         } catch (...) {
-            common::logger->error("Couldn't load counts for column {}", j);
+            common::logger->error("Couldn't load integer values for column {}", j);
             return false;
         }
     }
@@ -110,9 +110,9 @@ inline bool ColumnRankMatrix<BaseMatrix>::load(std::istream &in) {
 }
 
 template <class BaseMatrix>
-inline void ColumnRankMatrix<BaseMatrix>::serialize(std::ostream &out) const {
+inline void CSCMatrix<BaseMatrix>::serialize(std::ostream &out) const {
     binary_matrix_.serialize(out);
-    for (const auto &col : count_columns_) {
+    for (const auto &col : column_values_) {
         col.serialize(out);
     }
 }
@@ -121,4 +121,4 @@ inline void ColumnRankMatrix<BaseMatrix>::serialize(std::ostream &out) const {
 } // namespace annot
 } // namespace mtg
 
-#endif // __COLUMN_RANK_MATRIX_HPP__
+#endif // __CSC_MATRIX_HPP__

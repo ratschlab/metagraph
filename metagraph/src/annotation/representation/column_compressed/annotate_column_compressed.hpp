@@ -63,9 +63,9 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     using CountsCallback = std::function<void(uint64_t offset,
                                               const Label &,
                                               sdsl::int_vector<>&&)>;
-    static bool load_relation_counts(const std::vector<std::string> &filenames,
-                                     const CountsCallback &callback,
-                                     size_t num_threads = 1);
+    static bool load_column_values(const std::vector<std::string> &filenames,
+                                   const CountsCallback &callback,
+                                   size_t num_threads = 1);
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 

@@ -189,7 +189,7 @@ class Config {
         RowSparse,
         RBFish,
         RbBRWT,
-        CountBRWT,
+        IntBRWT,
     };
 
     enum GraphType {

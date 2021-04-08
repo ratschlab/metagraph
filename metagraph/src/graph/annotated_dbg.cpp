@@ -10,7 +10,7 @@
 
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
-#include "annotation/count_matrix/base/count_matrix.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -20,7 +20,7 @@
 namespace mtg {
 namespace graph {
 
-using mtg::annot::matrix::CountMatrix;
+using mtg::annot::matrix::IntMatrix;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -335,8 +335,8 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     std::vector<std::pair<uint64_t /* row */, size_t /* count */>> code_counts;
 
     if (with_kmer_counts) {
-        code_counts = dynamic_cast<const CountMatrix &>(annotator_->get_matrix())
-                                        .sum_row_counts(index_counts, min_count);
+        code_counts = dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
+                                        .sum_row_values(index_counts, min_count);
     } else {
         code_counts = annotator_->get_matrix().sum_rows(index_counts, min_count);
     }

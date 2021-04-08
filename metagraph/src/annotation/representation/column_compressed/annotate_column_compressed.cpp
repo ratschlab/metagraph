@@ -376,9 +376,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
 template <typename Label>
 bool ColumnCompressed<Label>
-::load_relation_counts(const std::vector<std::string> &filenames,
-                       const CountsCallback &callback,
-                       size_t num_threads) {
+::load_column_values(const std::vector<std::string> &filenames,
+                     const CountsCallback &callback,
+                     size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
     std::vector<uint64_t> offsets(filenames.size(), 0);

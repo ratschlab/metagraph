@@ -242,44 +242,44 @@ auto convert_to_MultiBRWT(const std::vector<std::string> &files,
                 get_num_threads(), config.tmp_dir);
 }
 
-ExtendedMultiBRWTAnnotator
-convert_to_ExtendedMultiBRWT(const std::vector<std::string> &files,
-                             const Config &config,
-                             const Timer &timer) {
+IntMultiBRWTAnnotator
+convert_to_IntMultiBRWT(const std::vector<std::string> &files,
+                        const Config &config,
+                        const Timer &timer) {
     auto brwt_annotator = convert_to_MultiBRWT(files, config);
 
     logger->trace("Converted to Multi-BRWT in {} sec", timer.elapsed());
 
-    std::vector<sdsl::int_vector<>> column_counts;
-    ColumnCompressed<>::load_relation_counts(files,
-        [&](size_t j, const std::string &label, sdsl::int_vector<>&& counts) {
+    std::vector<sdsl::int_vector<>> column_values;
+    ColumnCompressed<>::load_column_values(files,
+        [&](size_t j, const std::string &label, sdsl::int_vector<>&& values) {
             if (label != brwt_annotator->get_label_encoder().decode(j)) {
                 logger->error("The order of labels in Multi-BRWT is different"
-                              " from the input columns");
+                              " from the order of the input columns");
                 exit(1);
             }
             #pragma omp critical
             {
-                while (j >= column_counts.size()) {
-                    column_counts.push_back(sdsl::int_vector<>());
+                while (j >= column_values.size()) {
+                    column_values.push_back(sdsl::int_vector<>());
                 }
-                column_counts[j] = std::move(counts);
+                column_values[j] = std::move(values);
             }
         },
         get_num_threads()
     );
 
-    if (column_counts.size() != brwt_annotator->num_labels()) {
+    if (column_values.size() != brwt_annotator->num_labels()) {
         logger->error("The number of annotation columns does not match"
-                      " the number of relation count columns ({} != {})",
-                      brwt_annotator->num_labels(), column_counts.size());
+                      " the number of columns with relation values ({} != {})",
+                      brwt_annotator->num_labels(), column_values.size());
         exit(1);
     }
 
     auto multi_brwt = brwt_annotator->release_matrix();
-    return ExtendedMultiBRWTAnnotator(
-                std::make_unique<matrix::ColumnRankMatrix<binmat::BRWT>>(
-                        std::move(*multi_brwt), std::move(column_counts)),
+    return IntMultiBRWTAnnotator(
+                std::make_unique<matrix::CSCMatrix<binmat::BRWT>>(
+                        std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
 }
 
@@ -507,7 +507,7 @@ int transform_annotation(Config *config) {
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
-                && config->anno_type != Config::CountBRWT
+                && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -572,8 +572,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
-            case Config::CountBRWT: {
-                auto annotator = convert_to_ExtendedMultiBRWT(files, *config, timer);
+            case Config::IntBRWT: {
+                auto annotator = convert_to_IntMultiBRWT(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 annotator.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);

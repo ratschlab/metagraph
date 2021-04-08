@@ -666,8 +666,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
-        case CountBRWT:
-            return "count_brwt";
+        case IntBRWT:
+            return "int_brwt";
     }
     throw std::runtime_error("Never happens");
 }
@@ -697,8 +697,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
-    } else if (string == "count_brwt") {
-        return AnnotationType::CountBRWT;
+    } else if (string == "int_brwt") {
+        return AnnotationType::IntBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -760,7 +760,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, count_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
@@ -1125,7 +1125,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
-            fprintf(stderr, "\t   --count-kmers \t\tweigh k-mers with their counts annotated per label (requires count annotation) [off]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
