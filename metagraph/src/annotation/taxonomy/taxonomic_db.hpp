@@ -7,7 +7,6 @@
 #include "annotation/representation/base/annotation.hpp"
 #include "graph/annotated_dbg.hpp"
 
-
 namespace mtg {
 namespace annot {
 
@@ -92,11 +91,11 @@ class TaxonomyDB {
      * dfs_statistics calculates a tree_linearization, "this->node_depth" and
      *      'this->node_to_linearization_idx'.
      *
-     * @param [input] node - the node that is currently processed.
+     * @param [input] node -> the node that is currently processed.
      * @param [input] tree -> tree stored as list of children.
      * @param [output] tree_linearization -> the linearization of the received tree.
      */
-    void dfs_statistics(const NormalizedTaxId &node,
+    void dfs_statistics(const NormalizedTaxId node,
                         const ChildrenList &tree,
                         std::vector<NormalizedTaxId> *tree_linearization);
 
@@ -127,14 +126,14 @@ class TaxonomyDB {
     tsl::hopscotch_map<AccessionVersion, TaxId> label_taxid_map;
 
     /**
-     * precalc_log2 is a table for a fast compute of log2(x).
+     * fast_log2 is a table for a fast compute of log2(x).
      */
-    std::vector<uint64_t> precalc_log2;
+    std::vector<uint64_t> fast_log2;
 
     /**
-     * precalc_pow2 is a table for a fast compute of pow2(x).
+     * fast_pow2 is a table for a fast compute of pow2(x).
      */
-    std::vector<uint64_t> precalc_pow2;
+    std::vector<uint64_t> fast_pow2;
 
     /**
      * Maps taxid to its normalized index. Used for optimizing the runtime performance.
