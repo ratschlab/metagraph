@@ -89,8 +89,8 @@ TEST (TaxonomyTest, RmqPreprocessing) {
         tax.rmq_data[i].clear();
     }
     tax.rmq_data.clear();
-    tax.precalc_log2.clear();
-    tax.precalc_pow2.clear();
+    tax.fast_log2.clear();
+    tax.fast_pow2.clear();
     tax.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
 
     std::vector<uint64_t> linearization = {
@@ -109,8 +109,8 @@ TEST (TaxonomyTest, RmqPreprocessing) {
     };
 
     tax.rmq_preprocessing(linearization);
-    EXPECT_EQ(expected_pow2, tax.precalc_pow2);
-    EXPECT_EQ(expected_log2, tax.precalc_log2);
+    EXPECT_EQ(expected_pow2, tax.fast_pow2);
+    EXPECT_EQ(expected_log2, tax.fast_log2);
     EXPECT_EQ(expected_rmq, tax.rmq_data);
 }
 
@@ -135,8 +135,8 @@ TEST (TaxonomyTest, FindLca) {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     };
     tax.node_to_linearization_idx = {0, 1, 11, 13, 2, 8, 14, 3, 5};
-    tax.precalc_pow2 = {1, 2, 4, 8, 16};
-    tax.precalc_log2 = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4};
+    tax.fast_pow2 = {1, 2, 4, 8, 16};
+    tax.fast_log2 = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4};
     tax.node_depth = {4, 3, 1, 2, 2, 1, 1, 1, 1};
 
     struct query_lca {
@@ -398,8 +398,8 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
 
             for (uint64_t node: nodes_set) {
                 tax_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
-                                                      node_scores, nodes_already_propagated,
-                                                      best_lca, best_lca_dist_to_root);
+                                                     &node_scores, &nodes_already_propagated,
+                                                     &best_lca, &best_lca_dist_to_root);
             }
 
             EXPECT_EQ(make_pair(test.test_id, test.expected_node_scores),

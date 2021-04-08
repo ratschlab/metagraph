@@ -125,7 +125,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
-    double lca_coverage_threshold = 0.66;
+    double lca_coverage_fraction = 0.66;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
