@@ -1,7 +1,6 @@
 #ifndef __TRANSFORM_ANNO_TAX_HPP__
 #define __TRANSFORM_ANNO_TAX_HPP__
 
-
 namespace mtg {
 namespace cli {
 

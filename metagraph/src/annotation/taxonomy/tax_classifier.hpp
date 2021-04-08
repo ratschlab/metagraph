@@ -8,7 +8,6 @@
 #include "cli/load/load_annotated_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
-
 namespace mtg {
 namespace annot {
 
@@ -27,8 +26,13 @@ class TaxClassifier {
      * Construct a TaxClassifier
      *
      * @param [input] filepath to the file exported by TaxonomyDB.
+     * @param [input] lca_coverage_rate - threshold used inside assign_class.
+     * @param [input] kmers_discovery_rate - threshold used inside assign_class.
      */
-    TaxClassifier(const std::string &filepath);
+    TaxClassifier(const std::string &filepath,
+                  const double lca_coverage_rate,
+                  const double kmers_discovery_rate);
+
     TaxClassifier(){};
 
     /**
@@ -36,11 +40,10 @@ class TaxClassifier {
      * Consider matches[node] = number of kmers in the given read for which the taxonomic_map (LCA) points to 'node'.
      *          weight[node] = matches[node] / (the total number of kmers). (To obtain values in [0, 1])
      *          score[node] = sum(weight[node*]) where 'node*' is any of node's descendants or node's ancestors (Obtain values in [0, 1])
-     * The assigned taxid is the farthest node to the root with score[node] >= lca_coverage_threshold (for lca_coverage_threshold>0.5 it is unique).
+     * The assigned taxid is the farthest node to the root with score[node] >= lca_coverage_threshold (enforcing lca_coverage_threshold>0.5 makes sure that the answer is unique).
       */
     TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,
-                       const std::string &sequence,
-                       const double &lca_coverage_threshold) const;
+                       const std::string &sequence) const;
 
   private:
     /**
@@ -62,11 +65,11 @@ class TaxClassifier {
      */
      void update_scores_and_lca(const TaxId start_node,
                                 const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
-                                const uint64_t &desired_number_kmers,
-                                tsl::hopscotch_map<TaxId, uint64_t> &node_scores,
-                                tsl::hopscotch_set<TaxId> &nodes_already_propagated,
-                                TaxId &best_lca,
-                                uint64_t &best_lca_dist_to_root) const;
+                                const uint64_t desired_number_kmers,
+                                tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
+                                tsl::hopscotch_set<TaxId> *nodes_already_propagated,
+                                TaxId *best_lca,
+                                uint64_t *best_lca_dist_to_root) const;
     TaxId root_node;
 
     /**
@@ -78,6 +81,9 @@ class TaxClassifier {
      * taxonomic_map returns the taxid LCA for a given kmer.
      */
     sdsl::int_vector<> taxonomic_map;
+
+    double lca_coverage_rate;
+    double kmers_discovery_rate;
 };
 
 } // namespace annot
