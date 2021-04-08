@@ -507,6 +507,7 @@ int transform_annotation(Config *config) {
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
+                && config->anno_type != Config::CountBRWT
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
