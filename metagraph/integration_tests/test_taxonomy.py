@@ -17,12 +17,15 @@ TAX_DATA_DIR = TEST_DATA_DIR + "/taxonomic_data"
 tax_tests = {
     'one_thread': {
         'threads': 1,
+        'discovery_fraction': 0,
     },
     '5_threads': {
         'threads': 5,
+        'discovery_fraction': 0,
     },
     '16_threads': {
         'threads': 16,
+        'discovery_fraction': 0,
     }
 }
 
@@ -86,66 +89,77 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxDB} \
-                            --lca-coverage-threshold {lca_coverage} -p {num_threads}'.format(
+                            --lca-coverage-fraction {lca_coverage} -p {num_threads} \
+                            --discovery-fraction {discovery_fraction}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
             taxDB=self.tempdir.name + '/taxDB.taxdb',
             lca_coverage=lca_coverage,
             num_threads=tax_tests[tax_test]['threads'],
+            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         res_lines = res.stdout.decode().rstrip().split('\n')
 
-        num_correct_predictions_tips = 0
-        num_correct_predictions_internals = 0
-        num_total_predictions_tips = 0
-        num_total_predictions_internals = 0
+        num_correct_tips = 0
+        num_correct_internals = 0
+        num_total_tips = 0
+        num_total_internals = 0
 
-        num_descendant_predictions_internals = 0
-        num_ancestor_predictions_tips = 0
-        num_ancestor_predictions_internals = 0
+        num_descendant_prediction_internals = 0
+        num_ancestor_prediction_tips = 0
+        num_ancestor_prediction_internals = 0
 
-        num_wrong_predictions_tips = 0
-        num_wrong_predictions_internals = 0
+        num_wrong_prediction_tips = 0
+        num_wrong_prediction_internals = 0
+
+        num_too_few_discovered_kmers = 0
+
         for line in res_lines:
             if line == "":
                 continue
             query_expected = line.split(" ")[1].split("|")[3].strip()
             query_prediction = line.split(" ")[7].split("'")[1].strip()
 
+            if query_prediction == "0":
+                num_too_few_discovered_kmers += 1
+                continue
+
             if line.split(" ")[1].split("|")[5] == "0":
                 # This taxid is a tip, has no children in the taxonomic tree.
-                num_total_predictions_tips += 1
+                num_total_tips += 1
                 if query_expected == query_prediction:
-                    num_correct_predictions_tips += 1
+                    num_correct_tips += 1
                 else:
                     if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestor_predictions_tips += 1
+                        num_ancestor_prediction_tips += 1
                     else:
-                        num_wrong_predictions_tips += 1
+                        num_wrong_prediction_tips += 1
             else:
                 # This taxid is an internal node.
-                num_total_predictions_internals += 1
+                num_total_internals += 1
                 if query_expected == query_prediction:
-                    num_correct_predictions_internals += 1
+                    num_correct_internals += 1
                 else:
                     if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestor_predictions_internals += 1
+                        num_ancestor_prediction_internals += 1
                     elif self.is_descendant(node=query_expected, query=query_prediction):
-                        num_descendant_predictions_internals += 1
+                        num_descendant_prediction_internals += 1
                     else:
-                        num_wrong_predictions_internals += 1
-        self.assertEqual(num_total_predictions_tips, 650)
-        self.assertEqual(num_total_predictions_internals, 48)
+                        num_wrong_prediction_internals += 1
+        self.assertEqual(num_total_tips, 585)
+        self.assertEqual(num_total_internals, 39)
 
-        self.assertEqual(num_correct_predictions_tips, 547)
-        self.assertEqual(num_correct_predictions_internals, 24)
+        self.assertEqual(num_correct_tips, 547)
+        self.assertEqual(num_correct_internals, 23)
 
-        self.assertEqual(num_ancestor_predictions_internals, 13)
-        self.assertEqual(num_descendant_predictions_internals, 8)
-        self.assertEqual(num_ancestor_predictions_tips, 98)
+        self.assertEqual(num_ancestor_prediction_internals, 5)
+        self.assertEqual(num_descendant_prediction_internals, 8)
+        self.assertEqual(num_ancestor_prediction_tips, 33)
 
-        self.assertEqual(num_wrong_predictions_internals, 3)
-        self.assertEqual(num_wrong_predictions_tips, 5)
+        self.assertEqual(num_wrong_prediction_internals, 3)
+        self.assertEqual(num_wrong_prediction_tips, 5)
+
+        self.assertEqual(num_too_few_discovered_kmers, 73)
