@@ -18,7 +18,7 @@ class bit_vector_sd : public bit_vector {
     inline explicit bit_vector_sd(const sdsl::bit_vector &vector, uint64_t num_set_bits);
     inline explicit bit_vector_sd(const bit_vector_sd &other);
 
-    inline bit_vector_sd(bit_vector_sd&& other) noexcept;
+    inline bit_vector_sd(bit_vector_sd&& other);
     inline bit_vector_sd(std::initializer_list<bool> init);
     inline bit_vector_sd(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                          uint64_t size,
@@ -108,7 +108,7 @@ bit_vector_sd::bit_vector_sd(const bit_vector_sd &other) {
     *this = other;
 }
 
-bit_vector_sd::bit_vector_sd(bit_vector_sd&& other) noexcept {
+bit_vector_sd::bit_vector_sd(bit_vector_sd&& other) {
     *this = std::move(other);
 }
 

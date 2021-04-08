@@ -143,7 +143,7 @@ class BOSS {
 
     /**
      * Traversal starts at dummy source edges, then at forks and in the end at cycles.
-     * A contig is terminated when we reach dead end or a fork where the first edge
+     * A contig is terminated when we reach dead end or a fork where the rd successor
      * is visited, but not marked as being near a terminal edge.
      *
      * @param num_threads parallelize the graph traversal on this many threads
@@ -153,8 +153,23 @@ class BOSS {
      */
     void row_diff_traverse(size_t num_threads,
                            size_t max_length,
-                           sdsl::bit_vector *terminal,
-                           sdsl::bit_vector *dummy) const;
+                           const bit_vector &rd_succ,
+                           sdsl::bit_vector *terminal) const;
+
+    edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
+        TAlphabet d = get_W(edge) % alph_size;
+        assert(d != kSentinelCode && "sinks have no row-diff successors");
+        // make one traversal step
+        edge = fwd(edge, d);
+        // pick the row-diff successor
+        if (!get_last(edge - 1)) {
+            while (!rd_succ[edge]) {
+                edge--;
+                assert(!get_last(edge) && "a row-diff successor must exist");
+            }
+        }
+        return edge;
+    }
 
     /**
      * Call unitigs (dummy edges are skipped).

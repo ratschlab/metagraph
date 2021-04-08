@@ -40,6 +40,21 @@ void RowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
     f.close();
 }
 
+template <class BaseMatrix>
+void RowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
+    if (!std::filesystem::exists(filename)) {
+        common::logger->error("Can't read fork successor file: {}", filename);
+        std::exit(1);
+    }
+    std::ifstream f(filename, ios::binary);
+    if (!f.good()) {
+        common::logger->error("Could not open fork successor file {}", filename);
+        std::exit(1);
+    }
+    fork_succ_.load(f);
+    f.close();
+}
+
 template
 class RowDiff<ColumnMajor>;
 template

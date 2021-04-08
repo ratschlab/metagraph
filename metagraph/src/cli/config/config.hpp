@@ -56,7 +56,6 @@ class Config {
     bool align_sequences = false;
     bool align_both_strands = false;
     bool output_json = false;
-    bool optimize = false;
 
     unsigned int k = 3;
 
@@ -88,6 +87,8 @@ class Config {
     unsigned int num_columns_cached = 10;
     unsigned int max_hull_forks = 4;
     unsigned int parallel_assemblies = -1; // by default, run |parallel| assemblies in parallel, one per thread
+    unsigned int row_diff_stage = 0;
+    unsigned int max_path_length = 100;
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
@@ -138,7 +139,6 @@ class Config {
     std::string header = "";
     std::string host_address;
     std::string label_mask_file;
-    uint32_t max_path_length = 50;
     std::string linkage_file;
 
     std::filesystem::path tmp_dir;

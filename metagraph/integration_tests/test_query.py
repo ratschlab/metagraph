@@ -42,14 +42,14 @@ def product(graph_types, anno_types):
     result  = []
     for graph in graph_types:
         for anno in anno_types:
-            if graph == 'succinct' or (
-                    anno != 'row_diff' and anno != 'row_diff_brwt' and anno != 'row_diff_sparse'):
+            if graph == 'succinct' or not anno.startswith('row_diff'):
                 result.append((graph, anno))
     return result
 
-def build_annotation(graph_filename, input_fasta, anno_repr, output_filename):
+def build_annotation(graph_filename, input_fasta, anno_repr, output_filename,
+                     separate=False, no_fork_opt=False, no_anchor_opt=False):
     target_anno = anno_repr
-    if anno_repr in {'rb_brwt', 'brwt', 'row_diff', 'row_diff_brwt', 'row_diff_sparse', 'row_sparse'}:
+    if anno_repr in {'rb_brwt', 'brwt', 'row_sparse'} or anno_repr.startswith('row_diff'):
         target_anno = anno_repr
         anno_repr = 'column'
     elif anno_repr in {'flat', 'rbfish'}:
@@ -72,7 +72,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename):
         return
 
     final_anno = target_anno
-    if final_anno in ['row_diff_brwt', 'row_diff_sparse']:
+    if final_anno.startswith('row_diff'):
         target_anno = 'row_diff'
 
     annotate_command = '{exe} transform_anno -p {num_threads} \
@@ -87,17 +87,32 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename):
     if target_anno == 'row_diff':
         annotate_command += ' -i ' + graph_filename
 
-    res = subprocess.run([annotate_command], shell=True)
-    assert(res.returncode == 0)
+    if not no_fork_opt:
+        print('-- Building RowDiff without fork optimization...')
+        res = subprocess.run([annotate_command], shell=True)
+        assert(res.returncode == 0)
 
     if target_anno == 'row_diff':
-        annotate_command += ' --optimize'
-        res = subprocess.run([annotate_command], shell=True)
+        without_input_anno = annotate_command.split(' ')
+        without_input_anno.pop(-3)
+        without_input_anno = ' '.join(without_input_anno)
+        if not no_anchor_opt:
+            if separate:
+                print('-- Building RowDiff succ/pred...')
+                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True)
+                assert(res.returncode == 0)
+            res = subprocess.run([annotate_command + ' --row-diff-stage 1'], shell=True)
+            assert(res.returncode == 0)
+        if separate:
+            print('-- Assigning anchors...')
+            res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
+            assert(res.returncode == 0)
+        res = subprocess.run([annotate_command + ' --row-diff-stage 2'], shell=True)
         assert(res.returncode == 0)
 
         os.remove(output_filename + anno_file_extension[anno_repr])
 
-        if final_anno in ['row_diff_brwt', 'row_diff_sparse']:
+        if final_anno != target_anno:
             annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output_filename} ' \
                                f'-i {graph_filename} -p {NUM_THREADS} {output_filename}.row_diff.annodbg'
             res = subprocess.run([annotate_command], shell=True)
@@ -108,7 +123,9 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
         [repr for repr in GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'] if not (repr == 'bitmap' and PROTEIN_MODE)],
-        ANNO_TYPES
+        ANNO_TYPES + ['row_diff_brwt_separate',
+                      'row_diff_brwt_no_fork_opt',
+                      'row_diff_brwt_no_anchor_opt']
     ),
     class_name_func=get_test_class_name
 )
@@ -162,11 +179,24 @@ class TestQuery(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
+        def check_suffix(anno_repr, suffix):
+            match = anno_repr.endswith(suffix)
+            if match:
+                anno_repr = anno_repr[:-len(suffix)]
+            return anno_repr, match
+
+        cls.anno_repr, separate = check_suffix(cls.anno_repr, '_separate')
+        cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
+        cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
+
         build_annotation(
             cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             TEST_DATA_DIR + '/transcripts_100.fa',
             cls.anno_repr,
-            cls.tempdir.name + '/annotation'
+            cls.tempdir.name + '/annotation',
+            separate,
+            no_fork_opt,
+            no_anchor_opt
         )
 
         # check annotation

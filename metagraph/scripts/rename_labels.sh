@@ -12,7 +12,7 @@ anno_in="$2"
 
 mem=$(ls -s --block-size=1048576 $anno_in | cut -d' ' -f1)
 threads=1
-pmem=$(($mem / $threads * 5 / 4))
+pmem=$(($mem / $threads * 5 / 4 + 1000))
 
 extension="${anno_in##*.}"
 anno_in_prefix="${anno_in%.*}"

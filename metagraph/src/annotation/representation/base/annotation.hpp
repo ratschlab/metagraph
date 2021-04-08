@@ -27,9 +27,7 @@ class AnnotationCategory {
     virtual void set(IndexType i, const LabelType &label) = 0;
 
     virtual void serialize(const std::string &filename) const = 0;
-    virtual bool load(const std::string &filename) { return merge_load({ filename }); }
-    // TODO: remove merge_load and merge by annotation converters/mergers?
-    virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
+    virtual bool load(const std::string &filename) = 0;
 };
 
 
@@ -165,17 +163,6 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
                               std::function<void(Index)> callback) const override;
 
     virtual const binmat::BinaryMatrix& get_matrix() const = 0;
-
-    /*********************** Special queries **********************/
-
-    /**
-     * Return all labels for which counts are greater than or equal to |min_count|.
-     * Stop counting if count is greater than |count_cap|.
-     */
-    virtual std::vector<std::pair<uint64_t /* label_code */, size_t /* count */>>
-    count_labels(const std::vector<std::pair<Index, size_t>> &index_counts,
-                 size_t min_count = 1,
-                 size_t count_cap = std::numeric_limits<size_t>::max()) const;
 
   protected:
     LabelEncoder<Label> label_encoder_;

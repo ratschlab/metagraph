@@ -45,6 +45,59 @@ void BinaryMatrix::slice_columns(const std::vector<Column> &column_ids,
     }
 }
 
+std::vector<std::pair<BinaryMatrix::Column, size_t /* count */>>
+BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+                       size_t min_count,
+                       size_t count_cap) const {
+    assert(count_cap >= min_count);
+
+    if (!count_cap)
+        return {};
+
+    min_count = std::max(min_count, size_t(1));
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    std::vector<size_t> col_counts(num_columns(), 0);
+    size_t max_matched = 0;
+    size_t total_checked = 0;
+
+    for (auto [i, count] : index_counts) {
+        if (max_matched + (total_sum_count - total_checked) < min_count)
+            break;
+
+        for (size_t j : get_row(i)) {
+            assert(j < col_counts.size());
+
+            col_counts[j] += count;
+            max_matched = std::max(max_matched, col_counts[j]);
+        }
+
+        total_checked += count;
+    }
+
+    if (max_matched < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> result;
+    result.reserve(col_counts.size());
+
+    for (size_t j = 0; j < num_columns(); ++j) {
+        if (col_counts[j] >= min_count) {
+            result.emplace_back(j, std::min(col_counts[j], count_cap));
+        }
+    }
+
+    return result;
+}
+
+
 template <typename RowType>
 StreamRows<RowType>::StreamRows(const std::string &filename, size_t offset) {
     std::ifstream instream(filename, std::ios::binary);
