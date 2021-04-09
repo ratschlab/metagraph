@@ -151,8 +151,6 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--parallel-assemblies")) {
-            parallel_assemblies = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-path-length")) {
             max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -362,9 +360,6 @@ Config::Config(int argc, char *argv[]) {
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
         parallel_nodes = get_num_threads();
-
-    if (parallel_assemblies == static_cast<unsigned int>(-1))
-        parallel_assemblies = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;

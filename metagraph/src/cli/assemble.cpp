@@ -132,28 +132,23 @@ typedef std::function<void(const graph::MaskedDeBruijnGraph&,
 
 void call_masked_graphs(const AnnotatedDBG &anno_graph,
                         Config *config,
-                        std::vector<std::string>&& lines,
+                        const std::vector<std::string> &lines,
                         const CallMaskedGraphHeader &callback,
-                        size_t num_parallel_graphs_masked,
-                        size_t num_threads_per_graph) {
+                        size_t num_threads) {
     std::vector<std::string> shared_foreground_labels;
     std::vector<std::string> shared_background_labels;
 
-    ThreadPool thread_pool(num_parallel_graphs_masked);
-
-    for (std::string &line : lines) {
+    for (const std::string &line : lines) {
         assert(line.size() && line[0] != '#');
+
+        auto line_split = utils::split_string(line, "\t", false);
 
         if (line[0] == '@') {
             logger->trace("Counting shared k-mers");
 
             // shared in and out labels
-            auto line_split = utils::split_string(line, "\t", false);
             if (line_split.size() <= 1 || line_split.size() > 3)
                 throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
-
-            // sync all assembly jobs before clearing shared labels
-            thread_pool.join();
 
             shared_foreground_labels = utils::split_string(line_split[1], ",");
             shared_background_labels = utils::split_string(
@@ -167,38 +162,33 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             continue;
         }
 
-        thread_pool.enqueue([&](std::string line) {
-            auto line_split = utils::split_string(line, "\t", false);
-            if (line_split.size() <= 2 || line_split.size() > 4)
-                throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
+        if (line_split.size() <= 2 || line_split.size() > 4)
+            throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
 
-            auto diff_config = parse_diff_config(
-                line_split[1],
-                anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
-            );
+        DifferentialAssemblyConfig diff_config = parse_diff_config(
+            line_split[1],
+            anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
+        );
 
-            if (config->enumerate_out_sequences)
-                line_split[0] += ".";
+        if (config->enumerate_out_sequences)
+            line_split[0] += ".";
 
-            auto foreground_labels = utils::split_string(line_split[2], ",");
-            auto background_labels = utils::split_string(
-                line_split.size() == 4 ? line_split[3] : "",
-                ","
-            );
+        auto foreground_labels = utils::split_string(line_split[2], ",");
+        auto background_labels = utils::split_string(
+            line_split.size() == 4 ? line_split[3] : "",
+            ","
+        );
 
-            clean_label_set(anno_graph, foreground_labels);
-            clean_label_set(anno_graph, background_labels);
+        clean_label_set(anno_graph, foreground_labels);
+        clean_label_set(anno_graph, background_labels);
 
-            callback(*mask_graph_from_labels(anno_graph,
-                                             foreground_labels, background_labels,
-                                             shared_foreground_labels,
-                                             shared_background_labels,
-                                             diff_config, num_threads_per_graph),
-                     line_split[0]);
-        }, std::move(line));
+        callback(*mask_graph_from_labels(anno_graph,
+                                         foreground_labels, background_labels,
+                                         shared_foreground_labels,
+                                         shared_background_labels,
+                                         diff_config, num_threads),
+                 line_split[0]);
     }
-
-    thread_pool.join();
 }
 
 std::pair<std::vector<std::string>, unsigned int> parse_diff_file(std::ifstream &fin) {
@@ -244,7 +234,6 @@ int assemble(Config *config) {
             utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz"
         );
 
-        std::mutex file_open_mutex;
         std::mutex write_mutex;
 
         assert(!config->label_mask_file.empty());
@@ -259,19 +248,13 @@ int assemble(Config *config) {
         if (!num_experiments)
             return 0;
 
-        size_t num_parallel_assemblies = std::max(1u,
-            std::min({ num_experiments, config->parallel_assemblies, get_num_threads() })
-        );
-        size_t num_threads_per_traversal = std::max(
-            size_t(1), get_num_threads() / num_parallel_assemblies
-        );
+        size_t num_threads = std::max(1u, get_num_threads());
 
-        call_masked_graphs(*anno_graph, config, std::move(lines),
+        call_masked_graphs(*anno_graph, config, lines,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
-                std::lock_guard<std::mutex> file_lock(file_open_mutex);
                 seq_io::FastaWriter writer(config->outfbase, header,
                                            config->enumerate_out_sequences,
-                                           get_num_threads() > 1, /* async write */
+                                           num_threads > 1, /* async write */
                                            "a" /* append mode */);
 
                 if (config->unitigs || config->min_tip_size > 1) {
@@ -279,7 +262,7 @@ int assemble(Config *config) {
                                            std::lock_guard<std::mutex> lock(write_mutex);
                                            writer.write(unitig);
                                        },
-                                       num_threads_per_traversal,
+                                       num_threads,
                                        config->min_tip_size,
                                        config->kmers_in_single_form);
                 } else {
@@ -287,12 +270,11 @@ int assemble(Config *config) {
                                              std::lock_guard<std::mutex> lock(write_mutex);
                                              writer.write(seq);
                                          },
-                                         num_threads_per_traversal,
+                                         num_threads,
                                          config->kmers_in_single_form);
                 }
             },
-            num_parallel_assemblies,
-            num_threads_per_traversal
+            num_threads
         );
 
         return 0;
