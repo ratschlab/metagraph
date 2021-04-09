@@ -34,6 +34,12 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e9);
 
+    ColumnCompressed(sdsl::bit_vector&& column,
+                     const std::string &column_label,
+                     size_t num_columns_cached = 1,
+                     const std::string &swap_dir = "",
+                     uint64_t buffer_size_bytes = 1e9);
+
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
 

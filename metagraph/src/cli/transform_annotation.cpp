@@ -128,15 +128,15 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
 }
 
-binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
-                                      Config::AnnotationType anno_type) {
-    logger->trace("Computing total number of columns");
+uint64_t get_num_columns(const std::vector<std::string> &files,
+                         Config::AnnotationType anno_type) {
     size_t num_columns = 0;
     std::string extension = anno_type == Config::ColumnCompressed
             ? ColumnCompressed<>::kExtension
             : RowDiffColumnAnnotator::kExtension;
-    for (std::string file : files) {
-        file = utils::remove_suffix(file, extension) + extension;
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        std::string file = utils::remove_suffix(files[i], extension) + extension;
         std::ifstream instream(file, std::ios::binary);
         if (!instream.good()) {
             logger->error("Can't read from {}", file);
@@ -150,9 +150,16 @@ binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
             logger->error("Can't load label encoder from {}", file);
             exit(1);
         }
-
+        #pragma omp atomic
         num_columns += label_encoder.size();
     }
+    return num_columns;
+}
+
+binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
+                                      Config::AnnotationType anno_type) {
+    logger->trace("Computing total number of columns");
+    uint64_t num_columns = get_num_columns(files, anno_type);
 
     logger->trace("Generating trivial linkage matrix for {} columns",
                   num_columns);
@@ -417,6 +424,68 @@ int transform_annotation(Config *config) {
         annotation->serialize(config->outfbase);
         logger->trace("Renaming done in {} sec", timer.elapsed());
 
+        return 0;
+    }
+
+    /********************************************************/
+    /**************** operations on columns *****************/
+    /********************************************************/
+
+    if (config->intersect_columns) {
+        logger->trace("Loading annotation...");
+
+        uint64_t num_columns = get_num_columns(files, Config::ColumnCompressed);
+        if (!num_columns) {
+            logger->warn("No input columns to intersect");
+            exit(1);
+        }
+
+        sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
+
+        std::mutex mu;
+        auto on_column = [&](uint64_t, const auto &, auto&& col) {
+            #pragma omp critical
+            {
+                if (!sum.size()) {
+                    sum.resize(col->size());
+                } else if (sum.size() != col->size()) {
+                    logger->error("Input columns have inconsistent size ({} != {})",
+                                  sum.size(), col->size());
+                    exit(1);
+                }
+            }
+            col->call_ones([&](uint64_t i) {
+                atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+            });
+        };
+
+        if (!ColumnCompressed<>::merge_load(files, on_column, get_num_threads())) {
+            logger->error("Couldn't load annotations");
+            exit(1);
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        uint64_t min_cols = num_columns * config->intersect_ratio;
+        logger->trace("Selecting k-mers supported in at least {} / {} columns",
+                      min_cols, num_columns);
+
+        sdsl::bit_vector intersection(sum.size(), false);
+        for (uint64_t i = 0; i < sum.size(); ++i) {
+            if (sum[i] >= min_cols) {
+                intersection[i] = true;
+            }
+        }
+        sum = sdsl::int_vector<>();
+
+        ColumnCompressed<> intersected_column(std::move(intersection),
+                                              "intersection");
+
+        const auto &outfname = utils::remove_suffix(config->outfbase,
+                                                    ColumnCompressed<>::kExtension)
+                                                + ColumnCompressed<>::kExtension;
+        intersected_column.serialize(outfname);
+        logger->trace("Columns are intersected and the resulting column"
+                      " is serialized to {}", outfname);
         return 0;
     }
 

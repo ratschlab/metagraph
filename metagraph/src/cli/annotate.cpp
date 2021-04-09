@@ -1,5 +1,7 @@
 #include "annotate.hpp"
 
+#include <filesystem>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -15,6 +17,8 @@
 
 namespace mtg {
 namespace cli {
+
+namespace fs = std::filesystem;
 
 using namespace mtg::seq_io;
 
@@ -376,6 +380,15 @@ int annotate_graph(Config *config) {
             // annotate multiple files in parallel, each in a single thread
             num_threads = get_num_threads();
             set_num_threads(1);
+        }
+
+        if (!config->outfbase.empty()) {
+            try {
+                fs::create_directory(config->outfbase);
+            } catch (...) {
+                logger->error("Failed to create directory {}", config->outfbase);
+                throw;
+            }
         }
 
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)
