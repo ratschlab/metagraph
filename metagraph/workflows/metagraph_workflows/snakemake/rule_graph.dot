@@ -1,0 +1,33 @@
+digraph snakemake_dag {
+    graph[bgcolor=white, margin=0];
+    node[shape=box, style=rounded, fontname=sans,                 fontsize=10, penwidth=2];
+    edge[penwidth=2, color=grey];
+	0[label = "all", color = "0.58 0.6 0.85", style="rounded"];
+	1[label = "build_primary", color = "0.12 0.6 0.85", style="rounded"];
+	2[label = "primarize_canonical_graph", color = "0.54 0.6 0.85", style="rounded"];
+	3[label = "build_canonical_graph", color = "0.17 0.6 0.85", style="rounded"];
+	4[label = "relax_row_diff_brwt", color = "0.04 0.6 0.85", style="rounded"];
+	5[label = "annotate_row_diff_brwt", color = "0.50 0.6 0.85", style="rounded"];
+	6[label = "transform_row_diff_stage2", color = "0.62 0.6 0.85", style="rounded"];
+	7[label = "generate_column_list", color = "0.21 0.6 0.85", style="rounded"];
+	8[label = "annotate", color = "0.00 0.6 0.85", style="rounded"];
+	9[label = "transform_row_diff_stage1", color = "0.08 0.6 0.85", style="rounded"];
+	10[label = "transform_row_diff_stage0", color = "0.42 0.6 0.85", style="rounded"];
+	1 -> 0
+	4 -> 0
+	2 -> 1
+	3 -> 2
+	5 -> 4
+	6 -> 5
+	1 -> 5
+	1 -> 6
+	7 -> 6
+	9 -> 6
+	8 -> 7
+	1 -> 8
+	1 -> 9
+	7 -> 9
+	10 -> 9
+	1 -> 10
+	7 -> 10
+}            

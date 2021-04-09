@@ -10,7 +10,7 @@ import snakemake
 from .common import AnnotationLabelsSource, AnnotationFormats
 from .constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
-WORKFLOW_ROOT = Path(__file__).parent.parent / 'workflows'
+WORKFLOW_ROOT = Path(__file__).parent / 'snakemake'
 
 LOGGING_FORMAT='%(asctime)s - %(levelname)s: %(message)s'
 

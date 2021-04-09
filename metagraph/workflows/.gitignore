@@ -1,4 +1,5 @@
 .snakemake
+metagraph_workflows/snakemake/output_dir_example
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
