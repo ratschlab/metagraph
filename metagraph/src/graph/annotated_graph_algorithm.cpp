@@ -229,8 +229,6 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         graph_ptr = std::shared_ptr<const DeBruijnGraph>(
             std::shared_ptr<const DeBruijnGraph>(), &canonical->get_graph()
         );
-
-        add_complement = true;
     }
 
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(

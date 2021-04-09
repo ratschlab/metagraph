@@ -239,7 +239,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
         { true, DeBruijnGraph::BASIC },
         { false, DeBruijnGraph::CANONICAL },
         { true, DeBruijnGraph::CANONICAL },
-        { true, DeBruijnGraph::PRIMARY }
+        { false, DeBruijnGraph::PRIMARY },
+        { true, DeBruijnGraph::PRIMARY },
     };
     for (const auto &[add_complement, mode] : params) {
         for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
@@ -260,10 +261,12 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
                 1.0, 0.49, other_frac, ref_kmers, add_complement, mode
             );
 
-            ref_kmers.insert("GAATG");
-            ref_kmers.insert("AATGC");
-            ref_kmers.insert("GCATT");
             ref_kmers.insert("CATTC");
+            ref_kmers.insert("GCATT");
+            if (mode == DeBruijnGraph::CANONICAL || add_complement) {
+                ref_kmers.insert("GAATG");
+                ref_kmers.insert("AATGC");
+            }
 
             test_mask_unitigs_canonical<typename TypeParam::first_type,
                                         typename TypeParam::second_type>(
