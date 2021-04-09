@@ -56,6 +56,7 @@ class Config {
     bool align_sequences = false;
     bool align_both_strands = false;
     bool output_json = false;
+    bool intersect_columns = false;
 
     unsigned int k = 3;
 
@@ -123,6 +124,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
+    double intersect_ratio = 1;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
