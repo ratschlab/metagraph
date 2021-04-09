@@ -1,8 +1,12 @@
 import unittest
 import subprocess
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 from tempfile import TemporaryDirectory
 import os
+import gzip
+from helpers import get_test_class_name, build_annotation, graph_file_extension, \
+                    anno_file_extension, GRAPH_TYPES, ANNO_TYPES, product
+import itertools
 
 
 """Test graph assemble"""
@@ -40,10 +44,35 @@ GFAs = [name for name, _ in gfa_tests.items()]
 
 NUM_THREADS = 4
 
-
-class TestAnnotate(unittest.TestCase):
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(
+        [repr for repr in GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'] if not (repr == 'bitmap' and PROTEIN_MODE)],
+        ANNO_TYPES + ['row_diff_brwt_no_fork_opt',
+                      'row_diff_brwt_no_anchor_opt']
+    ),
+    class_name_func=get_test_class_name
+)
+class TestAssemble(unittest.TestCase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
+        self.with_bloom = False
+        if self.graph_repr == 'succinct_bloom':
+            self.graph_repr = 'succinct'
+            self.with_bloom = True
+
+        self.mask_dummy = False
+        if self.graph_repr == 'succinct_mask':
+            self.graph_repr = 'succinct'
+            self.mask_dummy = True
+
+        def check_suffix(anno_repr, suffix):
+            match = anno_repr.endswith(suffix)
+            if match:
+                anno_repr = anno_repr[:-len(suffix)]
+            return anno_repr, match
+
+        self.anno_repr, self.no_fork_opt = check_suffix(self.anno_repr, '_no_fork_opt')
+        self.anno_repr, self.no_anchor_opt = check_suffix(self.anno_repr, '_no_anchor_opt')
 
     def generate_fasta_from_gfa(self, input: str, output: str):
         fasta_file = open(output, 'w')
@@ -195,3 +224,70 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run(compare_command.split(), stdout=subprocess.PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual("Graphs are identical" in res.stdout.decode().split('\n')[2], True)
+
+    def test_diff_assembly(self):
+        k = 31
+        construct_command = '{exe} build {mask_dummy} -p {num_threads} \
+                --graph {repr} -k {k} -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            mask_dummy='--mask-dummy' if self.mask_dummy else '',
+            repr=self.graph_repr,
+            k=k,
+            outfile=self.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/metasub_fake_data.fa'
+        )
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        if self.with_bloom:
+            convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
+                exe=METAGRAPH,
+                outfile=self.tempdir.name + '/graph',
+                bloom_param='--bloom-fpp 0.1',
+                input=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            )
+            res = subprocess.run([convert_command], shell=True)
+            assert(res.returncode == 0)
+
+        print(self.no_fork_opt, self.no_anchor_opt)
+        build_annotation(
+            self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            TEST_DATA_DIR + '/metasub_fake_data.fa',
+            self.anno_repr,
+            self.tempdir.name + '/annotation',
+            False,
+            self.no_fork_opt,
+            self.no_anchor_opt
+        )
+
+        assemble_command = '{exe} assemble -p {num_threads} \
+                -a {annotation} -o {outfile} \
+                --label-mask-file {mask} {graph}'.format(
+            exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            outfile=self.tempdir.name + '/diff_contigs',
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            mask=TEST_DATA_DIR + '/metasub_fake_data.diff.txt'
+        )
+        res = subprocess.run([assemble_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        results = dict()
+        with gzip.open(self.tempdir.name + '/diff_contigs.fasta.gz', 'rt') as f:
+            for head, seq in itertools.zip_longest(*[f]*2):
+                head = head.rstrip()
+                seq = seq.rstrip()
+                if head not in results:
+                    results[head] = [seq]
+                else:
+                    results[head].append(seq)
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue('>metasub_other' in results)
+        self.assertTrue('>metasub_by_kmer' in results)
+        self.assertEqual(len(results['>metasub_other']), 1)
+        self.assertEqual(len(results['>metasub_by_kmer']), 1)
+        self.assertEqual(results['>metasub_other'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
+        self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
