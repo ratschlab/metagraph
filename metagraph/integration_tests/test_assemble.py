@@ -252,7 +252,6 @@ class TestAssemble(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        print(self.anno_repr, self.separate, self.no_fork_opt, self.no_anchor_opt)
         build_annotation(
             self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             TEST_DATA_DIR + '/metasub_fake_data.fa',
