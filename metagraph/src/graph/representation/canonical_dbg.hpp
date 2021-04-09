@@ -121,7 +121,7 @@ class CanonicalDBG : public DeBruijnGraph {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
-    virtual const DeBruijnGraph& get_graph() const { return graph_; }
+    virtual const DeBruijnGraph& get_base_graph() const override { return graph_; }
 
     virtual bool operator==(const CanonicalDBG &other) const {
         return graph_ == other.graph_;

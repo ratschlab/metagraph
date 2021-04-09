@@ -22,14 +22,12 @@ using mtg::common::logger;
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
+    uint64_t max_index = graph->get_base_graph().max_index();
+
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph was wrapped into canonical");
     }
-
-    uint64_t max_index = graph->max_index();
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get()))
-        max_index = canonical->get_graph().max_index();
 
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
@@ -47,12 +45,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         if (input_anno_type == Config::AnnotationType::RowDiff
             || input_anno_type == Config::AnnotationType::RowDiffBRWT
             || input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
-            auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
-
-            if (!dbg_graph) {
-                if (auto *canonical = dynamic_cast<CanonicalDBG *>(graph.get()))
-                    dbg_graph = dynamic_cast<const DBGSuccinct *>(&canonical->get_graph());
-            }
+            auto dbg_graph = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph());
 
             if (!dbg_graph) {
                 logger->error(

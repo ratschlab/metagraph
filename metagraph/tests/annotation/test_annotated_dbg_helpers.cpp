@@ -2,7 +2,6 @@
 
 #include "../graph/all/test_dbg_helpers.hpp"
 
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 
@@ -26,10 +25,8 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                DeBruijnGraph::Mode mode) {
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences, mode);
-    auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
 
-    uint64_t max_index = canonical ? canonical->get_graph().max_index()
-                                   : graph->max_index();
+    uint64_t max_index = graph->get_base_graph().max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,

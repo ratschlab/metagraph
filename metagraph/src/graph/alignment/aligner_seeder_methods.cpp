@@ -326,15 +326,6 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     return output_seeds;
 }
 
-template <class BaseSeeder>
-const DBGSuccinct& SuffixSeeder<BaseSeeder>
-::get_base_dbg_succ(const DeBruijnGraph &graph) {
-    return dynamic_cast<const CanonicalDBG*>(&graph)
-        ? dynamic_cast<const DBGSuccinct&>(
-              dynamic_cast<const CanonicalDBG&>(graph).get_graph())
-        : dynamic_cast<const DBGSuccinct&>(graph);
-}
-
 template <typename NodeType>
 auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     size_t k = this->graph_.get_k();

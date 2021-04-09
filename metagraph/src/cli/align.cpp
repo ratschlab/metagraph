@@ -96,12 +96,9 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
 
     if (aligner_config.min_seed_length < k) {
         // seeds are ranges of nodes matching a suffix
-        if (!dynamic_cast<const DBGSuccinct*>(&graph)) {
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            if (!canonical || !dynamic_cast<const DBGSuccinct*>(&canonical->get_graph())) {
-                logger->error("SuffixSeeder can be used only with succinct graph representation");
-                exit(1);
-            }
+        if (!dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph())) {
+            logger->error("SuffixSeeder can be used only with succinct graph representation");
+            exit(1);
         }
 
         // Use the seeder that seeds to node suffixes

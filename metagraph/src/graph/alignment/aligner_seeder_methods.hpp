@@ -113,7 +113,7 @@ class SuffixSeeder : public BaseSeeder {
     template <typename... Args>
     SuffixSeeder(Args&&... args)
           : BaseSeeder(std::forward<Args>(args)...),
-            dbg_succ_(get_base_dbg_succ(this->graph_)) {
+            dbg_succ_(dynamic_cast<const DBGSuccinct&>(this->graph_.get_base_graph())) {
         assert(this->config_.min_seed_length < this->graph_.get_k());
     }
 
@@ -125,8 +125,6 @@ class SuffixSeeder : public BaseSeeder {
 
   private:
     const DBGSuccinct &dbg_succ_;
-
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 };
 
 } // namespace align

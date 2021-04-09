@@ -7,7 +7,6 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 
@@ -29,7 +28,7 @@ constexpr bool MAKE_BOSS = true;
 
 
 /**
- * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().max_index().
+ * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().get_base_graph().max_index().
  * For an index i, the int_vector will contain a packed integer representing the
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with. The least significant half of each integer represents the count
@@ -225,11 +224,9 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           bool add_complement,
                           bool make_boss,
                           size_t num_threads) {
-    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph_ptr)) {
-        graph_ptr = std::shared_ptr<const DeBruijnGraph>(
-            std::shared_ptr<const DeBruijnGraph>(), &canonical->get_graph()
-        );
-    }
+    graph_ptr = std::shared_ptr<const DeBruijnGraph>(
+        std::shared_ptr<const DeBruijnGraph>(), &graph_ptr->get_base_graph()
+    );
 
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
@@ -338,7 +335,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 }
 
 /**
- * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().max_index().
+ * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().get_base_graph().max_index().
  * For an index i, the int_vector will contain a packed integer representing the
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with. The least significant half of each integer represents the count
@@ -351,17 +348,14 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
                                   const std::vector<Label> &labels_out,
                                   size_t num_threads) {
-    const DeBruijnGraph *graph = &anno_graph.get_graph();
-
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph))
-        graph = &canonical->get_graph();
+    const DeBruijnGraph &graph = anno_graph.get_graph().get_base_graph();
 
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::bit_vector indicator(graph->max_index() + 1, false);
+    sdsl::bit_vector indicator(graph.max_index() + 1, false);
 
     // at this stage, the width of counts is twice what it should be, since
     // the intention is to store the in label and out label counts interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(graph->max_index() + 1,
+    sdsl::int_vector<> counts = aligned_int_vector(graph.max_index() + 1,
                                                    0, width * 2, 16);
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();

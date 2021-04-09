@@ -435,7 +435,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
                 MaskedDeBruijnGraph graph(full_graph,
                                           std::make_unique<bit_vector_stat>(std::move(mask)), true);
 
-                EXPECT_EQ(*full_graph, graph.get_graph());
+                EXPECT_EQ(*full_graph, graph.get_base_graph());
                 EXPECT_TRUE(check_graph_nodes(graph));
 
                 size_t counter = 0;

@@ -125,9 +125,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // from the node prefix are not included).
 
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(
-                canonical ? canonical->get_graph() : graph
-            );
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
 
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);
