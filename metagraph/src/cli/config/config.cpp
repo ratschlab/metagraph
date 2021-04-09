@@ -1240,8 +1240,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                         "\t\t --label-taxid-map <*.accession2taxid>\n"
                         "\t\t -o <taxonomy-db-basename> ANNOT1 [[ANNOT2] ...]\n\n",
                 prog_name.c_str());
-            fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tavailable memory in GB [1]\n");
+//            fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
             break;
         }
         case TAX_CLASSIFY: {
