@@ -21,10 +21,10 @@ void execute_fasta_seq(const std::string sequence,
                        const mtg::graph::DeBruijnGraph &graph,
                        const mtg::annot::TaxClassifier &tax_classifier,
                        std::mutex &result_mutex,
-                       std::vector<std::pair<std::string, uint64_t> > &results) {
+                       std::vector<std::pair<std::string, uint64_t> > *results) {
     uint64_t taxid = tax_classifier.assign_class(graph, sequence);
     std::lock_guard<std::mutex> lock(result_mutex);
-    results.push_back({seq_label, taxid});
+    results->push_back(std::pair<std::string, uint64_t>{seq_label, taxid});
 }
 
 void execute_fasta_file(const string &file,
@@ -32,7 +32,7 @@ void execute_fasta_file(const string &file,
                         const mtg::graph::DeBruijnGraph &graph,
                         const mtg::annot::TaxClassifier &tax_classifier,
                         std::mutex &result_mutex,
-                        std::vector<std::pair<std::string, uint64_t> > &results) {
+                        std::vector<std::pair<std::string, uint64_t> > *results) {
     logger->trace("Parsing query sequences from file {}.", file);
 
     seq_io::FastaParser fasta_parser(file);
@@ -94,7 +94,7 @@ int taxonomic_classification(Config *config) {
                            *graph,
                            tax_classifier,
                            result_mutex,
-                           results);
+                           &results);
     }
     thread_pool.join();
     for (const std::pair<std::string, uint64_t> &result : results) {
