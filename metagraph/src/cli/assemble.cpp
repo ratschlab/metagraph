@@ -130,26 +130,19 @@ DifferentialAssemblyConfig parse_diff_config(const std::string &config_str,
 typedef std::function<void(const graph::MaskedDeBruijnGraph&,
                            const std::string& /* header */)> CallMaskedGraphHeader;
 
-void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
+void call_masked_graphs(const AnnotatedDBG &anno_graph,
+                        Config *config,
+                        std::vector<std::string>&& lines,
                         const CallMaskedGraphHeader &callback,
-                        size_t num_parallel_graphs_masked = 1,
-                        size_t num_threads_per_graph = 1) {
-    assert(!config->label_mask_file.empty());
-
-    std::ifstream fin(config->label_mask_file);
-    if (!fin.good()) {
-        throw std::iostream::failure("Failed to read label mask file");
-        exit(1);
-    }
-
-    ThreadPool thread_pool(num_parallel_graphs_masked);
+                        size_t num_parallel_graphs_masked,
+                        size_t num_threads_per_graph) {
     std::vector<std::string> shared_foreground_labels;
     std::vector<std::string> shared_background_labels;
 
-    std::string line;
-    while (std::getline(fin, line)) {
-        if (line.empty() || line[0] == '#')
-            continue;
+    ThreadPool thread_pool(num_parallel_graphs_masked);
+
+    for (std::string &line : lines) {
+        assert(line.size() && line[0] != '#');
 
         if (line[0] == '@') {
             logger->trace("Counting shared k-mers");
@@ -208,6 +201,21 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph, Config *config,
     thread_pool.join();
 }
 
+std::pair<std::vector<std::string>, unsigned int> parse_diff_file(std::ifstream &fin) {
+    std::string line;
+    std::vector<std::string> lines;
+    unsigned int num_experiments = 0;
+    while (std::getline(fin, line)) {
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        num_experiments += (line[0] != '@');
+        lines.emplace_back(std::move(line));
+    }
+
+    return { std::move(lines), num_experiments };
+}
+
 
 int assemble(Config *config) {
     assert(config);
@@ -239,14 +247,26 @@ int assemble(Config *config) {
         std::mutex file_open_mutex;
         std::mutex write_mutex;
 
-        size_t num_parallel_assemblies = std::max(
-            1u, std::min(config->parallel_assemblies, get_num_threads())
+        assert(!config->label_mask_file.empty());
+
+        std::ifstream fin(config->label_mask_file);
+        if (!fin.good()) {
+            throw std::iostream::failure("Failed to read label mask file");
+            exit(1);
+        }
+
+        auto [lines, num_experiments] = parse_diff_file(fin);
+        if (!num_experiments)
+            return 0;
+
+        size_t num_parallel_assemblies = std::max(1u,
+            std::min({ num_experiments, config->parallel_assemblies, get_num_threads() })
         );
         size_t num_threads_per_traversal = std::max(
             size_t(1), get_num_threads() / num_parallel_assemblies
         );
 
-        call_masked_graphs(*anno_graph, config,
+        call_masked_graphs(*anno_graph, config, std::move(lines),
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
                 std::lock_guard<std::mutex> file_lock(file_open_mutex);
                 seq_io::FastaWriter writer(config->outfbase, header,
