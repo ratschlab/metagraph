@@ -275,20 +275,20 @@ class TestAssemble(unittest.TestCase):
         res = subprocess.run([assemble_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        # results = dict()
-        # with gzip.open(self.tempdir.name + '/diff_contigs.fasta.gz', 'rt') as f:
-        #     for head, seq in itertools.zip_longest(*[f]*2):
-        #         head = head.rstrip()
-        #         seq = seq.rstrip()
-        #         if head not in results:
-        #             results[head] = [seq]
-        #         else:
-        #             results[head].append(seq)
+        results = dict()
+        with gzip.open(self.tempdir.name + '/diff_contigs.fasta.gz', 'rt') as f:
+            for head, seq in itertools.zip_longest(*[f]*2):
+                head = head.rstrip()
+                seq = seq.rstrip()
+                if head not in results:
+                    results[head] = [seq]
+                else:
+                    results[head].append(seq)
 
-        # self.assertEqual(len(results), 2)
-        # self.assertTrue('>metasub_other' in results)
-        # self.assertTrue('>metasub_by_kmer' in results)
-        # self.assertEqual(len(results['>metasub_other']), 1)
-        # self.assertEqual(len(results['>metasub_by_kmer']), 1)
-        # self.assertEqual(results['>metasub_other'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
-        # self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
+        self.assertEqual(len(results), 2)
+        self.assertTrue('>metasub_other' in results)
+        self.assertTrue('>metasub_by_kmer' in results)
+        self.assertEqual(len(results['>metasub_other']), 1)
+        self.assertEqual(len(results['>metasub_by_kmer']), 1)
+        self.assertEqual(results['>metasub_other'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
+        self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
