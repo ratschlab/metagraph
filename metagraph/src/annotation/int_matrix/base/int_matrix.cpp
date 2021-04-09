@@ -5,7 +5,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-std::vector<std::pair<IntMatrix::Column, size_t /* count */>>
+IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min,
                           size_t cap) const {
@@ -33,7 +33,7 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
         }
     }
 
-    std::vector<std::pair<uint64_t, size_t>> result;
+    RowValues result;
     result.reserve(sum_row.size());
 
     for (size_t j = 0; j < num_columns(); ++j) {

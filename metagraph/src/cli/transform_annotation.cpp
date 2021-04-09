@@ -233,8 +233,8 @@ auto convert_to_MultiBRWT(const std::vector<std::string> &files,
         out << linkage_matrix.format(CSVFormat) << std::endl;
         logger->trace("Generated new linkage and saved to {}", linkage_file);
     }
-    std::vector<std::vector<uint64_t>> linkage
-            = parse_linkage_matrix(linkage_file);
+
+    auto linkage = parse_linkage_matrix(linkage_file);
     logger->trace("Linkage loaded from {}", linkage_file);
 
     return convert_to_BRWT<MultiBRWTAnnotator>(

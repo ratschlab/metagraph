@@ -26,7 +26,7 @@ class IntMatrix : public binmat::BinaryMatrix {
     // Get all columns for which the sum of the values in queried rows
     // is greater than or equal to |min|. Stop counting if the sum is
     // greater than |cap|.
-    virtual std::vector<std::pair<Column, size_t /* count */>>
+    virtual RowValues
     sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                    size_t min = 1,
                    size_t cap = std::numeric_limits<size_t>::max()) const;

@@ -375,9 +375,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>
+void ColumnCompressed<Label>
 ::load_column_values(const std::vector<std::string> &filenames,
-                     const CountsCallback &callback,
+                     const ValuesCallback &callback,
                      size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
@@ -405,7 +405,7 @@ bool ColumnCompressed<Label>
     }
 
     if (error_occurred)
-        return false;
+        exit(1);
 
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
@@ -431,37 +431,38 @@ bool ColumnCompressed<Label>
                 continue;
             }
 
-            const auto &counts_fname
+            const auto &values_fname
                 = remove_suffix(filename, kExtension) + kCountExtension;
 
-            std::ifstream counts_in(counts_fname, std::ios::binary);
-            if (!counts_in)
-                throw std::ifstream::failure("can't open file with counts");
+            std::ifstream values_in(values_fname, std::ios::binary);
+            if (!values_in)
+                throw std::ifstream::failure("can't open file with values");
 
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                sdsl::int_vector<> column_counts;
+                sdsl::int_vector<> column_values;
                 try {
-                    column_counts.load(counts_in);
+                    column_values.load(values_in);
                 } catch (...) {
-                    logger->error("Can't load relation counts for column {} in {}",
+                    logger->error("Can't load values for column {} in {}",
                                   c, filename);
                     throw;
                 }
 
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
-                         std::move(column_counts));
+                         std::move(column_values));
             }
         } catch (const std::exception &e) {
-            logger->error("Caught exception when loading counts for {}: {}", filename, e.what());
+            logger->error("Caught exception when loading values for {}: {}", filename, e.what());
             error_occurred = true;
         } catch (...) {
-            logger->error("Unknown exception when loading counts for {}", filename);
+            logger->error("Unknown exception when loading values for {}", filename);
             error_occurred = true;
         }
     }
 
-    return !error_occurred;
+    if (error_occurred)
+        exit(1);
 }
 
 template <typename Label>
