@@ -39,9 +39,8 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         assert(assignments_.size() == 1);
-
         // the bit is set
-        return utils::arange<Column, SetBitPositions>(0, assignments_.size());
+        return { 0 };
     }
 
     // check all child nodes
@@ -66,20 +65,15 @@ Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
     if (!rank)
         return {};
 
-    Vector<std::pair<BRWT::Column, uint64_t>> row;
-
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         assert(assignments_.size() == 1);
-
         // the bit is set
-        for (size_t j = 0; j < assignments_.size(); ++j) {
-            row.emplace_back(j, rank);
-        }
-        return row;
+        return {{ 0, rank }};
     }
 
     // check all child nodes
+    Vector<std::pair<BRWT::Column, uint64_t>> row;
     uint64_t index_in_child = rank - 1;
 
     for (size_t k = 0; k < child_nodes_.size(); ++k) {
@@ -143,12 +137,12 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
 
             if constexpr(utils::is_pair_v<T>) {
                 if (uint64_t rank = nonzero_rows_->conditional_rank1(i)) {
-                    // only a single column is stored in leafs
+                    // only a single column is stored in leaves
                     slice.emplace_back(0, rank);
                 }
             } else {
                 if ((*nonzero_rows_)[i]) {
-                    // only a single column is stored in leafs
+                    // only a single column is stored in leaves
                     slice.push_back(0);
                 }
             }
