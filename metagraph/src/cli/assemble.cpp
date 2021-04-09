@@ -225,6 +225,8 @@ int assemble(Config *config) {
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
     if (config->infbase_annotators.size()) {
+        config->infbase = files.at(0);
+
         assert(config->label_mask_file.size());
         auto anno_graph = initialize_annotated_dbg(graph, *config);
 

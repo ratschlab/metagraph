@@ -144,7 +144,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename,
     if final_anno.startswith('row_diff'):
         target_anno = 'row_diff'
 
-    annotate_command = '{exe} transform_anno -p {num_threads} \
+    annotate_command = '{exe} transform_anno -i {graph} -p {num_threads} \
             --anno-type {target_anno} -o {outfile} {input}'.format(
         exe=METAGRAPH,
         num_threads=NUM_THREADS,
