@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <progress_bar.hpp>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -379,7 +381,9 @@ int transform_annotation(Config *config) {
         }
 
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
-
+        ProgressBar progress_bar(num_columns, "Intersect columns",
+                                 std::cerr, !get_verbose());
+        ThreadPool thread_pool(get_num_threads(), 1);
         std::mutex mu;
         auto on_column = [&](uint64_t, const auto &, auto&& col) {
             #pragma omp critical
@@ -392,8 +396,11 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
             }
-            col->call_ones([&](uint64_t i) {
-                atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+            thread_pool.enqueue([&,col{std::move(col)}]() {
+                col->call_ones([&](uint64_t i) {
+                    atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+                });
+                ++progress_bar;
             });
         };
 
@@ -401,10 +408,11 @@ int transform_annotation(Config *config) {
             logger->error("Couldn't load annotations");
             exit(1);
         }
+        thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
         uint64_t min_cols = num_columns * config->intersect_ratio;
-        logger->trace("Selecting k-mers supported in at least {} / {} columns",
+        logger->trace("Selecting k-mers annotated in >= {} / {} columns",
                       min_cols, num_columns);
 
         sdsl::bit_vector intersection(sum.size(), false);
