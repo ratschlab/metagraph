@@ -170,13 +170,7 @@ uint64_t Rainbowfish::get_code(Row row) const {
 // row is in [0, num_rows), column is in [0, num_columns)
 bool Rainbowfish::get(Row row, Column column) const {
     uint64_t code = get_code(row);
-    return reduced_matrix_[code / buffer_size_]->get(code % buffer_size_,
-                                                     column);
-}
-
-Rainbowfish::SetBitPositions Rainbowfish::get_row(Row row) const {
-    uint64_t code = get_code(row);
-    return reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_);
+    return reduced_matrix_[code / buffer_size_]->get(code % buffer_size_, column);
 }
 
 std::vector<Rainbowfish::SetBitPositions>
@@ -199,51 +193,13 @@ Rainbowfish::get_rows(const std::vector<Row> &rows) const {
         if (code == last_code) {
             result[row] = *last_row;
         } else {
-            result[row] = reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_);
+            result[row] = code_to_row(code);
             last_row = &result[row];
             last_code = code;
         }
     }
 
     return result;
-}
-
-std::vector<Rainbowfish::SetBitPositions>
-Rainbowfish::get_rows(std::vector<Row> *rows, size_t num_threads) const {
-    assert(rows);
-
-    std::vector<std::pair<uint64_t, /* code */
-                          uint64_t /* row */>> row_codes(rows->size());
-
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < rows->size(); ++i) {
-        row_codes[i] = { get_code((*rows)[i]), i };
-    }
-
-    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
-                          utils::LessFirst(), num_threads);
-
-    std::vector<uint64_t> codes;
-    codes.reserve(row_codes.size());
-    uint64_t last_code = std::numeric_limits<uint64_t>::max();
-    for (const auto &[code, i] : row_codes) {
-        if (code != last_code) {
-            codes.push_back(code);
-            last_code = code;
-        }
-        (*rows)[i] = codes.size() - 1;
-    }
-    row_codes = {};
-
-    std::vector<SetBitPositions> unique_rows(codes.size());
-
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < codes.size(); ++i) {
-        uint64_t c = codes[i];
-        unique_rows[i] = reduced_matrix_[c / buffer_size_]->get_row(c % buffer_size_);
-    }
-
-    return unique_rows;
 }
 
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {

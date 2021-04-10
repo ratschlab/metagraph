@@ -28,12 +28,8 @@ class Rainbowfish : public RainbowMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const;
-    SetBitPositions get_row(Row row) const;
+    using RainbowMatrix::get_rows;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
-    // Return unique rows (in arbitrary order) and update the row indexes
-    // in |rows| to point to their respective rows in the vector returned.
-    std::vector<SetBitPositions> get_rows(std::vector<Row> *rows,
-                                          size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -61,6 +57,9 @@ class Rainbowfish : public RainbowMatrix {
     std::vector<std::unique_ptr<BinaryMatrix>> reduced_matrix_;
 
     uint64_t get_code(Row row) const;
+    SetBitPositions code_to_row(uint64_t c) const {
+        return reduced_matrix_[c / buffer_size_]->get_row(c % buffer_size_);
+    }
 };
 
 } // namespace binmat

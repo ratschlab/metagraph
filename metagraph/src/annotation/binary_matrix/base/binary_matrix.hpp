@@ -56,12 +56,27 @@ class RainbowMatrix : public BinaryMatrix {
 
     using BinaryMatrix::get_rows;
 
+    virtual SetBitPositions get_row(Row row) const final {
+        return code_to_row(get_code(row));
+    }
+
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<SetBitPositions>
-    get_rows(std::vector<Row> *rows, size_t num_threads = 1) const = 0;
+    get_rows(std::vector<Row> *rows, size_t num_threads = 1) const;
+
+    // Return all columns for which counts are greater than or equal to |min_count|.
+    // Stop counting if count is greater than |count_cap|.
+    virtual std::vector<std::pair<Column, size_t /* count */>>
+    sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+             size_t min_count = 1,
+             size_t count_cap = std::numeric_limits<size_t>::max()) const;
 
     virtual uint64_t num_distinct_rows() const = 0;
+
+  private:
+    virtual uint64_t get_code(Row row) const = 0;
+    virtual SetBitPositions code_to_row(Row row) const = 0;
 };
 
 
