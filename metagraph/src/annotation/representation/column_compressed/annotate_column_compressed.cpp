@@ -170,11 +170,11 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     outstream.close();
 
-    outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
+    outstream.open(remove_suffix(filename, kExtension) + kCountExtension,
                    std::ios::binary);
     if (!outstream.good()) {
         logger->error("Could not open file for writing: {}",
-                      remove_suffix(filename, kExtension) + kExtension + ".counts");
+                      remove_suffix(filename, kExtension) + kCountExtension);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -387,6 +387,97 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     }
 
     return !error_occurred;
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::load_column_values(const std::vector<std::string> &filenames,
+                     const ValuesCallback &callback,
+                     size_t num_threads) {
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+
+        std::ifstream instream(filename, std::ios::binary);
+        if (!instream) {
+            logger->error("Can't read from {}", filename);
+            error_occurred = true;
+        }
+        std::ignore = load_number(instream);
+
+        LabelEncoder<Label> label_encoder;
+        if (!label_encoder.load(instream)) {
+            logger->error("Can't load label encoder from {}", filename);
+            error_occurred = true;
+        }
+
+        offsets[i] = label_encoder.size();
+    }
+
+    if (error_occurred)
+        exit(1);
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        logger->trace("Loading labels from {}", filename);
+        try {
+            std::ifstream instream(filename, std::ios::binary);
+            if (!instream)
+                throw std::ifstream::failure("can't open file");
+
+            std::ignore = load_number(instream);
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(instream))
+                throw std::ifstream::failure("can't load label encoder");
+
+            if (!label_encoder_load.size()) {
+                logger->warn("No labels in {}", filename);
+                continue;
+            }
+
+            const auto &values_fname
+                = remove_suffix(filename, kExtension) + kCountExtension;
+
+            std::ifstream values_in(values_fname, std::ios::binary);
+            if (!values_in)
+                throw std::ifstream::failure("can't open file with values");
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                sdsl::int_vector<> column_values;
+                try {
+                    column_values.load(values_in);
+                } catch (...) {
+                    logger->error("Can't load values for column {} in {}",
+                                  c, filename);
+                    throw;
+                }
+
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
+                         std::move(column_values));
+            }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading values for {}: {}", filename, e.what());
+            error_occurred = true;
+        } catch (...) {
+            logger->error("Unknown exception when loading values for {}", filename);
+            error_occurred = true;
+        }
+    }
+
+    if (error_occurred)
+        exit(1);
 }
 
 template <typename Label>

@@ -230,6 +230,68 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
+auto convert_to_MultiBRWT(const std::vector<std::string> &files,
+                          const Config &config) {
+    std::string linkage_file = config.linkage_file;
+    if (!linkage_file.size()) {
+        logger->trace("Generating new column linkage...");
+        binmat::LinkageMatrix linkage_matrix
+                = compute_linkage(files, Config::ColumnCompressed, config);
+        linkage_file = config.outfbase + ".linkage";
+        std::ofstream out(linkage_file);
+        out << linkage_matrix.format(CSVFormat) << std::endl;
+        logger->trace("Generated new linkage and saved to {}", linkage_file);
+    }
+
+    auto linkage = parse_linkage_matrix(linkage_file);
+    logger->trace("Linkage loaded from {}", linkage_file);
+
+    return convert_to_BRWT<MultiBRWTAnnotator>(
+                files, linkage, config.parallel_nodes,
+                get_num_threads(), config.tmp_dir);
+}
+
+IntMultiBRWTAnnotator
+convert_to_IntMultiBRWT(const std::vector<std::string> &files,
+                        const Config &config,
+                        const Timer &timer) {
+    auto brwt_annotator = convert_to_MultiBRWT(files, config);
+
+    logger->trace("Converted to Multi-BRWT in {} sec", timer.elapsed());
+
+    std::vector<sdsl::int_vector<>> column_values;
+    ColumnCompressed<>::load_column_values(files,
+        [&](size_t j, const std::string &label, sdsl::int_vector<>&& values) {
+            if (label != brwt_annotator->get_label_encoder().decode(j)) {
+                logger->error("The order of labels in Multi-BRWT is different"
+                              " from the order of the input columns");
+                exit(1);
+            }
+            #pragma omp critical
+            {
+                while (j >= column_values.size()) {
+                    column_values.push_back(sdsl::int_vector<>());
+                }
+                column_values[j] = std::move(values);
+            }
+        },
+        get_num_threads()
+    );
+
+    if (column_values.size() != brwt_annotator->num_labels()) {
+        logger->error("The number of annotation columns does not match"
+                      " the number of columns with relation values ({} != {})",
+                      brwt_annotator->num_labels(), column_values.size());
+        exit(1);
+    }
+
+    auto multi_brwt = brwt_annotator->release_matrix();
+    return IntMultiBRWTAnnotator(
+                std::make_unique<matrix::CSCMatrix<binmat::BRWT>>(
+                        std::move(*multi_brwt), std::move(column_values)),
+                brwt_annotator->get_label_encoder());
+}
+
 
 int transform_annotation(Config *config) {
     assert(config);
@@ -522,6 +584,7 @@ int transform_annotation(Config *config) {
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
+                && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -580,30 +643,17 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                if (!config->linkage_file.size()) {
-                    logger->trace("Generating new column linkage...");
-                    binmat::LinkageMatrix linkage_matrix
-                            = compute_linkage(files, input_anno_type, *config);
-                    config->linkage_file = config->outfbase + ".linkage";
-                    std::ofstream out(config->linkage_file);
-                    out << linkage_matrix.format(CSVFormat) << std::endl;
-                    logger->trace("Generated new linkage and saved to {}",
-                                  config->linkage_file);
-                }
-                std::vector<std::vector<uint64_t>> linkage
-                        = parse_linkage_matrix(config->linkage_file);
-                logger->trace("Linkage loaded from {}", config->linkage_file);
-
-                auto brwt_annotator = convert_to_BRWT<MultiBRWTAnnotator>(
-                        files, linkage, config->parallel_nodes,
-                        get_num_threads(), config->tmp_dir);
-
+                auto brwt_annotator = convert_to_MultiBRWT(files, *config);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
-
-                logger->trace("Serializing to '{}'", config->outfbase);
-
                 brwt_annotator->serialize(config->outfbase);
-
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::IntBRWT: {
+                auto annotator = convert_to_IntMultiBRWT(files, *config, timer);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                annotator.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
             case Config::BinRelWT_sdsl: {

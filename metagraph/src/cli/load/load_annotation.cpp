@@ -54,6 +54,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
 
+    } else if (utils::ends_with(filename, annot::IntMultiBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::IntBRWT;
+
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
@@ -119,6 +122,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RbBRWT: {
             annotation.reset(new annot::RbBRWTAnnotator());
+            break;
+        }
+        case Config::IntBRWT: {
+            annotation.reset(new annot::IntMultiBRWTAnnotator());
             break;
         }
     }
