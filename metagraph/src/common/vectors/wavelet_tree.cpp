@@ -4,6 +4,7 @@
 
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/threads/threading.hpp"
 
 typedef wavelet_tree::TAlphabet TAlphabet;
 
@@ -392,7 +393,10 @@ bool wavelet_tree_sdsl<t_wt_sdsl>::load(std::istream &in) {
 template <class t_wt_sdsl>
 sdsl::int_vector<> wavelet_tree_sdsl<t_wt_sdsl>::to_vector() const {
     sdsl::int_vector<> vector(wwt_.size(), 0, logsigma_);
-    std::copy(wwt_.begin(), wwt_.end(), vector.begin());
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 1024)
+    for (uint64_t i = 0; i < wwt_.size(); ++i) {
+        vector[i] = wwt_[i];
+    }
     return vector;
 }
 
