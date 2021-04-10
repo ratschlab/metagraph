@@ -223,19 +223,24 @@ Rainbowfish::get_rows(std::vector<Row> *rows, size_t num_threads) const {
     ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
                           utils::LessFirst(), num_threads);
 
-    std::vector<SetBitPositions> unique_rows;
-
+    std::vector<uint64_t> codes;
+    codes.reserve(row_codes.size());
     uint64_t last_code = std::numeric_limits<uint64_t>::max();
-
-    // TODO: use multiple threads
     for (const auto &[code, i] : row_codes) {
         if (code != last_code) {
-            unique_rows.push_back(
-                reduced_matrix_[code / buffer_size_]->get_row(code % buffer_size_)
-            );
+            codes.push_back(code);
             last_code = code;
         }
-        (*rows)[i] = unique_rows.size() - 1;
+        (*rows)[i] = codes.size() - 1;
+    }
+    row_codes = {};
+
+    std::vector<SetBitPositions> unique_rows(codes.size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < codes.size(); ++i) {
+        uint64_t c = codes[i];
+        unique_rows[i] = reduced_matrix_[c / buffer_size_]->get_row(c % buffer_size_);
     }
 
     return unique_rows;

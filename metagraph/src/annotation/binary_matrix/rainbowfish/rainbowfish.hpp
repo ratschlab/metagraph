@@ -13,7 +13,7 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-class Rainbowfish : public BinaryMatrix {
+class Rainbowfish : public RainbowMatrix {
   public:
     Rainbowfish() {}
     Rainbowfish(const std::function<void(RowCallback)> &call_rows,
