@@ -1,4 +1,3 @@
-import os
 import itertools
 
 from metagraph_workflows import utils
@@ -25,26 +24,14 @@ def get_seqs_file_list_path():
     return seqs_file_list_path
 
 
-mem_cap_factor=0.9
 disk_cap_factor=0.9
-
-def get_mem(key):
-    return config[key] if key in config else max_memory_mb
 
 def get_disk(key):
     return config[key] if key in config else config['default_disk_mb']
 
-def get_mem_cap(wildcards, resources):
-    return max(int(resources.mem_mb * mem_cap_factor/1024), 1)
-
 def get_disk_cap(wilcards, resources):
     return max(int(resources.disk_mb * disk_cap_factor/1024), 1)
 
-
-def columns_size_mb(columns_file):
-    with open(columns_file) as f:
-        col_file_size_bytes = sum(os.stat(l.strip()).st_size for l in f)
-        return col_file_size_bytes/1024**2
 
 def generate_col_paths(seq_file):
     with open(seq_file) as f:

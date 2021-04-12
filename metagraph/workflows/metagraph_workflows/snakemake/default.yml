@@ -10,7 +10,6 @@ annotation_labels_source: 'sequence_headers'
 exec_cmd: 'metagraph'
 
 default_disk_mb: 10000
-max_memory_mb: 2000
-
+max_memory_mb: 4048
 
 

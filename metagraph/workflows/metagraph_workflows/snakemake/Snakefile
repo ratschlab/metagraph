@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from psutil import virtual_memory
-
 from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
+from metagraph_workflows.resource_management import TransformRdStage1Resources, TransformRdStage2Resources
 
 include: "common.smk"
 
@@ -24,10 +23,8 @@ exec_cmd=config['exec_cmd']
 
 max_threads=take_value_or_default('max_threads', workflow.cores)
 
-# if not set, use half of the _installed_ memory. Arbitrary heuristic. Not using
-# _available_ memory, as otherwise behaviour between runs on the same machine
-# could change significantly for no apparent reason
-max_memory_mb=take_value_or_default('max_memory_mb', virtual_memory().total/1024**2/2)
+# TODO
+max_memory_mb=take_value_or_default('max_memory_mb', 4000)
 
 verbose = config['verbose'] if 'verbose' in config else False
 verbose_opt=' -v ' if verbose else ''
@@ -174,7 +171,9 @@ transform_row_diff_overhead_mb=2000
 
 rd_cols_dir = wdir/f'{graph}_rd_cols'
 
-rule transform_row_diff_stage0:
+from metagraph_workflows.resource_management import TransformRdStage0Resources
+
+rule transform_rd_stage0:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
@@ -182,9 +181,9 @@ rule transform_row_diff_stage0:
         columns_rd_row_count=rd_cols_dir/'vector.row_count'
     threads: max_threads
     resources:
-        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+        mem_mb=TransformRdStage0Resources().get_mem(config)
     params:
-        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        mem_cap=TransformRdStage0Resources().get_mem_cap(config),
         log_writing=get_log_opt("transform_row_diff_opt")
     shell:
         """
@@ -200,7 +199,7 @@ rule transform_row_diff_stage0:
             -o {output.columns_rd_row_count} 2>&1 {params.log_writing}
         """
 
-rule transform_row_diff_stage1:
+rule transform_rd_stage1:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
@@ -214,9 +213,9 @@ rule transform_row_diff_stage1:
         cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
     threads: max_threads
     resources:
-        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+        mem_mb=TransformRdStage1Resources().get_mem(config)
     params:
-        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        mem_cap=TransformRdStage1Resources().get_mem_cap(config),
         log_writing=get_log_opt("transform_row_diff_opt")
     shell:
         """
@@ -229,7 +228,8 @@ rule transform_row_diff_stage1:
             -o {output.cols_rd_vectors} 2>&1 {params.log_writing}
         """
 
-rule transform_row_diff_stage2:
+
+rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
         columns_file=columns_file,
@@ -239,9 +239,9 @@ rule transform_row_diff_stage2:
         rd_cols_done=touch(rd_cols_dir/DONE)
     threads: max_threads
     resources:
-        mem_mb=lambda wildcards, input: int(min(transform_row_diff_overhead_mb + columns_size_mb(input.columns_file), max_memory_mb))
+        mem_mb=TransformRdStage2Resources().get_mem(config),
     params:
-        mem_cap=lambda wildcards, resources: int((resources.mem_mb - transform_row_diff_overhead_mb)/1024.0) + 1,
+        mem_cap=TransformRdStage2Resources().get_mem_cap(config),
         log_writing=get_log_opt("transform_row_diff_opt")
     shell:
         """
@@ -257,8 +257,8 @@ rule transform_row_diff_stage2:
 
 rule annotate_row_diff_brwt:
     input:
-        anchors=rules.transform_row_diff_stage2.output.anchors,
-        rd_cols_done=rules.transform_row_diff_stage2.output.rd_cols_done,
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
         dbg_graph=graph_path
     output:
         annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
