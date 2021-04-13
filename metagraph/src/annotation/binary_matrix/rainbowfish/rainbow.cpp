@@ -132,6 +132,25 @@ Rainbow<MatrixType>::get_column(Column column) const {
 }
 
 template <class MatrixType>
+void
+Rainbow<MatrixType>::slice_columns(const std::vector<Column> &columns,
+                                   const ColumnCallback &callback) const {
+    uint64_t nrows = num_rows();
+    sdsl::bit_vector code_column(reduced_matrix_.num_rows());
+    reduced_matrix_.slice_columns(columns, [&](Column j, bitmap&& rows) {
+        sdsl::util::set_to_value(code_column, false);
+        rows.add_to(&code_column);
+
+        callback(j, bitmap_generator([&](const auto &index_callback) {
+            for (uint64_t i = 0; i < nrows; ++i) {
+                if (code_column[get_code(i)])
+                    index_callback(i);
+            }
+        }, nrows));
+    });
+}
+
+template <class MatrixType>
 bool Rainbow<MatrixType>::load(std::istream &in) {
     try {
         num_relations_ = load_number(in);

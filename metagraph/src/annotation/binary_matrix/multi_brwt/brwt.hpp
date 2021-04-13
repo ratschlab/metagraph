@@ -35,6 +35,9 @@ class BRWT : public BinaryMatrix {
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
 
+    void slice_columns(const std::vector<Column> &columns,
+                       const ColumnCallback &callback) const override;
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 

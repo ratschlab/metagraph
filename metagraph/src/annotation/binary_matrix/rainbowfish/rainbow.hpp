@@ -40,6 +40,9 @@ class Rainbow : public RainbowMatrix {
                                           size_t num_threads = 1) const override;
     std::vector<Row> get_column(Column column) const override;
 
+    void slice_columns(const std::vector<Column> &columns,
+                       const ColumnCallback &callback) const override;
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
