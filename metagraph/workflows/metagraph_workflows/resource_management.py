@@ -25,7 +25,7 @@ class ResourceConfig():
         self.rule_name = rule_name
 
     def get_mem(self, config):
-        def _get_mem():
+        def _get_mem(wildcards):
             mem_mb = get_rule_specific_config(self.rule_name, MEM_MB_KEY,
                                               config)
             if not mem_mb:

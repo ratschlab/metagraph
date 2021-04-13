@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
-from metagraph_workflows.resource_management import TransformRdStage1Resources, TransformRdStage2Resources
+from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
 
 include: "common.smk"
 
@@ -57,6 +57,7 @@ rule all:
 
 include: 'build.smk'
 
+rule_name="annotate"
 rule annotate:
     input:
         seqs=seqs_file_list_path,
@@ -65,8 +66,10 @@ rule annotate:
         done=touch(annotation_path_done),
         column_anno_files=generate_col_paths(seqs_file_list_path)
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("annotate"),
+        log_writing=get_log_opt(rule_name),
     shell:
         """
         OUT_DIR=$(dirname {output.done})
@@ -81,6 +84,7 @@ rule annotate:
           -o $OUT_DIR 2>&1 {params.log_writing}
         """
 
+rule_name="generate_column_list"
 rule generate_column_list:
     input: rules.annotate.output.column_anno_files
     output: columns_file
@@ -91,14 +95,17 @@ rule generate_column_list:
 
 max_path_length=None
 
+rule_name="generate_brwt_linkage"
 rule generate_brwt_linkage:
     input:
         columns_file=columns_file,
     output:
         linkage=wdir/f"{graph}.linkage.txt"
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("brwt_linkage"),
+        log_writing=get_log_opt(rule_name),
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -112,12 +119,15 @@ rule generate_brwt_linkage:
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
 
+rule_name="transform_annotation"
 rule transform_annotation:
     input:
         columns_file=columns_file,
     output:
         annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         log_writing=get_log_opt("annotate_{anno_type}")
     shell:
@@ -129,6 +139,7 @@ rule transform_annotation:
         """
 
 
+rule_name="annotate_brwt"
 rule annotate_brwt:
     input:
         linkage=wdir/f"{graph}.linkage.txt",
@@ -136,8 +147,10 @@ rule annotate_brwt:
     output:
         annotations=wdir/f'{graph}.brwt.annodbg',
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("annotate_brwt")
+        log_writing=get_log_opt(rule_name)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -149,14 +162,17 @@ rule annotate_brwt:
         """
 
 
+rule_name="relax_brwt"
 rule relax_brwt:
     input:
         brwt_annots=wdir/f'{graph}.{{brwt_fmt}}.annodbg',
     output:
         annotations=wdir/f'{graph}.relax.{{brwt_fmt}}.annodbg',
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("relax_brwt"),
+        log_writing=get_log_opt(rule_name),
     shell:
         """        
         {exec_cmd} relax_brwt \
@@ -173,6 +189,7 @@ rd_cols_dir = wdir/f'{graph}_rd_cols'
 
 from metagraph_workflows.resource_management import TransformRdStage0Resources
 
+rule_name="transform_rd_stage0"
 rule transform_rd_stage0:
     input:
         dbg_graph=graph_path,
@@ -184,7 +201,7 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage0Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt"),
+        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
@@ -200,6 +217,7 @@ rule transform_rd_stage0:
             -o {output.columns_rd_row_count} {params.tempdir_opt} 2>&1 {params.log_writing}
         """
 
+rule_name="transform_rd_stage1"
 rule transform_rd_stage1:
     input:
         dbg_graph=graph_path,
@@ -217,7 +235,7 @@ rule transform_rd_stage1:
         mem_mb=TransformRdStage1Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage1Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt"),
+        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
@@ -231,6 +249,7 @@ rule transform_rd_stage1:
         """
 
 
+rule_name="transform_rd_stage2"
 rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
@@ -244,7 +263,7 @@ rule transform_rd_stage2:
         mem_mb=TransformRdStage2Resources().get_mem(config),
     params:
         mem_cap=TransformRdStage2Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt"),
+        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
@@ -258,6 +277,7 @@ rule transform_rd_stage2:
         """
 
 
+rule_name="annotate_row_diff_brwt"
 rule annotate_row_diff_brwt:
     input:
         anchors=rules.transform_rd_stage2.output.anchors,
@@ -267,8 +287,10 @@ rule annotate_row_diff_brwt:
         annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
         linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("annotate_row_diff_brwt"),
+        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
@@ -284,14 +306,17 @@ rule annotate_row_diff_brwt:
         """
 
 
+rule_name="relax_row_diff_brwt"
 rule relax_row_diff_brwt:
     input:
         brwt_annots=rules.annotate_row_diff_brwt.output.annotations,
     output:
         annotations_relaxed=wdir/f'{graph}.relax.row_diff_brwt.annodbg',
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
-        log_writing=get_log_opt("relax_row_diff_brwt"),
+        log_writing=get_log_opt(rule_name),
     shell:
         """        
         {exec_cmd} relax_brwt \

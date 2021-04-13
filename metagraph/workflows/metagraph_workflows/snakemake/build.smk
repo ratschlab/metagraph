@@ -6,22 +6,22 @@ if build_primary:
 else:
     ruleorder: build > build_primary
 
-from metagraph_workflows.resource_management import BuildResources
+from metagraph_workflows.resource_management import BuildResources, ResourceConfig
 from metagraph_workflows import cfg_utils, constants
 
-rule_name='build'
+rule_name="build"
 rule build:
     input: seqs_file_list_path
     output: graph_path
-    threads: max_threads 
+    threads: max_threads
+    resources:
+        mem_mb=BuildResources().get_mem(config),
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
         mem_cap=BuildResources().get_mem_cap(config),
         disk_cap=cfg_utils.get_rule_specific_config(rule_name, constants.DISK_CAP_MB_KEY, config),
         log_writing=get_log_opt(rule_name)
-    resources:
-        mem_mb=BuildResources().get_mem(config),
     shell:
         """
         cat {input} | {exec_cmd} build \
@@ -40,10 +40,13 @@ rule build:
 
 canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 
+rule_name="build_canonical_graph"
 rule build_canonical_graph:
     input: seqs_file_list_path
     output: canonical_graph_path
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         k=config['k'],
     shell:
@@ -51,20 +54,26 @@ rule build_canonical_graph:
         cat {input} | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output}
         """
 
+rule_name="primarize_canonical_graph"
 rule primarize_canonical_graph:
     input: canonical_graph_path
     output: wdir/f'{graph}_primary.fasta.gz'
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     shell:
         """
         echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output}
         """
 
 
+rule_name="build_primary"
 rule build_primary:
     input: wdir/f'{graph}_primary.fasta.gz'
     output: graph_path
     threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         k=config['k'],
     shell:
