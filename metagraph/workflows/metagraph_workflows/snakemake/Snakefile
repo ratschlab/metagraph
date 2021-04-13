@@ -184,7 +184,8 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage0Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt")
+        log_writing=get_log_opt("transform_row_diff_opt"),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
@@ -196,7 +197,7 @@ rule transform_rd_stage0:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.columns_rd_row_count} 2>&1 {params.log_writing}
+            -o {output.columns_rd_row_count} {params.tempdir_opt} 2>&1 {params.log_writing}
         """
 
 rule transform_rd_stage1:
@@ -216,7 +217,8 @@ rule transform_rd_stage1:
         mem_mb=TransformRdStage1Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage1Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt")
+        log_writing=get_log_opt("transform_row_diff_opt"),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -225,7 +227,7 @@ rule transform_rd_stage1:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.cols_rd_vectors} 2>&1 {params.log_writing}
+            -o {output.cols_rd_vectors} {params.tempdir_opt} 2>&1 {params.log_writing}
         """
 
 
@@ -242,7 +244,8 @@ rule transform_rd_stage2:
         mem_mb=TransformRdStage2Resources().get_mem(config),
     params:
         mem_cap=TransformRdStage2Resources().get_mem_cap(config),
-        log_writing=get_log_opt("transform_row_diff_opt")
+        log_writing=get_log_opt("transform_row_diff_opt"),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -251,7 +254,7 @@ rule transform_rd_stage2:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.rd_cols_done} 2>&1 {params.log_writing}
+            -o {output.rd_cols_done} {params.tempdir_opt} 2>&1 {params.log_writing}
         """
 
 
@@ -266,6 +269,7 @@ rule annotate_row_diff_brwt:
     threads: max_threads
     params:
         log_writing=get_log_opt("annotate_row_diff_brwt"),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
         """
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
@@ -276,7 +280,7 @@ rule annotate_row_diff_brwt:
             --parallel-nodes 5 \
             --parallel {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} 2>&1 {params.log_writing}
+            -o {output.annotations} {params.tempdir_opt} 2>&1 {params.log_writing}
         """
 
 

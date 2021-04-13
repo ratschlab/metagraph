@@ -2,23 +2,12 @@ import logging
 import os
 
 from metagraph_workflows import constants
-
-RULE_CONFIGS_KEY = 'rules'
-
-MEM_MB_KEY = 'mem_mb'
-DISK_MB_KEY = 'disk_mb'
-
-MEM_CAP_MB_KEY = 'mem_cap_mb'
+from metagraph_workflows.cfg_utils import get_rule_specific_config
+from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
+    MEM_CAP_MB_KEY
 
 BASE_MEM = 2 * 1024
 FALLBACK_MAX_MEM = 4 * 1024
-
-
-def _get_rule_specific_config(rule, key, config):
-    if RULE_CONFIGS_KEY in config and rule in config[
-        RULE_CONFIGS_KEY] and key in config[RULE_CONFIGS_KEY][rule]:
-        return config[RULE_CONFIGS_KEY][rule][key]
-    return None
 
 
 def _get_max_memory(config):
@@ -37,8 +26,8 @@ class ResourceConfig():
 
     def get_mem(self, config):
         def _get_mem():
-            mem_mb = _get_rule_specific_config(self.rule_name, MEM_MB_KEY,
-                                               config)
+            mem_mb = get_rule_specific_config(self.rule_name, MEM_MB_KEY,
+                                              config)
             if not mem_mb:
                 mem_mb = _get_max_memory(config)
             return mem_mb
@@ -50,7 +39,7 @@ class ResourceConfig():
 
     def get_disk(self, config):
         def _get_disk():
-            disk_mb = _get_rule_specific_config(self.rule_name, DISK_MB_KEY,
+            disk_mb = get_rule_specific_config(self.rule_name, DISK_MB_KEY,
                                                config)
             if not disk_mb:
                 disk_mb = _get_max_memory(config)
@@ -68,14 +57,14 @@ class SupportsMemoryCap(ResourceConfig):
             estimated_base_memory = self.get_base_mem_estimate(wildcards, input,
                                                                threads)
 
-            mem_mb = _get_rule_specific_config(self.rule_name, MEM_MB_KEY,
-                                               config)
+            mem_mb = get_rule_specific_config(self.rule_name, MEM_MB_KEY,
+                                              config)
 
             if not mem_mb:
                 mem_mb = _get_max_memory(config)
 
-            mem_cap_mb = _get_rule_specific_config(self.rule_name,
-                                                   MEM_CAP_MB_KEY, config)
+            mem_cap_mb = get_rule_specific_config(self.rule_name,
+                                                  MEM_CAP_MB_KEY, config)
 
             if mem_cap_mb:
                 estimated_total_mem = mem_cap_mb + estimated_base_memory
@@ -94,8 +83,8 @@ class SupportsMemoryCap(ResourceConfig):
 
     def get_mem_cap(self, config):
         def _get_mem_cap(wildcards, input, threads, resources):
-            mem_cap_mb = _get_rule_specific_config(self.rule_name,
-                                                   MEM_CAP_MB_KEY, config)
+            mem_cap_mb = get_rule_specific_config(self.rule_name,
+                                                  MEM_CAP_MB_KEY, config)
 
             if not mem_cap_mb:
                 avail_mem_mb = resources.get('mem_mb', _get_max_memory(config))
