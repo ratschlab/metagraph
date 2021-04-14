@@ -38,6 +38,7 @@ class GraphClientJson:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               print_signature: bool = False,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
@@ -59,7 +60,8 @@ class GraphClientJson:
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
-                      "num_labels": top_labels}
+                      "num_labels": top_labels,
+                      "print_signature": print_signature}
 
         return self._json_seq_query(sequence, param_dict, "search")
 
@@ -139,12 +141,13 @@ class GraphClient:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               print_signature: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
         json_obj = self._json_client.search(sequence, top_labels,
-                                            discovery_threshold,
+                                            discovery_threshold, print_signature,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -182,6 +185,7 @@ class MultiGraphClient:
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
+               print_signature: bool = False,
                align: bool = False,
                **align_params) -> Dict[str, pd.DataFrame]:
         """See parameters for alignment `align_params` in align()"""
@@ -189,7 +193,7 @@ class MultiGraphClient:
         result = {}
         for name, graph_client in self.graphs.items():
             result[name] = graph_client.search(sequence, top_labels,
-                                               discovery_threshold,
+                                               discovery_threshold, print_signature,
                                                align, **align_params)
 
         return result
