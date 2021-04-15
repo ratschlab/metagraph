@@ -18,13 +18,13 @@ namespace matrix {
  * positions in a binary matrix. These values are indexed by rank1 called
  * on binary columns of the indexing matrix.
  */
-template <class BaseMatrix>
+template <class BaseMatrix, class ColumnValues = sdsl::int_vector<>>
 class CSCMatrix : public IntMatrix {
   public:
     CSCMatrix() {}
 
     CSCMatrix(BaseMatrix&& index_matrix,
-              std::vector<sdsl::int_vector<>>&& column_values)
+              std::vector<ColumnValues>&& column_values)
       : binary_matrix_(std::move(index_matrix)),
         column_values_(column_values) {}
 
@@ -57,13 +57,13 @@ class CSCMatrix : public IntMatrix {
 
   private:
     BaseMatrix binary_matrix_;
-    std::vector<sdsl::int_vector<>> column_values_;
+    std::vector<ColumnValues> column_values_;
 };
 
 
-template <class BaseMatrix>
-inline typename CSCMatrix<BaseMatrix>::RowValues
-CSCMatrix<BaseMatrix>::get_row_values(Row row) const {
+template <class BaseMatrix, class ColumnValues>
+inline typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues
+CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(Row row) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(row);
     RowValues row_values;
     row_values.reserve(column_ranks.size());
@@ -74,9 +74,9 @@ CSCMatrix<BaseMatrix>::get_row_values(Row row) const {
     return row_values;
 }
 
-template <class BaseMatrix>
-inline std::vector<typename CSCMatrix<BaseMatrix>::RowValues>
-CSCMatrix<BaseMatrix>::get_row_values(const std::vector<Row> &rows) const {
+template <class BaseMatrix, class ColumnValues>
+inline std::vector<typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues>
+CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(const std::vector<Row> &rows) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(rows);
     std::vector<RowValues> row_values(rows.size());
     // TODO: reshape?
@@ -90,8 +90,8 @@ CSCMatrix<BaseMatrix>::get_row_values(const std::vector<Row> &rows) const {
     return row_values;
 }
 
-template <class BaseMatrix>
-inline bool CSCMatrix<BaseMatrix>::load(std::istream &in) {
+template <class BaseMatrix, class ColumnValues>
+inline bool CSCMatrix<BaseMatrix, ColumnValues>::load(std::istream &in) {
     column_values_.clear();
 
     if (!binary_matrix_.load(in))
@@ -109,8 +109,8 @@ inline bool CSCMatrix<BaseMatrix>::load(std::istream &in) {
     return true;
 }
 
-template <class BaseMatrix>
-inline void CSCMatrix<BaseMatrix>::serialize(std::ostream &out) const {
+template <class BaseMatrix, class ColumnValues>
+inline void CSCMatrix<BaseMatrix, ColumnValues>::serialize(std::ostream &out) const {
     binary_matrix_.serialize(out);
     for (const auto &col : column_values_) {
         col.serialize(out);

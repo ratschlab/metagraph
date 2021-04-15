@@ -1,6 +1,8 @@
 #ifndef __STATIC_ANNOTATOR_DEFS_HPP__
 #define __STATIC_ANNOTATOR_DEFS_HPP__
 
+#include <sdsl/dac_vector.hpp>
+
 #include "annotation_matrix.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
@@ -39,7 +41,7 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT>, std::string> IntMultiBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string> IntMultiBRWTAnnotator;
 
 
 template <>
