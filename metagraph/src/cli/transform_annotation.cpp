@@ -856,6 +856,9 @@ int relax_multi_brwt(Config *config) {
         case Config::RowDiffBRWT:
             annotator = std::make_unique<RowDiffBRWTAnnotator>();
             break;
+        case Config::IntBRWT:
+            annotator = std::make_unique<IntMultiBRWTAnnotator>();
+            break;
         default:
             logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
             exit(1);
@@ -873,7 +876,9 @@ int relax_multi_brwt(Config *config) {
 
     const binmat::BRWT &matrix = anno_type == Config::BRWT
             ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
-            : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs();
+            : (anno_type == Config::IntBRWT
+                ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
+                : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs());
     relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
                get_num_threads());
 

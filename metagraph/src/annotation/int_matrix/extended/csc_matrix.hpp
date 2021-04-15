@@ -55,6 +55,8 @@ class CSCMatrix : public IntMatrix {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
+    const BaseMatrix& get_binary_matrix() const { return binary_matrix_; }
+
   private:
     BaseMatrix binary_matrix_;
     std::vector<ColumnValues> column_values_;
