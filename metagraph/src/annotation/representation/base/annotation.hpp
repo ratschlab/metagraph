@@ -52,7 +52,7 @@ class MultiLabelAnnotation
     // for each label and index 'indices[i]' add count 'counts[i]'
     virtual void add_label_counts(const std::vector<Index> &indices,
                                   const VLabels &labels,
-                                  const std::vector<uint32_t> &counts);
+                                  const std::vector<uint64_t> &counts);
 
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;

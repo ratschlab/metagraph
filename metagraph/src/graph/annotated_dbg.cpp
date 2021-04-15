@@ -72,7 +72,7 @@ void AnnotatedSequenceGraph
 
 void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
                                    const std::vector<Label> &labels,
-                                   std::vector<uint32_t>&& kmer_counts) {
+                                   std::vector<uint64_t>&& kmer_counts) {
     assert(check_compatibility());
     assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
 

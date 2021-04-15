@@ -1059,6 +1059,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anchors [STR]\t\tlocation of the anchor file (for row_diff) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
+            fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");

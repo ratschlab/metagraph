@@ -20,15 +20,13 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-const uint8_t kCountBits = 8;
-const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
-
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
-                                          uint64_t buffer_size_bytes)
+                                          uint64_t buffer_size_bytes,
+                                          uint8_t count_width)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
         buffer_size_bytes_(buffer_size_bytes),
@@ -38,16 +36,19 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                             assert(column_builder);
                             this->flush(j, column_builder);
                             delete column_builder;
-                        }) {}
+                        }),
+        count_width_(count_width),
+        max_count_(sdsl::bits::lo_set[count_width]) {}
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
                                           const std::string &column_label,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
-                                          uint64_t buffer_size_bytes)
+                                          uint64_t buffer_size_bytes,
+                                          uint8_t count_width)
       : ColumnCompressed(column.size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes) {
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
     label_encoder_.insert_and_encode(column_label);
     bitmatrix_.resize(1);
     cached_columns_.Put(0, new bitmap_vector(std::move(column)));
@@ -93,7 +94,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 template <typename Label>
 void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
                                                const VLabels &labels,
-                                               const std::vector<uint32_t> &counts) {
+                                               const std::vector<uint64_t> &counts) {
     assert(indices.size() == counts.size());
 
     const auto &columns = get_matrix().data();
@@ -105,7 +106,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         const auto j = label_encoder_.insert_and_encode(label);
 
         if (!relation_counts_[j].size()) {
-            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
+            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, count_width_);
 
         } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
             logger->error("Binary relation matrix was changed while adding relation counts");
@@ -114,9 +115,9 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
         for (size_t i = 0; i < indices.size(); ++i) {
             if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
-                uint32_t count = std::min(counts[i], kMaxCount);
+                uint64_t count = std::min(counts[i], max_count_);
                 sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
-                ref = std::min((uint32_t)ref, kMaxCount - count) + count;
+                ref = std::min((uint64_t)ref, max_count_ - count) + count;
 
             } else {
                 logger->warn("Trying to add count {} for non-annotated object {}."
@@ -183,7 +184,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -199,7 +200,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
     }
 
     logger->info("Num relation counts: {}", num_counts);

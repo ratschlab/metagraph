@@ -77,7 +77,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // add k-mer counts to the annotation
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
-                         std::vector<uint32_t>&& kmer_counts);
+                         std::vector<uint64_t>&& kmer_counts);
 
     /*********************** Special queries **********************/
 
