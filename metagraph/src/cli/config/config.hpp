@@ -147,6 +147,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     std::string linkage_file;
+    std::string intersected_columns;
 
     std::filesystem::path tmp_dir;
 

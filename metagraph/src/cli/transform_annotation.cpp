@@ -508,6 +508,48 @@ int transform_annotation(Config *config) {
         return 0;
     }
 
+    // TODO: move to column_op
+    if (config->intersected_columns.size()) {
+        ColumnCompressed<> base_columns(0);
+        if (!base_columns.load(config->intersected_columns)) {
+            logger->error("Cannot load base columns from file '{}'",
+                          config->intersected_columns);
+            exit(1);
+        }
+
+        logger->trace("Loading input annotations and computing the inner product...");
+
+        for (const auto &file : files) {
+            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+                    = initialize_annotation(file, *config);
+            if (!annotator->load(file)) {
+                logger->error("Cannot load annotations from file '{}'", file);
+                exit(1);
+            }
+
+            for (const std::string &base_label : base_columns.get_all_labels()) {
+                std::vector<std::pair<uint64_t, size_t>> col;
+                base_columns.get_column(base_label).call_ones([&col](uint64_t i) {
+                    col.emplace_back(i, 1);
+                });
+                // TODO: make parallel (call sum_rows on batches)
+                auto row_sum = annotator->get_matrix().sum_rows(std::move(col),
+                                                                config->min_count,
+                                                                config->max_count);
+
+                std::cout << fmt::format("({}<{}>, {}<*>):", config->intersected_columns,
+                                         base_label, file);
+                for (auto [j, sum] : row_sum) {
+                    const std::string &label = annotator->get_label_encoder().decode(j);
+                    std::cout << fmt::format("\t<{}>:{}", label, sum);
+                }
+                std::cout << "\n";
+            }
+        }
+
+        return 0;
+    }
+
     /********************************************************/
     /****************** convert annotation ******************/
     /********************************************************/
