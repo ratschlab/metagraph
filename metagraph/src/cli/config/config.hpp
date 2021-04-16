@@ -120,14 +120,15 @@ class Config {
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;
-    double min_count_quantile = 0.;
-    double max_count_quantile = 1.;
+    double min_count_quantile = 0.0;
+    double max_count_quantile = 1.0;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
-    double intersect_ratio = 1;
+    double min_fraction = 0.0;
+    double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;

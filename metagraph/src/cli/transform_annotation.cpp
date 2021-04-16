@@ -443,6 +443,15 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
+        const uint64_t min_cols
+            = std::max((uint64_t)std::ceil(num_columns * config->min_fraction),
+                       (uint64_t)config->min_count);
+        const uint64_t max_cols
+            = std::min((uint64_t)std::floor(num_columns * config->max_fraction),
+                       (uint64_t)config->max_count);
+
+        // TODO: set width to log2(max_cols + 1) but make sure atomic
+        //       increments can't lead to overflow
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns",
                                  std::cerr, !get_verbose());
@@ -474,13 +483,12 @@ int transform_annotation(Config *config) {
         thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        uint64_t min_cols = num_columns * config->intersect_ratio;
-        logger->trace("Selecting k-mers annotated in >= {} / {} columns",
-                      min_cols, num_columns);
+        logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
+                      min_cols, max_cols, num_columns);
 
         sdsl::bit_vector intersection(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
-            if (sum[i] >= min_cols) {
+            if (sum[i] >= min_cols && sum[i] <= max_cols) {
                 intersection[i] = true;
             }
         }

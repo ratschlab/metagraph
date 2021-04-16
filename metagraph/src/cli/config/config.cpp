@@ -175,8 +175,10 @@ Config::Config(int argc, char *argv[]) {
             }
         } else if (!strcmp(argv[i], "--intersect-columns")) {
             intersect_columns = true;
-        } else if (!strcmp(argv[i], "--intersect-ratio")) {
-            intersect_ratio = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--min-fraction")) {
+            min_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-fraction")) {
+            max_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -432,8 +434,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (intersect_ratio < 0 || intersect_ratio > 1) {
-        std::cerr << "Error: intersection ratio must be in range [0, 1]"
+    if (min_fraction < 0 || min_fraction > 1 || max_fraction < 0 || max_fraction > 1) {
+        std::cerr << "Error: min_fraction and max_fraction must be in range [0, 1]"
                   << std::endl;
         print_usage_and_exit = true;
     }
@@ -1091,7 +1093,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --intersect-columns \t\tcompute intersection of the annotation columns [off]\n");
-            fprintf(stderr, "\t   --intersect-ratio [FLOAT] \tinclude k-mer if it appears in this ratio of columns [1.0]\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
+            fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
+            fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
