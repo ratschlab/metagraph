@@ -226,6 +226,12 @@ class TestAPIClient(TestAPIBase):
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
+    def test_api_simple_query_w_signature_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, print_signature=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
