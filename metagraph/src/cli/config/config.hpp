@@ -57,7 +57,7 @@ class Config {
     bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
-    bool intersect_columns = false;
+    bool aggregate_columns = false;
 
     unsigned int k = 3;
 

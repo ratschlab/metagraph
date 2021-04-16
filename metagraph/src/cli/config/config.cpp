@@ -173,8 +173,8 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
-        } else if (!strcmp(argv[i], "--intersect-columns")) {
-            intersect_columns = true;
+        } else if (!strcmp(argv[i], "--aggregate-columns")) {
+            aggregate_columns = true;
         } else if (!strcmp(argv[i], "--min-fraction")) {
             min_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--max-fraction")) {
@@ -1092,7 +1092,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform_anno -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --intersect-columns \t\tcompute intersection of the annotation columns [off]\n");
+            fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
+            fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
             fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");

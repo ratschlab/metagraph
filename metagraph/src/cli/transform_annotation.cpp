@@ -434,12 +434,12 @@ int transform_annotation(Config *config) {
     /**************** operations on columns *****************/
     /********************************************************/
 
-    if (config->intersect_columns) {
+    if (config->aggregate_columns) {
         logger->trace("Loading annotation...");
 
         uint64_t num_columns = get_num_columns(files, Config::ColumnCompressed);
         if (!num_columns) {
-            logger->warn("No input columns to intersect");
+            logger->warn("No input columns to aggregate");
             exit(1);
         }
 
@@ -486,23 +486,25 @@ int transform_annotation(Config *config) {
         logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
                       min_cols, max_cols, num_columns);
 
-        sdsl::bit_vector intersection(sum.size(), false);
+        sdsl::bit_vector mask(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
             if (sum[i] >= min_cols && sum[i] <= max_cols) {
-                intersection[i] = true;
+                mask[i] = true;
             }
         }
         sum = sdsl::int_vector<>();
 
-        ColumnCompressed<> intersected_column(std::move(intersection),
-                                              "intersection");
+        const std::string &col_name = config->anno_labels.size()
+                                        ? config->anno_labels[0]
+                                        : "mask";
+        ColumnCompressed<> aggregated_column(std::move(mask), col_name);
 
         const auto &outfname = utils::remove_suffix(config->outfbase,
                                                     ColumnCompressed<>::kExtension)
                                                 + ColumnCompressed<>::kExtension;
-        intersected_column.serialize(outfname);
-        logger->trace("Columns are intersected and the resulting column"
-                      " is serialized to {}", outfname);
+        aggregated_column.serialize(outfname);
+        logger->trace("Columns are aggregated and the resulting column '{}'"
+                      " serialized to {}", col_name, outfname);
         return 0;
     }
 
