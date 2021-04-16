@@ -1146,7 +1146,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path out_dir,
                          fs::path swap_dir,
                          RowDiffStage construction_stage,
-                         fs::path count_vector_fname) {
+                         fs::path count_vector_fname,
+                         bool with_counts) {
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1184,6 +1185,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         for ( ; i < files.size(); ++i) {
             // also add some space for buffers for each column
             uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
+            if (with_counts) {
+                // also add k-mer counts
+                const auto &counts_fname = files[i] + ".counts";
+                file_size += fs::file_size(counts_fname);
+                if (!fs::exists(counts_fname)) {
+                    logger->warn("Could not find counts for annotation {}, skipped",
+                                 counts_fname);
+                    continue;
+                }
+            }
             if (file_size > mem_bytes) {
                 logger->warn("Not enough memory to process {}, requires {} MB, skipped",
                              files[i], file_size / 1e6);
@@ -1214,7 +1225,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         } else {
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
-                    construction_stage == RowDiffStage::COMPUTE_REDUCTION);
+                    construction_stage == RowDiffStage::COMPUTE_REDUCTION,
+                    with_counts);
         }
 
         logger->trace("Batch processed in {} sec", timer.elapsed());
