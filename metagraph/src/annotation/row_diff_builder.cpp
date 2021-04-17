@@ -810,7 +810,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     // get bit at position |i| or its relation count
     auto get_value = [&](const bit_vector &col,
                          size_t s, size_t j, uint64_t i) -> uint64_t {
-        if constexpr(!with_counts) {
+        if (!with_counts) {
             return col[i];
         } else {
             if (uint64_t rk = col.conditional_rank1(i)) {
