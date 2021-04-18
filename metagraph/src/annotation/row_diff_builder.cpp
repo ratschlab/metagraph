@@ -647,22 +647,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                bool with_counts) {
     if (with_counts) {
         convert_batch_to_row_diff<std::pair<uint64_t, uint64_t>>(
-                pred_succ_fprefix,
-                source_files,
-                col_out_dir,
-                swap_dir,
-                row_reduction_fname,
-                buf_size_bytes,
-                compute_row_reduction);
+                pred_succ_fprefix, source_files, col_out_dir, swap_dir,
+                row_reduction_fname, buf_size_bytes, compute_row_reduction);
     } else {
         convert_batch_to_row_diff<uint64_t>(
-                pred_succ_fprefix,
-                source_files,
-                col_out_dir,
-                swap_dir,
-                row_reduction_fname,
-                buf_size_bytes,
-                compute_row_reduction);
+                pred_succ_fprefix, source_files, col_out_dir, swap_dir,
+                row_reduction_fname, buf_size_bytes, compute_row_reduction);
     }
 }
 
@@ -955,7 +945,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             if constexpr(with_counts) {
                 // diff counts may be negative, hence we need wider integers
                 counts[l_idx][j] = sdsl::int_vector<>(row_diff_bits[l_idx][j], 0,
-                                                      counts[l_idx][j].width() * 2);
+                                                      std::min(counts[l_idx][j].width() * 2, 64));
             }
 
             auto call_ones = [&](const std::function<void(uint64_t)> &call) {

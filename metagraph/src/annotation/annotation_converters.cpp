@@ -1187,7 +1187,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
             if (with_counts) {
                 // also add k-mer counts
-                const auto &counts_fname = files[i] + ".counts";
+                const auto &counts_fname
+                    = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                + ColumnCompressed<>::kCountExtension;
                 file_size += fs::file_size(counts_fname);
                 if (!fs::exists(counts_fname)) {
                     logger->warn("Could not find counts for annotation {}, skipped",
