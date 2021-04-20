@@ -12,20 +12,6 @@ namespace annot {
 namespace binmat {
 
 template <class BaseMatrix>
-void RowDiff<BaseMatrix>::serialize(const std::string &filename) const {
-    std::ofstream f(filename, ios::binary);
-    serialize(f);
-    f.close();
-}
-
-template <class BaseMatrix>
-bool RowDiff<BaseMatrix>::load(const std::string &filename) {
-    std::ifstream f(filename, ios::binary);
-    bool result = load(f);
-    return result;
-}
-
-template <class BaseMatrix>
 void RowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read anchor file: {}", filename);
