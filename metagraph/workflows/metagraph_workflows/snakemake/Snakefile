@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from metagraph_workflows import rule_utils, constants
 from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
 from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
 
@@ -47,6 +48,12 @@ columns_file=wdir/'columns.txt'
 
 seqs_file_list_path=get_seqs_file_list_path()
 
+contigs_dir=wdir/f'{graph}_contigs'
+
+seq_ids_dict = {}
+if not config[constants.SAMPLE_IDS_PATH]:
+    seq_ids_dict = rule_utils.derive_sample_dictionary(seqs_file_list_path)
+
 localrules: generate_column_list
 
 rule all:
@@ -60,21 +67,29 @@ include: 'build.smk'
 rule_name="annotate"
 rule annotate:
     input:
-        seqs=seqs_file_list_path,
+        seqs=rule_utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=generate_col_paths(seqs_file_list_path)
+        column_anno_files=rule_utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        separate_build = str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         log_writing=get_log_opt(rule_name),
     shell:
         """
+        if {params.separate_build}; then
+            SEQ_PATHS={wdir}/seqs_paths.txt
+            echo "{input}" | tr ' ' '\n' > $SEQ_PATHS
+        else
+            SEQ_PATHS="{input.seqs}"
+        fi
+        
         OUT_DIR=$(dirname {output.done})
         mkdir -p $OUT_DIR
-        cat {input.seqs} | {exec_cmd} annotate \
+        cat $SEQ_PATHS | {exec_cmd} annotate \
           {verbose_opt} \
           --parallel {threads} \
           -i {input.dbg_graph} \

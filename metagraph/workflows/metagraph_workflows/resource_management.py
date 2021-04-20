@@ -1,6 +1,8 @@
 import logging
 import os
 
+from pathlib import Path
+
 from metagraph_workflows import constants
 from metagraph_workflows.cfg_utils import get_rule_specific_config
 from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
@@ -57,6 +59,8 @@ class SupportsMemoryCap(ResourceConfig):
             estimated_base_memory = self.get_base_mem_estimate(wildcards, input,
                                                                threads)
 
+            if not estimated_base_memory:
+                return 0
             mem_mb = get_rule_specific_config(self.rule_name, MEM_MB_KEY,
                                               config)
 
@@ -107,7 +111,9 @@ class TransformRdStage0Resources(SupportsMemoryCap):
         self.rule_name = 'transform_rd_stage0'
 
     def get_base_mem_estimate(self, wildcards, input, threads):
-        return columns_size_mb(input.columns_file) + BASE_MEM
+        if Path(input.columns_file).exists():
+            return columns_size_mb(input.columns_file) + BASE_MEM
+        return 0 # TODO improve
 
 
 class TransformRdStage1Resources(SupportsMemoryCap):

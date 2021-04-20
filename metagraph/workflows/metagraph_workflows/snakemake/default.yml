@@ -3,6 +3,9 @@ k: 31
 base_name: 'graph'
 build_primary_graph: False
 
+primarize_samples_separately: False
+
+
 # annotation options
 annotation_formats: ['relax.row_diff_brwt']
 annotation_labels_source: 'sequence_headers'
@@ -12,4 +15,5 @@ exec_cmd: 'metagraph'
 default_disk_mb: 10000
 max_memory_mb: 4048
 
-
+sample_ids_path: ''
+sample_staging_script_path: ''
