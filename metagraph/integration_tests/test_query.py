@@ -30,6 +30,7 @@ anno_file_extension = {'column': '.column.annodbg',
                        'row_diff_sparse': '.row_diff_sparse.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
+                       'int_brwt': '.int_brwt.annodbg',
                        'rbfish': '.rbfish.annodbg',
                        'flat': '.flat.annodbg'}
 

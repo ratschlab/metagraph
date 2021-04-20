@@ -72,7 +72,7 @@ inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_spar
 template <>
 inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
 template <>
-inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".rd_int_brwt.annodbg";
+inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
 
 } // namespace annot
 } // namespace mtg

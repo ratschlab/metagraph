@@ -154,15 +154,17 @@ void add_kmer_counts(const std::string &file,
     // remember the number of base labels to remove those unique to each sequence quickly
     const size_t num_base_labels = labels.size();
 
-    mtg::common::logger->trace("Parsing k-mer counts from '{}'",
-        utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
-    );
+    const std::string &counts_fname
+            = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
+
+    logger->trace("Parsing k-mer counts from '{}'", counts_fname);
+
     read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
         [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
             if (k != graph.get_k()) {
-                mtg::common::logger->error("File '{}' contains counts for k-mers of "
-                                          "length {} but graph is constructed with k={}",
-                                          file, k, graph.get_k());
+                logger->error("File '{}' contains counts for k-mers of "
+                              "length {} but graph is constructed with k={}",
+                              file, k, graph.get_k());
                 exit(1);
             }
             assert(read_stream->seq.l >= k && "sequences can't be shorter than k-mers");

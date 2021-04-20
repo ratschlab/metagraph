@@ -685,6 +685,40 @@ int transform_annotation(Config *config) {
                 rb_brwt_annotator->serialize(config->outfbase);
                 break;
             }
+            case Config::IntRowDiffBRWT: {
+                assert(config->infbase.size());
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+                auto int_annotation = convert_to_IntMultiBRWT(files, *config, timer);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>;
+
+                IntRowDiffBRWTAnnotator annotation(
+                        std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
+                                std::move(*int_annotation.release_matrix())),
+                        int_annotation.get_label_encoder());
+
+                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
+                        .load_anchor(anchors_file);
+                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
+                        .load_fork_succ(fork_succ_file);
+
+                logger->trace("RowDiff support bitmaps loaded");
+
+                annotation.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
         }
 
     } else if (input_anno_type == Config::RowDiff) {
@@ -859,6 +893,9 @@ int relax_multi_brwt(Config *config) {
         case Config::IntBRWT:
             annotator = std::make_unique<IntMultiBRWTAnnotator>();
             break;
+        case Config::IntRowDiffBRWT:
+            annotator = std::make_unique<IntRowDiffBRWTAnnotator>();
+            break;
         default:
             logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
             exit(1);
@@ -878,7 +915,9 @@ int relax_multi_brwt(Config *config) {
             ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
             : (anno_type == Config::IntBRWT
                 ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
-                : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs());
+                : (anno_type == Config::IntRowDiffBRWT
+                    ? dynamic_cast<IntRowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs().get_binary_matrix()
+                    : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs()));
     relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
                get_num_threads());
 
