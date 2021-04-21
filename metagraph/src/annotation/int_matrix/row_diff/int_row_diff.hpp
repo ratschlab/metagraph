@@ -35,7 +35,7 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     IntRowDiff() {}
 
     IntRowDiff(const graph::DBGSuccinct *graph, BaseMatrix&& diff)
-        : graph_(graph), diffs_(std::move(diff)) {}
+        : diffs_(std::move(diff)) { graph_ = graph; }
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
@@ -54,17 +54,13 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
 
     void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
-    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
     const anchor_bv_type& anchor() const { return anchor_; }
-    const graph::DBGSuccinct& graph() const { return *graph_; }
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
   private:
     static void add_diff(const RowValues &diff, RowValues *row);
-
-    const graph::DBGSuccinct *graph_ = nullptr;
 
     BaseMatrix diffs_;
     anchor_bv_type anchor_;
@@ -81,6 +77,7 @@ bool IntRowDiff<BaseMatrix>::get(Row i, Column j) const {
 
 template <class BaseMatrix>
 std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -105,6 +102,7 @@ IntMatrix::SetBitPositions IntRowDiff<BaseMatrix>::get_row(Row i) const {
 
 template <class BaseMatrix>
 IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -150,6 +148,7 @@ IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
 template <class BaseMatrix>
 std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 

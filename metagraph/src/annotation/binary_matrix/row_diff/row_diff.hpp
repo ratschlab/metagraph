@@ -30,6 +30,12 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 class IRowDiff {
   public:
     virtual ~IRowDiff() {}
+
+    const graph::DBGSuccinct* graph() const { return graph_; }
+    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
+
+  protected:
+    const graph::DBGSuccinct *graph_ = nullptr;
 };
 
 /**
@@ -62,19 +68,14 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
-        : graph_(graph), diffs_(std::move(diff)) {}
-
-    uint64_t num_columns() const override { return diffs_.num_columns(); }
-
-    const graph::DBGSuccinct* graph() const { return graph_; }
+          : diffs_(std::move(diff)) { graph_ = graph; }
 
     /**
-     * Returns the number of set bits in the matrix.
+     * Returns the number of set bits in the row-diff transformed matrix.
      */
     uint64_t num_relations() const override { return diffs_.num_relations(); }
-
+    uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_rows() const override { return diffs_.num_rows(); }
-    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
     bool get(Row row, Column column) const override;
 
@@ -100,8 +101,6 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
   private:
     static void add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row);
 
-    const graph::DBGSuccinct *graph_ = nullptr;
-
     BaseMatrix diffs_;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;
@@ -109,6 +108,7 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -123,6 +123,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
  */
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -137,6 +138,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -165,6 +167,7 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 

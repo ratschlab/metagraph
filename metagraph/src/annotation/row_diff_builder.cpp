@@ -8,7 +8,7 @@
 #include "common/threads/threading.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/vectors/bit_vector_sd.hpp"
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "graph/annotated_dbg.hpp"
 
 const uint64_t BLOCK_SIZE = 1 << 25;
@@ -1006,8 +1006,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     rk++;
                 });
             };
-            columns[j] = std::make_unique<bit_vector_sd>(call_ones, num_rows,
-                                                         row_diff_bits[l_idx][j]);
+            columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
+                                                            row_diff_bits[l_idx][j]);
         }
 
         if (compute_row_reduction) {
