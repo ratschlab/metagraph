@@ -680,6 +680,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     constexpr bool with_counts = utils::is_pair_v<T>;
     std::vector<std::vector<sdsl::int_vector<>>> counts;
     if (with_counts) {
+        counts.resize(source_files.size());
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < source_files.size(); ++i) {
             const auto &counts_fname = utils::remove_suffix(source_files[i],
@@ -925,7 +926,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     // free memory occupied by original columns
     sources.clear();
 
-    std::vector<std::unique_ptr<RowDiffColumnAnnotator>> row_diff(label_encoders.size());
+    std::vector<std::vector<std::unique_ptr<bit_vector>>> diff_columns(label_encoders.size());
 
     const uint32_t files_open_per_thread
             = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads);
@@ -1009,27 +1010,31 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                                          row_diff_bits[l_idx][j]);
         }
 
-        row_diff[l_idx] = std::make_unique<RowDiffColumnAnnotator>(
-                std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
-                std::move(label_encoders[l_idx]));
+        if (compute_row_reduction) {
+            diff_columns[l_idx] = std::move(columns);
 
-        if (!compute_row_reduction) {
-            auto fpath = col_out_dir/fs::path(source_files[l_idx])
-                                    .filename()
-                                    .replace_extension()
-                                    .replace_extension(row_diff[l_idx]->kExtension);
-
-            row_diff[l_idx]->serialize(fpath);
-
-            // TODO: IntRowDiff::kExtension
+        } else {
+            auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
             if constexpr(with_counts) {
-                std::ofstream outstream(std::string(fpath) + ".counts", std::ios::binary);
+                fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
+                ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+                logger->trace("Serialized {}", fpath);
+
+                fpath.replace_extension().replace_extension(ColumnCompressed<>::kCountExtension);
+                std::ofstream outstream(fpath, std::ios::binary);
                 for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
                     counts[l_idx][j].serialize(outstream);
                 }
-            }
+                logger->trace("Serialized {}", fpath);
+                counts[l_idx].clear();
 
-            logger->trace("Serialized {}", fpath);
+            } else {
+                fpath.replace_extension().replace_extension(RowDiffColumnAnnotator::kExtension);
+                RowDiffColumnAnnotator(
+                        std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                        std::move(label_encoders[l_idx])).serialize(fpath);
+                logger->trace("Serialized {}", fpath);
+            }
         }
     }
 
@@ -1045,8 +1050,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-        for (size_t l_idx = 0; l_idx < row_diff.size(); ++l_idx) {
-            for (const auto &col_ptr : row_diff[l_idx]->get_matrix().diffs().data()) {
+        for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
+            for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                     [&](uint64_t i) {
                         __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
