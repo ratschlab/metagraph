@@ -105,26 +105,6 @@ class TestingBase(unittest.TestCase):
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
                         separate=False, no_fork_opt=False, no_anchor_opt=False):
-        # if anno_repr.startswith('int_'):
-        #     # count k-mers
-        #     stats = TestingBase._get_stats(graph_path)
-        #     k = int(stats.stdout.decode().split('\n')[2].split(' ')[1])
-
-        #     tempdir = TemporaryDirectory()
-
-        #     command = f'{METAGRAPH} build -p {NUM_THREADS} --count-kmers \
-        #                 -k {k} -o {tempdir.name}/contigs {input}'
-
-        #     res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-        #     assert res.returncode == 0
-
-        #     input = f'{tempdir.name}/contigs.fasta.gz'
-        #     command = f'{METAGRAPH} clean -p {NUM_THREADS} \
-        #                  --to-fasta -o {input} {tempdir.name}/contigs.dbg'
-
-        #     res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
-        #     assert res.returncode == 0
-
         target_anno = anno_repr
         if anno_repr in {'row_sparse'} or anno_repr.endswith('brwt') or anno_repr.startswith('row_diff'):
             target_anno = anno_repr
