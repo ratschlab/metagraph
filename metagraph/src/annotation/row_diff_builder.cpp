@@ -4,6 +4,7 @@
 #include <progress_bar.hpp>
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/threads/threading.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
@@ -946,7 +947,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             if constexpr(with_counts) {
                 // diff counts may be negative, hence we need wider integers
                 counts[l_idx][j] = sdsl::int_vector<>(row_diff_bits[l_idx][j], 0,
-                                                      std::min(counts[l_idx][j].width() * 2, 64));
+                                                      std::min(counts[l_idx][j].width() + 1, 64));
             }
 
             auto call_ones = [&](const std::function<void(uint64_t)> &call) {
@@ -1001,7 +1002,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 elias_fano::merge_files<T>(filenames, [&](T v) {
                     call(utils::get_first(v));
                     if constexpr(with_counts) {
-                        counts[l_idx][j][rk] = v.second;
+                        counts[l_idx][j][rk] = matrix::encode_diff(v.second);
                     }
                     rk++;
                 });

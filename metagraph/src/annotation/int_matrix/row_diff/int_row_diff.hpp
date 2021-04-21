@@ -25,6 +25,24 @@ namespace matrix {
 const size_t RD_PATH_RESERVE_SIZE = 2;
 
 
+/**
+ * Convert deltas to positive integer for enable compression:
+ *      0  -> 0
+ *      -1 -> 1
+ *      1  -> 2
+ *      -2 -> 3
+ *      2  -> 4
+ *      ...
+ */
+inline uint64_t encode_diff(int64_t x) {
+    // TODO: skip 0?
+    return x >= 0 ? x * 2 : (-x) * 2 - 1;
+}
+
+inline int64_t decode_diff(uint64_t c) {
+    return !(c & 1) ? c / 2 : -((c + 1) / 2);
+}
+
 template <class BaseMatrix>
 class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
   public:
@@ -60,6 +78,7 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     BaseMatrix& diffs() { return diffs_; }
 
   private:
+    static void decode_diffs(RowValues *diffs);
     static void add_diff(const RowValues &diff, RowValues *row);
 
     BaseMatrix diffs_;
@@ -107,6 +126,7 @@ IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     RowValues result = diffs_.get_row_values(row);
+    decode_diffs(&result);
     std::sort(result.begin(), result.end());
 
     uint64_t boss_edge = graph_->kmer_to_boss_index(
@@ -121,10 +141,15 @@ IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
                 graph_->boss_to_kmer_index(boss_edge));
 
         RowValues diff_row = diffs_.get_row_values(row);
+        decode_diffs(&diff_row);
         std::sort(diff_row.begin(), diff_row.end());
         add_diff(diff_row, &result);
     }
 
+    assert(std::all_of(result.begin(), result.end(),
+                       [](auto &p) { return p.second; }));
+    assert(std::all_of(result.begin(), result.end(),
+                       [](auto &p) { return (int64_t)p.second > 0; }));
     return result;
 }
 
@@ -200,6 +225,9 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     node_to_rd = VectorMap<Row, size_t>();
 
     std::vector<RowValues> rd_rows = diffs_.get_row_values(rd_ids);
+    for (auto &row : rd_rows) {
+        decode_diffs(&row);
+    }
 
     rd_ids = std::vector<Row>();
 
@@ -215,6 +243,10 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
             // replace diff row with full reconstructed annotation
             rd_rows[*it] = result;
         }
+        assert(std::all_of(result.begin(), result.end(),
+                           [](auto &p) { return p.second; }));
+        assert(std::all_of(result.begin(), result.end(),
+                           [](auto &p) { return (int64_t)p.second > 0; }));
     }
 
     return rows;
@@ -233,6 +265,13 @@ void IntRowDiff<BaseMatrix>::serialize(std::ostream &out) const {
     anchor_.serialize(out);
     fork_succ_.serialize(out);
     diffs_.serialize(out);
+}
+
+template <class BaseMatrix>
+void IntRowDiff<BaseMatrix>::decode_diffs(RowValues *diffs) {
+    for (auto &[j, value] : *diffs) {
+        value = decode_diff(value);
+    }
 }
 
 template <class BaseMatrix>
@@ -256,8 +295,8 @@ void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
             result.push_back(*it2);
             ++it2;
         } else {
-            result.push_back(*it);
-            result.back().second += it2->second;
+            if (uint64_t sum = it->second + it2->second)
+                result.emplace_back(it->first, sum);
             ++it;
             ++it2;
         }
