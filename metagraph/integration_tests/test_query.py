@@ -7,20 +7,13 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 from helpers import get_test_class_name
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
 """Test graph construction"""
 
-METAGRAPH = './metagraph'
 DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
-
-graph_file_extension = {'succinct': '.dbg',
-                        'bitmap': '.bitmapdbg',
-                        'hash': '.orhashdbg',
-                        'hashfast': '.hashfastdbg',
-                        'hashstr': '.hashstrdbg'}
 
 anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg',
@@ -31,6 +24,7 @@ anno_file_extension = {'column': '.column.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'int_brwt': '.int_brwt.annodbg',
+                       'row_diff_int_brwt': '.row_diff_int_brwt.annodbg',
                        'rbfish': '.rbfish.annodbg',
                        'flat': '.flat.annodbg'}
 
@@ -47,79 +41,6 @@ def product(graph_types, anno_types):
                 result.append((graph, anno))
     return result
 
-def build_annotation(graph_filename, input_fasta, anno_repr, output_filename,
-                     separate=False, no_fork_opt=False, no_anchor_opt=False):
-    target_anno = anno_repr
-    if anno_repr in {'rb_brwt', 'brwt', 'row_sparse'} or anno_repr.startswith('row_diff'):
-        target_anno = anno_repr
-        anno_repr = 'column'
-    elif anno_repr in {'flat', 'rbfish'}:
-        target_anno = anno_repr
-        anno_repr = 'row'
-
-    annotate_command = '{exe} annotate -p {num_threads} --anno-header -i {graph} \
-            --anno-type {anno_repr} -o {outfile} {input}'.format(
-        exe=METAGRAPH,
-        num_threads=NUM_THREADS,
-        graph=graph_filename,
-        anno_repr=anno_repr,
-        outfile=output_filename,
-        input=input_fasta
-    )
-    res = subprocess.run([annotate_command], shell=True)
-    assert(res.returncode == 0)
-
-    if target_anno == anno_repr:
-        return
-
-    final_anno = target_anno
-    if final_anno.startswith('row_diff'):
-        target_anno = 'row_diff'
-
-    annotate_command = '{exe} transform_anno -p {num_threads} \
-            --anno-type {target_anno} -o {outfile} {input}'.format(
-        exe=METAGRAPH,
-        num_threads=NUM_THREADS,
-        graph=graph_filename,
-        target_anno=target_anno,
-        outfile=output_filename,
-        input=output_filename + anno_file_extension[anno_repr]
-    )
-    if target_anno == 'row_diff':
-        annotate_command += ' -i ' + graph_filename
-
-    if not no_fork_opt:
-        print('-- Building RowDiff without fork optimization...')
-        res = subprocess.run([annotate_command], shell=True)
-        assert(res.returncode == 0)
-
-    if target_anno == 'row_diff':
-        without_input_anno = annotate_command.split(' ')
-        without_input_anno.pop(-3)
-        without_input_anno = ' '.join(without_input_anno)
-        if not no_anchor_opt:
-            if separate:
-                print('-- Building RowDiff succ/pred...')
-                res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 1'], shell=True)
-                assert(res.returncode == 0)
-            res = subprocess.run([annotate_command + ' --row-diff-stage 1'], shell=True)
-            assert(res.returncode == 0)
-        if separate:
-            print('-- Assigning anchors...')
-            res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
-            assert(res.returncode == 0)
-        res = subprocess.run([annotate_command + ' --row-diff-stage 2'], shell=True)
-        assert(res.returncode == 0)
-
-        os.remove(output_filename + anno_file_extension[anno_repr])
-
-        if final_anno != target_anno:
-            annotate_command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output_filename} ' \
-                               f'-i {graph_filename} -p {NUM_THREADS} {output_filename}.row_diff.annodbg'
-            res = subprocess.run([annotate_command], shell=True)
-            assert (res.returncode == 0)
-            os.remove(output_filename + anno_file_extension['row_diff'])
-
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
@@ -130,7 +51,7 @@ def build_annotation(graph_filename, input_fasta, anno_repr, output_filename,
     ),
     class_name_func=get_test_class_name
 )
-class TestQuery(unittest.TestCase):
+class TestQuery(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -190,11 +111,11 @@ class TestQuery(unittest.TestCase):
         cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
         cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
+            cls.anno_repr,
             separate,
             no_fork_opt,
             no_anchor_opt
@@ -591,7 +512,7 @@ class TestQuery(unittest.TestCase):
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-class TestQueryCanonical(unittest.TestCase):
+class TestQueryCanonical(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -641,11 +562,11 @@ class TestQueryCanonical(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
-            cls.tempdir.name + '/annotation'
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr
         )
 
         # check annotation
@@ -775,7 +696,7 @@ class TestQueryCanonical(unittest.TestCase):
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-class TestQueryPrimary(unittest.TestCase):
+class TestQueryPrimary(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -849,11 +770,11 @@ class TestQueryPrimary(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
-            cls.tempdir.name + '/annotation'
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr
         )
 
         # check annotation
