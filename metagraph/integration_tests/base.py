@@ -117,7 +117,8 @@ class TestingBase(unittest.TestCase):
                     -i {graph_path} --anno-type {anno_repr} \
                     -o {output} {input}'
 
-        if with_counts := target_anno.endswith('int_brwt'):
+        with_counts = target_anno.endswith('int_brwt')
+        if with_counts:
             command += ' --count-kmers'
 
         res = subprocess.run([command], shell=True)
