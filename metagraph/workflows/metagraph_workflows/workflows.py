@@ -66,11 +66,7 @@ def run_build_workflow(
     config['exec_cmd'] = exec_cmd if exec_cmd else config['exec_cmd']
     config['max_threads'] = threads if threads else snakemake.available_cpu_count()
 
-    config['verbose'] = verbose
-
-    if config['verbose']:
-        config['write_logs'] = True
-
+    if verbose:
         importlib.reload(logging)
         logging.basicConfig(format=LOGGING_FORMAT, level=logging.INFO)
         logging.info("Dumping config:")

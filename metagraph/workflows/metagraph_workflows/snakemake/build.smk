@@ -19,7 +19,7 @@ rule build:
         tempdir_opt=cfg_utils.temp_dir_config(config),
         mem_cap=BuildResources().get_mem_cap(config),
         disk_cap=cfg_utils.get_rule_specific_config(rule_name, constants.DISK_CAP_MB_KEY, config),
-        log_writing=get_log_opt(rule_name)
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         cat {input} | {exec_cmd} build \
@@ -29,7 +29,7 @@ rule build:
         --mem-cap-gb {params.mem_cap} \
         --disk-cap-gb {params.disk_cap} \
         {verbose_opt} \
-        {params.tempdir_opt} 2>&1 {params.log_writing}
+        {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -41,19 +41,21 @@ canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 joint_contigs_path=wdir/f'{graph}_primary.fasta.gz'
 
 
-
 sample_ids_spec = False
 orig_samples_path=wdir/'orig_samples'
+
+
 
 rule_name="stage_samples"
 rule stage_samples:
     output: orig_samples_path/f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}"
     params:
         staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH],
-        additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS]
+        additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS],
+    log: cfg_utils.get_log_path(rule_name, config, ['sample_id'])
     shell:
         """
-        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options}
+        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} > {log} 2>&1
         """
 
 
@@ -66,9 +68,10 @@ rule build_canonical_graph_single_sample:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         k=config['k'],
+    log: cfg_utils.get_log_path(rule_name, config, ['sample_id'])
     shell:
         """
-        echo "{input}" | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output}
+        echo "{input}" | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output} > {log} 2>&1
         """
 
 
@@ -79,9 +82,10 @@ rule primarize_canonical_graph_single_sample:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
+    log: cfg_utils.get_log_path(rule_name, config, ['sample_id'])
     shell:
         """
-        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output}
+        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output} > {log} 2>&1
         """
 
 
@@ -95,6 +99,7 @@ rule build_joint_graph:
     params:
         k=config['k'],
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         if {params.separate_build}; then
@@ -105,7 +110,7 @@ rule build_joint_graph:
         fi
 
         # TODO: canonical or basic?
-        cat $SEQ_PATHS | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output} 
+        cat $SEQ_PATHS | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output} > {log} 2>&1
         
         """
 
@@ -116,9 +121,10 @@ rule primarize_joint_graph:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
+    log: cfg_utils.get_log_path(rule_name,config)
     shell:
         """
-        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output}
+        echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output} > {log} 2>&1
         """
 
 
@@ -131,7 +137,8 @@ rule build_joint_primary:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         k=config['k'],
+    log: cfg_utils.get_log_path(rule_name,config)
     shell:
         """
-        {exec_cmd} build --parallel {threads} --mode primary -k {params.k} -o {output} {input}
+        {exec_cmd} build --parallel {threads} --mode primary -k {params.k} -o {output} {input} > {log} 2>&1
         """

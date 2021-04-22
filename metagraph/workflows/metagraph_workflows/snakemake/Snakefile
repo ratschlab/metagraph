@@ -1,12 +1,10 @@
-from pathlib import Path
-
-from metagraph_workflows import rule_utils, constants
+from metagraph_workflows import rule_utils, constants, cfg_utils
 from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
 from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
 
 include: "common.smk"
 
-wdir=Path(config['output_directory'])
+wdir=cfg_utils.get_wdir(config)
 
 graph=config['base_name']
 build_primary=take_value_or_default('build_primary_graph', False)
@@ -27,15 +25,7 @@ max_threads=take_value_or_default('max_threads', workflow.cores)
 # TODO
 max_memory_mb=take_value_or_default('max_memory_mb', 4000)
 
-verbose = config['verbose'] if 'verbose' in config else False
-verbose_opt=' -v ' if verbose else ''
-
-write_logs = take_value_or_default('write_logs', False)
-
-log_dir=wdir/'logs'
-if write_logs:
-    log_dir.mkdir(exist_ok=True, parents=True)
-
+verbose_opt=' -v '
 
 DONE="DONE"
 
@@ -77,7 +67,7 @@ rule annotate:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         separate_build = str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        log_writing=get_log_opt(rule_name),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         if {params.separate_build}; then
@@ -96,7 +86,7 @@ rule annotate:
           {annotation_labels_opt} \
           --anno-type column \
           --separately \
-          -o $OUT_DIR 2>&1 {params.log_writing}
+          -o $OUT_DIR > {log} 2>&1
         """
 
 rule_name="generate_column_list"
@@ -121,7 +111,7 @@ rule generate_brwt_linkage:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
-        log_writing=get_log_opt(rule_name),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -130,7 +120,7 @@ rule generate_brwt_linkage:
             --greedy \
             --subsample {params.subsample} \
             --parallel {threads} \
-            -o {output.linkage} 2>&1 {params.log_writing}
+            -o {output.linkage} > {log} 2>&1
         """
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
@@ -144,14 +134,13 @@ rule transform_annotation:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
-    params:
-        log_writing=get_log_opt("annotate_{anno_type}")
+    log: cfg_utils.get_log_path(rule_name, config, ['anno_type'])
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
             --parallel {threads} \
-            -o {output.annotations} 2>&1 {params.log_writing}
+            -o {output.annotations} > {log} 2>&1
         """
 
 
@@ -167,7 +156,7 @@ rule annotate_brwt:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
-        log_writing=get_log_opt(rule_name)
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -175,7 +164,7 @@ rule annotate_brwt:
             --parallel-nodes {params.parallel_nodes} \
             --greedy \
             --parallel {threads} \
-            -o {output.annotations} 2>&1 {params.log_writing}
+            -o {output.annotations} > {log} 2>&1
         """
 
 
@@ -190,7 +179,7 @@ rule relax_brwt:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         relax_arity=config[constants.BRWT_RELAX_ARITY],
-        log_writing=get_log_opt(rule_name),
+    log: cfg_utils.get_log_path(rule_name, config, ['brwt_fmt'])
     shell:
         """        
         {exec_cmd} relax_brwt \
@@ -198,7 +187,7 @@ rule relax_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} 2>&1 {params.log_writing}
+            {input.brwt_annots} > {log} 2>&1
         """
 
 transform_row_diff_overhead_mb=2000
@@ -219,8 +208,8 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage0Resources().get_mem_cap(config),
-        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
+    log: cfg_utils.get_log_path(rule_name,config)
     shell:
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
@@ -232,7 +221,7 @@ rule transform_rd_stage0:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.columns_rd_row_count} {params.tempdir_opt} 2>&1 {params.log_writing}
+            -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
         """
 
 rule_name="transform_rd_stage1"
@@ -253,8 +242,8 @@ rule transform_rd_stage1:
         mem_mb=TransformRdStage1Resources().get_mem(config)
     params:
         mem_cap=TransformRdStage1Resources().get_mem_cap(config),
-        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -263,7 +252,7 @@ rule transform_rd_stage1:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.cols_rd_vectors} {params.tempdir_opt} 2>&1 {params.log_writing}
+            -o {output.cols_rd_vectors} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -281,8 +270,8 @@ rule transform_rd_stage2:
         mem_mb=TransformRdStage2Resources().get_mem(config),
     params:
         mem_cap=TransformRdStage2Resources().get_mem_cap(config),
-        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -291,7 +280,7 @@ rule transform_rd_stage2:
             -i {input.dbg_graph} \
             --parallel {threads} \
             --mem-cap-gb {params.mem_cap} \
-            -o {output.rd_cols_done} {params.tempdir_opt} 2>&1 {params.log_writing}
+            -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -309,8 +298,8 @@ rule annotate_row_diff_brwt:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
-        log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
@@ -321,7 +310,7 @@ rule annotate_row_diff_brwt:
             --parallel-nodes {params.parallel_nodes} \
             --parallel {threads} \
             -i {input.dbg_graph} \
-            -o {output.annotations} {params.tempdir_opt} 2>&1 {params.log_writing}
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -336,7 +325,7 @@ rule relax_row_diff_brwt:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
         relax_arity = config[constants.BRWT_RELAX_ARITY],
-        log_writing=get_log_opt(rule_name),
+    log: cfg_utils.get_log_path(rule_name, config)
     shell:
         """        
         {exec_cmd} relax_brwt \
@@ -344,5 +333,5 @@ rule relax_row_diff_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} 2>&1 {params.log_writing}
+            {input.brwt_annots} > {log} 2>&1
         """

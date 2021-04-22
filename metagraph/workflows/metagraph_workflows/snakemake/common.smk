@@ -7,9 +7,6 @@ from metagraph_workflows.constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 def take_value_or_default(key, default):
     return config[key] if (key in config.keys() and config[key]) else default
 
-def get_log_opt(rule):
-    return f" | tee {log_dir}/{graph}_{rule}.log" if write_logs else ''
-
 def get_seqs_file_list_path():
     if SEQS_FILE_LIST_PATH in config:
         return config[SEQS_FILE_LIST_PATH]
