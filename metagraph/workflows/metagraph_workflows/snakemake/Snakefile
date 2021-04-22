@@ -54,7 +54,7 @@ rule all:
 
 include: 'build.smk'
 
-rule_name="annotate"
+ANNOTATE_RULE="annotate"
 rule annotate:
     input:
         seqs=rule_utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
@@ -64,10 +64,10 @@ rule annotate:
         column_anno_files=rule_utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_RULE).get_mem(config),
     params:
         separate_build = str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
         if {params.separate_build}; then
@@ -89,7 +89,7 @@ rule annotate:
           -o $OUT_DIR > {log} 2>&1
         """
 
-rule_name="generate_column_list"
+GENERATE_COLUMN_LIST_RULE="generate_column_list"
 rule generate_column_list:
     input: rules.annotate.output.column_anno_files
     output: columns_file
@@ -100,7 +100,7 @@ rule generate_column_list:
 
 max_path_length=None
 
-rule_name="generate_brwt_linkage"
+GENERATE_BRWT_LINKAGE_RULE="generate_brwt_linkage"
 rule generate_brwt_linkage:
     input:
         columns_file=columns_file,
@@ -108,10 +108,10 @@ rule generate_brwt_linkage:
         linkage=wdir/f"{graph}.linkage.txt"
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE).get_mem(config),
     params:
         subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -125,7 +125,7 @@ rule generate_brwt_linkage:
 
 ruleorder: relax_brwt > transform_annotation # more specific rule has priority
 
-rule_name="transform_annotation"
+TRANSFORM_ANNOTATION_RULE="transform_annotation"
 rule transform_annotation:
     input:
         columns_file=columns_file,
@@ -133,8 +133,8 @@ rule transform_annotation:
         annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
-    log: cfg_utils.get_log_path(rule_name, config, ['anno_type'])
+        mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE).get_mem(config),
+    log: cfg_utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -144,7 +144,7 @@ rule transform_annotation:
         """
 
 
-rule_name="annotate_brwt"
+ANNOTATE_BRWT_RULE="annotate_brwt"
 rule annotate_brwt:
     input:
         linkage=wdir/f"{graph}.linkage.txt",
@@ -153,10 +153,10 @@ rule annotate_brwt:
         annotations=wdir/f'{graph}.brwt.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE).get_mem(config),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -168,7 +168,7 @@ rule annotate_brwt:
         """
 
 
-rule_name="relax_brwt"
+RELAX_BRWT_RULE="relax_brwt"
 rule relax_brwt:
     input:
         brwt_annots=wdir/f'{graph}.{{brwt_fmt}}.annodbg',
@@ -176,10 +176,10 @@ rule relax_brwt:
         annotations=wdir/f'{graph}.relax.{{brwt_fmt}}.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(RELAX_BRWT_RULE).get_mem(config),
     params:
         relax_arity=config[constants.BRWT_RELAX_ARITY],
-    log: cfg_utils.get_log_path(rule_name, config, ['brwt_fmt'])
+    log: cfg_utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
         """        
         {exec_cmd} relax_brwt \
@@ -196,7 +196,7 @@ rd_cols_dir = wdir/f'{graph}_rd_cols'
 
 from metagraph_workflows.resource_management import TransformRdStage0Resources
 
-rule_name="transform_rd_stage0"
+TRANSFORM_RD_STAGE0_RULE="transform_rd_stage0"
 rule transform_rd_stage0:
     input:
         dbg_graph=graph_path,
@@ -209,7 +209,7 @@ rule transform_rd_stage0:
     params:
         mem_cap=TransformRdStage0Resources().get_mem_cap(config),
         tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(rule_name,config)
+    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
@@ -224,7 +224,7 @@ rule transform_rd_stage0:
             -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
         """
 
-rule_name="transform_rd_stage1"
+TRANSFORM_RD_STAGE1_RULE="transform_rd_stage1"
 rule transform_rd_stage1:
     input:
         dbg_graph=graph_path,
@@ -243,7 +243,7 @@ rule transform_rd_stage1:
     params:
         mem_cap=TransformRdStage1Resources().get_mem_cap(config),
         tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -256,7 +256,7 @@ rule transform_rd_stage1:
         """
 
 
-rule_name="transform_rd_stage2"
+TRANSFORM_RD_STAGE2_RULE="transform_rd_stage2"
 rule transform_rd_stage2:
     input:
         dbg_graph=graph_path,
@@ -271,7 +271,7 @@ rule transform_rd_stage2:
     params:
         mem_cap=TransformRdStage2Resources().get_mem_cap(config),
         tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
     shell:
         """
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
@@ -284,7 +284,7 @@ rule transform_rd_stage2:
         """
 
 
-rule_name="annotate_row_diff_brwt"
+ANNOTATE_ROW_DIFF_BRWT_RULE="annotate_row_diff_brwt"
 rule annotate_row_diff_brwt:
     input:
         anchors=rules.transform_rd_stage2.output.anchors,
@@ -295,11 +295,11 @@ rule annotate_row_diff_brwt:
         linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE).get_mem(config),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
         tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
         """
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
@@ -314,7 +314,7 @@ rule annotate_row_diff_brwt:
         """
 
 
-rule_name="relax_row_diff_brwt"
+RELAX_ROW_DIFF_BRWT_RULE="relax_row_diff_brwt"
 rule relax_row_diff_brwt:
     input:
         brwt_annots=rules.annotate_row_diff_brwt.output.annotations,
@@ -322,10 +322,10 @@ rule relax_row_diff_brwt:
         annotations_relaxed=wdir/f'{graph}.relax.row_diff_brwt.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(rule_name).get_mem(config),
+        mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE).get_mem(config),
     params:
         relax_arity = config[constants.BRWT_RELAX_ARITY],
-    log: cfg_utils.get_log_path(rule_name, config)
+    log: cfg_utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
         """        
         {exec_cmd} relax_brwt \
