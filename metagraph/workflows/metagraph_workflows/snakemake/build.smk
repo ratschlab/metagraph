@@ -47,12 +47,13 @@ orig_samples_path=wdir/'orig_samples'
 
 rule_name="stage_samples"
 rule stage_samples:
-    output: orig_samples_path/"{sample_id}.fasta.gz"
+    output: orig_samples_path/f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}"
     params:
-        staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH]
+        staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH],
+        additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS]
     shell:
         """
-        bash {params.staging_script_path} {wildcards.sample_id} {output}
+        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options}
         """
 
 

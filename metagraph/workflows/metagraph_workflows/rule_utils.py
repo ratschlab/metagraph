@@ -26,7 +26,7 @@ def get_build_single_sample_input(config, orig_samples_path, seq_ids_dict):
         sample_id = wildcards[0] # TODO:
 
         if config[constants.SAMPLE_IDS_PATH]:
-            return orig_samples_path / "{sample_id}.fasta.gz"
+            return orig_samples_path / f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}"
         else:
             return seq_ids_dict[sample_id]
 

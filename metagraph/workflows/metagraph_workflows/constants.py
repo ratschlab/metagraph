@@ -8,6 +8,8 @@ PRIMARIZE_SAMPLES_SEPARATELY = 'primarize_samples_separately'
 
 SAMPLE_IDS_PATH="sample_ids_path"
 SAMPLE_STAGING_SCRIPT_PATH="sample_staging_script_path"
+SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS="sample_staging_script_additional_options"
+SAMPLE_STAGING_FILE_ENDING='sample_staging_file_ending'
 
 MAX_MEMORY_MB = 'max_memory_mb'
 RULE_CONFIGS_KEY = 'rules'

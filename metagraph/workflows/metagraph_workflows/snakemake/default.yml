@@ -17,3 +17,5 @@ max_memory_mb: 4048
 
 sample_ids_path: ''
 sample_staging_script_path: ''
+sample_staging_script_additional_options: ''
+sample_staging_file_ending: '.fastq'

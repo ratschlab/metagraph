@@ -94,5 +94,9 @@ dist: clean ## builds source and wheel package
 	python setup.py bdist_wheel
 	ls -l dist
 
+copy-cloud: dist
+	scp ./dist/metagraph_workflows-*-py2.py3-none-any.whl metagraph-cloud-small:~/
+
+
 install: clean ## install the package to the active Python's site-packages
 	python setup.py install

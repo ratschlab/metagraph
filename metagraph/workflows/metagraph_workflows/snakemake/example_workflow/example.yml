@@ -1,0 +1,19 @@
+k: 10
+base_name: 'example_k10'
+build_primary_graph: True
+primarize_samples_separately: True
+
+output_directory: 'output_dir_example'
+#seqs_file_list_path: 'transcript_paths.txt'
+seqs_file_list_path: ''
+
+annotation_labels_source: 'sequence_file_names'
+
+sample_ids_path: 'example_workflow/sample_ids.txt'
+sample_staging_script_path: 'example_workflow/dummy_staging_script.sh'
+sample_staging_file_ending: '.fasta.gz'
+
+rules:
+  build:
+    mem_mb: 1234
+

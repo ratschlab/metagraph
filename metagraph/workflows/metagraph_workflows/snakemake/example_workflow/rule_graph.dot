@@ -1,0 +1,47 @@
+digraph snakemake_dag {
+    graph[bgcolor=white, margin=0];
+    node[shape=box, style=rounded, fontname=sans,                 fontsize=10, penwidth=2];
+    edge[penwidth=2, color=grey];
+	0[label = "all", color = "0.14 0.6 0.85", style="rounded"];
+	1[label = "build_joint_primary", color = "0.00 0.6 0.85", style="rounded"];
+	2[label = "primarize_joint_graph", color = "0.28 0.6 0.85", style="rounded"];
+	3[label = "build_joint_graph", color = "0.53 0.6 0.85", style="rounded"];
+	4[label = "primarize_canonical_graph_single_sample", color = "0.35 0.6 0.85", style="rounded"];
+	5[label = "build_canonical_graph_single_sample", color = "0.39 0.6 0.85", style="rounded"];
+	6[label = "stage_samples\nsample_id: metasub_fake_data", color = "0.60 0.6 0.85", style="rounded"];
+	7[label = "primarize_canonical_graph_single_sample", color = "0.35 0.6 0.85", style="rounded"];
+	8[label = "build_canonical_graph_single_sample", color = "0.39 0.6 0.85", style="rounded"];
+	9[label = "stage_samples\nsample_id: transcripts_100", color = "0.60 0.6 0.85", style="rounded"];
+	10[label = "relax_row_diff_brwt", color = "0.21 0.6 0.85", style="rounded"];
+	11[label = "annotate_row_diff_brwt", color = "0.56 0.6 0.85", style="rounded"];
+	12[label = "transform_rd_stage2", color = "0.46 0.6 0.85", style="rounded"];
+	13[label = "generate_column_list", color = "0.25 0.6 0.85", style="rounded"];
+	14[label = "annotate", color = "0.18 0.6 0.85", style="rounded"];
+	15[label = "transform_rd_stage1", color = "0.63 0.6 0.85", style="rounded"];
+	16[label = "transform_rd_stage0", color = "0.32 0.6 0.85", style="rounded"];
+	1 -> 0
+	10 -> 0
+	2 -> 1
+	3 -> 2
+	4 -> 3
+	7 -> 3
+	5 -> 4
+	6 -> 5
+	8 -> 7
+	9 -> 8
+	11 -> 10
+	12 -> 11
+	1 -> 11
+	1 -> 12
+	13 -> 12
+	15 -> 12
+	14 -> 13
+	4 -> 14
+	7 -> 14
+	1 -> 14
+	1 -> 15
+	13 -> 15
+	16 -> 15
+	1 -> 16
+	13 -> 16
+}            
