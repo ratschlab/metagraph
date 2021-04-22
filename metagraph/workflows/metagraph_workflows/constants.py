@@ -11,6 +11,10 @@ SAMPLE_STAGING_SCRIPT_PATH="sample_staging_script_path"
 SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS="sample_staging_script_additional_options"
 SAMPLE_STAGING_FILE_ENDING='sample_staging_file_ending'
 
+BRWT_RELAX_ARITY="brwt_relax_arity"
+BRWT_PARALLEL_NODES="brwt_parallel_nodes"
+BRWT_LINKAGE_SUBSAMPLE="brwt_linkage_subsample"
+
 MAX_MEMORY_MB = 'max_memory_mb'
 RULE_CONFIGS_KEY = 'rules'
 MEM_MB_KEY = 'mem_mb'

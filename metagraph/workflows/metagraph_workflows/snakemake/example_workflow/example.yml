@@ -13,6 +13,8 @@ sample_ids_path: 'example_workflow/sample_ids.txt'
 sample_staging_script_path: 'example_workflow/dummy_staging_script.sh'
 sample_staging_file_ending: '.fasta.gz'
 
+brwt_relax_arity: 4
+
 rules:
   build:
     mem_mb: 1234

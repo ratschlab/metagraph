@@ -10,6 +10,10 @@ primarize_samples_separately: False
 annotation_formats: ['relax.row_diff_brwt']
 annotation_labels_source: 'sequence_headers'
 
+brwt_relax_arity: 32
+brwt_parallel_nodes: 5
+brwt_linkage_subsample: 100000
+
 exec_cmd: 'metagraph'
 
 default_disk_mb: 10000

@@ -120,6 +120,7 @@ rule generate_brwt_linkage:
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
         log_writing=get_log_opt(rule_name),
     shell:
         """        
@@ -127,7 +128,7 @@ rule generate_brwt_linkage:
             --anno-type brwt \
             --linkage \
             --greedy \
-            --subsample 10000000 \
+            --subsample {params.subsample} \
             --parallel {threads} \
             -o {output.linkage} 2>&1 {params.log_writing}
         """
@@ -165,12 +166,13 @@ rule annotate_brwt:
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
         log_writing=get_log_opt(rule_name)
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type brwt \
-            --parallel-nodes 10 \
+            --parallel-nodes {params.parallel_nodes} \
             --greedy \
             --parallel {threads} \
             -o {output.annotations} 2>&1 {params.log_writing}
@@ -187,13 +189,14 @@ rule relax_brwt:
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        relax_arity=config[constants.BRWT_RELAX_ARITY],
         log_writing=get_log_opt(rule_name),
     shell:
         """        
         {exec_cmd} relax_brwt \
             -o {output.annotations} \
             {verbose_opt} \
-            --relax-arity 15 \
+            --relax-arity {params.relax_arity} \
             --parallel {threads} \
             {input.brwt_annots} 2>&1 {params.log_writing}
         """
@@ -305,6 +308,7 @@ rule annotate_row_diff_brwt:
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
         log_writing=get_log_opt(rule_name),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     shell:
@@ -314,7 +318,7 @@ rule annotate_row_diff_brwt:
             --anno-type row_diff_brwt \
             --greedy \
             --fast \
-            --parallel-nodes 5 \
+            --parallel-nodes {params.parallel_nodes} \
             --parallel {threads} \
             -i {input.dbg_graph} \
             -o {output.annotations} {params.tempdir_opt} 2>&1 {params.log_writing}
@@ -331,13 +335,14 @@ rule relax_row_diff_brwt:
     resources:
         mem_mb=ResourceConfig(rule_name).get_mem(config),
     params:
+        relax_arity = config[constants.BRWT_RELAX_ARITY],
         log_writing=get_log_opt(rule_name),
     shell:
         """        
         {exec_cmd} relax_brwt \
             -o {output.annotations_relaxed} \
             {verbose_opt} \
-            --relax-arity 15 \
+            --relax-arity {params.relax_arity} \
             --parallel {threads} \
             {input.brwt_annots} 2>&1 {params.log_writing}
         """
