@@ -38,7 +38,7 @@ columns_file=wdir/'columns.txt'
 
 seqs_file_list_path=get_seqs_file_list_path()
 
-contigs_dir=wdir/f'{graph}_contigs'
+contigs_dir=wdir/'contigs'
 
 seq_ids_dict = {}
 if not config[constants.SAMPLE_IDS_PATH]:
@@ -192,7 +192,7 @@ rule relax_brwt:
 
 transform_row_diff_overhead_mb=2000
 
-rd_cols_dir = wdir/f'{graph}_rd_cols'
+rd_cols_dir = wdir/'rd_cols'
 
 from metagraph_workflows.resource_management import TransformRdStage0Resources
 

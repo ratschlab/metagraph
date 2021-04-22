@@ -35,7 +35,7 @@ rule build:
 
 ### Build Primary
 
-canonical_graphs_dir=wdir/f'{graph}_canonical'
+canonical_graphs_dir=wdir/f'canonical_graphs'
 canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 
 joint_contigs_path=wdir/f'{graph}_primary.fasta.gz'
