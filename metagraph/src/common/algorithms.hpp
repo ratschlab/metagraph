@@ -226,8 +226,8 @@ namespace utils {
         size_t left = window_size / 2;
         size_t right = window_size - left - 1;
         if (right + 1 >= v.size()) {
-            T count = std::accumulate(v.begin(), v.end(), (T)0);
-            v.assign(v.size(), count);
+            T sum = std::accumulate(v.begin(), v.end(), (T)0);
+            std::fill(v.begin(), v.end(), std::round((double)sum / v.size()));
 
         } else {
             std::vector<T> psum = v;

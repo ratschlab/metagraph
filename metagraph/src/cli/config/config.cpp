@@ -868,7 +868,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be\n"
                             "\t                         \t\tdetermined (-1: disables fallback) [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --smoothing-window [INT] \t\twindow size for smoothing k-mer counts in unitigs [off]\n");
+            fprintf(stderr, "\t   --smoothing-window [INT] \twindow size for smoothing k-mer counts in unitigs [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"
