@@ -48,7 +48,7 @@ orig_samples_path=wdir/'orig_samples'
 
 STAGE_SAMPLES_RULE="stage_samples"
 rule stage_samples:
-    output: orig_samples_path/f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}"
+    output: temp(orig_samples_path/f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}")
     params:
         staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH],
         additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS],
@@ -62,7 +62,7 @@ rule stage_samples:
 BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="build_canonical_graph_single_sample"
 rule build_canonical_graph_single_sample:
     input: rule_utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict)
-    output: canonical_graphs_dir/"{sample_id}.dbg"
+    output: temp(canonical_graphs_dir/"{sample_id}.dbg")
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_mem(config),
@@ -78,7 +78,7 @@ rule build_canonical_graph_single_sample:
 PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="primarize_canonical_graph_single_sample"
 rule primarize_canonical_graph_single_sample:
     input: canonical_graphs_dir/"{sample_id}.dbg"
-    output: contigs_dir/"{sample_id}_primary.fasta.gz"
+    output: temp(contigs_dir/"{sample_id}_primary.fasta.gz")
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_mem(config),
@@ -92,7 +92,7 @@ rule primarize_canonical_graph_single_sample:
 BUILD_JOINT_GRAPH_RULE="build_joint_graph"
 rule build_joint_graph:
     input: rule_utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path)
-    output: canonical_graph_path
+    output: temp(canonical_graph_path)
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(BUILD_JOINT_GRAPH_RULE).get_mem(config),
@@ -117,7 +117,7 @@ rule build_joint_graph:
 PRIMARIZE_JOINT_GRAPH_RULE="primarize_joint_graph"
 rule primarize_joint_graph:
     input: canonical_graph_path
-    output: joint_contigs_path
+    output: temp(joint_contigs_path)
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(PRIMARIZE_JOINT_GRAPH_RULE).get_mem(config),
