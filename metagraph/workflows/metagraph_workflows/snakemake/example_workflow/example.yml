@@ -15,6 +15,7 @@ sample_staging_file_ending: '.fasta.gz'
 
 brwt_relax_arity: 4
 
+tmpdir: '/tmp'
 rules:
   build:
     mem_mb: 1234

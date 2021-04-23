@@ -16,12 +16,13 @@ def test_TransformRdStage1Resources(config):
 
     assert inst.get_mem(config)(None, None, None) == 4100
 
+    base_mem = 1024
     mem = 2345
     config['rules'] = {rule_name: {'mem_mb': mem}}
     assert inst.get_mem(config)(None, None, None) == mem
     res = {'mem_mb': mem}
-    assert inst.get_mem_cap(config)(None, None, None, res) == 1.0
+    assert inst.get_mem_cap(config)(None, None, None, res) == pytest.approx((mem-base_mem)/1024)
 
     config['rules'][rule_name]['mem_cap_mb'] = 1000
-    assert inst.get_mem(config)(None, None, None) == 1000 + 2048
-    assert inst.get_mem_cap(config)(None, None, None, res) == 1000/1024
+    assert inst.get_mem(config)(None, None, None) == 1000 + base_mem
+    assert inst.get_mem_cap(config)(None, None, None, res) == pytest.approx(1000/1024)

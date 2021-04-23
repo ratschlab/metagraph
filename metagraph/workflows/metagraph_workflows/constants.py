@@ -16,6 +16,8 @@ BRWT_PARALLEL_NODES="brwt_parallel_nodes"
 BRWT_LINKAGE_SUBSAMPLE="brwt_linkage_subsample"
 
 MAX_MEMORY_MB = 'max_memory_mb'
+MAX_DISK_MB = 'max_disk_mb'
+
 RULE_CONFIGS_KEY = 'rules'
 MEM_MB_KEY = 'mem_mb'
 DISK_MB_KEY = 'disk_mb'

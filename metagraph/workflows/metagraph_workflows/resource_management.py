@@ -8,12 +8,17 @@ from metagraph_workflows.cfg_utils import get_rule_specific_config
 from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
     MEM_CAP_MB_KEY
 
-BASE_MEM = 2 * 1024
+BASE_MEM = 1 * 1024
 FALLBACK_MAX_MEM = 4 * 1024
+FALLBACK_MAX_DISK = 10 * 1024
 
 
 def _get_max_memory(config):
     return config.get(constants.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
+
+
+def _get_max_disk(config):
+    return config.get(constants.MAX_DISK_MB, FALLBACK_MAX_DISK)
 
 
 def columns_size_mb(columns_file):
@@ -40,17 +45,14 @@ class ResourceConfig():
         return BASE_MEM
 
     def get_disk(self, config):
-        def _get_disk():
+        def _get_disk(wildcards):
             disk_mb = get_rule_specific_config(self.rule_name, DISK_MB_KEY,
                                                config)
             if not disk_mb:
-                disk_mb = _get_max_memory(config)
+                disk_mb = _get_max_disk(config)
             return disk_mb
 
         return _get_disk
-
-    def get_base_disk_estimate(self, wildcards, input, threads):
-        return lkj
 
 
 class SupportsMemoryCap(ResourceConfig):
@@ -101,9 +103,13 @@ class SupportsMemoryCap(ResourceConfig):
         return _get_mem_cap
 
 
-class BuildResources(SupportsMemoryCap):
-    def __init__(self):
-        self.rule_name = 'build'
+class SupportsDiskCap(ResourceConfig):
+    def get_disk_cap(self, config):
+        return self.get_disk(config) # TODO: come up with a heuristic
+
+
+class BuildGraphResources(SupportsMemoryCap, SupportsDiskCap):
+    pass
 
 
 class TransformRdStage0Resources(SupportsMemoryCap):

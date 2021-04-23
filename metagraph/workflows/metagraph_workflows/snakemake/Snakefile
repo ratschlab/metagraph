@@ -66,7 +66,8 @@ rule annotate:
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE).get_mem(config),
     params:
-        separate_build = str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
@@ -86,7 +87,7 @@ rule annotate:
           {annotation_labels_opt} \
           --anno-type column \
           --separately \
-          -o $OUT_DIR > {log} 2>&1
+          -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
         """
 
 GENERATE_COLUMN_LIST_RULE="generate_column_list"
@@ -134,13 +135,15 @@ rule transform_annotation:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE).get_mem(config),
+    params:
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
     shell:
         """        
         cat {input.columns_file} | {exec_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
             --parallel {threads} \
-            -o {output.annotations} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -156,6 +159,7 @@ rule annotate_brwt:
         mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE).get_mem(config),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
         """        
@@ -164,7 +168,7 @@ rule annotate_brwt:
             --parallel-nodes {params.parallel_nodes} \
             --greedy \
             --parallel {threads} \
-            -o {output.annotations} > {log} 2>&1
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -179,6 +183,7 @@ rule relax_brwt:
         mem_mb=ResourceConfig(RELAX_BRWT_RULE).get_mem(config),
     params:
         relax_arity=config[constants.BRWT_RELAX_ARITY],
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
         """        
@@ -187,7 +192,7 @@ rule relax_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} > {log} 2>&1
+            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
         """
 
 transform_row_diff_overhead_mb=2000
@@ -325,6 +330,7 @@ rule relax_row_diff_brwt:
         mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE).get_mem(config),
     params:
         relax_arity = config[constants.BRWT_RELAX_ARITY],
+        tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
         """        
@@ -333,5 +339,5 @@ rule relax_row_diff_brwt:
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
             --parallel {threads} \
-            {input.brwt_annots} > {log} 2>&1
+            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
         """

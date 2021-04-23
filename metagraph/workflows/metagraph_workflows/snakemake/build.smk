@@ -1,4 +1,4 @@
-from metagraph_workflows.resource_management import BuildResources, ResourceConfig
+from metagraph_workflows.resource_management import BuildGraphResources, ResourceConfig
 from metagraph_workflows import cfg_utils, constants, rule_utils
 
 if build_primary:
@@ -13,12 +13,13 @@ rule build:
     output: graph_path
     threads: max_threads
     resources:
-        mem_mb=BuildResources().get_mem(config),
+        mem_mb=BuildGraphResources(BUILD_RULE).get_mem(config),
+        disk_mb=BuildGraphResources(BUILD_RULE).get_disk(config),
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
-        mem_cap=BuildResources().get_mem_cap(config),
-        disk_cap=cfg_utils.get_rule_specific_config(BUILD_RULE, constants.DISK_CAP_MB_KEY, config),
+        mem_cap=BuildGraphResources(BUILD_RULE).get_mem_cap(config),
+        disk_cap=BuildGraphResources(BUILD_RULE).get_disk_cap(config),
     log: cfg_utils.get_log_path(BUILD_RULE, config)
     shell:
         """
@@ -65,13 +66,23 @@ rule build_canonical_graph_single_sample:
     output: temp(canonical_graphs_dir/"{sample_id}.dbg")
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_mem(config),
+        mem_mb=BuildGraphResources(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_mem(config),
+        disk_mb=BuildGraphResources(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_disk(config),
     params:
         k=config['k'],
+        tempdir_opt=cfg_utils.temp_dir_config(config),
+        mem_cap=BuildGraphResources(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_mem_cap(config),
+        disk_cap=BuildGraphResources(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE).get_disk_cap(config),
     log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input}" | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output} > {log} 2>&1
+        echo "{input}" | {exec_cmd} build --parallel {threads} \
+        --mode canonical \
+        -k {params.k} \
+        -o {output} \
+        --mem-cap-gb {params.mem_cap} \
+        --disk-cap-gb {params.disk_cap} \
+        {params.tempdir_opt} > {log} 2>&1
         """
 
 
@@ -95,10 +106,14 @@ rule build_joint_graph:
     output: temp(canonical_graph_path)
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(BUILD_JOINT_GRAPH_RULE).get_mem(config),
+        mem_mb=BuildGraphResources(BUILD_JOINT_GRAPH_RULE).get_mem(config),
+        disk_mb=BuildGraphResources(BUILD_JOINT_GRAPH_RULE).get_disk(config),
     params:
         k=config['k'],
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        tempdir_opt=cfg_utils.temp_dir_config(config),
+        mem_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE).get_mem_cap(config),
+        disk_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE).get_disk_cap(config),
     log: cfg_utils.get_log_path(BUILD_JOINT_GRAPH_RULE, config)
     shell:
         """
@@ -109,8 +124,13 @@ rule build_joint_graph:
             SEQ_PATHS="{input}"
         fi
 
-        # TODO: canonical or basic?
-        cat $SEQ_PATHS | {exec_cmd} build --parallel {threads} --mode basic -k {params.k} -o {output} > {log} 2>&1
+        cat $SEQ_PATHS | {exec_cmd} build --parallel {threads} \
+        --mode canonical \
+        -k {params.k} \
+        -o {output} \
+        --mem-cap-gb {params.mem_cap} \
+        --disk-cap-gb {params.disk_cap} \
+        {params.tempdir_opt} > {log} 2>&1
         
         """
 
@@ -121,7 +141,7 @@ rule primarize_joint_graph:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(PRIMARIZE_JOINT_GRAPH_RULE).get_mem(config),
-    log: cfg_utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE,config)
+    log: cfg_utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE, config)
     shell:
         """
         echo "{input}" | {exec_cmd} transform --to-fasta --primary-kmers --parallel {threads} -o {output} > {log} 2>&1
@@ -134,11 +154,22 @@ rule build_joint_primary:
     output: graph_path
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(BUILD_JOINT_PRIMARY_RULE).get_mem(config),
+        mem_mb=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE).get_mem(config),
+        disk_mb=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE).get_disk(config),
     params:
         k=config['k'],
+        tempdir_opt=cfg_utils.temp_dir_config(config),
+        mem_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE).get_mem_cap(config),
+        disk_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE).get_disk_cap(config)
     log: cfg_utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
         """
-        {exec_cmd} build --parallel {threads} --mode primary -k {params.k} -o {output} {input} > {log} 2>&1
+        {exec_cmd} build --parallel {threads} \
+        --mode primary \
+        -k {params.k} \
+        -o {output} \
+        --mem-cap-gb {params.mem_cap} \
+        --disk-cap-gb {params.disk_cap} \
+        {input} \
+        {params.tempdir_opt} > {log} 2>&1
         """
