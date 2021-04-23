@@ -1,8 +1,9 @@
-#include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
 #include <algorithm>
 
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <sdsl/int_vector_buffer.hpp>
 
 #include "common/vector.hpp"
@@ -1085,6 +1086,74 @@ TEST(int_vector_buffer, change_and_seek_to_front) {
     }
 
     buf.close(true);
+}
+
+TEST(smooth_vector, empty) {
+    std::vector<uint32_t> v;
+    utils::smooth_vector(1, &v);
+    ASSERT_THAT(v, testing::ElementsAre());
+    utils::smooth_vector(2, &v);
+    ASSERT_THAT(v, testing::ElementsAre());
+    utils::smooth_vector(100, &v);
+    ASSERT_THAT(v, testing::ElementsAre());
+}
+
+TEST(smooth_vector, window_size_1) {
+    std::vector<uint32_t> v = { 1, 2, 3 };
+    utils::smooth_vector(0, &v);
+    ASSERT_THAT(v, testing::ElementsAre(1, 2, 3));
+    utils::smooth_vector(1, &v);
+    ASSERT_THAT(v, testing::ElementsAre(1, 2, 3));
+}
+
+TEST(smooth_vector, increasing) {
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(0, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+        utils::smooth_vector(1, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(2, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 3, 5, 7, 9, 11, 13, 15, 17 };
+        utils::smooth_vector(2, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, 2, 4, 6, 8, 10, 12, 14, 16));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size(), &v);
+        ASSERT_THAT(v, testing::ElementsAre(3, 3, 4, 4, 5, 5, 6, 6, 7));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2, &v);
+        ASSERT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(100, &v);
+        ASSERT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+}
+
+TEST(smooth_vector, zigzag) {
+    {
+        std::vector<int> v = { 1, -1, 1, -1, 1, -1, 1, -1, 1 };
+        utils::smooth_vector(1, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, -1, 1, -1, 1, -1, 1, -1, 1));
+        utils::smooth_vector(2, &v);
+        ASSERT_THAT(v, testing::ElementsAre(1, 0, 0, 0, 0, 0, 0, 0, 0));
+    }
+    {
+        std::vector<int> v = { 1, -1, 1, -1, 1, -1, 1, -1, 1 };
+        utils::smooth_vector(3, &v);
+        ASSERT_THAT(v, testing::ElementsAre(0, 0, 0, 0, 0, 0, 0, 0, 0));
+    }
 }
 
 } // namespace

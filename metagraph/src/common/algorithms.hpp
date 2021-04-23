@@ -216,6 +216,45 @@ namespace utils {
         return count_hist.back().first;
     }
 
+    template <typename T>
+    void smooth_vector(size_t window_size, std::vector<T> *v_p) {
+        auto &v = *v_p;
+
+        if (window_size <= 1)
+            return;
+
+        size_t left = window_size / 2;
+        size_t right = window_size - left - 1;
+        if (right + 1 >= v.size()) {
+            T count = std::accumulate(v.begin(), v.end(), (T)0);
+            v.assign(v.size(), count);
+
+        } else {
+            std::vector<T> psum = v;
+            std::partial_sum(v.begin(), v.end(), psum.begin());
+            // Now we transform it to the following:
+            // [1] [2] [3] [4] [4]
+            //      X   ^---^---*
+            //  X   ^---^---*---^
+            //  ^---^---*---^
+            //  ^---*---^
+            //  *---^
+            size_t i = 0;
+            // truncated window
+            for ( ; i <= left && i < v.size(); ++i) {
+                v[i] = std::round((double)psum[i + right] / (i + right + 1));
+            }
+            // full window
+            for ( ; i + right < v.size(); ++i) {
+                v[i] = std::round((double)(psum[i + right] - psum[i - left - 1]) / window_size);
+            }
+            // truncated window
+            for ( ; i < v.size(); ++i) {
+                v[i] = std::round((double)(psum.back() - psum[i - left - 1]) / (left + v.size() - i));
+            }
+        }
+    }
+
 } // namespace utils
 
 #endif // __ALGORITHMS_HPP__
