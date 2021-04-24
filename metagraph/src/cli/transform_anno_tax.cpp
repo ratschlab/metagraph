@@ -72,7 +72,6 @@ int transform_anno_tax(Config *config) {
 
     annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->label_taxid_map, all_labels);
 
-    // Load as many annotation matrix files as we can fit in memory.
     for (uint32_t i = 0; i < filenames.size(); ++i) {
         call_taxonomy_map_updates(filenames[i], config, &taxonomy);
     }
