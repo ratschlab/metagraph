@@ -131,7 +131,7 @@ class Config {
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
     double intersect_ratio = 1;
-    double lca_coverage_threshold = 0.66;
+    double lca_coverage_fraction = 0.66;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
