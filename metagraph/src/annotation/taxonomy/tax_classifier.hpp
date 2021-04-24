@@ -46,6 +46,8 @@ class TaxClassifier {
                        const std::string &sequence) const;
 
   private:
+    TaxId find_lca(const TaxId a, const TaxId b) const;
+
     /**
      * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
      * from the given taxDB filepath (created by './metagraph transform_anno_tax').
