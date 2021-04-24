@@ -16,23 +16,35 @@ using mtg::common::logger;
 
 uint64_t QUERY_SEQ_BATCH_SIZE = 10000;
 
-void execute_fasta_seq(const std::string sequence,
-                       const std::string seq_label,
-                       const mtg::graph::DeBruijnGraph &graph,
-                       const mtg::annot::TaxClassifier &tax_classifier,
-                       std::mutex &result_mutex,
-                       std::vector<std::pair<std::string, uint64_t> > &results) {
-    uint64_t taxid = tax_classifier.assign_class(graph, sequence);
-    std::lock_guard<std::mutex> lock(result_mutex);
-    results.push_back({seq_label, taxid});
+std::vector<std::pair<std::string, uint64_t> > pair_label_taxid;
+std::mutex tax_mutex;
+
+void append_new_result(const std::string &seq_label, const uint64_t taxid) {
+    std::scoped_lock<std::mutex> guard(tax_mutex);
+    pair_label_taxid.emplace_back(seq_label, taxid);
+}
+
+void print_all_results(const std::function<void(const std::string &, const uint64_t &)> &callback) {
+    for (const std::pair<std::string, uint64_t> &label_taxid : pair_label_taxid) {
+        callback(label_taxid.first, label_taxid.second);
+    }
+}
+
+void run_sequence_batch(const std::vector<std::pair<std::string, std::string> > &seq_batch,
+                        const mtg::annot::TaxClassifier &tax_classifier,
+                        const mtg::graph::DeBruijnGraph &graph,
+                        ThreadPool &thread_pool) {
+    thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
+        for (std::pair<std::string, std::string> &seq : sequences) {
+            append_new_result(seq.second, tax_classifier.assign_class(graph, seq.first));
+        }
+    }, std::move(seq_batch));
 }
 
 void execute_fasta_file(const string &file,
                         ThreadPool &thread_pool,
                         const mtg::graph::DeBruijnGraph &graph,
-                        const mtg::annot::TaxClassifier &tax_classifier,
-                        std::mutex &result_mutex,
-                        std::vector<std::pair<std::string, uint64_t> > &results) {
+                        const mtg::annot::TaxClassifier &tax_classifier) {
     logger->trace("Parsing query sequences from file {}.", file);
 
     seq_io::FastaParser fasta_parser(file);
@@ -46,11 +58,8 @@ void execute_fasta_file(const string &file,
         if (seq_batch.size() != QUERY_SEQ_BATCH_SIZE) {
             continue;
         }
-        thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
-            for (std::pair<std::string, std::string> &seq : sequences) {
-                execute_fasta_seq(seq.first, seq.second, graph, tax_classifier, result_mutex, results);
-            }
-        }, std::move(seq_batch));
+
+        run_sequence_batch(seq_batch, tax_classifier, graph, thread_pool);
 
         cnt_queries_executed ++;
         if (cnt_queries_executed % 100000 == 0) {
@@ -58,12 +67,7 @@ void execute_fasta_file(const string &file,
         }
         seq_batch.clear();
     }
-
-    thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string>> sequences){
-        for (std::pair<std::string, std::string> &seq : sequences) {
-            execute_fasta_seq(seq.first, seq.second, graph, tax_classifier, result_mutex, results);
-        }
-    }, std::move(seq_batch));
+    run_sequence_batch(seq_batch, tax_classifier, graph, thread_pool);
 }
 
 int taxonomic_classification(Config *config) {
@@ -86,22 +90,22 @@ int taxonomic_classification(Config *config) {
     timer.reset();
     logger->trace("Processing the classification...");
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-    std::vector<std::pair<std::string, uint64_t> > results;
-    std::mutex result_mutex;
     for (const std::string &file : files) {
         execute_fasta_file(file,
                            thread_pool,
                            *graph,
-                           tax_classifier,
-                           result_mutex,
-                           results);
+                           tax_classifier);
     }
     thread_pool.join();
-    for (const std::pair<std::string, uint64_t> &result : results) {
-        std::string output = fmt::format("Sequence '{}' was classified with Tax ID '{}'\n",
-                                         result.first, result.second);
-        std::cout << output << std::endl;
-    }
+
+    print_all_results(
+            [](const std::string name_seq, const uint64_t &taxid) {
+                std::string result = fmt::format(
+                      "Sequence '{}' was classified with Tax ID '{}'\n",
+                      name_seq, taxid);
+                std::cout << result << std::endl;
+            });
+
     logger->trace("Finished all the queries in {}s.", timer.elapsed());
 
     return 0;

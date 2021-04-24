@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <sdsl/int_vector.hpp>
+#include <sdsl/dac_vector.hpp>
 #include <vector>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
@@ -353,13 +354,55 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     }
     serialize_number_number_map(f, node_parent);
 
+    std::vector<std::pair<uint64_t, uint64_t>> taxid_frequencies(1);
+
     // Denormalize taxids in taxonomic map.
     for (size_t i = 0; i < this->taxonomic_map.size(); ++i) {
-        if (this->taxonomic_map[i]) {
-            this->taxonomic_map[i] = this->denormalized_taxid[this->taxonomic_map[i]];
+        if (this->taxonomic_map[i] == 0) {
+            continue;
         }
+        uint64_t taxid = this->taxonomic_map[i];
+        while (taxid >= taxid_frequencies.size()) {
+            taxid_frequencies.resize(2 * taxid_frequencies.size());
+        }
+        ++taxid_frequencies[taxid].first;
+        taxid_frequencies[taxid].second = taxid;
     }
-    this->taxonomic_map.serialize(f);
+    std::sort(taxid_frequencies.begin(), taxid_frequencies.end(),
+              [](const std::pair<uint64_t, uint64_t>& a, const std::pair<uint64_t, uint64_t>& b){
+                if (a.first != b.first) {
+                    return a.first > b.first;
+                }
+                return a.second > b.second;
+              });
+
+    sdsl::int_vector<> code_to_taxid(taxid_frequencies.size());
+    for (uint64_t i = 0; i < taxid_frequencies.size(); ++i) {
+        if (taxid_frequencies[i].first == 0) {
+            break;
+        }
+        code_to_taxid[i] = taxid_frequencies[i].second;
+    }
+
+    tsl::hopscotch_map<TaxId, TaxId> taxid_to_code;
+    for (uint64_t i = 0; i < code_to_taxid.size(); ++i) {
+        taxid_to_code[code_to_taxid[i]] = i;
+    }
+
+    sdsl::int_vector<> code_vector(this->taxonomic_map.size());
+    uint64_t code_vector_cnt = 0;
+    for (TaxId taxid : this->taxonomic_map) {
+        code_vector[code_vector_cnt++] = taxid_to_code[taxid];
+    }
+    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code(code_vector);
+
+    for (uint64_t i = 0; i < code_to_taxid.size(); ++i) {
+        code_to_taxid[i] = this->denormalized_taxid[code_to_taxid[i]];
+    }
+    code_to_taxid.serialize(f);
+
+    code.serialize(f);
+    serialize_number_number_map(f, node_parent);
 
     logger->trace("Finished exporting metagraph taxonomic data after {}s",
                   timer.elapsed());

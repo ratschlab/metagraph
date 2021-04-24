@@ -7,8 +7,11 @@
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 #include <vector>
+#include <sdsl/int_vector.hpp>
+#include <sdsl/dac_vector.hpp>
 
 #include "common/serialization.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -36,11 +39,25 @@ void TaxClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
 
-    this->taxonomic_map.load(f);
-    if (this->taxonomic_map.empty()) {
-        logger->error("Can't load serialized 'taxonomic_map' from file {}.", filepath.c_str());
+    sdsl::int_vector<> code_to_taxid;
+    code_to_taxid.load(f);
+    if (code_to_taxid.empty()) {
+        logger->error("Can't load serialized 'code_to_taxid' from file {}.", filepath.c_str());
         std::exit(1);
     }
+
+    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code;
+    code.load(f);
+    if (code.empty()) {
+        logger->error("Can't load serialized 'code' from file {}.", filepath.c_str());
+        std::exit(1);
+    }
+
+    this->taxonomic_map.resize(code.size());
+    for (uint64_t i = 0; i < code.size(); ++i) {
+        this->taxonomic_map[i] = code_to_taxid[code[i]];
+    }
+
     logger->trace("Finished taxdb importing after {}s", timer.elapsed());
 }
 
@@ -128,24 +145,86 @@ void TaxClassifier::update_scores_and_lca(const TaxId start_node,
     }
 }
 
+TaxId TaxClassifier::find_lca(const TaxId a, const TaxId b) const {
+    std::vector<TaxId> ancestors_a;
+    std::vector<TaxId> ancestors_b;
+
+    TaxId curr_node = a;
+    while (curr_node != this->root_node) {
+        ancestors_a.push_back(curr_node);
+        curr_node = this->node_parent.at(curr_node);
+    }
+    curr_node = b;
+    while (curr_node != this->root_node) {
+        ancestors_b.push_back(curr_node);
+        curr_node = this->node_parent.at(curr_node);
+    }
+
+    TaxId lca = this->root_node;
+    int idx_ancs_a = ancestors_a.size() - 1;
+    int idx_ancs_b = ancestors_b.size() - 1;
+
+    while (idx_ancs_a >= 0  && idx_ancs_b >= 0) {
+        if (ancestors_a[idx_ancs_a] == ancestors_b[idx_ancs_b]) {
+            lca = ancestors_a[idx_ancs_a];
+        } else {
+            break;
+        }
+        idx_ancs_a --;
+        idx_ancs_b --;
+    }
+    return lca;
+}
+
 TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                   const std::string &sequence) const {
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
-    uint64_t total_discovered_kmers = 0;
-    uint64_t total_nonzero_kmers = 0;
 
+    std::vector<uint64_t> forward_kmers;
     graph.map_to_nodes(sequence, [&](const uint64_t &i) {
-        if (i <= 0) {
-            return;
-        }
-        total_nonzero_kmers ++;
-        if (this->taxonomic_map[i - 1]) {
-            num_kmers_per_node[this->taxonomic_map[i - 1]]++;
-            total_discovered_kmers ++;
-        }
+        forward_kmers.push_back(i);
+    });
+    std::string reversed_sequence = sequence;
+    reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+
+    uint64_t total_kmers = forward_kmers.size();
+    uint64_t backward_kmer_index = total_kmers;
+    std::vector<uint64_t> backward_kmers(total_kmers);
+
+    graph.map_to_nodes(reversed_sequence, [&](const uint64_t &i) {
+        backward_kmers[--backward_kmer_index] = i;
     });
 
-    if (total_discovered_kmers < this->kmers_discovery_rate * total_nonzero_kmers) {
+    uint64_t total_discovered_kmers = 0;
+
+    for (uint64_t i = 0; i < total_kmers; ++i) {
+        if (forward_kmers[i] == 0 && backward_kmers[i] == 0) {
+            continue;
+        }
+
+        TaxId curr_taxid;
+        if (backward_kmers[i] == 0) {
+            curr_taxid = this->taxonomic_map[forward_kmers[i] - 1];
+        } else if (forward_kmers[i] == 0) {
+            curr_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+        } else {
+            TaxId forward_taxid = this->taxonomic_map[forward_kmers[i] - 1];
+            TaxId backward_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+            if (forward_taxid == 0) {
+                curr_taxid = backward_taxid;
+            } else if (backward_taxid == 0) {
+                curr_taxid = forward_taxid;
+            } else {
+                curr_taxid = find_lca(forward_taxid, backward_taxid);
+            }
+        }
+        if (curr_taxid) {
+            total_discovered_kmers += 1;
+            num_kmers_per_node[curr_taxid]++;
+        }
+    }
+
+    if (total_discovered_kmers <= this->kmers_discovery_rate * total_kmers) {
         return 0; // 0 is a wildcard for not enough discovered kmers.
     }
 
