@@ -3,9 +3,7 @@
 #include <filesystem>
 #include <tsl/hopscotch_set.h>
 
-#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "annotation/taxonomy/taxonomic_db.hpp"
-#include "common/threads/threading.hpp"
 #include "config/config.hpp"
 #include "cli/load/load_annotation.hpp"
 
@@ -45,7 +43,7 @@ void call_taxonomy_map_updates(const std::string &filename,
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annot =
             cli::initialize_annotation(filename, *config);
     if (!annot->load(filename)) {
-        logger->error("Filed to load annotations from file {}.", filename);
+        logger->error("Failed to load annotations from file {}.", filename);
         exit(1);
     }
     taxonomy->kmer_to_taxid_map_update(*annot);
