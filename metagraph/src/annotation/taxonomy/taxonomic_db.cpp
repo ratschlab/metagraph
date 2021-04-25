@@ -164,6 +164,11 @@ std::string TaxonomyDB::get_accession_version_from_label(const std::string &labe
     return label_parts[3];
 }
 
+//std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+//    auto aux = utils::split_string(label, "|")[2];
+//    return utils::split_string(aux, " ")[0];
+//}
+
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepath,
                                       const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
