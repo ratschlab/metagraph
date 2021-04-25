@@ -17,7 +17,7 @@ namespace mtg {
 namespace test {
 
 const std::string test_data_dir = "../tests/data/taxonomic_data/";
-const std::string lookup_filepath = test_data_dir + "dumb.accession2taxid";
+const std::string accession2taxid_filepath = test_data_dir + "dumb.accession2taxid";
 const std::string taxonomic_filepath = test_data_dir + "dumb_nodes.dmp";
 const std::string input_filepath = test_data_dir + "tax_input.fa";
 
@@ -46,7 +46,7 @@ void get_sequences_and_labels_from_file(const std::string &filepath,
 
 TEST (TaxonomyTest, DfsStatistics) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
+    annot::TaxonomyDB tax(taxonomic_filepath, accession2taxid_filepath, labels);
     tax.node_depth.clear();
     tax.node_depth.resize(9);
     tax.node_to_linearization_idx.clear();
@@ -83,7 +83,7 @@ TEST (TaxonomyTest, DfsStatistics) {
 
 TEST (TaxonomyTest, RmqPreprocessing) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
+    annot::TaxonomyDB tax(taxonomic_filepath, accession2taxid_filepath, labels);
 
     for (uint64_t i = 0; i < tax.rmq_data.size(); ++i) {
         tax.rmq_data[i].clear();
@@ -116,7 +116,7 @@ TEST (TaxonomyTest, RmqPreprocessing) {
 
 TEST (TaxonomyTest, FindLca) {
     tsl::hopscotch_set<std::string> labels = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels);
+    annot::TaxonomyDB tax(taxonomic_filepath, accession2taxid_filepath, labels);
 
     /*
      * Tree configuration:
@@ -167,7 +167,7 @@ TEST (TaxonomyTest, FindLca) {
 
 TEST (TaxonomyTest, KmerToTaxidUpdate) {
     tsl::hopscotch_set<std::string> labels_set = get_all_labels_from_file(input_filepath);
-    annot::TaxonomyDB tax(taxonomic_filepath, lookup_filepath, labels_set);
+    annot::TaxonomyDB tax(taxonomic_filepath, accession2taxid_filepath, labels_set);
 
     std::vector<std::string> all_sequences;
     std::vector<std::string> all_labels;

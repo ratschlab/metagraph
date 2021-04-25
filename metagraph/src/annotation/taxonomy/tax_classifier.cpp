@@ -6,14 +6,12 @@
 #include <string>
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
-#include <vector>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/dac_vector.hpp>
 
 #include "common/serialization.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 #include "common/logger.hpp"

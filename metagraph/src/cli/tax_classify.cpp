@@ -51,7 +51,7 @@ void execute_fasta_file(const string &file,
 
     std::vector<std::pair<std::string, std::string> > seq_batch;
 
-    uint64_t cnt_queries_executed = 0;
+    uint64_t cnt_queries_started = 0;
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         seq_batch.push_back({std::string(kseq.seq.s), std::string(kseq.name.s)});
 
@@ -61,9 +61,9 @@ void execute_fasta_file(const string &file,
 
         run_sequence_batch(seq_batch, tax_classifier, graph, thread_pool);
 
-        cnt_queries_executed ++;
-        if (cnt_queries_executed % 100000 == 0) {
-            logger->trace("Started to executed the first {} queries from file {}.", cnt_queries_executed, file);
+        cnt_queries_started ++;
+        if (cnt_queries_started % 100000 == 0) {
+            logger->trace("Processing the first {} queries from file {}.", cnt_queries_started, file);
         }
         seq_batch.clear();
     }
