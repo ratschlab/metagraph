@@ -13,7 +13,7 @@ namespace annot {
 /**
  * TaxonomyDB constructs a taxonomic map (kmer to taxid) in a similar way
  * to how Kraken2 works. The file exported by this object will be further
- * used by taxonomic sequence classifier in './metagraph tax_class'.
+ * used by taxonomic DNA sequencing read classifier in './metagraph tax_class'.
  */
 class TaxonomyDB {
   public:
@@ -25,7 +25,7 @@ class TaxonomyDB {
     using KmerId = Annotator::Index;
 
     /**
-     * Constructs a TaxonomyDB
+     * TaxonomyDB constructor
      *
      * @param [input] tax_tree_filepath path to a "nodes.dmp" file.
      * @param [input] label_taxid_map_filepath path to a ".accession2taxid" file.
@@ -80,16 +80,16 @@ class TaxonomyDB {
                               const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
-     * Computes the rmq data in "this->rmq_data". Beside this, calculates
-     *      the fast tables: 'this->precalc_log' and 'this->precalc_pow2'.
+     * Computes the rmq data in this->rmq_data. Beside this, calculates
+     *      the fast tables: this->precalc_log and this->precalc_pow2.
      *
      * @param [input] tree_linearization -> the linearization of the received tree.
      */
     void rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization);
 
     /**
-     * dfs_statistics calculates a tree_linearization, "this->node_depth" and
-     *      'this->node_to_linearization_idx'.
+     * dfs_statistics calculates a tree_linearization, this->node_depth and
+     *      this->node_to_linearization_idx.
      *
      * @param [input] node -> the node that is currently processed.
      * @param [input] tree -> tree stored as list of children.

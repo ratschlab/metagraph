@@ -12,8 +12,8 @@ namespace mtg {
 namespace annot {
 
 /**
- * TaxClassifier imports the data from TaxonomicDB and implements a method for taxonomic
- * classification given a query sequence.
+ * TaxClassifier imports data from TaxonomicDB and implements a method for taxonomic
+ * classification a given DNA sequencing read.
  */
 class TaxClassifier {
   public:
@@ -23,7 +23,7 @@ class TaxClassifier {
     using DeBruijnGraph = mtg::graph::DeBruijnGraph;
 
     /**
-     * Construct a TaxClassifier
+     * TaxClassifier constructor
      *
      * @param [input] filepath to the file exported by TaxonomyDB.
      * @param [input] lca_coverage_rate - threshold used inside assign_class.
@@ -36,7 +36,7 @@ class TaxClassifier {
     TaxClassifier(){};
 
     /**
-     * Assign a LCA taxid to a given sequence.
+     * Assign a LCA taxid to a given DNA sequencing read.
      * Consider matches[node] = number of kmers in the given read for which the taxonomic_map (LCA) points to 'node'.
      *          weight[node] = matches[node] / (the total number of kmers). (To obtain values in [0, 1])
      *          score[node] = sum(weight[node*]) where 'node*' is any of node's descendants or node's ancestors (Obtain values in [0, 1])
@@ -55,7 +55,7 @@ class TaxClassifier {
     void import_taxonomy(const std::string &filepath);
 
     /**
-     * Update the current node scores and the best LCA taxid.
+     * Update the current node_scores and best_lca by taking into account the kmers in start_node and all it's ancestors.
      *
      * @param [input] 'start_node' starting node to update ancestors and descendants in the taxonomic tree
      * @param [input] 'num_kmers_per_node[taxid]' the number of kmers that point to 'taxid' according to the 'taxonomic_map'.

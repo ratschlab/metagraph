@@ -63,7 +63,7 @@ void TaxonomyDB::read_tree(const std::string &tax_tree_filepath,
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
-        if (parts.size() < 2) {
+        if (parts.size() <= 2) {
             logger->error("The Taxonomic tree filepath contains incomplete lines. Please make sure that this file was not manually modified: {}",
                           tax_tree_filepath);
             exit(1);
@@ -84,8 +84,7 @@ void TaxonomyDB::read_tree(const std::string &tax_tree_filepath,
     this->denormalized_taxid.push_back(0);
 
     uint64_t num_nodes = 0;
-    // num_taxid_failed used for logging only.
-    uint64_t num_taxid_failed = 0;
+    uint64_t num_taxid_failed = 0; // num_taxid_failed used for logging only.
     while (relevant_taxids.size()) {
         const TaxId taxid = relevant_taxids.front();
         relevant_taxids.pop();
@@ -105,7 +104,7 @@ void TaxonomyDB::read_tree(const std::string &tax_tree_filepath,
         relevant_taxids.push(full_parents_list[taxid]);
     }
     if (num_taxid_failed) {
-        logger->warn("During the tax_tree_filepath {} parsing, there could not be found {} taxids associated to the given accession versions (total number of evaluated accession versions: {}).",
+        logger->warn("During the tax_tree_filepath {} parsing, there could not be found {} taxids associated to the given accession versions (total number of evaluations: {}).",
                      tax_tree_filepath, num_taxid_failed, num_nodes);
     }
 
@@ -157,7 +156,12 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
 }
 
 std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-    return utils::split_string(label, "|")[3];
+    std::vector<std::string> label_parts = utils::split_string(label, "|");
+    if (label_parts.size() <= 3 || label_parts[3] == "") {
+        logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
+        exit(1);
+    }
+    return label_parts[3];
 }
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
@@ -188,8 +192,7 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
             exit(1);
         }
         if (input_accessions.count(parts[1])) {
-            TaxId act = static_cast<TaxId>(std::stoull(parts[2]));
-            this->label_taxid_map[parts[1]] = act;
+            this->label_taxid_map[parts[1]] = static_cast<TaxId>(std::stoull(parts[2]));
         }
     }
 }
@@ -273,6 +276,7 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version,
     }
     if (!this->normalized_taxid.count(this->label_taxid_map.at(accession_version))) {
         // taxid (corresponding to the current accession_version) not in the taxonomic tree.
+        num_get_taxid_calls_failed += 1;
         return false;
     }
 
@@ -284,7 +288,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
     std::vector<std::string> all_labels = annot.get_all_labels();
     for (const std::string &label : all_labels) {
         AccessionVersion accession_version = get_accession_version_from_label(label);
-        uint64_t taxid;
+        NormalizedTaxId taxid;
         if (!get_normalized_taxid(accession_version, &taxid)) {
             continue;
         }
@@ -298,6 +302,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
                 while (index >= new_size) {
                     new_size = new_size * 2 + 1;
                 }
+                // Create a aux_taxonomic_map because taxonomic_map.resize() does not preserve the data.
                 sdsl::int_vector<> aux_taxonomic_map = this->taxonomic_map;
                 this->taxonomic_map.resize(new_size);
                 for (uint64_t i = 0; i < this->taxonomic_map.size(); ++i) {
@@ -312,7 +317,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
                 this->taxonomic_map[index] = taxid;
             } else {
                 NormalizedTaxId lca =
-                        find_lca(std::vector<uint64_t>{this->taxonomic_map[index],
+                        find_lca(std::vector<NormalizedTaxId>{this->taxonomic_map[index],
                                                          taxid});
                 this->taxonomic_map[index] = lca;
           }
@@ -322,7 +327,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {
     if (num_get_taxid_calls_failed) {
-        logger->warn("During the annotation matrix parsing, there could not be found {} taxids associated to the labels in the anno matrix (total labels evaluated:  {}).",
+        logger->warn("During the annotation matrix parsing, there could not be found {} taxids associated to the labels in the anno matrix (total evaluations:  {}).",
                      num_get_taxid_calls_failed, num_get_taxid_calls);
     }
 
@@ -356,7 +361,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 
     std::vector<std::pair<uint64_t, uint64_t>> taxid_frequencies(1);
 
-    // Denormalize taxids in taxonomic map.
+    // Compute taxid_frequencies.
     for (size_t i = 0; i < this->taxonomic_map.size(); ++i) {
         if (this->taxonomic_map[i] == 0) {
             continue;
@@ -369,12 +374,12 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         taxid_frequencies[taxid].second = taxid;
     }
     std::sort(taxid_frequencies.begin(), taxid_frequencies.end(),
-              [](const std::pair<uint64_t, uint64_t>& a, const std::pair<uint64_t, uint64_t>& b){
-                if (a.first != b.first) {
-                    return a.first > b.first;
-                }
-                return a.second > b.second;
-              });
+        [](const std::pair<uint64_t, uint64_t> &a, const std::pair<uint64_t, uint64_t> &b){
+            if (a.first != b.first) {
+                return a.first > b.first;
+            }
+            return a.second > b.second;
+        });
 
     sdsl::int_vector<> code_to_taxid(taxid_frequencies.size());
     for (uint64_t i = 0; i < taxid_frequencies.size(); ++i) {
@@ -396,6 +401,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     }
     sdsl::dac_vector_dp<sdsl::rrr_vector<>> code(code_vector);
 
+    // Denormalize code_to_taxid.
     for (uint64_t i = 0; i < code_to_taxid.size(); ++i) {
         code_to_taxid[i] = this->denormalized_taxid[code_to_taxid[i]];
     }
