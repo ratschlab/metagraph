@@ -1018,6 +1018,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             diff_columns[l_idx] = std::move(columns);
 
         } else {
+            if (!columns.size())
+                continue;
+
             auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
             if constexpr(with_values) {
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
