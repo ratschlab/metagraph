@@ -225,12 +225,15 @@ namespace utils {
 
         size_t left = window_size / 2;
         size_t right = window_size - left - 1;
+
+        assert(left >= right);
+
         if (right + 1 >= v.size()) {
             T sum = std::accumulate(v.begin(), v.end(), (T)0);
             std::fill(v.begin(), v.end(), std::round((double)sum / v.size()));
 
         } else {
-            std::vector<T> psum = v;
+            std::vector<double> psum(v.size());
             std::partial_sum(v.begin(), v.end(), psum.begin());
             // Now we transform it to the following:
             // [1] [2] [3] [4] [4]
@@ -241,16 +244,31 @@ namespace utils {
             //  *---^
             size_t i = 0;
             // truncated window
-            for ( ; i <= left && i < v.size(); ++i) {
-                v[i] = std::round((double)psum[i + right] / (i + right + 1));
+            //     ..........
+            // ^---*---^
+            for ( ; i <= left && i + right < v.size(); ++i) {
+                v[i] = std::round(psum[i + right] / (i + right + 1));
             }
             // full window
+            //     ..............
+            //     ^---*---^
             for ( ; i + right < v.size(); ++i) {
-                v[i] = std::round((double)(psum[i + right] - psum[i - left - 1]) / window_size);
+                assert(i > left);
+                v[i] = std::round((psum[i + right] - psum[i - left - 1]) / window_size);
+            }
+            // window fully covers the sequence
+            //     ......
+            //   ^---*---^
+            for ( ; i <= left; ++i) {
+                assert(i < v.size());
+                v[i] = std::round(psum.back() / v.size());
             }
             // truncated window
+            //     ..........
+            //       ^---*---^
             for ( ; i < v.size(); ++i) {
-                v[i] = std::round((double)(psum.back() - psum[i - left - 1]) / (left + v.size() - i));
+                assert(i > left);
+                v[i] = std::round((psum.back() - psum[i - left - 1]) / (left + v.size() - i));
             }
         }
     }

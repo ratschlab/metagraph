@@ -1131,6 +1131,21 @@ TEST(smooth_vector, increasing) {
     }
     {
         std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() + 1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(3, 4, 4, 5, 5, 5, 6, 6, 7));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2 - 2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2 - 1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
         utils::smooth_vector(v.size() * 2, &v);
         EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
     }
@@ -1153,6 +1168,20 @@ TEST(smooth_vector, zigzag) {
         std::vector<int> v = { 1, -1, 1, -1, 1, -1, 1, -1, 1 };
         utils::smooth_vector(3, &v);
         EXPECT_THAT(v, testing::ElementsAre(0, 0, 0, 0, 0, 0, 0, 0, 0));
+    }
+}
+
+TEST(smooth_vector, check_asserts_odd) {
+    std::vector<uint32_t> v(15, 0);
+    for (size_t ws = 0; ws < 100; ++ws) {
+        utils::smooth_vector(ws, &v);
+    }
+}
+
+TEST(smooth_vector, check_asserts_even) {
+    std::vector<uint32_t> v(16, 0);
+    for (size_t ws = 0; ws < 100; ++ws) {
+        utils::smooth_vector(ws, &v);
     }
 }
 
