@@ -219,13 +219,13 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
     logger->trace("Loading annotations from file {}", f);
 
     try {
-        std::ifstream instream(f, std::ios::binary);
-        if (!instream.good())
+        std::ifstream in(f, std::ios::binary);
+        if (!in.good())
             throw std::ifstream::failure("can't open file");
 
-        num_rows_ = load_number(instream);
+        num_rows_ = load_number(in);
 
-        if (!label_encoder_.load(instream))
+        if (!label_encoder_.load(in))
             throw std::ifstream::failure("can't load label encoder");
 
         if (!label_encoder_.size())
@@ -234,7 +234,7 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
         for (size_t c = 0; c < label_encoder_.size(); ++c) {
             auto column = std::make_unique<bit_vector_smart>();
 
-            if (!column->load(instream))
+            if (!column->load(in))
                 throw std::ifstream::failure("can't load next column");
 
             if (column->size() != num_rows_)
@@ -319,19 +319,19 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
-        std::ifstream instream(filename, std::ios::binary);
-        if (!instream.good()) {
+        std::ifstream in(filename, std::ios::binary);
+        if (!in.good()) {
             logger->error("Can't read from {}", filename);
             error_occurred = true;
         }
-        std::ignore = load_number(instream);
+        std::ignore = load_number(in);
 
         LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(instream)) {
+        if (!label_encoder.load(in)) {
             logger->error("Can't load label encoder from {}", filename);
             error_occurred = true;
         }
@@ -346,29 +346,29 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
         logger->trace("Loading annotations from file {}", filename);
         try {
-            std::ifstream instream(filename, std::ios::binary);
-            if (!instream.good())
+            std::ifstream in(filename, std::ios::binary);
+            if (!in.good())
                 throw std::ifstream::failure("can't open file");
 
-            const auto num_rows = load_number(instream);
+            const auto num_rows = load_number(in);
 
             LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(instream))
+            if (!label_encoder_load.load(in))
                 throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size())
-                logger->warn("No labels in {}", filename);
+                logger->warn("No columns in {}", filename);
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 auto new_column = std::make_unique<bit_vector_smart>();
 
-                if (!new_column->load(instream))
+                if (!new_column->load(in))
                     throw std::ifstream::failure("can't load next column");
 
                 if (new_column->size() != num_rows)
@@ -404,15 +404,15 @@ void ColumnCompressed<Label>
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
-        std::ifstream instream(filename, std::ios::binary);
-        if (!instream) {
+        std::ifstream in(filename, std::ios::binary);
+        if (!in) {
             logger->error("Can't read from {}", filename);
             error_occurred = true;
         }
-        std::ignore = load_number(instream);
+        std::ignore = load_number(in);
 
         LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(instream)) {
+        if (!label_encoder.load(in)) {
             logger->error("Can't load label encoder from {}", filename);
             error_occurred = true;
         }
@@ -432,18 +432,18 @@ void ColumnCompressed<Label>
         const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
         logger->trace("Loading labels from {}", filename);
         try {
-            std::ifstream instream(filename, std::ios::binary);
-            if (!instream)
+            std::ifstream in(filename, std::ios::binary);
+            if (!in)
                 throw std::ifstream::failure("can't open file");
 
-            std::ignore = load_number(instream);
+            std::ignore = load_number(in);
 
             LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(instream))
+            if (!label_encoder_load.load(in))
                 throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size()) {
-                logger->warn("No labels in {}", filename);
+                logger->warn("No columns in {}", filename);
                 continue;
             }
 
@@ -452,15 +452,15 @@ void ColumnCompressed<Label>
 
             std::ifstream values_in(values_fname, std::ios::binary);
             if (!values_in)
-                throw std::ifstream::failure("can't open file with values");
+                throw std::ifstream::failure("can't open file " + values_fname);
 
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 sdsl::int_vector<> column_values;
                 try {
                     column_values.load(values_in);
                 } catch (...) {
-                    logger->error("Can't load values for column {} in {}",
-                                  c, filename);
+                    logger->error("Can't load column values from {} for column {}",
+                                  values_fname, c);
                     throw;
                 }
 
