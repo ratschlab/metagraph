@@ -216,6 +216,15 @@ namespace utils {
         return count_hist.back().first;
     }
 
+    /**
+     * Smoothing of an array with a sliding window.
+     *
+     * If |window_size| is even, the left side of the window is longer than
+     * the right one by 1. For example, for window size 6: .....?...
+     *                                                       ^--*-^
+     * On the sides of the array, the window is truncated:     .?.......
+     *                                                       XX^*-^
+     */
     template <typename T>
     void smooth_vector(size_t window_size, std::vector<T> *v_p) {
         auto &v = *v_p;
