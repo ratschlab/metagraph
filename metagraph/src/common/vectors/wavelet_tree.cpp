@@ -302,7 +302,9 @@ void wavelet_tree_dyn::clear() {
 
 sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
     sdsl::int_vector<> vector(dwt_.size(), 0, logsigma());
-    for(size_t i = 0; i < vector.size(); ++i) {
+    // set the block size to a multiple of 64 to avoid race conditions for any width
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 1024)
+    for (size_t i = 0; i < vector.size(); ++i) {
         vector[i] = dwt_.at(i);
     }
     return vector;
@@ -393,6 +395,7 @@ bool wavelet_tree_sdsl<t_wt_sdsl>::load(std::istream &in) {
 template <class t_wt_sdsl>
 sdsl::int_vector<> wavelet_tree_sdsl<t_wt_sdsl>::to_vector() const {
     sdsl::int_vector<> vector(wwt_.size(), 0, logsigma_);
+    // set the block size to a multiple of 64 to avoid race conditions for any width
     #pragma omp parallel for num_threads(get_num_threads()) schedule(static, 1024)
     for (uint64_t i = 0; i < wwt_.size(); ++i) {
         vector[i] = wwt_[i];
