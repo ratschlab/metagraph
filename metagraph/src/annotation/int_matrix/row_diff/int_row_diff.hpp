@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <cassert>
 #include <string>
 #include <vector>
 
@@ -27,20 +28,20 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 
 /**
  * Convert deltas to positive integer for enable compression:
- *      0  -> 0
+ *      0  -> X (not allowed, zero diffs must be skipped)
+ *      1  -> 0
  *      -1 -> 1
- *      1  -> 2
+ *      2  -> 2
  *      -2 -> 3
- *      2  -> 4
  *      ...
  */
 inline uint64_t encode_diff(int64_t x) {
-    // TODO: skip 0?
-    return x >= 0 ? x * 2 : (-x) * 2 - 1;
+    assert(x);
+    return x > 0 ? (x - 1) * 2 : (-x) * 2 - 1;
 }
 
 inline int64_t decode_diff(uint64_t c) {
-    return !(c & 1) ? c / 2 : -((c + 1) / 2);
+    return !(c & 1) ? c / 2 + 1 : -((c + 1) / 2);
 }
 
 template <class BaseMatrix>

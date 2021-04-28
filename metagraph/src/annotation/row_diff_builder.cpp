@@ -843,9 +843,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 } else {
                     // add current bit if this node is an anchor
                     // or if the successor has zero diff
-                    bool is_anchor = anchor[row_idx];
-                    uint64_t succ_value = is_anchor ? 0 : get_value(source_col, source_idx, j, *succ);
-                    if (is_anchor || succ_value != curr_value) {
+                    uint64_t succ_value = anchor[row_idx] ? 0 : get_value(source_col, source_idx, j, *succ);
+                    if (succ_value != curr_value) {
                         // no reduction, we must keep the bit
                         auto &v = set_rows_fwd[source_idx][j];
                         if constexpr(with_values) {
@@ -1005,6 +1004,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 elias_fano::merge_files<T>(filenames, [&](T v) {
                     call(utils::get_first(v));
                     if constexpr(with_values) {
+                        assert(v.second && "zero diffs must have been skipped");
                         values[l_idx][j][rk] = matrix::encode_diff(v.second);
                     }
                     rk++;
