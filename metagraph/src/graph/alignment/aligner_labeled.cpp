@@ -163,7 +163,7 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
     DefaultColumnExtender<NodeType>::call_visited_nodes([&](node_index node, size_t, size_t) {
-        auto [it, inserted] = targets_.emplace(node, Vector<uint64_t>{});
+        auto [it, inserted] = targets_.emplace(node, 0);
         if (inserted) {
             process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
                              { node }, [&](auto row, size_t) {
@@ -178,8 +178,13 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     auto it = added_nodes.begin();
     for (auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
         assert(it != added_nodes.end());
-        assert(targets_[*it].empty());
-        targets_[*it] = std::move(labels);
+        auto jt = targets_set_.emplace(labels).first;
+        std::cerr << "test\t" << jt - targets_set_.begin() << " " << labels.size() << "\t";
+        for (auto l : labels) {
+            std::cerr << " " << l;
+        }
+        std::cerr << "\n";
+        targets_[*it] = jt - targets_set_.begin();
         ++it;
     }
     assert(it == added_nodes.end());
@@ -200,45 +205,115 @@ void LabeledBacktrackingExtender<NodeType>
 
     assert(next_extension.size() == 1);
     DBGAlignment alignment = std::move(next_extension[0]);
+    assert(alignment.is_valid(this->graph_, &this->config_));
 
-    Vector<uint64_t> empty;
-    tsl::hopscotch_map<uintptr_t, std::vector<size_t>> labels;
+    // map label set to indices in the alignment
+    tsl::hopscotch_map<size_t, std::vector<size_t>> labels;
     for (size_t i = 0; i < alignment.size(); ++i) {
-        auto find = targets_.find(alignment[i]);
-        uintptr_t target = static_cast<uintptr_t>(&empty);
-        if (find != targets_.end())
-            target = static_cast<uintptr_t>(&find->second);
-
-        labels[target].emplace_back(i);
+        assert(targets_.count(alignment[i]));
+        labels[targets_[alignment[i]]].emplace_back(i);
     }
 
+    std::cerr << "input: " << alignment << "\n";
 
+    auto prefix_skip = [](AlignmentPrefix<node_index> &prefix) {
+        assert(!prefix.eof());
+        while (prefix.get_back_op() == Cigar::INSERTION) {
+            assert(!prefix.eof());
+            ++prefix;
+        }
+        assert(!prefix.eof());
+        ++prefix;
+    };
 
-    // std::cerr << "input: " << alignment << "\n";
+    auto suffix_skip = [](AlignmentSuffix<node_index> &suffix) {
+        assert(!suffix.eof());
+        while (suffix.get_front_op() == Cigar::INSERTION) {
+            assert(!suffix.eof());
+            ++suffix;
+        }
+        assert(!suffix.eof());
+        ++suffix;
+    };
 
-    // AlignmentPrefix<node_index> prefix(alignment, this->config_, this->graph_);
+    size_t offset = 0;
+    if (labels.count(0)) {
+        const auto &empty_indices = labels[0];
+        std::cerr << "\tempty range\t" << empty_indices.front() << " " << empty_indices.back() << "\n";
+        assert(empty_indices.size());
+        if (empty_indices.back() == alignment.size() - 1) {
+            AlignmentPrefix<node_index> prefix(alignment, this->config_, this->graph_);
+            auto it = empty_indices.rbegin();
+            for (size_t i = alignment.size(); i > 0 && *it == i - 1; --i, ++it) {
+                prefix_skip(prefix);
+            }
 
-    // Vector<uint64_t> target_intersection;
+            alignment = Alignment<node_index>(prefix);
+            if (alignment.empty()) {
+                assert(prefix.eof());
+                return;
+            }
+        }
 
-    // for (size_t i = alignment.size(); i > 0; --i) {
-    //     if (!targets_.count(alignment[i - 1])) {
-    //         assert(!prefix.eof());
-    //         while (prefix.get_back_op() == Cigar::INSERTION) {
-    //             assert(!prefix.eof());
-    //             ++prefix;
-    //         }
-    //         assert(!prefix.eof());
-    //         ++prefix;
-    //     } else {
-    //         target_intersection = targets_[alignment[i - 1]];
-    //         break;
-    //     }
-    // }
+        if (empty_indices.front() == 0) {
+            AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
+            size_t end = std::min(empty_indices.size(), alignment.size());
+            for ( ; offset < end && offset == empty_indices[offset]; ++offset) {
+                suffix_skip(suffix);
+            }
 
-    // if (prefix.eof())
-    //     return;
+            if (offset == alignment.size()) {
+                assert(suffix.eof());
+                return;
+            }
+        }
+    }
 
-    // alignment = DBGAlignment(prefix);
+    for (const auto &[target_idx, indices] : labels) {
+        assert(indices.size());
+        const auto &targets = *(targets_set_.begin() + target_idx);
+        if (targets.empty() || indices.back() < offset)
+            continue;
+
+        std::cerr << "\trange\t" << targets.size() << " " << offset << "\t" << indices.front() << " " << indices.back() << "\n";
+
+        if (indices.back() + 1 - indices.front() == indices.size()) {
+            // contiguous range
+            AlignmentPrefix<node_index> prefix(alignment, this->config_, this->graph_);
+            for (size_t i = 1; alignment.size() - i > indices.back() - offset; ++i) {
+                prefix_skip(prefix);
+                std::cerr << "\t\tstep\t" << Alignment<node_index>(prefix) << "\n";
+            }
+
+            alignment = Alignment<node_index>(prefix);
+            if (alignment.empty()) {
+                assert(prefix.eof());
+                continue;
+            }
+
+            AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
+            if (indices.size() > 1) {
+                auto it = std::lower_bound(indices.begin(), indices.end(), offset);
+                assert(it != indices.end());
+                for (size_t i = offset; i < *it; ++i) {
+                    suffix_skip(suffix);
+                    std::cerr << "\t\tstep\t" << Alignment<node_index>(suffix) << "\n";
+                }
+            }
+
+            if (!suffix.eof()) {
+                extensions.emplace_back(suffix);
+                assert(extensions.back().size());
+                std::cerr << "\t\tlast: " << extensions.back() << "\n";
+                extensions.back().target_columns = targets;
+            }
+        } else {
+            // TODO
+        }
+    }
+
+    // Vector<uint64_t> target_intersection = targets_[alignment.back()];
+
     // std::cerr << "\tstart: " << alignment << " " << target_intersection.size() << "\n";
 
     // AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
@@ -280,7 +355,6 @@ void LabeledBacktrackingExtender<NodeType>
     //         }
     //         std::swap(inter, target_intersection);
     //     }
-
     // }
 
     // if (target_intersection.size()) {

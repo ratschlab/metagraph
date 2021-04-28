@@ -42,7 +42,9 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     LabeledBacktrackingExtender(const AnnotatedDBG &anno_graph,
                                 const DBGAlignerConfig &config,
                                 std::string_view query)
-          : BaseExtender(anno_graph.get_graph(), config, query), anno_graph_(anno_graph) {}
+          : BaseExtender(anno_graph.get_graph(), config, query), anno_graph_(anno_graph) {
+        targets_set_.emplace(Vector<uint64_t>{});
+    }
 
     virtual ~LabeledBacktrackingExtender() {}
 
@@ -59,7 +61,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     const AnnotatedDBG &anno_graph_;
-    mutable tsl::hopscotch_map<node_index, Vector<uint64_t>> targets_;
+    mutable VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
+    mutable tsl::hopscotch_map<node_index, size_t> targets_;
 };
 
 template <class Seeder = ExactSeeder<>,
