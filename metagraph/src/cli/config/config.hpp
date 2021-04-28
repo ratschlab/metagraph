@@ -57,7 +57,7 @@ class Config {
     bool align_both_strands = false;
     bool filter_by_kmer = false;
     bool output_json = false;
-    bool intersect_columns = false;
+    bool aggregate_columns = false;
 
     unsigned int k = 3;
 
@@ -90,6 +90,7 @@ class Config {
     unsigned int max_hull_forks = 4;
     unsigned int row_diff_stage = 0;
     unsigned int max_path_length = 100;
+    unsigned int smoothing_window = 1;  // no smoothing by default
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
@@ -120,14 +121,15 @@ class Config {
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;
-    double min_count_quantile = 0.;
-    double max_count_quantile = 1.;
+    double min_count_quantile = 0.0;
+    double max_count_quantile = 1.0;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
-    double intersect_ratio = 1;
+    double min_fraction = 0.0;
+    double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
 
     std::vector<std::string> fnames;
@@ -146,6 +148,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     std::string linkage_file;
+    std::string intersected_columns;
 
     std::filesystem::path tmp_dir;
 

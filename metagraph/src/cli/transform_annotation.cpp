@@ -434,15 +434,24 @@ int transform_annotation(Config *config) {
     /**************** operations on columns *****************/
     /********************************************************/
 
-    if (config->intersect_columns) {
+    if (config->aggregate_columns) {
         logger->trace("Loading annotation...");
 
         uint64_t num_columns = get_num_columns(files, Config::ColumnCompressed);
         if (!num_columns) {
-            logger->warn("No input columns to intersect");
+            logger->warn("No input columns to aggregate");
             exit(1);
         }
 
+        const uint64_t min_cols
+            = std::max((uint64_t)std::ceil(num_columns * config->min_fraction),
+                       (uint64_t)config->min_count);
+        const uint64_t max_cols
+            = std::min((uint64_t)std::floor(num_columns * config->max_fraction),
+                       (uint64_t)config->max_count);
+
+        // TODO: set width to log2(max_cols + 1) but make sure atomic
+        //       increments can't lead to overflow
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns",
                                  std::cerr, !get_verbose());
@@ -474,27 +483,70 @@ int transform_annotation(Config *config) {
         thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        uint64_t min_cols = num_columns * config->intersect_ratio;
-        logger->trace("Selecting k-mers annotated in >= {} / {} columns",
-                      min_cols, num_columns);
+        logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
+                      min_cols, max_cols, num_columns);
 
-        sdsl::bit_vector intersection(sum.size(), false);
+        sdsl::bit_vector mask(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
-            if (sum[i] >= min_cols) {
-                intersection[i] = true;
+            if (sum[i] >= min_cols && sum[i] <= max_cols) {
+                mask[i] = true;
             }
         }
         sum = sdsl::int_vector<>();
 
-        ColumnCompressed<> intersected_column(std::move(intersection),
-                                              "intersection");
+        const std::string &col_name = config->anno_labels.size()
+                                        ? config->anno_labels[0]
+                                        : "mask";
+        ColumnCompressed<> aggregated_column(std::move(mask), col_name);
 
         const auto &outfname = utils::remove_suffix(config->outfbase,
                                                     ColumnCompressed<>::kExtension)
                                                 + ColumnCompressed<>::kExtension;
-        intersected_column.serialize(outfname);
-        logger->trace("Columns are intersected and the resulting column"
-                      " is serialized to {}", outfname);
+        aggregated_column.serialize(outfname);
+        logger->trace("Columns are aggregated and the resulting column '{}'"
+                      " serialized to {}", col_name, outfname);
+        return 0;
+    }
+
+    // TODO: move to column_op
+    if (config->intersected_columns.size()) {
+        ColumnCompressed<> base_columns(0);
+        if (!base_columns.load(config->intersected_columns)) {
+            logger->error("Cannot load base columns from file '{}'",
+                          config->intersected_columns);
+            exit(1);
+        }
+
+        logger->trace("Loading input annotations and computing the inner product...");
+
+        for (const auto &file : files) {
+            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+                    = initialize_annotation(file, *config);
+            if (!annotator->load(file)) {
+                logger->error("Cannot load annotations from file '{}'", file);
+                exit(1);
+            }
+
+            for (const std::string &base_label : base_columns.get_all_labels()) {
+                std::vector<std::pair<uint64_t, size_t>> col;
+                base_columns.get_column(base_label).call_ones([&col](uint64_t i) {
+                    col.emplace_back(i, 1);
+                });
+                // TODO: make parallel (call sum_rows on batches)
+                auto row_sum = annotator->get_matrix().sum_rows(std::move(col),
+                                                                config->min_count,
+                                                                config->max_count);
+
+                std::cout << fmt::format("({}<{}>, {}<*>):", config->intersected_columns,
+                                         base_label, file);
+                for (auto [j, sum] : row_sum) {
+                    const std::string &label = annotator->get_label_encoder().decode(j);
+                    std::cout << fmt::format("\t<{}>:{}", label, sum);
+                }
+                std::cout << "\n";
+            }
+        }
+
         return 0;
     }
 

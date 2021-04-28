@@ -173,10 +173,14 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
-        } else if (!strcmp(argv[i], "--intersect-columns")) {
-            intersect_columns = true;
-        } else if (!strcmp(argv[i], "--intersect-ratio")) {
-            intersect_ratio = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--aggregate-columns")) {
+            aggregate_columns = true;
+        } else if (!strcmp(argv[i], "--intersected-anno")) {
+            intersected_columns = get_value(i++);
+        } else if (!strcmp(argv[i], "--min-fraction")) {
+            min_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-fraction")) {
+            max_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -307,6 +311,8 @@ Config::Config(int argc, char *argv[]) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--smoothing-window")) {
+            smoothing_window = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-singletons")) {
             num_singleton_kmers = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
@@ -432,8 +438,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (intersect_ratio < 0 || intersect_ratio > 1) {
-        std::cerr << "Error: intersection ratio must be in range [0, 1]"
+    if (min_fraction < 0 || min_fraction > 1 || max_fraction < 0 || max_fraction > 1) {
+        std::cerr << "Error: min_fraction and max_fraction must be in range [0, 1]"
                   << std::endl;
         print_usage_and_exit = true;
     }
@@ -871,6 +877,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be\n"
                             "\t                         \t\tdetermined (-1: disables fallback) [1]\n");
             fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --smoothing-window [INT] \twindow size for smoothing k-mer counts in unitigs [off]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"
                             "\t                              \t\tExample: --count-bins-q '0 0.33 0.66 1'\n");
@@ -1095,8 +1103,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform_anno -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --intersect-columns \t\tcompute intersection of the annotation columns [off]\n");
-            fprintf(stderr, "\t   --intersect-ratio [FLOAT] \tinclude k-mer if it appears in this ratio of columns [1.0]\n");
+            fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
+            fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
+            fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
+            fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
+            fprintf(stderr, "\t   --intersected-anno [STR] \tannotation with columns to intersect with ANNOTATOR (count shared bits) [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
