@@ -1,10 +1,14 @@
 #include "node_weights.hpp"
 
+#include <filesystem>
+
 #include "common/algorithms.hpp"
 
 
 namespace mtg {
 namespace graph {
+
+namespace fs = std::filesystem;
 
 NodeWeights::NodeWeights(uint64_t max_index, size_t bits_per_count)
       : weights_(max_index, 0, bits_per_count),
@@ -50,12 +54,23 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
 }
 
 void NodeWeights::serialize(const std::string &filename_base) const {
-    const auto weights_filename
+    const auto fname
         = utils::remove_suffix(filename_base, kWeightsExtension)
                                         + kWeightsExtension;
 
-    std::ofstream outstream(weights_filename, std::ios::binary);
+    std::ofstream outstream(fname, std::ios::binary);
     weights_.serialize(outstream);
+}
+
+    // serialize weights from buffer without loading all in RAM
+void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,
+                            const std::string &filename_base) {
+    const auto fname
+        = utils::remove_suffix(filename_base, kWeightsExtension)
+                                        + kWeightsExtension;
+    const std::string old_fname = weights.filename();
+    weights.close(false);
+    fs::rename(old_fname, fname);
 }
 
 bool NodeWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {

@@ -158,7 +158,7 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeight) {
             constructor.add_sequences(std::vector<std::string>(input_data));
 
             BOSS constructed;
-            sdsl::int_vector<> weights;
+            sdsl::int_vector_buffer<> weights;
             constructor.build_graph(&constructed, &weights);
 
             ASSERT_EQ(constructed.num_edges() + 1, weights.size());
@@ -199,7 +199,7 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 
             BOSS::Chunk chunk = constructor->build_chunk();
 
-            sdsl::int_vector<> weights;
+            sdsl::int_vector_buffer<> weights;
             chunk.initialize_boss(&constructed, &weights);
 
             ASSERT_EQ(constructed.num_edges() + 1, weights.size());
