@@ -62,7 +62,7 @@ void NodeWeights::serialize(const std::string &filename_base) const {
     weights_.serialize(outstream);
 }
 
-    // serialize weights from buffer without loading all in RAM
+// serialize weights from buffer without loading all in RAM
 void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,
                             const std::string &filename_base) {
     const auto fname
