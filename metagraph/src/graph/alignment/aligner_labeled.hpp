@@ -170,6 +170,22 @@ class LabeledAligner : public ILabeledAligner {
     build_extender(std::string_view query) const override {
         return std::make_shared<Extender>(anno_graph_, config_, query);
     }
+
+    std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    build_seeder(std::string_view query,
+                 bool is_reverse_complement,
+                 std::vector<DeBruijnGraph::node_index>&& nodes) const override {
+        if (config_.min_seed_length < graph_.get_k()
+                && SuffixSeeder<Seeder>::get_base_dbg_succ(graph_)) {
+            return std::make_shared<SuffixSeeder<Seeder>>(
+                graph_, query, is_reverse_complement, std::move(nodes), config_
+            );
+        } else {
+            return std::make_shared<Seeder>(
+                graph_, query, is_reverse_complement, std::move(nodes), config_
+            );
+        }
+    }
 };
 
 } // namespace align

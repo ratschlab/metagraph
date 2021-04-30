@@ -53,6 +53,11 @@ class ISeedAndExtendAligner : public IDBGAligner {
   protected:
     virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query) const = 0;
+
+    virtual std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    build_seeder(std::string_view query,
+                 bool is_reverse_complement,
+                 std::vector<DeBruijnGraph::node_index>&& nodes) const = 0;
 };
 
 class ISeedFilter {
@@ -102,6 +107,22 @@ class DBGAligner : public ISeedAndExtendAligner {
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query) const override {
         return std::make_shared<Extender>(graph_, config_, query);
+    }
+
+    std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    build_seeder(std::string_view query,
+                 bool is_reverse_complement,
+                 std::vector<DeBruijnGraph::node_index>&& nodes) const override {
+        if (config_.min_seed_length < graph_.get_k()
+                && SuffixSeeder<Seeder>::get_base_dbg_succ(graph_)) {
+            return std::make_shared<SuffixSeeder<Seeder>>(
+                graph_, query, is_reverse_complement, std::move(nodes), config_
+            );
+        } else {
+            return std::make_shared<Seeder>(
+                graph_, query, is_reverse_complement, std::move(nodes), config_
+            );
+        }
     }
 };
 
@@ -232,32 +253,15 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(nodes_rc.size() == nodes.size());
         }
 
-        std::shared_ptr<ISeeder<node_index>> seeder;
+        std::shared_ptr<ISeeder<node_index>> seeder = build_seeder(
+            this_query, is_reverse_complement, std::move(nodes)
+        );
+
         std::shared_ptr<ISeeder<node_index>> seeder_rc;
-        if (config_.min_seed_length < graph_.get_k()
-                && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
-            seeder = std::make_shared<SuffixSeeder<Seeder>>(
-                graph_, this_query, is_reverse_complement, std::move(nodes), config_
-            );
-        } else {
-            seeder = std::make_shared<Seeder>(
-                graph_, this_query, is_reverse_complement, std::move(nodes), config_
-            );
-        }
 
         if (config_.forward_and_reverse_complement
-                || graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-            if (config_.min_seed_length < graph_.get_k()
-                    && SuffixSeeder<Seeder>::get_base_dbg_succ(this->graph_)) {
-                seeder_rc = std::make_shared<SuffixSeeder<Seeder>>(
-                    graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
-                );
-            } else {
-                seeder_rc = std::make_shared<Seeder>(
-                    graph_, reverse, !is_reverse_complement, std::move(nodes_rc), config_
-                );
-            }
-        }
+                || graph_.get_mode() == DeBruijnGraph::CANONICAL)
+            seeder_rc = build_seeder(reverse, is_reverse_complement, std::move(nodes_rc));
 
         auto extender = build_extender(this_query);
 
