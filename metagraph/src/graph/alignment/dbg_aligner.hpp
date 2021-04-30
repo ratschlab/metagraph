@@ -45,10 +45,15 @@ class IDBGAligner {
                      const AlignmentCallback &callback) const;
 };
 
+template <class AlignmentCompare = LocalAlignmentLess>
 class ISeedAndExtendAligner : public IDBGAligner {
   public:
     virtual ~ISeedAndExtendAligner() {}
+    virtual const DeBruijnGraph& get_graph() const = 0;
     virtual const DBGAlignerConfig& get_config() const = 0;
+
+    virtual void align_batch(const QueryGenerator &generate_query,
+                             const AlignmentCallback &callback) const override;
 
   protected:
     virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
@@ -79,7 +84,7 @@ class SeedAndExtendAlignerCore;
 template <class Seeder = ExactSeeder<>,
           class Extender = DefaultColumnExtender<>,
           class AlignmentCompare = LocalAlignmentLess>
-class DBGAligner : public ISeedAndExtendAligner {
+class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     typedef IDBGAligner::node_index node_index;
     typedef IDBGAligner::DBGAlignment DBGAlignment;
@@ -95,9 +100,7 @@ class DBGAligner : public ISeedAndExtendAligner {
             throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
     }
 
-    virtual void align_batch(const QueryGenerator &generate_query,
-                             const AlignmentCallback &callback) const override final;
-
+    virtual const DeBruijnGraph& get_graph() const override final { return graph_; }
     virtual const DBGAlignerConfig& get_config() const override final { return config_; }
 
   protected:
@@ -224,31 +227,30 @@ class SeedAndExtendAlignerCore {
     AlignmentAggregator<node_index, AlignmentCompare> aggregator_;
 };
 
-
-template <class Seeder, class Extender, class AlignmentCompare>
-inline void DBGAligner<Seeder, Extender, AlignmentCompare>
+template <class AlignmentCompare>
+inline void ISeedAndExtendAligner<AlignmentCompare>
 ::align_batch(const QueryGenerator &generate_query,
               const AlignmentCallback &callback) const {
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        SeedFilter seed_filter(graph_.get_k());
+        SeedFilter seed_filter(get_graph().get_k());
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
-            graph_, config_, seed_filter, query, is_reverse_complement
+            get_graph(), get_config(), seed_filter, query, is_reverse_complement
         );
         auto &paths = aligner_core.get_paths();
         std::string_view this_query = paths.get_query(is_reverse_complement);
         std::string_view reverse = paths.get_query(!is_reverse_complement);
         assert(this_query == query);
 
-        std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
+        std::vector<node_index> nodes = map_sequence_to_nodes(get_graph(), query);
         std::vector<node_index> nodes_rc;
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
+        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL
+                || get_config().forward_and_reverse_complement) {
             assert(!is_reverse_complement);
             std::string dummy(query);
             nodes_rc = nodes;
-            reverse_complement_seq_path(graph_, dummy, nodes_rc);
+            reverse_complement_seq_path(get_graph(), dummy, nodes_rc);
             assert(dummy == paths.get_query(true));
             assert(nodes_rc.size() == nodes.size());
         }
@@ -259,13 +261,13 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         std::shared_ptr<ISeeder<node_index>> seeder_rc;
 
-        if (config_.forward_and_reverse_complement
-                || graph_.get_mode() == DeBruijnGraph::CANONICAL)
-            seeder_rc = build_seeder(reverse, is_reverse_complement, std::move(nodes_rc));
+        if (get_config().forward_and_reverse_complement
+                || get_graph().get_mode() == DeBruijnGraph::CANONICAL)
+            seeder_rc = build_seeder(reverse, !is_reverse_complement, std::move(nodes_rc));
 
         auto extender = build_extender(this_query);
 
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
             auto extender_rc = build_extender(reverse);
 
             auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
@@ -280,7 +282,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                *extender, *extender_rc,
                                                build_rev_comp_alignment_core);
 
-        } else if (config_.forward_and_reverse_complement) {
+        } else if (get_config().forward_and_reverse_complement) {
             auto extender_rc = build_extender(reverse);
             aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
 

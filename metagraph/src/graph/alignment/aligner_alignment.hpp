@@ -327,6 +327,10 @@ class QueryAlignment {
     const_iterator cbegin() const { return alignments_.cbegin(); }
     const_iterator cend() const { return alignments_.cend(); }
 
+    iterator erase(const_iterator begin, const_iterator end) {
+        return alignments_.erase(begin, end);
+    }
+
   private:
     std::shared_ptr<std::string> query_;
     std::shared_ptr<std::string> query_rc_;
