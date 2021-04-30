@@ -114,7 +114,7 @@ std::vector<std::string> get_labels_by_label(const MultiLabelEncoded<std::string
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    auto code_counts = annotator.count_labels(index_counts.values_container(), min_count, min_count);
+    auto code_counts = annotator.get_matrix().sum_rows(index_counts.values_container(), min_count, min_count);
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());
@@ -289,7 +289,7 @@ get_top_labels_by_label(const MultiLabelEncoded<std::string> &annotator,
         index_counts[i] = 1;
     }
 
-    auto code_counts = annotator.count_labels(index_counts.values_container(), min_count);
+    auto code_counts = annotator.get_matrix().sum_rows(index_counts.values_container(), min_count);
 
     assert(std::all_of(
         code_counts.begin(), code_counts.end(),

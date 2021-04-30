@@ -1,8 +1,9 @@
-#include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
 #include <algorithm>
 
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <sdsl/int_vector_buffer.hpp>
 
 #include "common/vector.hpp"
@@ -1010,6 +1011,177 @@ TEST(int_vector_buffer, small_buffer) {
             ASSERT_EQ(final[j], buf[j]);
         }
         buf.close(true);
+    }
+}
+
+TEST(int_vector_buffer, seek_to_front_65) {
+    const size_t width = 1;
+    const size_t buffer_size = 8; // buffer size 8 bytes
+    const std::string &filename = test_dump_basename + "_ivb";
+
+    // initialize buffer
+    {
+        sdsl::int_vector_buffer<> buf(filename, std::ios::out, buffer_size, width);
+    }
+
+    sdsl::int_vector_buffer<> buf(filename, std::ios::in | std::ios::out, buffer_size, width);
+    for (size_t i = 0; i < 65; ++i) {
+        buf.push_back(1);
+    }
+
+    ASSERT_EQ(1, buf[0]);
+    ASSERT_EQ(1, buf[64]);
+
+    buf.close(true);
+}
+
+TEST(int_vector_buffer, seek_to_front) {
+    const size_t size = 1'000'000;
+    const size_t width = 1;
+    const size_t buffer_size = 10'000;
+    const std::string &filename = test_dump_basename + "_ivb";
+
+    sdsl::int_vector<> vector(size, 1, width);
+
+    // initialize buffer
+    {
+        sdsl::int_vector_buffer<> buf(filename, std::ios::out, buffer_size, width);
+    }
+
+    sdsl::int_vector_buffer<> buf(filename, std::ios::in | std::ios::out, buffer_size, width);
+    for (size_t i = 0; i < size; ++i) {
+        buf.push_back(1);
+    }
+
+    for (size_t i = 0; i < size; ++i) {
+        ASSERT_EQ(1, buf[i]);
+    }
+
+    buf.close(true);
+}
+
+TEST(int_vector_buffer, change_and_seek_to_front) {
+    const size_t size = 1'000'000;
+    const size_t width = 1;
+    const size_t buffer_size = 10'000;
+    const std::string &filename = test_dump_basename + "_ivb";
+
+    sdsl::int_vector<> vector(size, 1, width);
+
+    // initialize buffer
+    {
+        sdsl::int_vector_buffer<> buf(filename, std::ios::out, buffer_size, width);
+        for (size_t i = 0; i < size; ++i) {
+            buf.push_back(0);
+        }
+    }
+
+    sdsl::int_vector_buffer<> buf(filename, std::ios::in | std::ios::out, buffer_size, width);
+    for (size_t i = 0; i < size; ++i) {
+        buf[i] = 1;
+    }
+
+    for (size_t i = 0; i < size; ++i) {
+        ASSERT_EQ(1, buf[i]);
+    }
+
+    buf.close(true);
+}
+
+TEST(smooth_vector, empty) {
+    std::vector<uint32_t> v;
+    utils::smooth_vector(1, &v);
+    EXPECT_THAT(v, testing::ElementsAre());
+    utils::smooth_vector(2, &v);
+    EXPECT_THAT(v, testing::ElementsAre());
+    utils::smooth_vector(100, &v);
+    EXPECT_THAT(v, testing::ElementsAre());
+}
+
+TEST(smooth_vector, window_size_1) {
+    std::vector<uint32_t> v = { 1, 2, 3 };
+    utils::smooth_vector(0, &v);
+    EXPECT_THAT(v, testing::ElementsAre(1, 2, 3));
+    utils::smooth_vector(1, &v);
+    EXPECT_THAT(v, testing::ElementsAre(1, 2, 3));
+}
+
+TEST(smooth_vector, increasing) {
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(0, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+        utils::smooth_vector(1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 3, 5, 7, 9, 11, 13, 15, 17 };
+        utils::smooth_vector(2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, 2, 4, 6, 8, 10, 12, 14, 16));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size(), &v);
+        EXPECT_THAT(v, testing::ElementsAre(3, 4, 4, 5, 5, 6, 6, 7, 7));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() + 1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(3, 4, 4, 5, 5, 5, 6, 6, 7));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2 - 2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2 - 1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(v.size() * 2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+    {
+        std::vector<uint32_t> v = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        utils::smooth_vector(100, &v);
+        EXPECT_THAT(v, testing::ElementsAre(5, 5, 5, 5, 5, 5, 5, 5, 5));
+    }
+}
+
+TEST(smooth_vector, zigzag) {
+    {
+        std::vector<int> v = { 1, -1, 1, -1, 1, -1, 1, -1, 1 };
+        utils::smooth_vector(1, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, -1, 1, -1, 1, -1, 1, -1, 1));
+        utils::smooth_vector(2, &v);
+        EXPECT_THAT(v, testing::ElementsAre(1, 0, 0, 0, 0, 0, 0, 0, 0));
+    }
+    {
+        std::vector<int> v = { 1, -1, 1, -1, 1, -1, 1, -1, 1 };
+        utils::smooth_vector(3, &v);
+        EXPECT_THAT(v, testing::ElementsAre(0, 0, 0, 0, 0, 0, 0, 0, 0));
+    }
+}
+
+TEST(smooth_vector, check_asserts_odd) {
+    std::vector<uint32_t> v(15, 0);
+    for (size_t ws = 0; ws < 100; ++ws) {
+        utils::smooth_vector(ws, &v);
+    }
+}
+
+TEST(smooth_vector, check_asserts_even) {
+    std::vector<uint32_t> v(16, 0);
+    for (size_t ws = 0; ws < 100; ++ws) {
+        utils::smooth_vector(ws, &v);
     }
 }
 

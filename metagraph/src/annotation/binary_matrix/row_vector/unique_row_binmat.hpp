@@ -10,7 +10,7 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-class UniqueRowBinmat : public BinaryMatrix {
+class UniqueRowBinmat : public RainbowMatrix {
   public:
     explicit UniqueRowBinmat(uint64_t num_rows = 0);
 
@@ -25,7 +25,7 @@ class UniqueRowBinmat : public BinaryMatrix {
     uint64_t num_rows() const { return row_rank_.size(); }
 
     bool get(Row row, Column column) const;
-    SetBitPositions get_row(Row row) const;
+    using RainbowMatrix::get_rows;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;
 
@@ -37,7 +37,12 @@ class UniqueRowBinmat : public BinaryMatrix {
     // matrix density
     double density() const;
 
+    uint64_t num_distinct_rows() const { return unique_rows_.size(); }
+
   private:
+    uint64_t get_code(Row row) const { return row_rank_[row]; }
+    SetBitPositions code_to_row(uint64_t c) const { return unique_rows_[c]; }
+
     uint32_t num_columns_ = 0;
     uint32_t num_relations_ = 0;
     std::vector<SetBitPositions> unique_rows_;

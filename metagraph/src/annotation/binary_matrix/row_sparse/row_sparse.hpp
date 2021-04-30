@@ -36,6 +36,11 @@ class RowSparse : public BinaryMatrix {
     uint64_t num_relations() const override { return elements_.size(); }
 
   private:
+    // sdsl::enc_vector compresses deltas v[i]-v[i-1] with
+    // elias-type of coding, hence, it makes an assumption
+    // that the vector is sorted (or almost sorted).
+    // Thus, this matrix representation compresses best dense
+    // matrices with many set bits per row.
     sdsl::enc_vector<> elements_;
     bit_vector_small boundary_;
     uint64_t num_columns_ = 0;

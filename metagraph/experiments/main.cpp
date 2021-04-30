@@ -680,7 +680,7 @@ int main(int argc, char *argv[]) {
             for (const auto &file : files) {
                 if (compressor == MatrixType::COLUMN) {
                     annot::ColumnCompressed<> annotator;
-                    annotator.merge_load({ file });
+                    annotator.load(file);
                     const auto &source_columns = annotator.get_matrix().data();
                     assert(annotator.num_labels() == source_columns.size());
 
@@ -728,7 +728,7 @@ int main(int argc, char *argv[]) {
                 if (compressor == MatrixType::ROW_FLAT) {
                     annot::StaticBinRelAnnotator<annot::binmat::RowConcatenated<>> annotator;
                     std::cout << "loading\n";
-                    annotator.merge_load({ file });
+                    annotator.load(file);
                     std::cout << "done\n";
                     const auto &rows = annotator.get_matrix().data();
                     std::ofstream sdout(file + ".sd", std::ios::binary);
@@ -742,7 +742,7 @@ int main(int argc, char *argv[]) {
                 } else if (compressor == MatrixType::RAINBOWFISH) {
                     annot::StaticBinRelAnnotator<annot::binmat::Rainbowfish> annotator;
                     std::cout << "loading\n";
-                    annotator.merge_load({ file });
+                    annotator.load(file);
                     std::cout << "done\n";
                     const auto &rainbowfish = annotator.get_matrix();
                     const auto &row_codes = rainbowfish.get_row_codes();

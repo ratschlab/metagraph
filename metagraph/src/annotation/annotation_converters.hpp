@@ -105,14 +105,15 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  * @param swap_dir directory for temporary files
  */
+enum class RowDiffStage { COUNT_LABELS = 0, COMPUTE_REDUCTION, CONVERT };
 void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          std::filesystem::path out_dir,
                          std::filesystem::path swap_dir,
-                         bool optimize = false,
-                         std::filesystem::path row_reduction_fname = "");
+                         RowDiffStage construction_stage,
+                         std::filesystem::path count_vector_fname = "");
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
@@ -120,7 +121,8 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 /**
  * Converts a RowDiff annotation into RowDiff<RowSparse>.
  */
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator);
+std::unique_ptr<RowDiffRowSparseAnnotator>
+convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames);
 
 /**
  * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this

@@ -382,7 +382,7 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual('mode: basic', params_str[2])
 
         # build annotation
-        annotate_command = '{exe} annotate --anno-header -v -i {graph} \
+        annotate_command = '{exe} annotate --anno-header -i {graph} \
                 --disk-swap {tmp_dir} --mem-cap-gb 1e-6 \
                 --anno-type {anno_repr} -o {outfile} {input}'.format(
             exe=METAGRAPH,

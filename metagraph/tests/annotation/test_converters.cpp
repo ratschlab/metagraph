@@ -159,6 +159,7 @@ TEST(RowDiff, succ) {
     const auto dst_dir = std::filesystem::path(test_dump_basename)/"row_diff_succ";
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     const std::string succ_file = graph_fname + ".succ";
+    const std::string succ_boundary_file = graph_fname + ".succ_boundary";
     const std::string pred_file = graph_fname + ".pred";
     const std::string pred_boundary_file = graph_fname + ".pred_boundary";
 
@@ -174,19 +175,10 @@ TEST(RowDiff, succ) {
      * 2 -> 4 -> 5 -> 3 -> 1
      */
 
-    const std::vector<std::vector<uint64_t>> expected_succ = {
-        { 5, 5, 5, 5, 5 },
-        { 5, 3, 0, 5, 2 },
-        { 5, 3, 0, 4, 2 } };
-    const std::vector<std::vector<uint64_t>> expected_pred = {
-        {},
-        { 2, 4, 1 },
-        { 2, 4, 1, 3 } };
-    const std::vector<std::vector<bool>> expected_boundary = {
-        { 1, 1, 1, 1, 1 },
-        { 0, 1, 1, 0, 1, 0, 1, 1 },
-        { 0, 1, 1, 0, 1, 0, 1, 0, 1 }
-    };
+    const std::vector<uint64_t> expected_succ = { 3, 0, 4, 2 };
+    const std::vector<bool> expected_succ_boundary = { 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+    const std::vector<uint64_t> expected_pred = { 2, 4, 1, 3 };
+    const std::vector<bool> expected_pred_boundary = { 0, 1, 1, 0, 1, 0, 1, 0, 1 };
 
     for (uint32_t max_depth : { 1, 3, 5 }) {
         std::filesystem::remove_all(dst_dir);
@@ -195,40 +187,36 @@ TEST(RowDiff, succ) {
         std::unique_ptr<graph::DBGSuccinct> graph = create_graph(3, { "ACGTCAG" });
         graph->serialize(graph_fname);
 
-        ColumnCompressed<> source_annot(5);
-        source_annot.add_labels({ 0, 1, 2, 3, 4 }, { "Label1" });
-        std::string annot_fname
-                = dst_dir/(std::string("ACGTCAG") + ColumnCompressed<>::kExtension);
-        source_annot.serialize(annot_fname);
-
-        convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
+        convert_to_row_diff({}, graph_fname, 1e9, max_depth, dst_dir, dst_dir,
+                            RowDiffStage::COMPUTE_REDUCTION);
 
         ASSERT_TRUE(std::filesystem::exists(succ_file));
+        ASSERT_TRUE(std::filesystem::exists(succ_boundary_file));
         ASSERT_TRUE(std::filesystem::exists(pred_file));
         ASSERT_TRUE(std::filesystem::exists(pred_boundary_file));
 
         sdsl::int_vector_buffer succ(succ_file, std::ios::in);
-
-        uint32_t idx = max_depth / 2;
-        ASSERT_EQ(5, succ.size());
+        ASSERT_EQ(expected_succ.size(), succ.size());
         for (uint32_t i = 0; i < succ.size(); ++i) {
-            EXPECT_EQ(expected_succ[idx][i], succ[i]) << max_depth << " " << i;
+            EXPECT_EQ(expected_succ[i], succ[i]) << max_depth << " " << i;
+        }
+
+        sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
+        ASSERT_EQ(expected_succ_boundary.size(), succ_boundary.size());
+        for(uint32_t i = 0; i < expected_succ_boundary.size(); ++i) {
+            EXPECT_EQ(expected_succ_boundary[i], succ_boundary[i]) << max_depth << " " << i;
         }
 
         sdsl::int_vector_buffer pred(pred_file, std::ios::in);
-
-        EXPECT_EQ(expected_pred[idx].size(), pred.size());
+        EXPECT_EQ(expected_pred.size(), pred.size());
         for (uint32_t i = 0; i < pred.size(); ++i) {
-            EXPECT_EQ(expected_pred[idx][i], pred[i]) << max_depth << " " << i;
+            EXPECT_EQ(expected_pred[i], pred[i]) << max_depth << " " << i;
         }
 
-        sdsl::bit_vector boundary;
-        std::ifstream fpred_boundary(pred_boundary_file, std::ios::binary);
-        boundary.load(fpred_boundary);
-
-        ASSERT_EQ(expected_boundary[idx].size(), boundary.size());
-        for(uint32_t i = 0; i < expected_boundary[idx].size(); ++i) {
-            EXPECT_EQ(expected_boundary[idx][i], boundary[i]) << max_depth << " " << i;
+        sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);
+        ASSERT_EQ(expected_pred_boundary.size(), pred_boundary.size());
+        for(uint32_t i = 0; i < expected_pred_boundary.size(); ++i) {
+            EXPECT_EQ(expected_pred_boundary[i], pred_boundary[i]) << max_depth << " " << i;
         }
     }
 
@@ -248,18 +236,11 @@ TEST(RowDiff, ConvertFromColumnCompressedEmpty) {
     const std::string graph_fname = dst_dir/(std::string("ACGTCAG") + graph::DBGSuccinct::kExtension);
     graph->serialize(graph_fname);
 
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir);
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, true);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, 1, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     const std::string dest_fname = dst_dir/(std::string("ACGTCAG") + RowDiffColumnAnnotator::kExtension);
-    ASSERT_TRUE(std::filesystem::exists(dest_fname));
-    RowDiffColumnAnnotator annotator;
-    annotator.load(dest_fname);
-
-    ASSERT_EQ(0u, annotator.num_objects());
-    ASSERT_EQ(0u, annotator.num_relations());
-    ASSERT_EQ(0u, annotator.num_labels());
-
+    ASSERT_TRUE(!std::filesystem::exists(dest_fname));
     std::filesystem::remove_all(dst_dir);
 }
 
@@ -289,8 +270,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             source_annot.add_labels({ 0, 1, 2, 3, 4 }, labels);
             source_annot.serialize(annot_fname);
 
-            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
-            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
+            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
+            convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
             ASSERT_TRUE(std::filesystem::exists(dest_fname));
             RowDiffColumnAnnotator annotator;
@@ -342,8 +323,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 annot_fnames.push_back(annot_fname);
             }
 
-            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
-            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
+            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
+            convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
             for (uint32_t i = 0; i < labels.size(); ++i) {
                 std::string rd_anno = dst_dir/(labels[i] + RowDiffColumnAnnotator::kExtension);
@@ -402,8 +383,8 @@ void test_row_diff(uint32_t k,
 
     initial_annotation.serialize(annot_fname);
 
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
-    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
+    convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
     RowDiffColumnAnnotator annotator;
@@ -460,8 +441,8 @@ void test_row_diff_separate_columns(uint32_t k,
         initial_annotation.serialize(annot_fname);
     }
 
-    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir);
-    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, true);
+    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::COMPUTE_REDUCTION);
+    convert_to_row_diff(annot_fnames, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     for (const auto& [label, indices] : col_annotations) {
         const std::string dest_fname
@@ -733,7 +714,7 @@ TEST_F(MergeAnnotators, RowCompressed) {
     );
 
     merged_annotation = new RowCompressed<>(num_rows);
-    merged_annotation->merge_load({ test_dump_basename_row_compressed_merge + "_merged" });
+    merged_annotation->load(test_dump_basename_row_compressed_merge + "_merged");
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
@@ -754,7 +735,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
     merge<RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
 
     merged_annotation = new RowCompressed<>(num_rows);
-    merged_annotation->merge_load({ filename });
+    merged_annotation->load(filename);
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
@@ -775,7 +756,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
     merge<RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
 
     merged_annotation = new RowFlatAnnotator();
-    merged_annotation->merge_load({ filename });
+    merged_annotation->load(filename);
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
@@ -819,7 +800,7 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     merge<RowFlatAnnotator, std::string>(std::move(annotators), filenames, outfile);
 
     merged_annotation = new RowFlatAnnotator();
-    merged_annotation->merge_load({ outfile });
+    merged_annotation->load(outfile);
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 

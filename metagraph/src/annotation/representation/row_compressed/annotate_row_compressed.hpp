@@ -41,6 +41,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     /************************* Serialization *************************/
 
     void serialize(const std::string &filename) const;
+    bool load(const std::string &filename) { return merge_load({ filename }); }
     bool merge_load(const std::vector<std::string> &filenames);
 
     static void serialize(const std::string &filename,

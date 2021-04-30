@@ -257,21 +257,6 @@ done
 
 ### Transform graphs
 ```bash
-for i in {1..33}; do
-    N=$((750 * i));
-    bsub -J "to_small_graph_${N}" \
-         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/to_small_graph_${N}.lsf \
-         -W 1:00 \
-         -n 1 -R "rusage[mem=50000] span[hosts=1]" \
-        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform -v \
-                --state small \
-                --index-ranges 10 \
-                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.small.indexed.dbg \
-                ~/metagenome/data/BIGSI/subsets/graph_subset_${N}.small.dbg \
-                2>&1"; \
-done
-
-
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_primary_contigs_${N}" \
@@ -306,6 +291,20 @@ done
 
 for i in {1..33}; do
     N=$((750 * i));
+    bsub -J "to_small_graph_${N}" \
+         -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/to_small_graph_${N}.lsf \
+         -W 1:00 \
+         -n 1 -R "rusage[mem=50000] span[hosts=1]" \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph_DNA transform -v \
+                --state small \
+                -o ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary.small.dbg \
+                ~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary.dbg \
+                2>&1"; \
+done
+
+
+for i in {1..33}; do
+    N=$((750 * i));
     OUTDIR=~/metagenome/data/BIGSI/subsets/graph_subset_${N}_primary
     mkdir -p $OUTDIR
     bsub -J "annotate_${N}" \
@@ -331,7 +330,7 @@ for i in {33..1}; do
          -W 24:00 \
          -n 20 -R "rusage[mem=$((N + 1))] span[hosts=1]" \
         "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_master/metagraph_DNA transform_anno -v \
                 --anno-type brwt --greedy \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
@@ -342,11 +341,12 @@ done
 for i in {33..1}; do
     N=$((750 * i));
     bsub -J "relax_brwt_${N}" \
+         -w "to_brwt_${N}" \
          -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/relax_brwt_${N}_primary.lsf \
-         -W 96:00 \
+         -W 24:00 \
          -n 10 -R "rusage[mem=${N}] span[hosts=1]" \
-        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA relax_brwt -v \
-                --relax-arity 20 \
+        "/usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_master/metagraph_DNA relax_brwt -v \
+                --relax-arity 32 \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.relaxed \
                 ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary.brwt.annodbg \
                 --parallel 20 \
@@ -358,11 +358,11 @@ for i in {33..1}; do
     N=$((750 * i));
     bsub -J "to_rbbrwt_${N}" \
          -oo ~/metagenome/data/BIGSI/subsets/lsf_logs/column_to_rbbrwt_${N}_primary.lsf \
-         -W 96:00 \
+         -W 24:00 \
          -n 20 -R "rusage[mem=$((7 * N / 4 + 1000))] span[hosts=1]" \
         "find ~/metagenome/data/BIGSI/subsets/annotation/columns/graph_subset_${N}_primary/ -name \"*.annodbg\" \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA transform_anno -v \
-                --anno-type rb_brwt --relax-arity 20 \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_master/metagraph_DNA transform_anno -v \
+                --anno-type rb_brwt --relax-arity 32 \
                 -o ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${N}_primary \
                 --parallel 20 \
                 2>&1"; \
@@ -517,13 +517,13 @@ done
 
 ## Query graph
 ```bash
-METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_test/metagraph_DNA
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph
 
 # file to query
 for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta \
                 ~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta; do
-    NAME=metagraph.primary.rb_brwt
+    NAME=metagraph.primary.small.rd_brwt
     # name of the output folder
     OUTDIR=~/metagenome/data/BIGSI/subsets/query_results/$(basename $QUERY)/${NAME}
     mkdir -p $OUTDIR
@@ -531,8 +531,7 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
     for num_columns in $(seq 750 3000 24750); do
         run="$METAGRAPH query -v --discovery-fraction 0.0 --count-labels --fast \
                 -i \${TMPDIR}/graph.dbg \
-                -a \${TMPDIR}/graph.rb_brwt.annodbg \
-                --mode canonical \
+                -a \${TMPDIR}/graph.row_diff_brwt.annodbg \
                 $QUERY"
 
         bsub -J "${NAME}.${num_columns}" \
@@ -542,12 +541,12 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
             " \
                 TMPDIR=/dev/shm/$NAME_$num_columns_\${LSB_JOBID};
                 mkdir \${TMPDIR};
-                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}_primary.dbg \
+                cp ~/metagenome/data/BIGSI/subsets/graph_subset_${num_columns}_primary.small.dbg \
                     \${TMPDIR}/graph.dbg; \
-                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}_primary.rb_brwt.annodbg \
-                    \${TMPDIR}/graph.rb_brwt.annodbg; \
+                cp ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_${num_columns}_primary.rd_100.row_diff_brwt.annodbg \
+                    \${TMPDIR}/graph.row_diff_brwt.annodbg; \
                 /usr/bin/time -v $run > /dev/null 2> /dev/null; \
-                for i in {1..10}; do \
+                for i in {1..3}; do \
                     /usr/bin/time -v $run > \${TMPDIR}/out 2>> \${TMPDIR}/err;
                 done; \
                 mv \${TMPDIR}/out ${OUTDIR}/${num_columns}.out; \

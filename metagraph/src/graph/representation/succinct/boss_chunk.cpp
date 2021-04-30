@@ -1,5 +1,7 @@
 #include "boss_chunk.hpp"
 
+#include <iostream>
+
 #include "common/threads/chunked_wait_queue.hpp"
 #include "common/serialization.hpp"
 #include "common/vector.hpp"
@@ -16,7 +18,7 @@ using utils::get_first;
 using mtg::kmer::KmerExtractorBOSS;
 namespace fs = std::filesystem;
 
-const uint64_t BUFFER_SIZE = 5 * 1024 * 1024; // 5 MiB
+const uint64_t BUFFER_SIZE = 1024 * 1024; // 1 MiB
 
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer64, uint8_t>>);
 static_assert(utils::is_pair_v<std::pair<KmerExtractorBOSS::Kmer128, uint8_t>>);
@@ -120,6 +122,11 @@ void initialize_chunk(uint64_t alph_size,
         F->at(lastF) = curpos - 1;
     }
 
+    W->flush();
+    last->flush();
+    if (weights)
+        weights->flush();
+
     assert(W->size() == curpos);
     assert(last->size() == curpos);
     assert(!weights || weights->size() == curpos);
@@ -137,9 +144,17 @@ BOSS::Chunk::Chunk(uint64_t alph_size, size_t k, const std::string &swap_dir)
 }
 
 BOSS::Chunk::~Chunk() {
-    W_.close(true);
-    last_.close(true);
-    weights_.close(true);
+    try {
+        W_.close(true);
+        last_.close(true);
+        weights_.close(true);
+
+    } catch (const std::exception &e) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk";
+    }
 
     // remove the temp directory, but only if it was initialized
     if (!dir_.empty())
