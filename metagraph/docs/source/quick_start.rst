@@ -199,8 +199,13 @@ Transform annotation
 
 To enhance the query performance and reduce the memory footprint, annotations can be converted to other representations.
 
-There are different annotation representations available in MetaGraph.
-For instance, ``Rainbowfish`` can be used with relatively small instances to achieve a very fast query speed. In contrast, ``RowDiff<Multi-BRWT>`` typically achieves the smallest memory footprint while still providing a good query performance.
+There are different annotation representations available in MetaGraph (see the possible values for flag ``--anno-type`` in ``metagraph transform_anno``).
+For instance, ``Rainbowfish`` can be used to achieve a very fast query speed, but it can
+be applied only to relatively small problem instances (about 100 GB) because of the limited
+compression performance and the complexity of the construction algorithm.
+In contrast, ``RowDiff<Multi-BRWT>`` typically achieves
+the best compression while still providing a good query performance, and thus, it is
+recommended for very large problem instances.
 
 Convert annotation to Rainbowfish
 """""""""""""""""""""""""""""""""
