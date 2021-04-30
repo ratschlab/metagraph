@@ -174,7 +174,6 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     const std::vector<std::string> labels { "A", "B", "C" };
 
     for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
-        std::cerr << "foo\n";
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
             k, sequences, labels, mode
