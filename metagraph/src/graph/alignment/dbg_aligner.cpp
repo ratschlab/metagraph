@@ -32,6 +32,75 @@ void IDBGAligner
     }, callback);
 }
 
+template <class AlignmentCompare>
+void ISeedAndExtendAligner<AlignmentCompare>
+::align_batch(const QueryGenerator &generate_query,
+              const AlignmentCallback &callback) const {
+    generate_query([&](std::string_view header,
+                       std::string_view query,
+                       bool is_reverse_complement) {
+        SeedFilter seed_filter(get_graph().get_k());
+        SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
+            get_graph(), get_config(), seed_filter, query, is_reverse_complement
+        );
+        auto &paths = aligner_core.get_paths();
+        std::string_view this_query = paths.get_query(is_reverse_complement);
+        std::string_view reverse = paths.get_query(!is_reverse_complement);
+        assert(this_query == query);
+
+        std::vector<node_index> nodes = map_sequence_to_nodes(get_graph(), query);
+        std::vector<node_index> nodes_rc;
+        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL
+                || get_config().forward_and_reverse_complement) {
+            assert(!is_reverse_complement);
+            std::string dummy(query);
+            nodes_rc = nodes;
+            reverse_complement_seq_path(get_graph(), dummy, nodes_rc);
+            assert(dummy == paths.get_query(true));
+            assert(nodes_rc.size() == nodes.size());
+        }
+
+        std::shared_ptr<ISeeder<node_index>> seeder = build_seeder(
+            this_query, is_reverse_complement, std::move(nodes)
+        );
+
+        std::shared_ptr<ISeeder<node_index>> seeder_rc;
+
+        if (get_config().forward_and_reverse_complement
+                || get_graph().get_mode() == DeBruijnGraph::CANONICAL)
+            seeder_rc = build_seeder(reverse, !is_reverse_complement, std::move(nodes_rc));
+
+        auto extender = build_extender(this_query);
+
+        if (get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+            auto extender_rc = build_extender(reverse);
+
+            auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
+                                                     const auto &callback) {
+                callback(ManualSeeder<node_index>(std::move(rev_comp_seeds)));
+            };
+
+            // From a given seed, align forwards, then reverse complement and
+            // align backwards. The graph needs to be canonical to ensure that
+            // all paths exist even when complementing.
+            aligner_core.align_both_directions(*seeder, *seeder_rc,
+                                               *extender, *extender_rc,
+                                               build_rev_comp_alignment_core);
+
+        } else if (get_config().forward_and_reverse_complement) {
+            auto extender_rc = build_extender(reverse);
+            aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
+
+        } else {
+            aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
+        }
+
+        aligner_core.flush();
+
+        callback(header, std::move(paths));
+    });
+}
+
 Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
     size_t found_count = 0;
     std::pair<size_t, size_t> idx_range {
@@ -298,6 +367,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
     );
 }
 
+template class ISeedAndExtendAligner<>;
 template class SeedAndExtendAlignerCore<>;
 
 } // namespace align
