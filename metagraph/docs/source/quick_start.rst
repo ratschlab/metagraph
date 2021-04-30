@@ -151,17 +151,42 @@ To label all k-mers from each file with the same id (for instance for the experi
 
     metagraph annotate -v -i graph.dbg --anno-filename -o annotation file_1.fa file_2.fa ...
 
-which will construct annotation labeling k-mers from the first file by label ``file_1.fa``, k-mers from the second file by label ``file_2.fa``, etc.
+which will annotate k-mers from the first file by label ``file_1.fa``, k-mers from the second file by label ``file_2.fa``, etc.
 
-In this mode, usually it is preferred to independently construct a single annotation column for each input file, where each can be constructed in parallel by adding ``--separately -p <num_threads>``::
+Annotate with disk swap
+***********************
+When the input files and the output annotation are very large, disk swap space can be used
+by setting flags ``--disk-swap`` and ``--mem-cap-gb``, to limit the size of internal buffers
+and reduce RAM usage during annotation construction::
 
-    metagraph annotate -v -i graph.dbg \
-                       --anno-filename \
-                       --separately -p 36 \
-                       -o annotation \
-                       file_1.fa file_2.fa ...
+    metagraph annotate -v -i graph.dbg --anno-filename --disk-swap /tmp --mem-cap-gb 1 \
+                          -o annotation file_1.fa file_2.fa ...
 
-**Note** that it is recommended to run annotation from a set of long (primary) contigs/unitigs, where all k-mers have already been deduplicated, especially when annotating a (primary) graph in the ``succinct`` representation. This can be achieved by simply constructing individual (canonical) de Bruijn graphs from all read sets and transforming them to contigs. These contigs serve as an equivalent non-redundant representation of sets of k-mers from each read set and using them for annotation usually speeds up the process by one or two orders of magnitude.
+Annotate files independently
+****************************
+It is recommended to independently construct a single annotation column per each input file.
+To do this in parallel and avoid loading the same graph multiple times, run one annotation
+command with flags ``--separately -p <num_threads>`` added::
+
+    metagraph annotate -v -i graph.dbg --anno-filename --separately -p 36 \
+                          -o annotation file_1.fa file_2.fa ...
+
+This will create a new directory ``annotation/`` with individual annotation columns::
+
+    file_1.fa.column.annodbg    file_2.fa.column.annodbg    ...
+
+Annotate using contigs
+**********************
+**Important!** It is recommended to run annotation from a set of long (primary) contigs/unitigs,
+where all k-mers have already been deduplicated, especially when annotating a (primary) graph
+in the ``succinct`` representation. In contrast, annotating a ``succinct`` graph from
+separate k-mers (especially not deduplicated) will take orders of magnitude longer.
+The contigs serve as an equivalent non-redundant representation of the k-mers sets and, thus,
+result in the same graph annotation.
+**Thus, in practice,** for large inputs, it is recommended to construct
+individual (canonical) de Bruijn graphs from all read sets, called sample graphs, and
+transform them to contigs. These contig sets are then used instead of the original read
+sets to construct and annotate the join (primary) graph.
 
 Annotate graph with custom labels
 """""""""""""""""""""""""""""""""
