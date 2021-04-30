@@ -1,12 +1,10 @@
 MetaGraph - User Manual
 =======================
 
-Welcome to the user manual of MetaGraph. This document summarizes setup and use of the MetaGraph
-framework, a software platform for the construction, annotation and query of very large sequence
-graphs. In addition to a comprehensive description of all commands and features of MetaGraph, you
-will also find small examples and tutorial-style workflows that outline some core use cases.
+Welcome to the user manual of MetaGraph!
 
-Following the overview of contents covered by this document:
+This manual includes setup instructions and usage tutorials outlining the key use cases for the MetaGraph
+framework, a software platform for indexing and analysis of very large sequence collections.
 
 .. toctree::
    :maxdepth: 3

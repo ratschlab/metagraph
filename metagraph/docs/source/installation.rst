@@ -4,7 +4,7 @@ Installation
 ============
 
 The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
-following, we provide detailed instructions for setting up the framework.
+following, we provide detailed setting up instructions.
 
 Install with conda
 ------------------
@@ -13,33 +13,36 @@ There are conda packages available on bioconda for both Linux and Mac OS X::
 
     conda install -c bioconda -c conda-forge metagraph
 
-The executable is called ``metagraph_DNA``.
+The executables are called ``metagraph_DNA`` (with a ``metagraph`` symlink) and ``metagraph_Protein``.
+
+For support of other/custom alphabets, compile from source (see :ref:`Install from source<install from source>`).
+
 
 Docker container
 ----------------
 
-If docker is available on your system, you can immediately get started using
-e.g.::
+If docker is available on your system, you can immediately get started with::
 
     docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph \
         build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 
 
-where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host system.
-This directory is then mapped under ``/mnt`` in the container.
+where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host system to map it
+under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
+the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch ``master``).
 
+
+.. _install from source:
 
 Install from source
 -------------------
 
 Prerequisites
 ^^^^^^^^^^^^^
-Before compiling MetaGraph, you need to install the following dependencies. For users that do not
-have administration/root access to their machine, we recommend using `brew
-<https://brew.sh/>`_, available for MacOS and Linux. 
+Before compiling MetaGraph, install the following dependencies:
 
 - cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
+- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
 - bzip2
 - HTSlib
 
@@ -47,6 +50,9 @@ have administration/root access to their machine, we recommend using `brew
 
 - boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
 - Python 3 (for running integration tests)
+
+**Tip:** For those without administrator/root privileges, we recommend using
+`brew <https://brew.sh/>`_ (available for MacOS and Linux).
 
 
 For AppleClang on MacOS
@@ -72,7 +78,7 @@ For **CentOS** (8 or higher)::
 
 For Linux with GNU GCC installed with Homebrew
 """"""""""""""""""""""""""""""""""""""""""""""
-GNU GCC and all the prerequisites can be installed with Homebrew as follows::
+GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
 
     brew install gcc autoconf automake libtool cmake make htslib
     [[ "$OSTYPE" == "darwin"* ]] \
@@ -95,7 +101,7 @@ Then, the following environment variables have to be set::
 
 For Linux with LLVM Clang installed with Homebrew
 """""""""""""""""""""""""""""""""""""""""""""""""
-For compiling with LLVM Clang installed with Homebrew, the prerequisites can be installed with::
+For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
 
     brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
 
@@ -117,19 +123,20 @@ Then, the following environment variables have to be set::
     export CXX=\"\$(which clang++)\"
     " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
+
 Compiling
 ^^^^^^^^^
 To compile MetaGraph, please follow these steps.
 
-1. Clone the latest version of the code from the git repository::
+#. Clone the latest version of the code from the git repository::
 
     git clone --recursive https://github.com/ratschlab/metagraph.git
 
-2. Make sure all submodules have been downloaded::
+#. Make sure all submodules have been downloaded::
 
     git submodule update --init --recursive
 
-3. Install *sdsl-lite* (in :code:`metagraph/external-libraries/sdsl-lite`) with the following script::
+#. Install *sdsl-lite* in :code:`metagraph/external-libraries/sdsl-lite` with the following script::
 
     git submodule sync
     git submodule update --init --recursive
@@ -138,21 +145,23 @@ To compile MetaGraph, please follow these steps.
     ./install.sh $PWD
     popd
 
-4. Go to the :code:`build` directory::
+#. Go to the :code:`build` directory::
 
-    mkdir -p metagraph/build && cd metagraph/build
+    mkdir metagraph/build
+    cd metagraph/build
 
-5. Compile::
+#. Compile::
 
-    cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
+    cmake ..
+    make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
 
-6. Run unit tests (optional)::
+#. Run unit tests (optional)::
 
-    ./unit_tests
+    ./unit_tests --gtest_filter="*"
 
-7. Run integration tests (optional)::
+#. Run integration tests (optional)::
 
-    ./integration_tests
+    ./integration_tests --test_filter="*"
 
 Build configurations
 ^^^^^^^^^^^^^^^^^^^^
