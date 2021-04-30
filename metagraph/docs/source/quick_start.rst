@@ -3,65 +3,87 @@
 Quick start
 ===========
 
-The MetaGraph indexes consist of two parts: k-mer index and graph annotation.
+MetaGraph constructs indexes composed of two main elements: a k-mer index and an annotation matrix.
 
-The k-mer index stores all k-mers from the input sequences and represents a de Bruijn graph. This index essentially serves as a dictionary mapping k-mers to their unique positive identifiers.
+The k-mer index stores all k-mers from the input sequences and represents a de Bruijn graph.
+This index serves as a dictionary mapping k-mers to their unique positive identifiers.
 
-The graph annotation is a matrix encoding the relation between the k-mers and their attributes (e.g., k-mer ``i`` appears in SRA sample ``j``).
+.. It can also be used to map sub-k-mers (or spaced k-mers) to ranges of their identifiers (see TODO).
+
+The second element is a matrix encoding the relation between the k-mers and their attributes.
+These relations may represent, for instance:
+
+* k-mer ``i`` is present in sequence/genome ``j``
+* k-mer ``i`` is present in SRA sample ``j``
+* k-mer ``i`` is present in file ``j``
+* k-mer ``i`` is present in a collection of sequences/files marked by ``j``
+* k-mer ``i`` is highly expressed in sample ``j``
+
+.. TODO: Describe counts/coordinate annotation
+
+In the following, you will find simplified instructions and examples for constructing a MetaGraph
+index or querying it.
 
 Construct index
 ---------------
 
-The indexing workflow in MetaGraph consists of two major steps: graph and annotation construction.
+The indexing workflow in MetaGraph consists of two major steps: graph construction and annotation construction.
 
-Build graph
-^^^^^^^^^^^
+Construct graph
+^^^^^^^^^^^^^^^
 
 Simple example::
 
     metagraph build -v -p 4 -k 31 -o graph transcripts_1000.fa
 
-where ``transcripts_1000.fa`` is a fasta/fastq file with input sequences.
+where ``transcripts_1000.fa`` is a fasta/fastq file (may be gzipped) with input sequences.
 
 It is possible to pass multiple input files::
 
     metagraph build -v -p 4 -k 31 -o graph file_1.fa file_2.fa ...
 
-or pipe a list of input files::
+or pipe a list of them::
 
     find . -name "*.fa" | metagraph build -v -p 4 -k 31 -o graph
 
-which will construct a single de Bruijn graph, a k-mer index for all k-mers extracted from the input sequences. 
+which will construct a single de Bruijn graph (a k-mer index) from all k-mers extracted from the input sequences. 
 
 To see the list of all available flags, type ``metagraph build``.
 
 There are various graph representations available in MetaGraph, which can be chosen with flag ``--graph``.
-However, the default ``succinct`` representation is usually the best choice because of its great scalability (requires only 2-4 bits per k-mer).
+However, the default ``succinct`` representation is usually the best choice because of its great scalability (requires only 2-4 bits per k-mer) and the ability to search sub-k-mers/k-mer ranges.
 
 Construct graph with disk swap
 """"""""""""""""""""""""""""""
 
-For very large inputs, graphs can be constructed with disk swap to limit the RAM usage (available only for succinct graphs)::
+For very large inputs, graphs can be constructed with disk swap to limit the RAM usage (currently, available only for ``succinct`` graph representations).
+For example, to restrict the buffer size to 4 GiB, the following build command can be used::
 
-    metagraph build -v -k 31 -o graph --parallel 36 --disk-swap /tmp --disk-cap-gb 100 file.fa ...
+    metagraph build -v -k 31 -o graph -p 36 --disk-swap /tmp --disk-cap-gb 4 file.fa ...
+
+Using larger buffers usually speeds up the construction. However, using a 50-100 GB buffer is always sufficient, even when constructing graphs with trillions of k-mers.
 
 Transform graph to other representations
 """"""""""""""""""""""""""""""""""""""""
 
 To transform a ``succinct`` graph to a more compressed and smaller representation, run::
 
-    metagraph transform -v --state small -o graph_small graph.dbg
+    metagraph transform -v --state small -p 4 -o graph_small graph.dbg
 
 To transform a graph back to sequences, it can be traversed to extract all its contigs/unitigs::
 
     metagraph transform -v --to-fasta -o contigs -p 4 graph.dbg
 
-These sequences contain exactly all k-mers indexed in the graph and can be used as their non-redundant representation.
+These sequences contain exactly all k-mers indexed in the graph and can be used as their non-redundant (deduplicated) representation.
+
+The assembled contigs are written to a compressed FASTA file, which can be inspected with::
+
+    zless contigs.fasta.gz
 
 Build graph in canonical mode
 """""""""""""""""""""""""""""
 
-If the input sequences are raw reads where the direction (strand) is unknown, it makes sense to index along with each read its reverse complement sequence.
+When the input sequences are raw reads from an unknown direction (strand), it is natural to index along with each sequence its reverse complement.
 
 MetaGraph has a special graph mode where each k-mer indexed in the graph automatically adds its reverse complement k-mer to the index. To build a canonical graph from a set of reads/sequences, run ::
 
@@ -70,19 +92,19 @@ MetaGraph has a special graph mode where each k-mer indexed in the graph automat
 Build graph in primary mode
 """""""""""""""""""""""""""
 
-Canonical graphs contain each k-mer in both of its forms (given and reverse complement), however, the same structure can be modeled by storing explicitly only one of them and implicitly modeling the other.
-Often, different tools do this by only storing the lexicographically smallest of the two k-mers. However, this would not be possible to implement with the succinct graph representation.
-Hence, we introduce relax this constraint and pick *any* of the two forms of each k-mer.
-In particular, the canonical graph is fully traversed and a k-mer is marked as primary if it was reached in the traversal before its reverse complement.
+Canonical graphs contain each k-mer in both of its forms (given and reverse complement), but the same data structure can be modeled by storing only one of them and implicitly modeling the other.
+Often, different tools achieve this by only storing the lexicographically smallest of the two k-mers. However, this is not be possible to efficiently implement with the ``succinct`` graph representation.
+Hence, we relax this constraint and pick *any* of the two forms of each k-mer.
+In a nutshell, this representation is constructed by fully traversing the canonical graph and marking a k-mer as *primary* if it was reached before its reverse complement in the traversal.
 The graph containing only primary k-mers is called *primary*.
 
-The algorithm for primarization of a canonical graph is as follows.
+The algorithm for primarization of a canonical graph is as follows:
 
-1. First, we extract a set of primary contigs from the canonical graph::
+1. First, extract a set of primary contigs (stretches of primary k-mers) from the canonical graph. ::
 
     metagraph transform -v --to-fasta --primary-kmers -o primary_contigs -p 4 graph.dbg
 
-2. Then, we construct a new graph from the primary contigs and indicate that this graph is *primary*::
+2. Then, construct a new graph from the primary contigs and mark this graph as *primary*. ::
 
     metagraph build -v -p 4 \
                     -k 31 \
@@ -90,7 +112,9 @@ The algorithm for primarization of a canonical graph is as follows.
                     --mode primary \
                     primary_contigs.fasta.gz
 
-Now this new graph ``graph_primary.dbg`` emulates the same canonical graph, while taking only half of its space.
+Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph (e.g., when querying or annotating), while taking only half of its space.
+
+.. TODO: note that canonical graphs must not be used with row-diff<*> annotations and always must be primarized
 
 Annotate graph
 ^^^^^^^^^^^^^^
