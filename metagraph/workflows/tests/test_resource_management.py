@@ -1,28 +1,35 @@
 import pytest
+import math
 
 from metagraph_workflows import resource_management as rm
-
+from metagraph_workflows import constants
 
 @pytest.fixture()
 def config():
     return {
-        'max_memory_mb': 4100
+        constants.MAX_MEMORY_MB: 16000
     }
 
 
 def test_TransformRdStage1Resources(config):
     rule_name = 'transform_rd_stage1'
-    inst = rm.TransformRdStage1Resources()
+    inst = rm.TransformRdStage1Resources(config)
 
-    assert inst.get_mem(config)(None, None, None) == 4100
+    # by default get max available memory
+    assert inst.get_mem()(None, None, None) == 16000
 
     base_mem = 1024
-    mem = 2345
-    config['rules'] = {rule_name: {'mem_mb': mem}}
-    assert inst.get_mem(config)(None, None, None) == mem
-    res = {'mem_mb': mem}
-    assert inst.get_mem_cap(config)(None, None, None, res) == pytest.approx((mem-base_mem)/1024)
 
-    config['rules'][rule_name]['mem_cap_mb'] = 1000
-    assert inst.get_mem(config)(None, None, None) == 1000 + base_mem
-    assert inst.get_mem_cap(config)(None, None, None, res) == pytest.approx(1000/1024)
+    # now explicitly setting available memory for the rule
+    mem = 8000
+    config['rules'] = {rule_name: {'mem_mb': mem}}
+    assert inst.get_mem()(None, None, None) == mem
+
+    resources = {'mem_mb': mem}
+    assert inst.get_mem_cap_gib()(None, None, None, resources) == int(math.ceil(0.8*mem/1024))
+
+    # now additionally setting mem cap explicitly
+    mem_cap = 2048
+    config['rules'][rule_name]['mem_cap_mb'] = mem_cap
+    assert inst.get_mem()(None, None, None) == mem
+    assert inst.get_mem_cap_gib()(None, None, None, resources) == int(math.ceil(mem_cap/1024))

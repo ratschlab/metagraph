@@ -20,7 +20,7 @@ annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source'
 
 exec_cmd=config['exec_cmd']
 
-max_threads=take_value_or_default('max_threads', workflow.cores)
+max_threads=take_value_or_default(constants.MAX_THREADS, workflow.cores)
 
 # TODO
 max_memory_mb=take_value_or_default('max_memory_mb', 4000)
@@ -64,7 +64,7 @@ rule annotate:
         column_anno_files=rule_utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(ANNOTATE_RULE).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
@@ -109,7 +109,7 @@ rule generate_brwt_linkage:
         linkage=wdir/f"{graph}.linkage.txt"
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE).get_mem(config),
+        mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE, config).get_mem(),
     params:
         subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
     log: cfg_utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
@@ -134,7 +134,7 @@ rule transform_annotation:
         annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE).get_mem(config),
+        mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE, config).get_mem(),
     params:
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
@@ -156,7 +156,7 @@ rule annotate_brwt:
         annotations=wdir/f'{graph}.brwt.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
         tempdir_opt=cfg_utils.temp_dir_config(config),
@@ -180,7 +180,7 @@ rule relax_brwt:
         annotations=wdir/f'{graph}.relax.{{brwt_fmt}}.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(RELAX_BRWT_RULE).get_mem(config),
+        mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
     params:
         relax_arity=config[constants.BRWT_RELAX_ARITY],
         tempdir_opt=cfg_utils.temp_dir_config(config),
@@ -195,8 +195,6 @@ rule relax_brwt:
             {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
         """
 
-transform_row_diff_overhead_mb=2000
-
 rd_cols_dir = wdir/'rd_cols'
 
 from metagraph_workflows.resource_management import TransformRdStage0Resources
@@ -210,9 +208,9 @@ rule transform_rd_stage0:
         columns_rd_row_count=rd_cols_dir/'vector.row_count'
     threads: max_threads
     resources:
-        mem_mb=TransformRdStage0Resources().get_mem(config)
+        mem_mb=TransformRdStage0Resources(config).get_mem()
     params:
-        mem_cap=TransformRdStage0Resources().get_mem_cap(config),
+        mem_cap=TransformRdStage0Resources(config).get_mem_cap_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
@@ -244,9 +242,9 @@ rule transform_rd_stage1:
         cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
     threads: max_threads
     resources:
-        mem_mb=TransformRdStage1Resources().get_mem(config)
+        mem_mb=TransformRdStage1Resources(config).get_mem()
     params:
-        mem_cap=TransformRdStage1Resources().get_mem_cap(config),
+        mem_cap=TransformRdStage1Resources(config).get_mem_cap_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
@@ -272,9 +270,9 @@ rule transform_rd_stage2:
         rd_cols_done=touch(rd_cols_dir/DONE)
     threads: max_threads
     resources:
-        mem_mb=TransformRdStage2Resources().get_mem(config),
+        mem_mb=TransformRdStage2Resources(config).get_mem(),
     params:
-        mem_cap=TransformRdStage2Resources().get_mem_cap(config),
+        mem_cap=TransformRdStage2Resources(config).get_mem_cap_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
     shell:
@@ -300,7 +298,7 @@ rule annotate_row_diff_brwt:
         linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE).get_mem(config),
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
         tempdir_opt=cfg_utils.temp_dir_config(config),
@@ -327,7 +325,7 @@ rule relax_row_diff_brwt:
         annotations_relaxed=wdir/f'{graph}.relax.row_diff_brwt.annodbg',
     threads: max_threads
     resources:
-        mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE).get_mem(config),
+        mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         relax_arity = config[constants.BRWT_RELAX_ARITY],
         tempdir_opt=cfg_utils.temp_dir_config(config),

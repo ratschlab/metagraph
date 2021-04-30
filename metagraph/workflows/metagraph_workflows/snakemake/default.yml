@@ -5,6 +5,8 @@ build_primary_graph: False
 
 primarize_samples_separately: False
 
+kmc_mem_mb_per_thread: 2048
+kmc_max_bins: 2000
 
 # annotation options
 annotation_formats: ['relax.row_diff_brwt']
