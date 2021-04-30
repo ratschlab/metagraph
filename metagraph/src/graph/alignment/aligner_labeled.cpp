@@ -1,17 +1,11 @@
 #include "aligner_labeled.hpp"
 
-#include "aligner_prefix_suffix.hpp"
-
 #include <tsl/hopscotch_set.h>
 
-#include "graph/annotated_dbg.hpp"
-#include "graph/annotated_graph_algorithm.hpp"
+#include "aligner_prefix_suffix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
-#include "common/hashers/hash.hpp"
-#include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"
 
 namespace mtg {

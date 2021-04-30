@@ -4,12 +4,9 @@
 #include <cassert>
 #include <functional>
 
-#include <tsl/hopscotch_map.h>
-
 #include "aligner_alignment.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
-#include "aligner_aggregator.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 

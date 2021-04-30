@@ -1,5 +1,8 @@
 #include "dbg_aligner.hpp"
 
+#include <tsl/hopscotch_map.h>
+
+#include "aligner_aggregator.hpp"
 #include "common/algorithms.hpp"
 
 namespace mtg {

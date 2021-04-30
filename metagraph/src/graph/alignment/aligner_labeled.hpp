@@ -5,9 +5,7 @@
 
 #include "dbg_aligner.hpp"
 #include "common/vector_set.hpp"
-#include "common/utils/template_utils.hpp"
 #include "common/hashers/hash.hpp"
-#include "common/vectors/bitmap.hpp"
 #include "graph/annotated_dbg.hpp"
 
 namespace mtg {
