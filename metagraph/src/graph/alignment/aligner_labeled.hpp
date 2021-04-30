@@ -18,7 +18,12 @@ template <class AlignmentCompare = LocalAlignmentLess>
 class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
-          : anno_graph_(anno_graph), graph_(anno_graph_.get_graph()), config_(config) {}
+          : anno_graph_(anno_graph), graph_(anno_graph_.get_graph()), config_(config) {
+        assert(config_.num_alternative_paths);
+        if (!config_.check_config_scores()) {
+            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+        }
+    }
 
     virtual ~ILabeledAligner() {}
 
@@ -89,12 +94,7 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
     template <typename... Args>
     LabeledAligner(Args&&... args)
-          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {
-        assert(this->config_.num_alternative_paths);
-        if (!this->config_.check_config_scores()) {
-            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
-        }
-    }
+          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
 
   protected:
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>

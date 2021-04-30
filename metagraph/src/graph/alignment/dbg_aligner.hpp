@@ -70,13 +70,6 @@ template <class Seeder = ExactSeeder<>,
           class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
-    typedef IDBGAligner::node_index node_index;
-    typedef IDBGAligner::DBGAlignment DBGAlignment;
-    typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
-    typedef IDBGAligner::score_t score_t;
-    typedef IDBGAligner::QueryGenerator QueryGenerator;
-    typedef IDBGAligner::AlignmentCallback AlignmentCallback;
-
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {
         assert(config_.num_alternative_paths);
