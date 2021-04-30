@@ -341,15 +341,16 @@ bool update_column(const DeBruijnGraph &graph_,
 }
 
 template <typename NodeType>
-void DefaultColumnExtender<NodeType>
+auto DefaultColumnExtender<NodeType>
 ::backtrack(score_t min_path_score,
             AlignNode best_node,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-            std::vector<DBGAlignment> &extensions) const {
+            std::vector<DBGAlignment> &extensions) const -> std::vector<AlignNode> {
     assert(std::get<3>(best_node));
     size_t size = query_.size() - start_ + 1;
     Cigar cigar;
     std::vector<NodeType> path;
+    std::vector<AlignNode> track;
     std::string seq;
     NodeType start_node = DeBruijnGraph::npos;
 
@@ -399,6 +400,7 @@ void DefaultColumnExtender<NodeType>
                 assert(pos);
                 cigar.append(last_op);
                 path.push_back(std::get<0>(best_node));
+                track.push_back(best_node);
                 seq += std::get<1>(best_node);
                 assert((last_op == Cigar::MATCH)
                     == (graph_.get_node_sequence(std::get<0>(best_node)).back()
@@ -428,6 +430,7 @@ void DefaultColumnExtender<NodeType>
                     last_op = OF[pos - offset];
                     assert(last_op == Cigar::MATCH || last_op == Cigar::DELETION);
                     path.push_back(std::get<0>(best_node));
+                    track.push_back(best_node);
                     seq += std::get<1>(best_node);
                     cigar.append(Cigar::DELETION);
                     switch (PF[pos - offset]) {
@@ -443,7 +446,7 @@ void DefaultColumnExtender<NodeType>
     }
 
     if (max_score < min_path_score)
-        return;
+        return {};
 
     if (pos > 1)
         cigar.append(Cigar::CLIPPED, pos - 1);
@@ -478,6 +481,8 @@ void DefaultColumnExtender<NodeType>
         DEBUG_LOG("Alignment (trim seed): {}", extension);
         extensions.emplace_back(std::move(extension));
     }
+
+    return track;
 }
 
 template <typename NodeType>
@@ -686,9 +691,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
             assert(OS[max_pos - offset] == Cigar::MATCH);
             backtrack(min_path_score, best_node, prev_starts, extensions);
         }
-
-        // assert(extensions.size() < 2
-            // || extensions.back().get_score() <= extensions[extensions.size() - 2].get_score());
     }
 
     return extensions;

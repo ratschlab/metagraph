@@ -127,7 +127,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
-                                        // { std::string("A"), std::string("TGCCT") },
+                                        { std::string("A"), std::string("TGCCT") },
                                         { std::string("B"), std::string("AATGCCT") } }} }
     }};
 
@@ -174,6 +174,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     const std::vector<std::string> labels { "A", "B", "C" };
 
     for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        std::cerr << "foo\n";
         auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                            typename TypeParam::second_type>(
             k, sequences, labels, mode
@@ -183,7 +184,10 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
         LabeledAligner<> aligner(*anno_graph, config);
 
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-            { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") } }} }
+            // r.c. TTTGAACTAA
+            { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") },
+                                            { std::string("A"), std::string("GTCGAAA") },
+                                            { std::string("C"), std::string("TCGACTGA") } }} }
         }};
 
         for (const auto &[query, targets] : exp_alignments) {

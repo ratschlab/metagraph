@@ -143,10 +143,12 @@ class SeedAndExtendAlignerCore {
             paths_(std::forward<Args>(args)...),
             aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
 
-    void flush(const std::function<bool()> &terminate = []() { return false; }) {
+    void flush(const std::function<bool(const DBGAlignment&)> &skip = [](const auto &) { return false; },
+               const std::function<bool()> &terminate = []() { return false; }) {
         aggregator_.call_alignments([&](auto&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
-            paths_.emplace_back(std::move(alignment));
+            if (!skip(alignment))
+                paths_.emplace_back(std::move(alignment));
         }, terminate);
     }
 
@@ -282,10 +284,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
             aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
         }
 
-        aligner_core.flush([this,&paths]() {
-            assert(paths.size() <= config_.num_alternative_paths);
-            return paths.size() == config_.num_alternative_paths;
-        });
+        aligner_core.flush();
 
         callback(header, std::move(paths));
     });

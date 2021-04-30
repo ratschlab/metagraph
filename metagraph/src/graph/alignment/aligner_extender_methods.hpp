@@ -120,10 +120,11 @@ class DefaultColumnExtender : public IExtender<NodeType> {
         column.first.emplace_back(std::move(scores));
     }
 
-    virtual void backtrack(score_t min_path_score,
-                           AlignNode best_node,
-                           tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-                           std::vector<DBGAlignment> &extensions) const;
+    virtual std::vector<AlignNode>
+    backtrack(score_t min_path_score,
+              AlignNode best_node,
+              tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+              std::vector<DBGAlignment> &extensions) const;
 
     virtual bool skip_backtrack_start(const std::vector<DBGAlignment> &extensions,
                                       const AlignNode &node) const;

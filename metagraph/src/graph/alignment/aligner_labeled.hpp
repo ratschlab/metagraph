@@ -49,10 +49,11 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     virtual ~LabeledBacktrackingExtender() {}
 
   protected:
-    virtual void backtrack(score_t min_path_score,
-                           AlignNode best_node,
-                           tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
-                           std::vector<DBGAlignment> &extensions) const override;
+    virtual std::vector<AlignNode>
+    backtrack(score_t min_path_score,
+              AlignNode best_node,
+              tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
+              std::vector<DBGAlignment> &extensions) const override;
 
     virtual void init_backtrack() const override;
 
@@ -156,9 +157,8 @@ class LabeledAligner : public ILabeledAligner {
                 aligner_core.align_one_direction(is_reverse_complement, *seeder, *extender);
             }
 
-            aligner_core.flush([this,&paths]() {
-                assert(paths.size() <= config_.num_alternative_paths);
-                return paths.size() == config_.num_alternative_paths;
+            aligner_core.flush([&](const DBGAlignment &alignment) {
+                return alignment.target_columns.empty();
             });
 
             callback(header, std::move(paths));
