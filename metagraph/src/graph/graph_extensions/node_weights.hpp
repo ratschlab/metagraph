@@ -37,7 +37,7 @@ class NodeWeights : public SequenceGraph::GraphExtension {
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
-    // serialize weights from buffer without loading all in RAM
+    // serialize weights from buffer |weights| without loading all in RAM
     static void serialize(sdsl::int_vector_buffer<>&& weights,
                           const std::string &filename_base);
 
