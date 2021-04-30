@@ -53,6 +53,11 @@ To see the list of all available flags, type ``metagraph build``.
 There are various graph representations available in MetaGraph, which can be chosen with flag ``--graph``.
 However, the default ``succinct`` representation is usually the best choice because of its great scalability (requires only 2-4 bits per k-mer) and the ability to search sub-k-mers/k-mer ranges.
 
+To check stats for a constructed graph, type::
+
+    metagraph stats graph.dbg
+
+
 Construct graph with disk swap
 """"""""""""""""""""""""""""""
 
@@ -116,6 +121,7 @@ Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph 
 
 .. TODO: note that canonical graphs must not be used with row-diff<*> annotations and always must be primarized
 
+
 Annotate graph
 ^^^^^^^^^^^^^^
 
@@ -126,19 +132,24 @@ Annotate sequence headers
 
 For annotating each sequence with its header in the fasta/fastq file, run ::
 
-    metagraph annotate -i graph.dbg --anno-header -o annotation transcripts_1000.fa
+    metagraph annotate -v -i graph.dbg --anno-header -o annotation transcripts_1000.fa
 
 This is a common annotation scenario when indexing reference sequences or assembled genomes.
+
+To check stats for the constructed annotation, type::
+
+    metagraph stats -a annotation.column.annodbg
+
+All annotation labels (column names) for an annotation matrix can be printed with::
+
+    metagraph stats --print-col-names -a annotation.column.annodbg
 
 Annotate source filename
 """"""""""""""""""""""""
 
-For labeling all k-mers from a file with a single id, the commonly used command is ::
+To label all k-mers from each file with the same id (for instance for the experiment discovery problem), the command is::
 
-    metagraph annotate -v -i graph.dbg \
-                       --anno-filename \
-                       -o annotation \
-                       file_1.fa file_2.fa ...
+    metagraph annotate -v -i graph.dbg --anno-filename -o annotation file_1.fa file_2.fa ...
 
 which will construct annotation labeling k-mers from the first file by label ``file_1.fa``, k-mers from the second file by label ``file_2.fa``, etc.
 
