@@ -3,7 +3,7 @@
 API
 ===
 
-MetaGraph API provides a simple way to query indexes (running on a remote server or locally) in Python and supports both exact k-mer
+The MetaGraph API provides a simple way to query indexes (running on a remote server or locally) in Python and supports both exact k-mer
 matching as well as inexact search (alignment).
 
 .. _install api:

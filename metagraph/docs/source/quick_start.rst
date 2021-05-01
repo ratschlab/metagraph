@@ -66,8 +66,8 @@ To check stats for a constructed graph, type::
 Construct from KMC counters
 """""""""""""""""""""""""""
 
-Apart from the standard FASTA/FASTQ/VCF input formats (also gzipped), a graph can be construction
-from k-mer counters produced by the `KMC <https://github.com/refresh-bio/KMC>`_ tool.
+Apart from the standard FASTA/FASTQ/VCF input formats (uncompressed or gzipped), a graph can be
+constructed from k-mer counts produced by the `KMC <https://github.com/refresh-bio/KMC>`_ tool.
 
 KMC is extremely efficient in counting k-mers and can be used to quickly pre-process the
 input and deduplicate/count/filter the input k-mers.
@@ -77,6 +77,10 @@ occurring at least 5 times in the input::
     K=31
     ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
     metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph SRR403017.cutoff_5.kmc_pre
+
+.. note:: In the above example, we use ``./KMC`` as the directory where KMC will store its
+          intermediate caches. Depending on your input data, this directory should be at a location
+          with a sufficient amount of free intermediate storage space.
 
 Construct with disk swap
 """"""""""""""""""""""""
@@ -108,7 +112,7 @@ The assembled contigs are written to a compressed FASTA file, which can be inspe
 Build graph in canonical mode
 """""""""""""""""""""""""""""
 
-When the input sequences are raw reads from an unknown direction (strand), it is natural to index along with each sequence its reverse complement.
+When the input sequences are raw reads of unknown directionality (strandedness), it is natural to index along with each sequence its reverse complement.
 
 MetaGraph has a special graph mode where each k-mer indexed in the graph automatically adds its reverse complement k-mer to the index. To build a canonical graph from a set of reads/sequences, run ::
 
@@ -117,11 +121,12 @@ MetaGraph has a special graph mode where each k-mer indexed in the graph automat
 Build graph in primary mode
 """""""""""""""""""""""""""
 
-Canonical graphs contain each k-mer in both of its forms (given and reverse complement), but the same data structure can be modeled by storing only one of them and implicitly modeling the other.
-Often, different tools achieve this by only storing the lexicographically smallest of the two k-mers. However, this is not be possible to efficiently implement with the ``succinct`` graph representation.
+Canonical graphs contain each k-mer in both of its forms (forward and reverse complement), but the same data structure can be modeled by storing only one of them and implicitly modeling the other.
+Often, different tools achieve this by only storing the lexicographically smallest of the two
+k-mers. However, it is not possible to efficiently implement this with the ``succinct`` graph representation.
 Hence, we relax this constraint and pick *any* of the two forms of each k-mer.
 In a nutshell, this representation is constructed by fully traversing the canonical graph and marking a k-mer as *primary* if it was reached before its reverse complement in the traversal.
-The graph containing only primary k-mers is called *primary*.
+The graph containing only primary k-mers is called a *primary* graph.
 
 The algorithm for primarization of a canonical graph is as follows:
 
@@ -137,7 +142,9 @@ The algorithm for primarization of a canonical graph is as follows:
                     --mode primary \
                     primary_contigs.fasta.gz
 
-Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph (e.g., when querying or annotating), while taking only half of its space.
+Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph (e.g., when querying
+or annotating) containing the same information as the original canonical graph, while taking only
+half of the space.
 
 .. TODO: note that canonical graphs must not be used with row-diff<*> annotations and always must be primarized
 
@@ -146,7 +153,7 @@ Graph cleaning
 
 For removing sequencing noise, there are graph cleaning and k-mer
 filtering procedures implemented in MetaGraph. These are based on the assumption that
-k-mers relatively lowly abundant in the input reads are likely due to sequencing errors, and
+k-mers with a relatively low abundance in the input data are likely due to sequencing errors, and
 hence should be dropped to keep the k-mer index free of the non-existent k-mers.
 
 ::
@@ -154,7 +161,7 @@ hence should be dropped to keep the k-mer index free of the non-existent k-mers.
     K=31
     metagraph build -v -p 4 -k $K --count-kmers -o graph SRR403017.fasta.gz
 
-    metagraph clean -v -p 4 --to-fasta --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 \
+    metagraph clean -v -p 4 --to-fasta --prune-tips $((2*$K)) --prune-unitigs 0 --fallback 2 \
                     -o SRR403017_clean_contigs graph.dbg
 
     zless SRR403017_clean_contigs.fasta.gz
@@ -164,7 +171,8 @@ hence should be dropped to keep the k-mer index free of the non-existent k-mers.
 Annotate graph
 ^^^^^^^^^^^^^^
 
-Once a graph is constructed, there are multiple ways to annotate it to encode metadata.
+Once a graph is constructed, there are multiple ways to construct the corresponding annotation to
+encode its metadata.
 
 Annotate sequence headers
 """""""""""""""""""""""""
@@ -214,18 +222,16 @@ This will create a new directory ``annotation/`` with individual annotation colu
 
     file_1.fa.column.annodbg    file_2.fa.column.annodbg    ...
 
-Annotate using contigs
-**********************
-**Important!** It is recommended to run annotation from a set of long (primary) contigs/unitigs,
-where all k-mers have already been deduplicated, especially when annotating a (primary) graph
-in the ``succinct`` representation. In contrast, annotating a ``succinct`` graph from
-separate k-mers (especially not deduplicated) will take orders of magnitude longer.
-The contigs serve as an equivalent non-redundant representation of the k-mers sets and, thus,
-result in the same graph annotation.
-**Thus, in practice,** for large inputs, it is recommended to construct
-individual (canonical) de Bruijn graphs from all read sets, called sample graphs, and
-transform them to contigs. These contig sets are then used instead of the original read
-sets to construct and annotate the join (primary) graph.
+.. important:: It is recommended to run annotation from a set of long (primary) contigs/unitigs,
+    where all k-mers have already been deduplicated, especially when annotating a (primary) graph
+    in the ``succinct`` representation. In contrast, annotating a ``succinct`` graph from
+    separate k-mers (especially not deduplicated) will take orders of magnitude longer.
+    The contigs serve as an equivalent non-redundant representation of the k-mers sets and, thus,
+    result in the same graph annotation.
+    **Thus, in practice,** for large inputs, it is recommended to construct
+    individual (canonical) de Bruijn graphs from all read sets, called sample graphs, and
+    transform them to contigs. These contig sets are then used instead of the original read
+    sets to construct and annotate the join (primary) graph.
 
 Annotate graph with custom labels
 """""""""""""""""""""""""""""""""
@@ -238,7 +244,7 @@ Transform annotation
 
 To enhance the query performance and reduce the memory footprint, annotations can be converted to other representations.
 
-There are different annotation representations available in MetaGraph (see the possible values for flag ``--anno-type`` in ``metagraph transform_anno``).
+There are several different annotation representations available in MetaGraph (see the possible values for flag ``--anno-type`` in ``metagraph transform_anno``).
 For instance, ``Rainbowfish`` can be used to achieve a very fast query speed, but it can
 be applied only to relatively small problem instances (about 100 GB) because of the limited
 compression performance and the complexity of the construction algorithm.
@@ -306,7 +312,7 @@ To query a MetaGraph index (graph + annotation) using the command line interface
 
 For alignment, see ``metagraph align``.
 
-To load up a MetaGraph index in the server mode for querying it with Python API or HTTP requests, run::
+To load up a MetaGraph index in the server mode for querying it with the Python API or via HTTP requests, run::
 
     metagraph server_query -i graph.dbg \
                            -a annotation.column.annodbg \
