@@ -37,9 +37,12 @@ Simple example
 
 De Bruijn graphs are constructed with ``metagraph build``::
 
-    metagraph build -v -p 4 -k 31 -o graph transcripts_1000.fa
+    metagraph build --verbose --parallel 4 -k 31 --outfile-base graph transcripts_1000.fa
 
-where ``transcripts_1000.fa`` is a fasta/fastq file (may be gzipped) with input sequences.
+where ``transcripts_1000.fa`` is a fasta/fastq file (may be gzipped) with input sequences. The same
+command can be shortened to::
+
+    metagraph build -v -p 4 -k 31 -o graph transcripts_1000.fa
 
 It is possible to pass multiple input files::
 
@@ -49,7 +52,7 @@ or pipe a list of them::
 
     find . -name "*.fa" | metagraph build -v -p 4 -k 31 -o graph
 
-which will construct a single de Bruijn graph (a k-mer index) from all k-mers extracted from the input sequences. 
+All of the above commands will construct a single de Bruijn graph (a k-mer index) from all k-mers extracted from the input sequences. 
 
 To see the list of all available flags, type ``metagraph build``.
 

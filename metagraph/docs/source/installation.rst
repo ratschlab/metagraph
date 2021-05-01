@@ -4,7 +4,7 @@ Installation
 ============
 
 The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
-following, we provide detailed setting up instructions.
+following, we provide detailed instructions for setting up MetaGraph.
 
 Install with conda
 ------------------
@@ -49,8 +49,8 @@ Before compiling MetaGraph, install the following dependencies:
 - boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
 - Python 3 (for running integration tests)
 
-**Tip:** For those without administrator/root privileges, we recommend using
-`brew <https://brew.sh/>`_ (available for MacOS and Linux).
+.. tip:: For those without administrator/root privileges, we recommend using
+         `brew <https://brew.sh/>`_ (available for MacOS and Linux).
 
 
 For AppleClang on MacOS
@@ -130,6 +130,10 @@ To compile MetaGraph, please follow these steps.
 
     git clone --recursive https://github.com/ratschlab/metagraph.git
 
+#. Change into the ``metagraph`` directory::
+    
+    cd metagraph
+
 #. Make sure all submodules have been downloaded::
 
     git submodule update --init --recursive
@@ -143,7 +147,7 @@ To compile MetaGraph, please follow these steps.
     ./install.sh $PWD
     popd
 
-#. Go to the ``build`` directory::
+#. Set up the ``build`` directory and change into it::
 
     mkdir metagraph/build
     cd metagraph/build
