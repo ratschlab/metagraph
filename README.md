@@ -28,20 +28,6 @@ DATA="../tests/data/transcripts_1000.fa"
 ./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000.dbg
 ```
 
-### Graph cleaning
-```
-DATA="../tests/data/transcripts_1000.fa"
-K=12
-
-./metagraph build -k $K --count-kmers -o transcripts_1000 $DATA
-
-./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 --to-fasta -o transcripts_1000_clean_contigs transcripts_1000.dbg
-
-zless transcripts_1000_clean_contigs.fasta.gz | tail
-```
-
-For real examples, see [scripts](./metagraph/scripts).
-
 ### Print usage
 `./metagraph`
 
@@ -63,10 +49,9 @@ For real examples, see [scripts](./metagraph/scripts).
 
 #### Build from k-mers filtered with KMC
 ```bash
-CUTOFF=5
 K=20
-./KMC/kmc -ci$CUTOFF -t30 -k$K -m5 -fq -b <FILE>.fasta.gz <FILE>.kmc_$CUTOFF ./KMC
-./metagraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
+./KMC/kmc -ci5 -t4 -k$K -m5 -fm <FILE>.fasta.gz <FILE>.cutoff_5 ./KMC
+./metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph <FILE>.cutoff_5.kmc_pre
 ```
 
 ### Annotate graph

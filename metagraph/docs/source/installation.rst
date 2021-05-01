@@ -15,7 +15,7 @@ There are conda packages available on bioconda for both Linux and Mac OS X::
 
 The executables are called ``metagraph_DNA`` (with a ``metagraph`` symlink) and ``metagraph_Protein``.
 
-For support of other/custom alphabets, compile from source (see :ref:`Install from source<install from source>`).
+For support of other/custom alphabets, compile from source (see `Install from source`_).
 
 
 Docker container
@@ -31,8 +31,6 @@ where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host sy
 under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
 the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch ``master``).
 
-
-.. _install from source:
 
 Install from source
 -------------------
@@ -136,7 +134,7 @@ To compile MetaGraph, please follow these steps.
 
     git submodule update --init --recursive
 
-#. Install *sdsl-lite* in :code:`metagraph/external-libraries/sdsl-lite` with the following script::
+#. Install *sdsl-lite* in ``metagraph/external-libraries/sdsl-lite`` with the following script::
 
     git submodule sync
     git submodule update --init --recursive
@@ -145,7 +143,7 @@ To compile MetaGraph, please follow these steps.
     ./install.sh $PWD
     popd
 
-#. Go to the :code:`build` directory::
+#. Go to the ``build`` directory::
 
     mkdir metagraph/build
     cd metagraph/build
@@ -166,17 +164,17 @@ To compile MetaGraph, please follow these steps.
 Build configurations
 ^^^^^^^^^^^^^^^^^^^^
 
-When configuring :code:`cmake .. <arguments>` additional arguments can be provided:
+When configuring ``cmake .. <arguments>`` additional arguments can be provided:
 
-- :code:`-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (:code:`Release` by default)
-- :code:`-DBUILD_STATIC=[ON|OFF]` -- link statically (:code:`OFF` by default)
-- :code:`-DLINK_OPT=[ON|OFF]` -- enable link time optimization (:code:`OFF` by default)
-- :code:`-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (:code:`ON` by default)
-- :code:`-DWITH_AVX=[ON|OFF]` -- compile with *avx* instructions (:code:`ON` by default, if available)
-- :code:`-DWITH_MSSE42=[ON|OFF]` -- compile with *msse4.2* instructions (:code:`ON` by default, if available)
-- :code:`-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (:code:`DNA` by default)
+- ``-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]`` -- build modes (``Release`` by default)
+- ``-DBUILD_STATIC=[ON|OFF]`` -- link statically (``OFF`` by default)
+- ``-DLINK_OPT=[ON|OFF]`` -- enable link time optimization (``OFF`` by default)
+- ``-DBUILD_KMC=[ON|OFF]`` -- compile the KMC executable (``ON`` by default)
+- ``-DWITH_AVX=[ON|OFF]`` -- compile with *avx* instructions (``ON`` by default, if available)
+- ``-DWITH_MSSE42=[ON|OFF]`` -- compile with *msse4.2* instructions (``ON`` by default, if available)
+- ``-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]`` -- alphabet to use (``DNA`` by default)
 
 
 Install API
 ----------------------------
-See :ref:`API Install<install api>`.
+See :ref:`API Install <install api>`.

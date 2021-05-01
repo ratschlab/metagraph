@@ -32,7 +32,10 @@ The indexing workflow in MetaGraph consists of two major steps: graph constructi
 Construct graph
 ^^^^^^^^^^^^^^^
 
-Simple example::
+Simple example
+""""""""""""""
+
+De Bruijn graphs are constructed with ``metagraph build``::
 
     metagraph build -v -p 4 -k 31 -o graph transcripts_1000.fa
 
@@ -57,9 +60,23 @@ To check stats for a constructed graph, type::
 
     metagraph stats graph.dbg
 
+Construct from KMC counters
+"""""""""""""""""""""""""""
 
-Construct graph with disk swap
-""""""""""""""""""""""""""""""
+Apart from the standard FASTA/FASTQ/VCF input formats (also gzipped), a graph can be construction
+from k-mer counters produced by the `KMC <https://github.com/refresh-bio/KMC>`_ tool.
+
+KMC is extremely efficient in counting k-mers and can be used to quickly pre-process the
+input and deduplicate/count/filter the input k-mers.
+For example, the following command can be used to construct a graph only from k-mers
+occurring at least 5 times in the input::
+
+    K=31
+    ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
+    metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph SRR403017.cutoff_5.kmc_pre
+
+Construct with disk swap
+""""""""""""""""""""""""
 
 For very large inputs, graphs can be constructed with disk swap to limit the RAM usage (currently, available only for ``succinct`` graph representations).
 For example, to restrict the buffer size to 4 GiB, the following build command can be used::
@@ -68,8 +85,8 @@ For example, to restrict the buffer size to 4 GiB, the following build command c
 
 Using larger buffers usually speeds up the construction. However, using a 50-100 GB buffer is always sufficient, even when constructing graphs with trillions of k-mers.
 
-Transform graph to other representations
-""""""""""""""""""""""""""""""""""""""""
+Transform to other representations
+""""""""""""""""""""""""""""""""""
 
 To transform a ``succinct`` graph to a more compressed and smaller representation, run::
 
@@ -120,6 +137,25 @@ The algorithm for primarization of a canonical graph is as follows:
 Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph (e.g., when querying or annotating), while taking only half of its space.
 
 .. TODO: note that canonical graphs must not be used with row-diff<*> annotations and always must be primarized
+
+Graph cleaning
+""""""""""""""
+
+For removing sequencing noise, there are graph cleaning and k-mer
+filtering procedures implemented in MetaGraph. These are based on the assumption that
+k-mers relatively lowly abundant in the input reads are likely due to sequencing errors, and
+hence should be dropped to keep the k-mer index free of the non-existent k-mers.
+
+::
+
+    K=31
+    metagraph build -v -p 4 -k $K --count-kmers -o graph SRR403017.fasta.gz
+
+    metagraph clean -v -p 4 --to-fasta --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 \
+                    -o SRR403017_clean_contigs graph.dbg
+
+    zless SRR403017_clean_contigs.fasta.gz
+
 
 
 Annotate graph

@@ -24,9 +24,9 @@ copyright = u'2021, Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsc
 author = u'Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
 
 # The short X.Y version
-version = u'0.1'
-# The full version, including alpha/beta/rc tags
-release = u'0.1.0'
+# version = u'latest'
+# # The full version, including alpha/beta/rc tags
+# release = u'latest'
 
 
 # -- General configuration ---------------------------------------------------
