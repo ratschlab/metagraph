@@ -188,15 +188,20 @@ auto LabeledBacktrackingExtender<NodeType>
             break;
 
         if (it != track.end()) {
-            Vector<uint64_t> diff;
-            std::set_difference(cur_targets.begin(), cur_targets.end(),
-                                target_intersection.begin(), target_intersection.end(),
-                                std::back_inserter(diff));
-            if (inter.size() == target_intersection.size() || diff.empty()) {
+            if (inter.size() == target_intersection.size()) {
                 prev_starts.emplace(*it);
                 ++it;
             } else {
-                it = track.end();
+                Vector<uint64_t> diff;
+                std::set_difference(cur_targets.begin(), cur_targets.end(),
+                                    target_intersection.begin(), target_intersection.end(),
+                                    std::back_inserter(diff));
+                if (diff.empty()) {
+                    prev_starts.emplace(*it);
+                    ++it;
+                } else {
+                    it = track.end();
+                }
             }
         }
 
