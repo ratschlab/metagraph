@@ -5,6 +5,7 @@
 #include <functional>
 
 #include "aligner_alignment.hpp"
+#include "aligner_aggregator.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -54,7 +55,9 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
   protected:
     virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
-    build_extender(std::string_view query) const = 0;
+    build_extender(std::string_view query,
+                   const AlignmentAggregator<IDBGAligner::node_index,
+                                             AlignmentCompare> &aggregator) const = 0;
 
     virtual std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
     build_seeder(std::string_view query,
@@ -82,7 +85,9 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     DBGAlignerConfig config_;
 
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
-    build_extender(std::string_view query) const override {
+    build_extender(std::string_view query,
+                   const AlignmentAggregator<IDBGAligner::node_index,
+                                             AlignmentCompare>&) const override {
         return std::make_shared<Extender>(graph_, config_, query);
     }
 

@@ -39,6 +39,7 @@ class AlignmentAggregator {
     inline void add_alignment(DBGAlignment&& alignment);
 
     inline score_t get_min_path_score(const DBGAlignment &seed) const;
+    inline score_t get_min_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const;
 
     const DBGAlignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
@@ -93,23 +94,24 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
 ::get_min_path_score(const DBGAlignment &alignment) const -> score_t {
-    if (alignment.target_columns.empty()) {
-        auto find = path_queue_.find(std::numeric_limits<uint64_t>::max());
-        return find == path_queue_.end() || find->second.empty()
-            ? config_.min_path_score
-            : find->second.minimum()->get_score();
-    }
+    if (alignment.target_columns.empty())
+        return get_min_path_score();
 
     score_t min_score = std::numeric_limits<score_t>::max();
     for (uint64_t target : alignment.target_columns) {
-        auto find = path_queue_.find(target);
-        if (find == path_queue_.end() || find->second.empty())
-            return config_.min_path_score;
-
-        min_score = std::min(min_score, find->second.minimum()->get_score());
+        min_score = std::min(min_score, get_min_path_score(target));
     }
 
     return min_score;
+}
+
+template <typename NodeType, class AlignmentCompare>
+inline auto AlignmentAggregator<NodeType, AlignmentCompare>
+::get_min_path_score(uint64_t target) const -> score_t {
+    auto find = path_queue_.find(target);
+    return find == path_queue_.end() || find->second.empty()
+        ? config_.min_path_score
+        : find->second.minimum()->get_score();
 }
 
 template <typename NodeType, class AlignmentCompare>

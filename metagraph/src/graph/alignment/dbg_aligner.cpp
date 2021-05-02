@@ -2,7 +2,6 @@
 
 #include <tsl/hopscotch_map.h>
 
-#include "aligner_aggregator.hpp"
 #include "common/algorithms.hpp"
 
 namespace mtg {
@@ -184,10 +183,10 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 || get_graph().get_mode() == DeBruijnGraph::CANONICAL)
             seeder_rc = build_seeder(reverse, !is_reverse_complement, std::move(nodes_rc));
 
-        auto extender = build_extender(this_query);
+        auto extender = build_extender(this_query, aligner_core.get_aggregator());
 
         if (get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
-            auto extender_rc = build_extender(reverse);
+            auto extender_rc = build_extender(reverse, aligner_core.get_aggregator());
 
             auto build_rev_comp_alignment_core = [&](auto&& rev_comp_seeds,
                                                      const auto &callback) {
@@ -202,7 +201,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                                                build_rev_comp_alignment_core);
 
         } else if (get_config().forward_and_reverse_complement) {
-            auto extender_rc = build_extender(reverse);
+            auto extender_rc = build_extender(reverse, aligner_core.get_aggregator());
             aligner_core.align_best_direction(*seeder, *seeder_rc, *extender, *extender_rc);
 
         } else {

@@ -92,8 +92,8 @@ process_seq_path(const DeBruijnGraph &graph,
     }
 }
 
-template <typename NodeType>
-void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
+template <typename NodeType, class AlignmentCompare>
+void LabeledBacktrackingExtender<NodeType, AlignmentCompare>::init_backtrack() const {
     std::vector<uint64_t> added_rows;
     std::vector<node_index> added_nodes;
 
@@ -128,14 +128,29 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     assert(it == added_nodes.end());
 }
 
-template <typename NodeType>
-auto LabeledBacktrackingExtender<NodeType>
+template <typename NodeType, class AlignmentCompare>
+auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
 ::backtrack(score_t min_path_score,
             AlignNode best_node,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,
             std::vector<DBGAlignment> &extensions) const -> std::vector<AlignNode> {
     size_t target_id = targets_[std::get<0>(best_node)];
     if (!target_id)
+        return {};
+
+    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
+        = this->table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
+
+    score_t score = S[max_pos - offset];
+
+    Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
+    auto target_it = std::remove_if(
+        target_intersection.begin(), target_intersection.end(),
+        [&](uint64_t target) { return aggregator_.get_min_path_score(target) > score; }
+    );
+    target_intersection.erase(target_it, target_intersection.end());
+
+    if (target_intersection.empty())
         return {};
 
     std::vector<DBGAlignment> next_extension;
@@ -154,8 +169,6 @@ auto LabeledBacktrackingExtender<NodeType>
     DBGAlignment alignment = std::move(next_extension[0]);
     assert(alignment.is_valid(this->graph_, &this->config_));
     assert(alignment.back() == std::get<0>(best_node));
-
-    Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
 
     AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
     while (!suffix.get_added_offset())
