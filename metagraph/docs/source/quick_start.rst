@@ -114,7 +114,7 @@ Build graph in canonical mode
 
 When the input sequences are raw reads of unknown directionality (strandedness), it is natural to index along with each sequence its reverse complement.
 
-MetaGraph has a special graph mode where each k-mer indexed in the graph automatically adds its reverse complement k-mer to the index. To build a canonical graph from a set of reads/sequences, run ::
+MetaGraph has a special graph mode where each k-mer indexed in the graph automatically adds its reverse complement k-mer to the index. To build a canonical graph from a set of reads/sequences, add ``--mode canonical`` to the build command::
 
     find . -name "*.fa" | metagraph build -v -p 4 -k 31 -o graph --mode canonical
 
@@ -130,11 +130,11 @@ The graph containing only primary k-mers is called a *primary* graph.
 
 The algorithm for primarization of a canonical graph is as follows:
 
-1. First, extract a set of primary contigs (stretches of primary k-mers) from the canonical graph. ::
+1. First, extract a set of primary contigs (stretches of primary k-mers) from the canonical graph::
 
     metagraph transform -v --to-fasta --primary-kmers -o primary_contigs -p 4 graph.dbg
 
-2. Then, construct a new graph from the primary contigs and mark this graph as *primary*. ::
+2. Then, construct a new graph from the primary contigs and mark this graph as *primary* by adding ``--mode primary`` to the build command::
 
     metagraph build -v -p 4 \
                     -k 31 \
