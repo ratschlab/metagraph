@@ -187,8 +187,9 @@ auto LabeledBacktrackingExtender<NodeType>
         if (inter.empty())
             break;
 
-        if (it != track.end()) {
-            if (inter.size() == target_intersection.size()) {
+        if (it != track_end) {
+            if (inter.size() == target_intersection.size()
+                    || inter.size() == cur_targets.size()) {
                 prev_starts.emplace(*it);
                 ++it;
             } else {

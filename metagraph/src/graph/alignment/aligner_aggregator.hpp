@@ -84,13 +84,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
         }
     };
 
-    if (packaged_alignment->target_columns.empty()) {
-        add_to_target(std::numeric_limits<uint64_t>::max());
-    } else {
-        std::for_each(packaged_alignment->target_columns.begin(),
-                      packaged_alignment->target_columns.end(),
-                      add_to_target);
-    }
+    add_to_target(std::numeric_limits<uint64_t>::max());
+    std::for_each(packaged_alignment->target_columns.begin(),
+                  packaged_alignment->target_columns.end(),
+                  add_to_target);
 }
 
 template <typename NodeType, class AlignmentCompare>
