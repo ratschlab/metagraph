@@ -174,6 +174,7 @@ auto LabeledBacktrackingExtender<NodeType>
     auto it = track.begin();
     assert(it != track.end());
 
+    bool skipped = false;
     prev_starts.emplace(*it);
     ++it;
 
@@ -187,24 +188,22 @@ auto LabeledBacktrackingExtender<NodeType>
         if (inter.empty())
             break;
 
-        if (it != track_end) {
-            if (inter.size() == target_intersection.size()
-                    || inter.size() == cur_targets.size()) {
+        assert(it != track.end());
+        if ((!skipped && inter.size() == target_intersection.size())
+                || inter.size() == cur_targets.size()) {
+            prev_starts.emplace(*it);
+        } else if (!skipped) {
+            Vector<uint64_t> diff;
+            std::set_difference(cur_targets.begin(), cur_targets.end(),
+                                target_intersection.begin(), target_intersection.end(),
+                                std::back_inserter(diff));
+            if (diff.empty()) {
                 prev_starts.emplace(*it);
-                ++it;
             } else {
-                Vector<uint64_t> diff;
-                std::set_difference(cur_targets.begin(), cur_targets.end(),
-                                    target_intersection.begin(), target_intersection.end(),
-                                    std::back_inserter(diff));
-                if (diff.empty()) {
-                    prev_starts.emplace(*it);
-                    ++it;
-                } else {
-                    it = track.end();
-                }
+                skipped = true;
             }
         }
+        ++it;
 
         if (inter.size() < target_intersection.size()) {
             if (suffix.get_front_op() != Cigar::DELETION
