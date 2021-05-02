@@ -143,14 +143,14 @@ auto LabeledBacktrackingExtender<NodeType>
     auto track = DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
                                                             dummy, next_extension);
 
-    if (next_extension.empty()) {
+    assert(next_extension.size() <= 1);
+    if (next_extension.empty() || next_extension[0].get_offset()) {
         prev_starts.insert(dummy.begin(), dummy.end());
         return track;
     }
 
     dummy = tsl::hopscotch_set<AlignNode, AlignNodeHash>();
 
-    assert(next_extension.size() == 1);
     DBGAlignment alignment = std::move(next_extension[0]);
     assert(alignment.is_valid(this->graph_, &this->config_));
     assert(alignment.back() == std::get<0>(best_node));
@@ -158,7 +158,7 @@ auto LabeledBacktrackingExtender<NodeType>
     Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
 
     AlignmentSuffix<node_index> suffix(alignment, this->config_, this->graph_);
-    while (!suffix.eof() && !suffix.get_added_offset())
+    while (!suffix.get_added_offset())
         ++suffix;
 
     auto suffix_shift = [&suffix]() {
@@ -201,16 +201,30 @@ auto LabeledBacktrackingExtender<NodeType>
         }
 
         if (inter.size() < target_intersection.size()) {
-            extensions.emplace_back(suffix);
-            extensions.back().target_columns = target_intersection;
-            assert(check_targets(anno_graph_, extensions.back()));
+            if (suffix.get_front_op() != Cigar::DELETION) {
+                extensions.emplace_back(suffix);
+                extensions.back().target_columns = target_intersection;
+                assert(check_targets(anno_graph_, extensions.back()));
+            }
+        } else {
+            --suffix;
+            if (!suffix.reof() && suffix.get_front_op() == Cigar::DELETION) {
+                ++suffix;
+                if (suffix.get_front_op() != Cigar::DELETION) {
+                    extensions.emplace_back(suffix);
+                    extensions.back().target_columns = target_intersection;
+                    assert(check_targets(anno_graph_, extensions.back()));
+                }
+            } else {
+                ++suffix;
+            }
         }
 
         suffix_shift();
         std::swap(target_intersection, inter);
     }
 
-    if (target_intersection.size()) {
+    if (target_intersection.size() && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
         extensions.emplace_back(suffix);
         extensions.back().target_columns = target_intersection;
         assert(check_targets(anno_graph_, extensions.back()));

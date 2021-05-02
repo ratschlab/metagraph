@@ -148,7 +148,8 @@ Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix
 
     nodes_.assign(alignment_suffix.get_node_begin_it(), data.end());
 
-    extend_query_begin(data.get_query().data());
+    extend_query_begin(data.get_query().data() - data.get_clipping());
+    extend_query_end(data.get_query().data() + data.get_query().size() + data.get_end_clipping());
 }
 
 template <typename NodeType>
