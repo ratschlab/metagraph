@@ -206,7 +206,8 @@ auto LabeledBacktrackingExtender<NodeType>
         }
 
         if (inter.size() < target_intersection.size()) {
-            if (suffix.get_front_op() != Cigar::DELETION) {
+            if (suffix.get_front_op() != Cigar::DELETION
+                    && suffix.get_score() >= this->config_.min_cell_score) {
                 extensions.emplace_back(suffix);
                 extensions.back().target_columns = target_intersection;
                 assert(check_targets(anno_graph_, extensions.back()));
@@ -215,7 +216,8 @@ auto LabeledBacktrackingExtender<NodeType>
             --suffix;
             if (!suffix.reof() && suffix.get_front_op() == Cigar::DELETION) {
                 ++suffix;
-                if (suffix.get_front_op() != Cigar::DELETION) {
+                if (suffix.get_front_op() != Cigar::DELETION
+                        && suffix.get_score() >= this->config_.min_cell_score) {
                     extensions.emplace_back(suffix);
                     extensions.back().target_columns = target_intersection;
                     assert(check_targets(anno_graph_, extensions.back()));
@@ -229,7 +231,9 @@ auto LabeledBacktrackingExtender<NodeType>
         std::swap(target_intersection, inter);
     }
 
-    if (target_intersection.size() && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
+    if (target_intersection.size()
+            && suffix.get_score() >= this->config_.min_cell_score
+            && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
         extensions.emplace_back(suffix);
         extensions.back().target_columns = target_intersection;
         assert(check_targets(anno_graph_, extensions.back()));
