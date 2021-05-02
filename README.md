@@ -2,7 +2,7 @@
 
 ## Install
 
-See [Installation](metagraph/docs/source/installation.rst) instructions.
+See [installation instructions](metagraph/docs/source/installation.rst) or [docs online](https://metagraph.ethz.ch/static/docs/index.html).
 
 
 ## Typical workflow
