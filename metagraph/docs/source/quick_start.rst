@@ -231,7 +231,7 @@ This will create a new directory ``annotation/`` with individual annotation colu
     **Thus, in practice,** for large inputs, it is recommended to construct
     individual (canonical) de Bruijn graphs from all read sets, called sample graphs, and
     transform them to contigs. These contig sets are then used instead of the original read
-    sets to construct and annotate the join (primary) graph.
+    sets to construct and annotate the joint (primary) graph.
 
 Annotate graph with custom labels
 """""""""""""""""""""""""""""""""
