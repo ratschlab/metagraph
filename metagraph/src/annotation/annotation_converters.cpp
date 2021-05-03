@@ -364,21 +364,56 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
             num_parallel_nodes, num_threads);
 }
 
-std::unique_ptr<RowDiffRowSparseAnnotator> convert(const RowDiffColumnAnnotator &annotator) {
-    uint64_t num_set_bits = annotator.num_relations();
-    uint64_t num_rows = annotator.num_objects();
-    uint64_t num_columns = annotator.num_labels();
+std::unique_ptr<RowDiffRowSparseAnnotator>
+convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
 
-    RowSparse matrix(
-        [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().diffs().data())
-                    .call_rows(callback);
+    uint64_t total_num_set_bits = 0;
+    bool load_successful = merge_load_row_diff(
+        filenames,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            #pragma omp critical
+            {
+                if (columns.size() && column->size() != columns.back()->size()) {
+                    logger->error("Column {} has {} rows, previous column has {} rows",
+                                  label, column->size(), columns.back()->size());
+                    exit(1);
+                }
+                size_t col = label_encoder.insert_and_encode(label);
+                if (col != columns.size()) {
+                    logger->error("Duplicate columns {}", label);
+                    exit(1);
+                }
+                columns.push_back(std::move(column));
+                total_num_set_bits += num_set_bits;
+            }
         },
-        num_columns, num_rows, num_set_bits
+        get_num_threads()
     );
-    auto rd = std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(matrix));
-    return std::make_unique<RowDiffRowSparseAnnotator>(std::move(rd),
-                                                       annotator.get_label_encoder());
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    RowSparse rd_matrix(
+        [&](auto callback) {
+            utils::RowsFromColumnsTransformer(columns).call_rows(callback);
+        },
+        num_columns, num_rows, total_num_set_bits
+    );
+    return std::make_unique<RowDiffRowSparseAnnotator>(
+                std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(rd_matrix)),
+                std::move(label_encoder));
 }
 
 
@@ -1072,21 +1107,71 @@ void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
                               RowCompressed<std::string> *annotator,
                               size_t num_threads);
 
+fs::path get_count_filename(fs::path vector_fname,
+                            const std::string &extension,
+                            fs::path out_dir,
+                            fs::path fallback_filename) {
+    if (vector_fname.extension() != extension) {
+        if (!vector_fname.empty()) {
+            logger->warn(
+                "The output filename {} does not have the expected extension"
+                " '{}'. The name of the row count vector will be derived"
+                " from the first column in batch.", vector_fname, extension);
+        }
+
+        // fix the name, set to the fallback value
+        vector_fname = out_dir/fs::path(fallback_filename)
+                                .filename()
+                                .replace_extension()
+                                .replace_extension(extension);
+
+        logger->info("The name of the row count vector was automatically"
+                     " derived from the first column in batch and set to {}",
+                     vector_fname);
+
+        if (fs::exists(vector_fname)) {
+            logger->warn("Found row count vector {}, will be overwritten",
+                         vector_fname);
+            fs::remove(vector_fname);
+        }
+    }
+
+    return vector_fname;
+}
+
 void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &graph_fname,
                          size_t mem_bytes,
                          uint32_t max_path_length,
                          fs::path out_dir,
                          fs::path swap_dir,
-                         bool optimize,
-                         fs::path row_reduction_fname) {
+                         RowDiffStage construction_stage,
+                         fs::path count_vector_fname) {
     if (out_dir.empty())
         out_dir = "./";
 
-    build_successor(graph_fname, graph_fname, max_path_length, get_num_threads());
+    if (construction_stage != RowDiffStage::COUNT_LABELS)
+        build_pred_succ(graph_fname, graph_fname, out_dir,
+                        ".row_count", get_num_threads());
 
-    if (optimize)
-        optimize_anchors_in_row_diff(graph_fname, out_dir, ".row_reduction");
+    if (construction_stage == RowDiffStage::CONVERT) {
+        assign_anchors(graph_fname, graph_fname, out_dir, max_path_length,
+                       ".row_reduction", get_num_threads());
+
+        const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;
+        if (!fs::exists(anchors_fname)) {
+            logger->error("Can't find anchors bitmap at {}", anchors_fname);
+            exit(1);
+        }
+        uint64_t anchor_size = fs::file_size(anchors_fname);
+        if (anchor_size > mem_bytes) {
+            logger->warn("Anchor bitmap ({} MiB) is larger than the memory"
+                         " allocated ({} MiB). Reserve more RAM.",
+                         anchor_size >> 20, mem_bytes >> 20);
+            return;
+        }
+        mem_bytes -= anchor_size;
+    }
 
     if (!files.size())
         return;
@@ -1100,9 +1185,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             // also add some space for buffers for each column
             uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
             if (file_size > mem_bytes) {
-                logger->warn(
-                        "Not enough memory to process {}, requires {} MB, skipped",
-                        files[i], file_size / 1e6);
+                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
+                             files[i], file_size / 1e6);
                 continue;
             }
             if (file_size > mem_bytes_left)
@@ -1111,40 +1195,29 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             mem_bytes_left -= file_size;
             file_batch.push_back(files[i]);
 
-            // derive name from first file in batch
-            if (!optimize && row_reduction_fname.extension() != ".row_reduction") {
-                if (!row_reduction_fname.empty()) {
-                    logger->warn(
-                        "The output filename {} does not have extension '.row_reduction'."
-                        " The name of the row reduction vector will be derived"
-                        " from the first column in batch.", row_reduction_fname);
-                }
-                row_reduction_fname = out_dir/fs::path(file_batch.back())
-                                                .filename()
-                                                .replace_extension()
-                                                .replace_extension(".row_reduction");
-
-                logger->info("The name of the row reduction vector was automatically"
-                             " derived from the first column in batch and set to {}",
-                             row_reduction_fname);
-
-                if (fs::exists(row_reduction_fname)) {
-                    logger->warn("Found row reduction vector {}, will be overwritten",
-                                 row_reduction_fname);
-                    fs::remove(row_reduction_fname);
-                }
+            // get a file name of the count vector or derive from the first file in batch
+            if (construction_stage == RowDiffStage::COUNT_LABELS) {
+                count_vector_fname = get_count_filename(count_vector_fname, ".row_count",
+                                                        out_dir, file_batch.front());
+            } else if (construction_stage == RowDiffStage::COMPUTE_REDUCTION) {
+                count_vector_fname = get_count_filename(count_vector_fname, ".row_reduction",
+                                                        out_dir, file_batch.front());
             }
         }
 
         Timer timer;
-        logger->trace("Annotations for row-diff transform in batch: {}",
+        logger->trace("Annotations in batch: {}",
                       file_batch.size());
 
-        convert_batch_to_row_diff(
-                graph_fname, graph_fname + kRowDiffAnchorExt + (optimize ? "" : ".unopt"),
-                file_batch, out_dir, swap_dir, row_reduction_fname, ROW_DIFF_BUFFER_BYTES, !optimize);
+        if (construction_stage == RowDiffStage::COUNT_LABELS) {
+            count_labels_per_row(file_batch, count_vector_fname);
+        } else {
+            convert_batch_to_row_diff(graph_fname,
+                    file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
+                    construction_stage == RowDiffStage::COMPUTE_REDUCTION);
+        }
 
-        logger->trace("Batch transformed in {} sec", timer.elapsed());
+        logger->trace("Batch processed in {} sec", timer.elapsed());
     }
 }
 
@@ -1190,7 +1263,14 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
+        std::string fork_succ_file = utils::remove_suffix(graph_file, kRowDiffForkSuccExt) + kRowDiffForkSuccExt;
+        if (!std::filesystem::exists(fork_succ_file)) {
+            logger->error("Couldn't find fork successor bitmap at {}", fork_succ_file);
+            std::exit(1);
+        }
         const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchors_file);
+        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_fork_succ(fork_succ_file);
+
         row_diff_anno.serialize(out_file);
         return;
     }

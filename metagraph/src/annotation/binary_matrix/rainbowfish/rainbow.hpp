@@ -32,7 +32,6 @@ class Rainbow : public RainbowMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const override;
-    SetBitPositions get_row(Row row) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
@@ -51,11 +50,15 @@ class Rainbow : public RainbowMatrix {
   private:
     uint64_t num_relations_ = 0;
 
+    // TODO: try out sdsl::dac_vector<> or other compression methods
     sdsl::bit_vector row_codes_;
     bit_vector_rrr<> row_code_delimiters_;
     MatrixType reduced_matrix_;
 
-    uint64_t get_code(Row row) const;
+    uint64_t get_code(Row row) const override;
+    SetBitPositions code_to_row(uint64_t c) const override {
+        return reduced_matrix_.get_row(c);
+    }
 };
 
 } // namespace binmat

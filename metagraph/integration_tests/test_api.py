@@ -3,7 +3,7 @@ import os
 import shlex
 import time
 import unittest
-from subprocess import Popen
+import subprocess
 
 import socket
 import requests
@@ -26,10 +26,20 @@ class TestAPIBase(TestingBase):
         cls._build_graph(fasta_path, graph_path, 6, 'succinct', mode=mode)
         cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column')
 
-        cls.host = socket.gethostbyname(socket.gethostname())
-        cls.port = 3456
+        cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
-        cls.server_process = cls._start_server(cls, graph_path, annotation_path)
+        cls.port = 3456
+        num_retries = 100
+        while num_retries > 0:
+            cls.server_process = cls._start_server(cls, graph_path, annotation_path)
+            try:
+                cls.server_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                break
+            cls.port += 1
+            num_retries -= 1
+        if num_retries == 0:
+            raise "Couldn't start server"
 
         wait_time_sec = 1
         print("Waiting {} sec for the server (PID {}) to start up".format(
@@ -50,7 +60,7 @@ class TestAPIBase(TestingBase):
             threads=2
         )
 
-        return Popen(shlex.split(construct_command))
+        return subprocess.Popen(shlex.split(construct_command))
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
@@ -215,6 +225,12 @@ class TestAPIClient(TestAPIBase):
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+
+    def test_api_simple_query_with_signature_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, with_signature=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
 
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True, min_exact_match=0.01)

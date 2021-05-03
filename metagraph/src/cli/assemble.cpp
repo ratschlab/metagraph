@@ -26,33 +26,6 @@ mask_graph(const AnnotatedDBG &anno_graph, Config *config) {
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
-    // Remove non-present labels
-    config->label_mask_in.erase(
-        std::remove_if(config->label_mask_in.begin(),
-                       config->label_mask_in.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-in label {}", label);
-
-                           return !exists;
-                       }),
-        config->label_mask_in.end()
-    );
-
-    config->label_mask_out.erase(
-        std::remove_if(config->label_mask_out.begin(),
-                       config->label_mask_out.end(),
-                       [&](const auto &label) {
-                           bool exists = anno_graph.label_exists(label);
-                           if (!exists)
-                               logger->trace("Removing mask-out label {}", label);
-
-                           return !exists;
-                       }),
-        config->label_mask_out.end()
-    );
-
     logger->trace("Masked in: {}", fmt::join(config->label_mask_in, " "));
     logger->trace("Masked out: {}", fmt::join(config->label_mask_out, " "));
 

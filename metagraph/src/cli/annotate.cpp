@@ -1,5 +1,7 @@
 #include "annotate.hpp"
 
+#include <filesystem>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -15,6 +17,8 @@
 
 namespace mtg {
 namespace cli {
+
+namespace fs = std::filesystem;
 
 using namespace mtg::seq_io;
 
@@ -178,7 +182,7 @@ void add_kmer_counts(const std::string &file,
             }
 
             callback(read_stream->seq.s, labels,
-                     std::vector<uint32_t>(kmer_counts, kmer_counts + read_stream->seq.l - k + 1));
+                     std::vector<uint64_t>(kmer_counts, kmer_counts + read_stream->seq.l - k + 1));
 
             total_seqs++;
 
@@ -251,11 +255,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.anno_labels,
                 [&](std::string sequence,
                             std::vector<std::string> labels,
-                            std::vector<uint32_t> kmer_counts) {
+                            std::vector<uint64_t> kmer_counts) {
                     thread_pool.enqueue(
                         [&](std::string &sequence,
                                 std::vector<std::string> &labels,
-                                std::vector<uint32_t> &kmer_counts) {
+                                std::vector<uint64_t> &kmer_counts) {
                             anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
                         },
                         std::move(sequence), std::move(labels), std::move(kmer_counts)
@@ -376,6 +380,15 @@ int annotate_graph(Config *config) {
             // annotate multiple files in parallel, each in a single thread
             num_threads = get_num_threads();
             set_num_threads(1);
+        }
+
+        if (!config->outfbase.empty()) {
+            try {
+                fs::create_directory(config->outfbase);
+            } catch (...) {
+                logger->error("Failed to create directory {}", config->outfbase);
+                throw;
+            }
         }
 
         #pragma omp parallel for num_threads(num_threads) default(shared) schedule(dynamic, 1)

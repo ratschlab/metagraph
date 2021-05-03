@@ -1,6 +1,8 @@
 #ifndef __STATIC_ANNOTATOR_DEFS_HPP__
 #define __STATIC_ANNOTATOR_DEFS_HPP__
 
+#include <sdsl/dac_vector.hpp>
+
 #include "annotation_matrix.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
@@ -11,6 +13,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
+#include "annotation/int_matrix/extended/csc_matrix.hpp"
 
 
 namespace mtg {
@@ -38,6 +41,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
+typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string> IntMultiBRWTAnnotator;
+
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
@@ -61,6 +66,9 @@ template <>
 inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.annodbg";
 template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
+template <>
+inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
+
 } // namespace annot
 } // namespace mtg
 

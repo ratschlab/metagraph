@@ -68,6 +68,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
                 std::string anchor_fname = config.infbase + kRowDiffAnchorExt;
                 dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_anchor(anchor_fname);
+                std::string fork_succ_fname = config.infbase + kRowDiffForkSuccExt;
+                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_fork_succ(fork_succ_fname);
             } else if (input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
                 dynamic_cast<RowDiff<RowSparse> &>(matrix).set_graph(dbg_graph);
             } else {

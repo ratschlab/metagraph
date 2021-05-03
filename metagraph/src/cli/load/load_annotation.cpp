@@ -54,6 +54,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RbBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::RbBRWT;
 
+    } else if (utils::ends_with(filename, annot::IntMultiBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::IntBRWT;
+
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
         exit(1);
@@ -66,14 +69,16 @@ initialize_annotation(Config::AnnotationType anno_type,
                       bool row_compressed_sparse,
                       uint64_t num_rows,
                       const std::string &swap_dir,
-                      double memory_available_gb) {
+                      double memory_available_gb,
+                      uint8_t count_width) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
                 new annot::ColumnCompressed<>(num_rows, column_compressed_num_columns_cached,
-                                              swap_dir, memory_available_gb * kBytesInGigabyte)
+                                              swap_dir, memory_available_gb * kBytesInGigabyte,
+                                              count_width)
             );
             break;
         }
@@ -119,6 +124,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RbBRWT: {
             annotation.reset(new annot::RbBRWTAnnotator());
+            break;
+        }
+        case Config::IntBRWT: {
+            annotation.reset(new annot::IntMultiBRWTAnnotator());
             break;
         }
     }
