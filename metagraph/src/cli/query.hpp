@@ -62,7 +62,8 @@ class QueryExecutor {
                                      size_t num_top_labels,
                                      double discovery_fraction,
                                      std::string anno_labels_delimiter,
-                                     const graph::AnnotatedDBG &anno_graph);
+                                     const graph::AnnotatedDBG &anno_graph,
+                                     bool with_kmer_counts = false);
 
   private:
     const Config &config_;

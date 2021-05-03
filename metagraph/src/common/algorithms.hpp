@@ -212,6 +212,72 @@ namespace utils {
         return count_hist.back().first;
     }
 
+    /**
+     * Smoothing of an array with a sliding window.
+     *
+     * If |window_size| is even, the left side of the window is longer than
+     * the right one by 1. For example, for window size 6: .....?...
+     *                                                       ^--*-^
+     * On the sides of the array, the window is truncated:     .?.......
+     *                                                       XX^*-^
+     */
+    template <typename T>
+    void smooth_vector(size_t window_size, std::vector<T> *v_p) {
+        auto &v = *v_p;
+
+        if (window_size <= 1)
+            return;
+
+        size_t left = window_size / 2;
+        size_t right = window_size - left - 1;
+
+        assert(left >= right);
+
+        if (right + 1 >= v.size()) {
+            T sum = std::accumulate(v.begin(), v.end(), (T)0);
+            std::fill(v.begin(), v.end(), std::round((double)sum / v.size()));
+
+        } else {
+            std::vector<double> psum(v.size());
+            std::partial_sum(v.begin(), v.end(), psum.begin());
+            // Now we transform it to the following:
+            // [1] [2] [3] [4] [4]
+            //      X   ^---^---*
+            //  X   ^---^---*---^
+            //  ^---^---*---^
+            //  ^---*---^
+            //  *---^
+            size_t i = 0;
+            // truncated window
+            //     ..........
+            // ^---*---^
+            for ( ; i <= left && i + right < v.size(); ++i) {
+                v[i] = std::round(psum[i + right] / (i + right + 1));
+            }
+            // full window
+            //     ..............
+            //     ^---*---^
+            for ( ; i + right < v.size(); ++i) {
+                assert(i > left);
+                v[i] = std::round((psum[i + right] - psum[i - left - 1]) / window_size);
+            }
+            // window fully covers the sequence
+            //     ......
+            //   ^---*---^
+            for ( ; i <= left; ++i) {
+                assert(i < v.size());
+                v[i] = std::round(psum.back() / v.size());
+            }
+            // truncated window
+            //     ..........
+            //       ^---*---^
+            for ( ; i < v.size(); ++i) {
+                assert(i > left);
+                v[i] = std::round((psum.back() - psum[i - left - 1]) / (left + v.size() - i));
+            }
+        }
+    }
+
 } // namespace utils
 
 #endif // __ALGORITHMS_HPP__

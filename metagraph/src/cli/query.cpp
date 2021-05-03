@@ -59,7 +59,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          size_t num_top_labels,
                                          double discovery_fraction,
                                          std::string anno_labels_delimiter,
-                                         const AnnotatedDBG &anno_graph) {
+                                         const AnnotatedDBG &anno_graph,
+                                         bool with_kmer_counts) {
     std::string output;
     output.reserve(1'000);
 
@@ -86,7 +87,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     } else if (count_labels) {
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
-                                                    discovery_fraction);
+                                                    discovery_fraction,
+                                                    with_kmer_counts);
 
         if (!top_labels.size() && suppress_unlabeled)
             return "";
@@ -868,7 +870,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
                                         config.discovery_fraction, config.anno_labels_delimiter,
-                                        anno_graph);
+                                        anno_graph, config.count_kmers);
 }
 
 void QueryExecutor::query_fasta(const string &file,

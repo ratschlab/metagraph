@@ -20,15 +20,13 @@ namespace annot {
 using utils::remove_suffix;
 using mtg::common::logger;
 
-const uint8_t kCountBits = 8;
-const uint32_t kMaxCount = sdsl::bits::lo_set[kCountBits];
-
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
-                                          uint64_t buffer_size_bytes)
+                                          uint64_t buffer_size_bytes,
+                                          uint8_t count_width)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
         buffer_size_bytes_(buffer_size_bytes),
@@ -38,7 +36,24 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                             assert(column_builder);
                             this->flush(j, column_builder);
                             delete column_builder;
-                        }) {}
+                        }),
+        count_width_(count_width),
+        max_count_(sdsl::bits::lo_set[count_width]) {}
+
+template <typename Label>
+ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
+                                          const std::string &column_label,
+                                          size_t num_columns_cached,
+                                          const std::string &swap_dir,
+                                          uint64_t buffer_size_bytes,
+                                          uint8_t count_width)
+      : ColumnCompressed(column.size(),
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+    label_encoder_.insert_and_encode(column_label);
+    bitmatrix_.resize(1);
+    cached_columns_.Put(0, new bitmap_vector(std::move(column)));
+    flushed_ = false;
+}
 
 template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
@@ -79,7 +94,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 template <typename Label>
 void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
                                                const VLabels &labels,
-                                               const std::vector<uint32_t> &counts) {
+                                               const std::vector<uint64_t> &counts) {
     assert(indices.size() == counts.size());
 
     const auto &columns = get_matrix().data();
@@ -91,7 +106,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         const auto j = label_encoder_.insert_and_encode(label);
 
         if (!relation_counts_[j].size()) {
-            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, kCountBits);
+            relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, count_width_);
 
         } else if (relation_counts_[j].size() != columns[j]->num_set_bits()) {
             logger->error("Binary relation matrix was changed while adding relation counts");
@@ -100,9 +115,9 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
         for (size_t i = 0; i < indices.size(); ++i) {
             if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
-                uint32_t count = std::min(counts[i], kMaxCount);
+                uint64_t count = std::min(counts[i], max_count_);
                 sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
-                ref = std::min((uint32_t)ref, kMaxCount - count) + count;
+                ref = std::min((uint64_t)ref, max_count_ - count) + count;
 
             } else {
                 logger->warn("Trying to add count {} for non-annotated object {}."
@@ -137,7 +152,8 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
     if (!outstream.good()) {
-        logger->trace("Could not open {}", remove_suffix(filename, kExtension) + kExtension);
+        logger->error("Could not open file for writing: {}",
+                      remove_suffix(filename, kExtension) + kExtension);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -155,11 +171,11 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     outstream.close();
 
-    outstream.open(remove_suffix(filename, kExtension) + kExtension + ".counts",
+    outstream.open(remove_suffix(filename, kExtension) + kCountExtension,
                    std::ios::binary);
     if (!outstream.good()) {
-        logger->trace("Could not open {}",
-                      remove_suffix(filename, kExtension) + kExtension + ".counts");
+        logger->error("Could not open file for writing: {}",
+                      remove_suffix(filename, kExtension) + kCountExtension);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -168,7 +184,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -184,7 +200,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, kCountBits).serialize(outstream);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
     }
 
     logger->info("Num relation counts: {}", num_counts);
@@ -203,13 +219,13 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
     logger->trace("Loading annotations from file {}", f);
 
     try {
-        std::ifstream instream(f, std::ios::binary);
-        if (!instream.good())
+        std::ifstream in(f, std::ios::binary);
+        if (!in.good())
             throw std::ifstream::failure("can't open file");
 
-        num_rows_ = load_number(instream);
+        num_rows_ = load_number(in);
 
-        if (!label_encoder_.load(instream))
+        if (!label_encoder_.load(in))
             throw std::ifstream::failure("can't load label encoder");
 
         if (!label_encoder_.size())
@@ -218,7 +234,7 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
         for (size_t c = 0; c < label_encoder_.size(); ++c) {
             auto column = std::make_unique<bit_vector_smart>();
 
-            if (!column->load(instream))
+            if (!column->load(in))
                 throw std::ifstream::failure("can't load next column");
 
             if (column->size() != num_rows_)
@@ -303,19 +319,19 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
 
-        std::ifstream instream(filename, std::ios::binary);
-        if (!instream.good()) {
+        std::ifstream in(filename, std::ios::binary);
+        if (!in.good()) {
             logger->error("Can't read from {}", filename);
             error_occurred = true;
         }
-        std::ignore = load_number(instream);
+        std::ignore = load_number(in);
 
         LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(instream)) {
+        if (!label_encoder.load(in)) {
             logger->error("Can't load label encoder from {}", filename);
             error_occurred = true;
         }
@@ -330,29 +346,29 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
         logger->trace("Loading annotations from file {}", filename);
         try {
-            std::ifstream instream(filename, std::ios::binary);
-            if (!instream.good())
+            std::ifstream in(filename, std::ios::binary);
+            if (!in.good())
                 throw std::ifstream::failure("can't open file");
 
-            const auto num_rows = load_number(instream);
+            const auto num_rows = load_number(in);
 
             LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(instream))
+            if (!label_encoder_load.load(in))
                 throw std::ifstream::failure("can't load label encoder");
 
             if (!label_encoder_load.size())
-                logger->warn("No labels in {}", filename);
+                logger->warn("No columns in {}", filename);
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 auto new_column = std::make_unique<bit_vector_smart>();
 
-                if (!new_column->load(instream))
+                if (!new_column->load(in))
                     throw std::ifstream::failure("can't load next column");
 
                 if (new_column->size() != num_rows)
@@ -372,6 +388,97 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     }
 
     return !error_occurred;
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::load_column_values(const std::vector<std::string> &filenames,
+                     const ValuesCallback &callback,
+                     size_t num_threads) {
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+
+        std::ifstream in(filename, std::ios::binary);
+        if (!in) {
+            logger->error("Can't read from {}", filename);
+            error_occurred = true;
+        }
+        std::ignore = load_number(in);
+
+        LabelEncoder<Label> label_encoder;
+        if (!label_encoder.load(in)) {
+            logger->error("Can't load label encoder from {}", filename);
+            error_occurred = true;
+        }
+
+        offsets[i] = label_encoder.size();
+    }
+
+    if (error_occurred)
+        exit(1);
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        logger->trace("Loading labels from {}", filename);
+        try {
+            std::ifstream in(filename, std::ios::binary);
+            if (!in)
+                throw std::ifstream::failure("can't open file");
+
+            std::ignore = load_number(in);
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(in))
+                throw std::ifstream::failure("can't load label encoder");
+
+            if (!label_encoder_load.size()) {
+                logger->warn("No columns in {}", filename);
+                continue;
+            }
+
+            const auto &values_fname
+                = remove_suffix(filename, kExtension) + kCountExtension;
+
+            std::ifstream values_in(values_fname, std::ios::binary);
+            if (!values_in)
+                throw std::ifstream::failure("can't open file " + values_fname);
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                sdsl::int_vector<> column_values;
+                try {
+                    column_values.load(values_in);
+                } catch (...) {
+                    logger->error("Can't load column values from {} for column {}",
+                                  values_fname, c);
+                    throw;
+                }
+
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
+                         std::move(column_values));
+            }
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading values for {}: {}", filename, e.what());
+            error_occurred = true;
+        } catch (...) {
+            logger->error("Unknown exception when loading values for {}", filename);
+            error_occurred = true;
+        }
+    }
+
+    if (error_occurred)
+        exit(1);
 }
 
 template <typename Label>

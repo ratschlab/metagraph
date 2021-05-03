@@ -1,6 +1,10 @@
 #include "binary_matrix.hpp"
 
+#include <ips4o.hpp>
+
 #include "common/serialization.hpp"
+#include "common/utils/template_utils.hpp"
+#include "common/vector_map.hpp"
 
 
 namespace mtg {
@@ -76,6 +80,102 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
             break;
 
         for (size_t j : get_row(i)) {
+            assert(j < col_counts.size());
+
+            col_counts[j] += count;
+            max_matched = std::max(max_matched, col_counts[j]);
+        }
+
+        total_checked += count;
+    }
+
+    if (max_matched < min_count)
+        return {};
+
+    std::vector<std::pair<uint64_t, size_t>> result;
+    result.reserve(col_counts.size());
+
+    for (size_t j = 0; j < num_columns(); ++j) {
+        if (col_counts[j] >= min_count) {
+            result.emplace_back(j, std::min(col_counts[j], count_cap));
+        }
+    }
+
+    return result;
+}
+
+
+std::vector<RainbowMatrix::SetBitPositions>
+RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
+    assert(rows);
+
+    std::vector<std::pair<uint64_t, /* code */
+                          uint64_t /* row */>> row_codes(rows->size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_codes[i] = { get_code((*rows)[i]), i };
+    }
+
+    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
+                          utils::LessFirst(), num_threads);
+
+    std::vector<uint64_t> codes;
+    codes.reserve(row_codes.size());
+    uint64_t last_code = std::numeric_limits<uint64_t>::max();
+    for (const auto &[code, i] : row_codes) {
+        if (code != last_code) {
+            codes.push_back(code);
+            last_code = code;
+        }
+        (*rows)[i] = codes.size() - 1;
+    }
+    row_codes = {};
+
+    std::vector<SetBitPositions> unique_rows(codes.size());
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = 0; i < codes.size(); ++i) {
+        unique_rows[i] = code_to_row(codes[i]);
+    }
+
+    return unique_rows;
+}
+
+std::vector<std::pair<RainbowMatrix::Column, size_t /* count */>>
+RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+                        size_t min_count,
+                        size_t count_cap) const {
+    assert(count_cap >= min_count);
+
+    if (!count_cap)
+        return {};
+
+    min_count = std::max(min_count, size_t(1));
+
+    size_t total_sum_count = 0;
+    for (const auto &pair : index_counts) {
+        total_sum_count += pair.second;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    VectorMap<size_t, size_t> code_count;
+    code_count.reserve(index_counts.size());
+    for (auto [i, count] : index_counts) {
+        code_count[get_code(i)] += count;
+    }
+
+    std::vector<size_t> col_counts(num_columns(), 0);
+    size_t max_matched = 0;
+    size_t total_checked = 0;
+
+    for (auto [c, count] : code_count) {
+        if (max_matched + (total_sum_count - total_checked) < min_count)
+            break;
+
+        for (size_t j : code_to_row(c)) {
             assert(j < col_counts.size());
 
             col_counts[j] += count;

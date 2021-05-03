@@ -12,6 +12,8 @@
 namespace mtg {
 namespace graph {
 
+using mtg::common::logger;
+
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
@@ -49,20 +51,30 @@ mask_nodes_by_unitig_labels(const AnnotatedDBG &anno_graph,
     const auto &annotation = anno_graph.get_annotation();
     const auto &label_encoder = annotation.get_label_encoder();
 
-    assert(labels_in.size() + labels_out.size() <= annotation.num_labels());
-
     const double label_in_factor = label_mask_in_fraction * labels_in.size();
     const double label_out_factor = label_mask_out_fraction * labels_out.size();
 
+    bool detected_missing_labels = false;
     std::unordered_set<uint64_t> labels_in_enc;
     for (const auto &label_in : labels_in) {
-        labels_in_enc.emplace(label_encoder.encode(label_in));
+        try {
+            labels_in_enc.emplace(label_encoder.encode(label_in));
+        } catch (...) {
+            logger->error("Mask-in label {} is not found in annotation", label_in);
+            detected_missing_labels = true;
+        }
     }
-
     std::unordered_set<uint64_t> labels_out_enc;
     for (const auto &label_out : labels_out) {
-        labels_out_enc.emplace(label_encoder.encode(label_out));
+        try {
+            labels_out_enc.emplace(label_encoder.encode(label_out));
+        } catch (...) {
+            logger->error("Mask-out label {} is not found in annotation", label_out);
+            detected_missing_labels = true;
+        }
     }
+    if (detected_missing_labels)
+        exit(1);
 
     return mask_nodes_by_unitig(dbg, [&](const auto &, const auto &path) {
         VectorMap<row_index, size_t> index_counts;

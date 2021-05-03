@@ -49,11 +49,6 @@ bool Rainbow<MatrixType>::get(Row row, Column column) const {
 }
 
 template <class MatrixType>
-BinaryMatrix::SetBitPositions Rainbow<MatrixType>::get_row(Row row) const {
-    return reduced_matrix_.get_row(get_code(row));
-}
-
-template <class MatrixType>
 std::vector<BinaryMatrix::SetBitPositions>
 Rainbow<MatrixType>::get_rows(const std::vector<Row> &rows) const {
     std::vector<Row> pointers = rows;
