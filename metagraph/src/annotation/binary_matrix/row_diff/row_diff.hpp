@@ -30,8 +30,6 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 class IRowDiff : public BinaryMatrix {
   public:
     virtual ~IRowDiff() {}
-
-    virtual bool is_anchor(Row row) const = 0;
 };
 
 /**
@@ -99,7 +97,6 @@ class RowDiff : public IRowDiff {
     void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
     const anchor_bv_type& anchor() const { return anchor_; }
-    bool is_anchor(Row row) const { return anchor_[row]; }
 
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
