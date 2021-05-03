@@ -26,10 +26,10 @@ def test_TransformRdStage1Resources(config):
     assert inst.get_mem()(None, None, None) == mem
 
     resources = {'mem_mb': mem}
-    assert inst.get_mem_cap_gib()(None, None, None, resources) == int(math.ceil(0.8*mem/1024))
+    assert inst.get_mem_buffer_gib()(None, None, None, resources) == int(math.ceil(0.8 * mem / 1024))
 
     # now additionally setting mem cap explicitly
-    mem_cap = 2048
-    config['rules'][rule_name]['mem_cap_mb'] = mem_cap
+    mem_buffer = 2048
+    config['rules'][rule_name]['mem_buffer_mb'] = mem_buffer
     assert inst.get_mem()(None, None, None) == mem
-    assert inst.get_mem_cap_gib()(None, None, None, resources) == int(math.ceil(mem_cap/1024))
+    assert inst.get_mem_buffer_gib()(None, None, None, resources) == int(math.ceil(mem_buffer / 1024))

@@ -9,7 +9,7 @@ from pathlib import Path
 from metagraph_workflows import constants
 from metagraph_workflows.cfg_utils import get_rule_specific_config
 from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
-    MEM_CAP_MB_KEY, THREADS_KEY
+    MEM_BUFFER_MB_KEY, THREADS_KEY
 
 BASE_MEM = 1 * 1024
 FALLBACK_MAX_MEM = 4 * 1024
@@ -78,30 +78,30 @@ class ResourceConfig:
         return _get_disk
 
 
-class SupportsMemoryCap(ResourceConfig):
+class SupportsMemBufferSize(ResourceConfig):
     MEM_OVERHEAD = BASE_MEM
 
     CAP_MEM_FRACTION = 0.85
 
-    def get_mem_cap_gib(self):
+    def get_mem_buffer_gib(self):
         """
         value for the `--mem-cap-gb` parameter (in GiB)
         """
-        def _get_mem_cap(wildcards, input, threads, resources):
+        def _get_mem_buffer(wildcards, input, threads, resources):
             mem_cap_mb = get_rule_specific_config(self.rule_name,
-                                                  MEM_CAP_MB_KEY, self.config)
+                                                  MEM_BUFFER_MB_KEY, self.config)
 
             if not mem_cap_mb:
-                mem_cap_mb = self._mem_cap_estimate(wildcards, resources, input, threads)
+                mem_cap_mb = self._mem_buf_estimate(wildcards, resources, input, threads)
 
                 if mem_cap_mb == TBD_VALUE:
                     return TBD_VALUE
 
             return int(math.ceil(mem_cap_mb / 1024.0))
 
-        return _get_mem_cap
+        return _get_mem_buffer
 
-    def _mem_cap_estimate(self, wildcards, resources, input, threads):
+    def _mem_buf_estimate(self, wildcards, resources, input, threads):
         """
         Default estimation for mem cap: get a percentage of the available memory
         """
@@ -114,15 +114,15 @@ class SupportsMemoryCap(ResourceConfig):
         return max(int(self.CAP_MEM_FRACTION * avail_mem_mb), 1024) # TODO: parametrize constant?
 
 
-class SupportsMemoryCapWithEstimation(SupportsMemoryCap):
+class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
     """
     Base class for cases where we have a heuristic to estimate the required mem cap.
     """
-    def _mem_cap_estimate(self, wildcards, resources, input, threads) -> int:
+    def _mem_buf_estimate(self, wildcards, resources, input, threads) -> int:
         raise NotImplementedError("Mixing in SupportsMemoryCapWithEstimation requires reimplementing mem_cap_estimate")
 
     def _get_mem_estimate(self, wildcards, input, threads):
-        mem_cap = self.get_mem_cap_gib()(wildcards, input, threads, None)
+        mem_cap = self.get_mem_buffer_gib()(wildcards, input, threads, None)
 
         if mem_cap == TBD_VALUE:
             return TBD_VALUE
@@ -139,16 +139,16 @@ class SupportsDiskCap(ResourceConfig):
         return self.get_disk() # TODO: come up with a heuristic
 
 
-class BuildGraphResources(SupportsMemoryCap, SupportsDiskCap):
+class BuildGraphResources(SupportsMemBufferSize, SupportsDiskCap):
     pass
 
 
-class BuildGraphResourcesWithKmerEstimates(SupportsMemoryCapWithEstimation, SupportsDiskCap):
+class BuildGraphResourcesWithKmerEstimates(SupportsMemBufferSizeWithEstimation, SupportsDiskCap):
 
     KMC_STATS_KEY = "Stats"
     KMC_UNIQUE_KMER_CNT = "#Unique_counted_k-mers"
 
-    def _mem_cap_estimate(self, wildcards, resources, input, threads) -> int:
+    def _mem_buf_estimate(self, wildcards, resources, input, threads) -> int:
         kmc_json_path = Path(input['kmer'])
 
         if not kmc_json_path.exists():
@@ -176,28 +176,28 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
 
         if input_path.exists():
             file_size_mib = max(int(math.ceil(input_path.stat().st_size / 1024.0**2)), 1)
-            logging.debug(f"File size of {input.path} is {file_size_mib}")
+            logging.debug(f"File size of {input_path.name} is {file_size_mib}")
 
             return file_size_mib + 2*BASE_MEM
 
         return TBD_VALUE
 
 
-class TransformRdStage0Resources(SupportsMemoryCapWithEstimation):
+class TransformRdStage0Resources(SupportsMemBufferSizeWithEstimation):
     def __init__(self, config):
         super().__init__('transform_rd_stage0', config)
 
-    def _mem_cap_estimate(self, wildcards, resources, input, threads):
+    def _mem_buf_estimate(self, wildcards, resources, input, threads):
         if Path(input.columns_file).exists():
             return int(columns_size_mb(input.columns_file) + BASE_MEM)
         return TBD_VALUE
 
 
-class TransformRdStage1Resources(SupportsMemoryCap):
+class TransformRdStage1Resources(SupportsMemBufferSize):
     def __init__(self, config):
         super().__init__('transform_rd_stage1', config)
 
 
-class TransformRdStage2Resources(SupportsMemoryCap):
+class TransformRdStage2Resources(SupportsMemBufferSize):
     def __init__(self, config):
         super().__init__('transform_rd_stage2', config)

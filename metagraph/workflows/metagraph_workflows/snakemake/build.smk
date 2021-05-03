@@ -18,7 +18,7 @@ rule build:
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
-        mem_cap=BuildGraphResources(BUILD_RULE, config).get_mem_cap_gib(),
+        mem_buffer=BuildGraphResources(BUILD_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_RULE, config).get_disk_cap(),
     log: cfg_utils.get_log_path(BUILD_RULE, config)
     shell:
@@ -27,7 +27,7 @@ rule build:
         --parallel {threads} \
         -k {params.k} \
         -o {output} \
-        --mem-cap-gb {params.mem_cap} \
+        --mem-cap-gb {params.mem_buffer} \
         --disk-cap-gb {params.disk_cap} \
         {params.tempdir_opt} > {log} 2>&1
         """
@@ -111,7 +111,7 @@ rule build_canonical_graph_single_sample:
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
-        mem_cap=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem_cap_gib(),
+        mem_buffer=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_disk_cap(),
     log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
@@ -121,7 +121,7 @@ rule build_canonical_graph_single_sample:
         --mode canonical \
         -k {params.k} \
         -o {output} \
-        --mem-cap-gb {params.mem_cap} \
+        --mem-cap-gb {params.mem_buffer} \
         --disk-cap-gb {params.disk_cap} \
         {params.tempdir_opt} > {log} 2>&1
         """
@@ -158,7 +158,7 @@ rule build_joint_graph:
         k=config['k'],
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
-        mem_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_mem_cap_gib(),
+        mem_buffer=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_disk_cap(),
     log: cfg_utils.get_log_path(BUILD_JOINT_GRAPH_RULE, config)
     shell:
@@ -175,7 +175,7 @@ rule build_joint_graph:
         --mode canonical \
         -k {params.k} \
         -o {output} \
-        --mem-cap-gb {params.mem_cap} \
+        --mem-cap-gb {params.mem_buffer} \
         --disk-cap-gb {params.disk_cap} \
         {params.tempdir_opt} > {log} 2>&1
         
@@ -210,7 +210,7 @@ rule build_joint_primary:
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
-        mem_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_mem_cap_gib(),
+        mem_buffer=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_disk_cap()
     log: cfg_utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
@@ -220,7 +220,7 @@ rule build_joint_primary:
         --mode primary \
         -k {params.k} \
         -o {output} \
-        --mem-cap-gb {params.mem_cap} \
+        --mem-cap-gb {params.mem_buffer} \
         --disk-cap-gb {params.disk_cap} \
         {input} \
         {params.tempdir_opt} > {log} 2>&1

@@ -210,7 +210,7 @@ rule transform_rd_stage0:
     resources:
         mem_mb=TransformRdStage0Resources(config).get_mem()
     params:
-        mem_cap=TransformRdStage0Resources(config).get_mem_cap_gib(),
+        mem_buffer=TransformRdStage0Resources(config).get_mem_buffer_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
@@ -223,7 +223,7 @@ rule transform_rd_stage0:
             --row-diff-stage 0 \
             -i {input.dbg_graph} \
             --parallel {threads} \
-            --mem-cap-gb {params.mem_cap} \
+            --mem-cap-gb {params.mem_buffer} \
             -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
         """
 
@@ -244,7 +244,7 @@ rule transform_rd_stage1:
     resources:
         mem_mb=TransformRdStage1Resources(config).get_mem()
     params:
-        mem_cap=TransformRdStage1Resources(config).get_mem_cap_gib(),
+        mem_buffer=TransformRdStage1Resources(config).get_mem_buffer_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
@@ -254,7 +254,7 @@ rule transform_rd_stage1:
             --row-diff-stage 1 \
             -i {input.dbg_graph} \
             --parallel {threads} \
-            --mem-cap-gb {params.mem_cap} \
+            --mem-cap-gb {params.mem_buffer} \
             -o {output.cols_rd_vectors} {params.tempdir_opt} > {log} 2>&1
         """
 
@@ -272,7 +272,7 @@ rule transform_rd_stage2:
     resources:
         mem_mb=TransformRdStage2Resources(config).get_mem(),
     params:
-        mem_cap=TransformRdStage2Resources(config).get_mem_cap_gib(),
+        mem_buffer=TransformRdStage2Resources(config).get_mem_buffer_gib(),
         tempdir_opt=cfg_utils.temp_dir_config(config),
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
     shell:
@@ -282,7 +282,7 @@ rule transform_rd_stage2:
             --row-diff-stage 2 \
             -i {input.dbg_graph} \
             --parallel {threads} \
-            --mem-cap-gb {params.mem_cap} \
+            --mem-cap-gb {params.mem_buffer} \
             -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
         """
 

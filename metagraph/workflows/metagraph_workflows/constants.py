@@ -28,5 +28,5 @@ THREADS_KEY = 'threads'
 MEM_MB_KEY = 'mem_mb'
 DISK_MB_KEY = 'disk_mb'
 
-MEM_CAP_MB_KEY = 'mem_cap_mb'
+MEM_BUFFER_MB_KEY = 'mem_buffer_mb'
 DISK_CAP_MB_KEY = 'disk_cap_mb'
