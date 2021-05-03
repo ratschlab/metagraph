@@ -184,6 +184,28 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
     prev_starts.emplace(*it);
     ++it;
 
+    auto aln_from_suffix = [&]() {
+        DBGAlignment aln_suffix(suffix);
+        aln_suffix.target_columns = target_intersection;
+        assert(check_targets(anno_graph_, aln_suffix));
+        auto target_it = std::remove_if(
+            aln_suffix.target_columns.begin(),
+            aln_suffix.target_columns.end(),
+            [&](uint64_t target) {
+                if (aln_suffix.get_score() > min_scores_[target]) {
+                    min_scores_[target] = aln_suffix.get_score();
+                    return false;
+                }
+
+                return true;
+            }
+        );
+        aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
+
+        if (aln_suffix.target_columns.size())
+            extensions.emplace_back(std::move(aln_suffix));
+    };
+
     for (size_t i = alignment.size() - 1; i > 0; --i) {
         const auto &cur_targets = *(targets_set_.begin() + targets_[alignment[i - 1]]);
         Vector<uint64_t> inter;
@@ -214,25 +236,7 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
         if (inter.size() < target_intersection.size()) {
             if (suffix.get_front_op() != Cigar::DELETION
                     && suffix.get_score() >= this->config_.min_cell_score) {
-                DBGAlignment aln_suffix(suffix);
-                aln_suffix.target_columns = target_intersection;
-                assert(check_targets(anno_graph_, aln_suffix));
-                auto target_it = std::remove_if(
-                    aln_suffix.target_columns.begin(),
-                    aln_suffix.target_columns.end(),
-                    [&](uint64_t target) {
-                        if (aln_suffix.get_score() > min_scores_[target]) {
-                            min_scores_[target] = aln_suffix.get_score();
-                            return false;
-                        }
-
-                        return true;
-                    }
-                );
-                aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
-
-                if (aln_suffix.target_columns.size())
-                    extensions.emplace_back(std::move(aln_suffix));
+                aln_from_suffix();
             }
         } else {
             --suffix;
@@ -240,25 +244,7 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
                 ++suffix;
                 if (suffix.get_front_op() != Cigar::DELETION
                         && suffix.get_score() >= this->config_.min_cell_score) {
-                    DBGAlignment aln_suffix(suffix);
-                    aln_suffix.target_columns = target_intersection;
-                    assert(check_targets(anno_graph_, aln_suffix));
-                    auto target_it = std::remove_if(
-                        aln_suffix.target_columns.begin(),
-                        aln_suffix.target_columns.end(),
-                        [&](uint64_t target) {
-                            if (aln_suffix.get_score() > min_scores_[target]) {
-                                min_scores_[target] = aln_suffix.get_score();
-                                return false;
-                            }
-
-                            return true;
-                        }
-                    );
-                    aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
-
-                    if (aln_suffix.target_columns.size())
-                        extensions.emplace_back(std::move(aln_suffix));
+                    aln_from_suffix();
                 }
             } else {
                 ++suffix;
@@ -272,25 +258,7 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
     if (target_intersection.size()
             && suffix.get_score() >= this->config_.min_cell_score
             && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
-        DBGAlignment aln_suffix(suffix);
-        aln_suffix.target_columns = target_intersection;
-        assert(check_targets(anno_graph_, aln_suffix));
-        auto target_it = std::remove_if(
-            aln_suffix.target_columns.begin(),
-            aln_suffix.target_columns.end(),
-            [&](uint64_t target) {
-                if (aln_suffix.get_score() > min_scores_[target]) {
-                    min_scores_[target] = aln_suffix.get_score();
-                    return false;
-                }
-
-                return true;
-            }
-        );
-        aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
-
-        if (aln_suffix.target_columns.size())
-            extensions.emplace_back(std::move(aln_suffix));
+        aln_from_suffix();
     }
 
     return track;
