@@ -496,7 +496,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
     assert(start_ + size == partial_sums_.size());
 
     extend_window_ = std::string_view{ align_start, size - 1 };
-    // std::cout << "bandstart\t" << extend_window_.size() << "\n";
     DEBUG_LOG("Extend query window: {}", extend_window_);
     assert(extend_window_[0] == seed_->get_query().back());
 
@@ -588,8 +587,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
 
                 max_i = std::min(max_i + 1, size);
 
-                // std::cout << "band\t" << min_i << "," << max_i << "\t" << best_start.second << "," << last_score << "," << xdrop_cutoff_ << "\n";
-
                 size_t cur_size = max_i - min_i;
 
                 Scores next_column(ScoreVec(cur_size, ninf), ScoreVec(cur_size, ninf),
@@ -608,8 +605,6 @@ auto DefaultColumnExtender<NodeType>::get_extensions(score_t min_path_score)
                 auto &[S, E, F, OS, OE, OF, prev_node, PS, PF, offset, max_pos] = next_column;
 
                 auto max_it = S.begin() + (max_pos - offset);
-
-                // std::cout << "cur\t" << static_cast<ssize_t>(max_pos) - static_cast<ssize_t>(next_distance_from_origin) << "\n";
 
                 converged = !updated || has_converged(column_pair, next_column);
 
