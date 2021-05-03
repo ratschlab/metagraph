@@ -76,7 +76,7 @@ class BOSS::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);
 
-    void initialize_boss(BOSS *graph, sdsl::int_vector<> *weights = nullptr);
+    void initialize_boss(BOSS *graph, sdsl::int_vector_buffer<> *weights = nullptr);
 
     /**
      * Merge BOSS chunks loaded from the files passed in #chunk_filenames and construct
@@ -85,7 +85,7 @@ class BOSS::Chunk {
     static BOSS*
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                            bool verbose = false,
-                           sdsl::int_vector<> *weights = nullptr,
+                           sdsl::int_vector_buffer<> *weights = nullptr,
                            const std::string &swap_dir = "");
 
     static constexpr auto kFileExtension = ".dbg.chunk";
