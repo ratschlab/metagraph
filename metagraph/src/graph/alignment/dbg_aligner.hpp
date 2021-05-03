@@ -56,8 +56,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
   protected:
     virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index,
-                                             AlignmentCompare> &aggregator) const = 0;
+                   const IAlignmentAggregator<IDBGAligner::node_index> &aggregator) const = 0;
 
     virtual std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
     build_seeder(std::string_view query,
@@ -86,8 +85,7 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index,
-                                             AlignmentCompare>&) const override {
+                   const IAlignmentAggregator<IDBGAligner::node_index>&) const override {
         return std::make_shared<Extender>(graph_, config_, query);
     }
 

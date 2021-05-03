@@ -92,8 +92,8 @@ process_seq_path(const DeBruijnGraph &graph,
     }
 }
 
-template <typename NodeType, class AlignmentCompare>
-void LabeledBacktrackingExtender<NodeType, AlignmentCompare>::init_backtrack() const {
+template <typename NodeType>
+void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     std::vector<uint64_t> added_rows;
     std::vector<node_index> added_nodes;
     min_scores_.clear();
@@ -133,8 +133,8 @@ void LabeledBacktrackingExtender<NodeType, AlignmentCompare>::init_backtrack() c
     assert(it == added_nodes.end());
 }
 
-template <typename NodeType, class AlignmentCompare>
-auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
+template <typename NodeType>
+auto LabeledBacktrackingExtender<NodeType>
 ::backtrack(score_t min_path_score,
             AlignNode best_node,
             tsl::hopscotch_set<AlignNode, AlignNodeHash> &prev_starts,

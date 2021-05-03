@@ -48,8 +48,7 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     DBGAlignerConfig config_;
 };
 
-template <typename NodeType = DeBruijnGraph::node_index,
-          class AlignmentCompare = LocalAlignmentLess>
+template <typename NodeType = DeBruijnGraph::node_index>
 class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
   public:
     typedef DefaultColumnExtender<DeBruijnGraph::node_index> BaseExtender;
@@ -61,7 +60,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
     LabeledBacktrackingExtender(const AnnotatedDBG &anno_graph,
                                 const DBGAlignerConfig &config,
-                                const AlignmentAggregator<NodeType, AlignmentCompare> &aggregator,
+                                const IAlignmentAggregator<NodeType> &aggregator,
                                 std::string_view query)
           : BaseExtender(anno_graph.get_graph(), config, query),
             anno_graph_(anno_graph),
@@ -83,7 +82,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
 
   private:
     const AnnotatedDBG &anno_graph_;
-    const AlignmentAggregator<NodeType, AlignmentCompare> &aggregator_;
+    const IAlignmentAggregator<NodeType> &aggregator_;
     mutable VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
     mutable tsl::hopscotch_map<node_index, size_t> targets_;
     mutable tsl::hopscotch_map<uint64_t, score_t> min_scores_;
@@ -101,8 +100,7 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   protected:
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index,
-                                             AlignmentCompare> &aggregator) const override {
+                   const IAlignmentAggregator<IDBGAligner::node_index> &aggregator) const override {
         return std::make_shared<Extender>(this->anno_graph_, this->config_, aggregator, query);
     }
 

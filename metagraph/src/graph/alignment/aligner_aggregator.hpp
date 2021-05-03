@@ -11,8 +11,19 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+
+template <typename NodeType>
+class IAlignmentAggregator {
+  public:
+    typedef Alignment<NodeType> DBGAlignment;
+    typedef typename DBGAlignment::score_t score_t;
+
+    virtual score_t get_min_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const = 0;
+    virtual void add_alignment(DBGAlignment&& alignment) = 0;
+};
+
 template <typename NodeType, class AlignmentCompare>
-class AlignmentAggregator {
+class AlignmentAggregator : public IAlignmentAggregator<NodeType> {
     struct SharedPtrCmp {
         bool operator()(const std::shared_ptr<Alignment<NodeType>> &a,
                         const std::shared_ptr<Alignment<NodeType>> &b) const {
@@ -36,10 +47,10 @@ class AlignmentAggregator {
         assert(config_.num_alternative_paths);
     }
 
-    inline void add_alignment(DBGAlignment&& alignment);
+    void add_alignment(DBGAlignment&& alignment) override;
 
-    inline score_t get_min_path_score(const DBGAlignment &seed) const;
-    inline score_t get_min_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const;
+    score_t get_min_path_score(const DBGAlignment &seed) const;
+    score_t get_min_path_score(uint64_t target = std::numeric_limits<uint64_t>::max()) const override;
 
     const DBGAlignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
