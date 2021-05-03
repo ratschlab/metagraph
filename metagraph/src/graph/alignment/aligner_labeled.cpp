@@ -96,6 +96,7 @@ template <typename NodeType, class AlignmentCompare>
 void LabeledBacktrackingExtender<NodeType, AlignmentCompare>::init_backtrack() const {
     std::vector<uint64_t> added_rows;
     std::vector<node_index> added_nodes;
+    min_scores_.clear();
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&this->graph_);
     if (!dbg_succ) {
@@ -121,6 +122,10 @@ void LabeledBacktrackingExtender<NodeType, AlignmentCompare>::init_backtrack() c
     auto it = added_nodes.begin();
     for (auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
         assert(it != added_nodes.end());
+        for (uint64_t target : labels) {
+            if (!min_scores_.count(target))
+                min_scores_.emplace(target, aggregator_.get_min_path_score(target));
+        }
         auto jt = targets_set_.emplace(labels).first;
         targets_[*it] = jt - targets_set_.begin();
         ++it;
@@ -138,21 +143,6 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
     if (!target_id)
         return {};
 
-    const auto &[S, E, F, OS, OE, OF, prev, PS, PF, offset, max_pos]
-        = this->table_.find(std::get<0>(best_node))->second.first.at(std::get<2>(best_node));
-
-    score_t score = S[max_pos - offset];
-
-    Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
-    auto target_it = std::remove_if(
-        target_intersection.begin(), target_intersection.end(),
-        [&](uint64_t target) { return aggregator_.get_min_path_score(target) > score; }
-    );
-    target_intersection.erase(target_it, target_intersection.end());
-
-    if (target_intersection.empty())
-        return {};
-
     std::vector<DBGAlignment> next_extension;
     tsl::hopscotch_set<AlignNode, AlignNodeHash> dummy;
     auto track = DefaultColumnExtender<NodeType>::backtrack(min_path_score, best_node,
@@ -165,6 +155,8 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
     }
 
     dummy = tsl::hopscotch_set<AlignNode, AlignNodeHash>();
+
+    Vector<uint64_t> target_intersection = *(targets_set_.begin() + target_id);
 
     DBGAlignment alignment = std::move(next_extension[0]);
     assert(alignment.is_valid(this->graph_, &this->config_));
@@ -184,6 +176,7 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
 
     suffix_shift();
 
+    assert(track.size() == alignment.size());
     auto it = track.begin();
     assert(it != track.end());
 
@@ -221,9 +214,25 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
         if (inter.size() < target_intersection.size()) {
             if (suffix.get_front_op() != Cigar::DELETION
                     && suffix.get_score() >= this->config_.min_cell_score) {
-                extensions.emplace_back(suffix);
-                extensions.back().target_columns = target_intersection;
-                assert(check_targets(anno_graph_, extensions.back()));
+                DBGAlignment aln_suffix(suffix);
+                aln_suffix.target_columns = target_intersection;
+                assert(check_targets(anno_graph_, aln_suffix));
+                auto target_it = std::remove_if(
+                    aln_suffix.target_columns.begin(),
+                    aln_suffix.target_columns.end(),
+                    [&](uint64_t target) {
+                        if (aln_suffix.get_score() > min_scores_[target]) {
+                            min_scores_[target] = aln_suffix.get_score();
+                            return false;
+                        }
+
+                        return true;
+                    }
+                );
+                aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
+
+                if (aln_suffix.target_columns.size())
+                    extensions.emplace_back(std::move(aln_suffix));
             }
         } else {
             --suffix;
@@ -231,9 +240,25 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
                 ++suffix;
                 if (suffix.get_front_op() != Cigar::DELETION
                         && suffix.get_score() >= this->config_.min_cell_score) {
-                    extensions.emplace_back(suffix);
-                    extensions.back().target_columns = target_intersection;
-                    assert(check_targets(anno_graph_, extensions.back()));
+                    DBGAlignment aln_suffix(suffix);
+                    aln_suffix.target_columns = target_intersection;
+                    assert(check_targets(anno_graph_, aln_suffix));
+                    auto target_it = std::remove_if(
+                        aln_suffix.target_columns.begin(),
+                        aln_suffix.target_columns.end(),
+                        [&](uint64_t target) {
+                            if (aln_suffix.get_score() > min_scores_[target]) {
+                                min_scores_[target] = aln_suffix.get_score();
+                                return false;
+                            }
+
+                            return true;
+                        }
+                    );
+                    aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
+
+                    if (aln_suffix.target_columns.size())
+                        extensions.emplace_back(std::move(aln_suffix));
                 }
             } else {
                 ++suffix;
@@ -247,9 +272,25 @@ auto LabeledBacktrackingExtender<NodeType, AlignmentCompare>
     if (target_intersection.size()
             && suffix.get_score() >= this->config_.min_cell_score
             && (suffix.reof() || suffix.get_front_op() != Cigar::DELETION)) {
-        extensions.emplace_back(suffix);
-        extensions.back().target_columns = target_intersection;
-        assert(check_targets(anno_graph_, extensions.back()));
+        DBGAlignment aln_suffix(suffix);
+        aln_suffix.target_columns = target_intersection;
+        assert(check_targets(anno_graph_, aln_suffix));
+        auto target_it = std::remove_if(
+            aln_suffix.target_columns.begin(),
+            aln_suffix.target_columns.end(),
+            [&](uint64_t target) {
+                if (aln_suffix.get_score() > min_scores_[target]) {
+                    min_scores_[target] = aln_suffix.get_score();
+                    return false;
+                }
+
+                return true;
+            }
+        );
+        aln_suffix.target_columns.erase(target_it, aln_suffix.target_columns.end());
+
+        if (aln_suffix.target_columns.size())
+            extensions.emplace_back(std::move(aln_suffix));
     }
 
     return track;

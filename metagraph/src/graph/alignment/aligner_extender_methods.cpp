@@ -451,6 +451,8 @@ auto DefaultColumnExtender<NodeType>
     if (pos > 1)
         cigar.append(Cigar::CLIPPED, pos - 1);
 
+    assert(path.size() == track.size());
+
     std::reverse(cigar.begin(), cigar.end());
     std::reverse(path.begin(), path.end());
     std::reverse(seq.begin(), seq.end());
@@ -469,6 +471,7 @@ auto DefaultColumnExtender<NodeType>
         auto next_path = *seed_;
         next_path.append(std::move(extension));
         next_path.trim_offset();
+        track.resize(next_path.size());
         assert(next_path.is_valid(graph_, &config_));
 
         DEBUG_LOG("Alignment (extended): {}", next_path);
@@ -476,6 +479,7 @@ auto DefaultColumnExtender<NodeType>
     } else {
         extension.extend_query_begin(query_.data());
         extension.trim_offset();
+        track.resize(extension.size());
         assert(extension.is_valid(graph_, &config_));
 
         DEBUG_LOG("Alignment (trim seed): {}", extension);

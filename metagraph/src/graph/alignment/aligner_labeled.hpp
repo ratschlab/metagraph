@@ -86,6 +86,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender<NodeType> {
     const AlignmentAggregator<NodeType, AlignmentCompare> &aggregator_;
     mutable VectorSet<Vector<uint64_t>, utils::VectorHash> targets_set_;
     mutable tsl::hopscotch_map<node_index, size_t> targets_;
+    mutable tsl::hopscotch_map<uint64_t, score_t> min_scores_;
 };
 
 template <class Seeder = ExactSeeder<>,
