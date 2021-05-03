@@ -32,26 +32,6 @@ inline sdsl::int_vector<> pack_vector(const Vector &vector, uint8_t width) {
 
 sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width);
 
-template <class t_int_vec>
-inline void reverse_bit_vector(t_int_vec &v) {
-    typedef typename t_int_vec::size_type size_type;
-    typedef typename t_int_vec::value_type value_type;
-
-    size_type begin = 0;
-    for ( ; begin + begin + 128 <= v.size(); begin += 64) {
-        value_type a = sdsl::bits::rev(v.get_int(begin));
-        value_type b = sdsl::bits::rev(v.get_int(v.size() - begin - 64));
-        v.set_int(begin, b);
-        v.set_int(v.size() - begin - 64, a);
-    }
-
-    size_type size = (v.size() % 128) / 2;
-    value_type a = sdsl::bits::rev(v.get_int(begin, size)) >> (64 - size);
-    value_type b = sdsl::bits::rev(v.get_int(v.size() - begin - size, size)) >> (64 - size);
-    v.set_int(begin, b, size);
-    v.set_int(v.size() - begin - size, a, size);
-}
-
 
 /**
  * Atomic bit fetching, setting, and unsetting on packed vectors.

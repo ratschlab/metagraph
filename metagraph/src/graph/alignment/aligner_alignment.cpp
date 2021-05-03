@@ -46,45 +46,6 @@ Alignment<NodeType>::Alignment(std::string_view query,
 }
 
 template <typename NodeType>
-Alignment<NodeType>::Alignment(const AlignmentPrefix<NodeType> &alignment_prefix) {
-    const auto &data = alignment_prefix.data();
-    assert(data.get_cigar().size());
-
-    offset_ = data.get_offset() + alignment_prefix.get_offset();
-    if (offset_ == alignment_prefix.get_graph().get_k()) {
-        *this = Alignment();
-        return;
-    }
-
-    const char *query_begin_ = data.get_query().data();
-    auto prefix_node = alignment_prefix.get_prefix_node();
-    if (prefix_node) {
-        nodes_.assign(&prefix_node, &prefix_node + 1);
-    } else {
-        nodes_.assign(data.get_nodes().begin(), alignment_prefix.get_node_end_it().base());
-    }
-
-    cigar_ = data.get_cigar();
-    orientation_ = data.get_orientation();
-    sequence_ = alignment_prefix.get_sequence();
-
-    score_ = alignment_prefix.get_score();
-    const char *query_end_ = alignment_prefix.get_query().data() + alignment_prefix.get_query().size();
-
-    query_ = std::string_view(query_begin_, query_end_ - query_begin_);
-
-    if (cigar_.back().first == Cigar::CLIPPED)
-        cigar_.pop_back();
-
-    for (size_t i = 0; i < alignment_prefix.get_trim(); ++i) {
-        --cigar_.back().second;
-
-        if (!cigar_.back().second)
-            cigar_.pop_back();
-    }
-}
-
-template <typename NodeType>
 Alignment<NodeType>::Alignment(const AlignmentSuffix<NodeType> &alignment_suffix) {
     const auto &data = alignment_suffix.data();
     assert(data.get_cigar().size());

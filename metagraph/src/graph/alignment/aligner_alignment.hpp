@@ -23,9 +23,6 @@ class DeBruijnGraph;
 namespace align {
 
 template <typename NodeType = uint64_t>
-class AlignmentPrefix;
-
-template <typename NodeType = uint64_t>
 class AlignmentSuffix;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
@@ -80,7 +77,6 @@ class Alignment {
               bool orientation = false,
               size_t offset = 0);
 
-    Alignment(const AlignmentPrefix<NodeType> &alignment_prefix);
     Alignment(const AlignmentSuffix<NodeType> &alignment_suffix);
 
     void append(Alignment&& other);
