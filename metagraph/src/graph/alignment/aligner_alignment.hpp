@@ -127,44 +127,6 @@ class Alignment {
             cigar_.pop_back();
     }
 
-    void pop_back(const DBGAlignerConfig &config) {
-        assert(nodes_.size() > 1);
-
-        size_t end_clipping = get_end_clipping();
-        if (end_clipping)
-            cigar_.pop_back();
-
-        nodes_.pop_back();
-        if (cigar_.back().first == Cigar::INSERTION) {
-            std::string_view suffix(query_.data() + query_.size() - cigar_.back().second,
-                                    cigar_.back().second);
-            score_ -= config.match_score(suffix);
-            end_clipping += cigar_.back().second;
-            query_.remove_suffix(cigar_.back().second);
-            cigar_.pop_back();
-        }
-
-        assert(cigar_.back().first == Cigar::MATCH || cigar_.back().first == Cigar::MISMATCH);
-        score_ -= config.match_score(std::string_view(query_.data() + query_.size() - 1, 1));
-        query_.remove_suffix(1);
-        ++end_clipping;
-        --cigar_.back().second;
-        if (!cigar_.back().second)
-            cigar_.pop_back();
-
-        if (cigar_.back().first == Cigar::INSERTION) {
-            std::string_view suffix(query_.data() + query_.size() - cigar_.back().second,
-                                    cigar_.back().second);
-            score_ -= config.match_score(suffix);
-            end_clipping += cigar_.back().second;
-            query_.remove_suffix(cigar_.back().second);
-            cigar_.pop_back();
-        }
-
-        if (end_clipping)
-            cigar_.append(Cigar::CLIPPED, end_clipping);
-    }
-
     void trim_offset();
 
     void reverse_complement(const DeBruijnGraph &graph,
