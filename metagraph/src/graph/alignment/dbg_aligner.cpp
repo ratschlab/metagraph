@@ -8,20 +8,14 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-class ISeedFilter {
+
+class SeedFilter {
   public:
     typedef IDBGAligner::DBGAlignment DBGAlignment;
     typedef IDBGAligner::node_index node_index;
     typedef std::function<void(node_index, uint64_t, size_t, size_t)> LabeledNodeRangeCallback;
     typedef std::function<void(const LabeledNodeRangeCallback&)> LabeledNodeRangeGenerator;
 
-    virtual ~ISeedFilter() {}
-    virtual Vector<uint64_t> labels_to_keep(const DBGAlignment&) = 0;
-    virtual void update_seed_filter(const LabeledNodeRangeGenerator&) = 0;
-};
-
-class SeedFilter : public ISeedFilter {
-  public:
     SeedFilter(size_t k) : k_(k) {}
     Vector<uint64_t> labels_to_keep(const DBGAlignment &seed);
     void update_seed_filter(const LabeledNodeRangeGenerator &generator);
@@ -52,14 +46,15 @@ class SeedAndExtendAlignerCore {
     template <typename... Args>
     SeedAndExtendAlignerCore(const DeBruijnGraph &graph,
                              const DBGAlignerConfig &config,
-                             ISeedFilter &seed_filter,
+                             std::shared_ptr<SeedFilter> seed_filter,
                              Args&&... args)
           : graph_(graph), config_(config),
-            seed_filter_(std::shared_ptr<ISeedFilter>{}, &seed_filter),
+            seed_filter_(seed_filter),
             paths_(std::forward<Args>(args)...),
             aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
 
-    void flush(const std::function<bool(const DBGAlignment&)> &skip = [](const auto &) { return false; },
+    void flush(const std::function<bool(const DBGAlignment&)> &skip
+                   = [](const auto &) { return false; },
                const std::function<bool()> &terminate = []() { return false; }) {
         aggregator_.call_alignments([&](auto&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
@@ -114,7 +109,7 @@ class SeedAndExtendAlignerCore {
     const DeBruijnGraph &graph_;
     const DBGAlignerConfig &config_;
 
-    std::shared_ptr<ISeedFilter> seed_filter_;
+    std::shared_ptr<SeedFilter> seed_filter_;
     DBGQueryAlignment paths_;
     AlignmentAggregator<node_index, AlignmentCompare> aggregator_;
 };
@@ -152,9 +147,10 @@ void ISeedAndExtendAligner<AlignmentCompare>
     generate_query([&](std::string_view header,
                        std::string_view query,
                        bool is_reverse_complement) {
-        SeedFilter seed_filter(get_graph().get_k());
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(
-            get_graph(), get_config(), seed_filter, query, is_reverse_complement
+            get_graph(), get_config(),
+            std::make_shared<SeedFilter>(get_graph().get_k()),
+            query, is_reverse_complement
         );
         auto &paths = aligner_core.get_paths();
         std::string_view this_query = paths.get_query(is_reverse_complement);
@@ -214,7 +210,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
     });
 }
 
-Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
+inline Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
     size_t found_count = 0;
     std::pair<size_t, size_t> idx_range {
         seed.get_clipping(), seed.get_clipping() + k_ - seed.get_offset()
@@ -244,7 +240,7 @@ Vector<uint64_t> SeedFilter::labels_to_keep(const DBGAlignment &seed) {
     return { std::numeric_limits<uint64_t>::max() };
 }
 
-void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
+inline void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) {
     generator([&](node_index node, uint64_t, size_t begin, size_t end) {
         auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
         auto &range = emplace.first.value();
@@ -256,7 +252,7 @@ void SeedFilter::update_seed_filter(const LabeledNodeRangeGenerator &generator) 
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
              const ISeeder<node_index> &seeder,
              IExtender<node_index> &extender,
@@ -371,7 +367,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_one_direction(bool orientation_to_align,
                       const ISeeder<node_index> &seeder,
                       IExtender<node_index> &extender) {
@@ -383,7 +379,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_best_direction(const ISeeder<node_index> &seeder,
                        const ISeeder<node_index> &seeder_rc,
                        IExtender<node_index> &extender,
@@ -398,7 +394,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_both_directions(const ISeeder<node_index> &forward_seeder,
                         const ISeeder<node_index> &reverse_seeder,
                         IExtender<node_index> &forward_extender,
@@ -469,7 +465,7 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+inline void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_aggregate(const AlignmentGenerator &alignment_generator) {
     alignment_generator(
         [&](DBGAlignment&& alignment) {
