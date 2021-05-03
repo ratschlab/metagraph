@@ -16,7 +16,7 @@ brwt_relax_arity: 32
 brwt_parallel_nodes: 5
 brwt_linkage_subsample: 100000
 
-exec_cmd: 'metagraph'
+metagraph_cmd: 'metagraph'
 
 default_disk_mb: 10000
 max_memory_mb: 4048

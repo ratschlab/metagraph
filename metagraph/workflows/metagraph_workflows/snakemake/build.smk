@@ -23,7 +23,7 @@ rule build:
     log: cfg_utils.get_log_path(BUILD_RULE, config)
     shell:
         """
-        cat {input} | {exec_cmd} build {verbose_opt} \
+        cat {input} | {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         -k {params.k} \
         -o {output} \
@@ -116,7 +116,7 @@ rule build_canonical_graph_single_sample:
     log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input.seq}" | {exec_cmd} build {verbose_opt} \
+        echo "{input.seq}" | {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode canonical \
         -k {params.k} \
@@ -138,7 +138,7 @@ rule primarize_canonical_graph_single_sample:
     log: cfg_utils.get_log_path(PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input}" | {exec_cmd} transform {verbose_opt} \
+        echo "{input}" | {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
         --parallel {threads} \
@@ -170,7 +170,7 @@ rule build_joint_graph:
             SEQ_PATHS="{input}"
         fi
 
-        cat $SEQ_PATHS | {exec_cmd} build {verbose_opt} \
+        cat $SEQ_PATHS | {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode canonical \
         -k {params.k} \
@@ -191,7 +191,7 @@ rule primarize_joint_graph:
     log: cfg_utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE, config)
     shell:
         """
-        echo "{input}" | {exec_cmd} transform {verbose_opt} \
+        echo "{input}" | {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
         --parallel {threads} \
@@ -215,7 +215,7 @@ rule build_joint_primary:
     log: cfg_utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
         """
-        {exec_cmd} build {verbose_opt} \
+        {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode primary \
         -k {params.k} \

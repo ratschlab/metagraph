@@ -29,7 +29,7 @@ def run_build_workflow(
         build_primary_graph: bool = False,
         annotation_formats: Iterable[AnnotationFormats] = (),
         annotation_labels_source: Optional[AnnotationLabelsSource] = None,
-        exec_cmd: Optional[str] = None,
+        metagraph_cmd: Optional[str] = None,
         threads: Optional[int] = None,
         force: bool = False,
         verbose: bool = False,
@@ -63,7 +63,7 @@ def run_build_workflow(
     config['annotation_formats'] = [af.value for af in
                                     annotation_formats] if annotation_formats else config['annotation_formats']
 
-    config['exec_cmd'] = exec_cmd if exec_cmd else config['exec_cmd']
+    config['metagraph_cmd'] = metagraph_cmd if metagraph_cmd else config['metagraph_cmd']
     config['max_threads'] = threads if threads else snakemake.available_cpu_count()
 
     if verbose:
@@ -120,7 +120,7 @@ def setup_build_parser(parser):
     workflow.add_argument('--force', default=False, action='store_true')
     workflow.add_argument('--verbose', default=False, action='store_true')
     workflow.add_argument('--dryrun', default=False, action='store_true')
-    workflow.add_argument('--exec-cmd', type=str, default=None)
+    workflow.add_argument('--metagraph-cmd', type=str, default=None)
     workflow.add_argument('--additional-snakemake-args', type=str, default='',
                           help='Additional arguments to pass to snakemake, e.g. --additional-snakemake-args="arg1=val1 arg2=val2"')
 
@@ -168,7 +168,7 @@ def init_build(args):
         build_primary_graph=args.build_primary_graph,
         annotation_formats=[AnnotationFormats(af) for af in args.annotation_format],
         annotation_labels_source=args.annotation_labels_source,
-        exec_cmd=args.exec_cmd,
+        metagraph_cmd=args.metagraph_cmd,
         threads=args.threads,
         force=args.force,
         verbose=args.verbose,
