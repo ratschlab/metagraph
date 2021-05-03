@@ -37,7 +37,7 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
  */
 inline uint64_t encode_diff(int64_t x) {
     assert(x);
-    return x > 0 ? (x - 1) * 2 : (-x) * 2 - 1;
+    return (std::abs(x) - 1) * 2 + (x < 0);
 }
 
 inline int64_t decode_diff(uint64_t c) {
