@@ -36,6 +36,18 @@ process_seq_path(const DeBruijnGraph &graph,
                  const std::vector<DeBruijnGraph::node_index> &query_nodes,
                  const std::function<void(AnnotatedDBG::row_index, size_t)> &callback) {
     const CanonicalDBG *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+    if (!dbg_succ && canonical)
+        dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
+
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+
+    auto run_callback = [&](DeBruijnGraph::node_index node, size_t i) {
+        if (!boss || boss->get_W(dbg_succ->kmer_to_boss_index(node)))
+            callback(AnnotatedDBG::graph_to_anno_index(node), i);
+    };
+
     if (canonical) {
         if (query_nodes.size()) {
             auto first = std::find_if(query_nodes.begin(), query_nodes.end(),
@@ -47,26 +59,20 @@ process_seq_path(const DeBruijnGraph &graph,
 
             if (canonical->get_base_node(*first) == *first) {
                 for (size_t i = start; i < query_nodes.size(); ++i) {
-                    if (query_nodes[i] != DeBruijnGraph::npos) {
-                        callback(AnnotatedDBG::graph_to_anno_index(
-                            canonical->get_base_node(query_nodes[i])
-                        ), i);
-                    }
+                    if (query_nodes[i] != DeBruijnGraph::npos)
+                        run_callback(canonical->get_base_node(query_nodes[i]), i);
                 }
             } else {
                 for (size_t i = query_nodes.size(); i > start; --i) {
-                    if (query_nodes[i - 1] != DeBruijnGraph::npos) {
-                        callback(AnnotatedDBG::graph_to_anno_index(
-                            canonical->get_base_node(query_nodes[i - 1])
-                        ), i - 1);
-                    }
+                    if (query_nodes[i - 1] != DeBruijnGraph::npos)
+                        run_callback(canonical->get_base_node(query_nodes[i - 1]), i - 1);
                 }
             }
         }
     } else if (graph.get_mode() != DeBruijnGraph::CANONICAL) {
         for (size_t i = 0; i < query_nodes.size(); ++i) {
             if (query_nodes[i] != DeBruijnGraph::npos)
-                callback(AnnotatedDBG::graph_to_anno_index(query_nodes[i]), i);
+                run_callback(query_nodes[i], i);
         }
     } else {
         size_t i = 0;
@@ -76,14 +82,14 @@ process_seq_path(const DeBruijnGraph &graph,
             map_query += query.substr(graph.get_k());
             graph.map_to_nodes(map_query, [&](DeBruijnGraph::node_index node) {
                 if (node != DeBruijnGraph::npos)
-                    callback(AnnotatedDBG::graph_to_anno_index(node), i);
+                    run_callback(node, i);
 
                 ++i;
             });
         } else {
             graph.map_to_nodes(query, [&](DeBruijnGraph::node_index node) {
                 if (node != DeBruijnGraph::npos)
-                    callback(AnnotatedDBG::graph_to_anno_index(node), i);
+                    run_callback(node, i);
 
                 ++i;
             });
@@ -98,23 +104,13 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     std::vector<node_index> added_nodes;
     min_scores_.clear();
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&this->graph_);
-    if (!dbg_succ) {
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_))
-            dbg_succ = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
-    }
-
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-
     DefaultColumnExtender<NodeType>::call_visited_nodes([&](node_index node, size_t, size_t) {
         auto [it, inserted] = targets_.emplace(node, 0);
         if (inserted) {
             process_seq_path(this->graph_, std::string(this->graph_.get_k(), '#'),
                              { node }, [&](auto row, size_t) {
-                if (!boss || boss->get_W(dbg_succ->kmer_to_boss_index(AnnotatedDBG::anno_to_graph_index(row)))) {
-                    added_rows.push_back(row);
-                    added_nodes.push_back(node);
-                }
+                added_rows.push_back(row);
+                added_nodes.push_back(node);
             });
         }
     });
