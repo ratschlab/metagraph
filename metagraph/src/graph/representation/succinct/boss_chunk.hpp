@@ -10,6 +10,9 @@
 
 namespace mtg {
 namespace graph {
+
+class DBGSuccinct;
+
 namespace boss {
 
 /**
@@ -18,6 +21,7 @@ namespace boss {
  */
 class BOSS::Chunk {
     friend BOSS;
+    friend DBGSuccinct;
 
   public:
     typedef uint8_t TAlphabet;

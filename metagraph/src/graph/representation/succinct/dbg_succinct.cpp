@@ -6,6 +6,8 @@
 #include <string>
 #include <filesystem>
 
+#include "graph/representation/succinct/boss_chunk.hpp"
+#include "graph/graph_extensions/node_weights.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -740,20 +742,20 @@ bool DBGSuccinct::load(const std::string &filename) {
 }
 
 void DBGSuccinct::serialize(const std::string &filename) const {
-    auto prefix = remove_suffix(filename, kExtension);
+    const std::string &prefix = remove_suffix(filename, kExtension);
 
     // Clear any existing Bloom filters
     std::filesystem::remove(prefix + kBloomFilterExtension);
 
     {
-        const auto out_filename = prefix + kExtension;
-        std::ofstream outstream(out_filename, std::ios::binary);
-        boss_graph_->serialize(outstream);
-        serialize_number(outstream, static_cast<int>(mode_));
+        const std::string out_filename = prefix + kExtension;
+        std::ofstream out(out_filename, std::ios::binary);
+        boss_graph_->serialize(out);
+        serialize_number(out, static_cast<int>(mode_));
 
-        boss_graph_->serialize_suffix_ranges(outstream);
+        boss_graph_->serialize_suffix_ranges(out);
 
-        if (!outstream.good())
+        if (!out.good())
             throw std::ios_base::failure("Can't write to file " + out_filename);
     }
 
@@ -770,20 +772,41 @@ void DBGSuccinct::serialize(const std::string &filename) const {
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = prefix + kDummyMaskExtension;
-    std::ofstream outstream(out_filename, std::ios::binary);
-    if (!outstream.good())
+    std::ofstream out(out_filename, std::ios::binary);
+    if (!out.good())
         throw std::ios_base::failure("Can't write to file " + out_filename);
 
-    valid_edges_->serialize(outstream);
+    valid_edges_->serialize(out);
 
     if (bloom_filter_) {
-        std::ofstream bloom_outstream(prefix + kBloomFilterExtension, std::ios::binary);
-        if (!bloom_outstream.good())
+        std::ofstream bloom_out(prefix + kBloomFilterExtension, std::ios::binary);
+        if (!bloom_out.good())
             throw std::ios_base::failure("Can't write to file " + prefix + kBloomFilterExtension);
 
-        bloom_filter_->serialize(bloom_outstream);
+        bloom_filter_->serialize(bloom_out);
     }
 }
+
+void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
+                            const std::string &filename,
+                            Mode mode) {
+    const std::string &prefix = remove_suffix(filename, kExtension);
+
+    std::filesystem::remove(prefix + kBloomFilterExtension);
+    std::filesystem::remove(prefix + kDummyMaskExtension);
+
+    const std::string &fname = prefix + kExtension;
+    boss::BOSS::serialize(std::move(chunk), fname);
+    std::ofstream out(fname, std::ios::binary | std::ios::ate);
+    serialize_number(out, static_cast<int>(mode));
+    serialize_number(out, 0); // suffix ranges are not indexed
+    if (!out.good())
+        throw std::ios_base::failure("Can't write to file " + fname);
+
+    if (chunk.weights_.size())
+        NodeWeights::serialize(std::move(chunk.weights_), fname);
+}
+
 
 void DBGSuccinct::switch_state(BOSS::State new_state) {
     if (get_state() == new_state)

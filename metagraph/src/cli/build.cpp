@@ -156,7 +156,12 @@ int build_graph(Config *config) {
 
         assert(graph_data.size());
 
-        if (config->count_kmers) {
+        if (!config->mark_dummy_kmers && !config->node_suffix_length) {
+            DBGSuccinct::serialize(std::move(graph_data), config->outfbase, config->graph_mode);
+            logger->trace("Graph construction finished in {} sec", timer.elapsed());
+            return 0;
+
+        } else if (config->count_kmers) {
             sdsl::int_vector_buffer<> kmer_counts;
             graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));

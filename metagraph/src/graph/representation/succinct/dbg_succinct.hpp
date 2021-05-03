@@ -120,6 +120,10 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override;
     virtual void serialize(const std::string &filename_base) const override;
+    // initialize DBGSuccinct and dump to disk without loading everything in RAM
+    static void serialize(boss::BOSS::Chunk&& chunk,
+                          const std::string &filename_base,
+                          Mode mode);
     virtual std::string file_extension() const override final { return kExtension; }
     std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 
