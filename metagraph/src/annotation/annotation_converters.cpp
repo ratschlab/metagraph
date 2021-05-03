@@ -1192,7 +1192,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                         = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                     + ColumnCompressed<>::kCountExtension;
                     file_size += fs::file_size(values_fname);
-                } catch (...) {}
+                } catch (...) {
+                    // Count vectors may be missing for empty annotations. If a count file
+                    // is missing for a non-empty annotation, the error will be thrown later
+                    // in convert_batch_to_row_diff, so we skip it here in any case.
+                }
             }
             if (file_size > mem_bytes) {
                 logger->warn("Not enough memory to process {}, requires {} MB, skipped",
