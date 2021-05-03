@@ -58,10 +58,10 @@ class ExactSeeder : public ISeeder<NodeType> {
     const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
-    mutable std::vector<NodeType> query_nodes_;
+    std::vector<NodeType> query_nodes_;
     const DBGAlignerConfig &config_;
     std::vector<DBGAlignerConfig::score_t> partial_sum_;
-    mutable size_t num_matching_;
+    size_t num_matching_;
 
     size_t num_exact_matching() const;
 };
