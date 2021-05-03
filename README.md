@@ -2,83 +2,8 @@
 
 ## Install
 
-### Conda
+See [installation instructions](metagraph/docs/source/installation.rst) or [docs online](https://metagraph.ethz.ch/static/docs/index.html).
 
-There are conda packages available on bioconda for both Linux and Mac OS X:
-
-```
-conda install -c bioconda -c conda-forge metagraph
-```
-
-The executable is called `metagraph_DNA`.
-
-### Docker
-
-If docker is available on your system, you can immediately get started using
-e.g.
-```
-docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph build -v -k 10 /mnt/transcripts_1000.fa -o /mnt/transcripts_1000
-```
-
-where you'd need to replace `${DATA_DIR_HOST}` with a directory on the host system. This directory is then mapped 
-under `/mnt` in the container.
-
-
-## Install From Sources
-
-### Prerequisites
-- cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang (clang-1100.0.33.8 or higher)
-- bzip2
-- HTSlib
-
-#### Optional
-- boost and jemalloc-4.0.0 or higher (to build with *folly* for efficient small vector support)
-- Python 3 (for running integration tests)
-
-For compiling with **AppleClang**, the prerequisites can be installed as easy as:
-```
-brew install libomp cmake make bzip2 htslib boost jemalloc
-```
-
-For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)
-```
-sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
-```
-
-For **CentOS** (8 or higher)
-```
-yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
-```
-
-All prerequisites can also be installed by users **without root** using [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh).
-
-
-### Compile
-1. `git clone --recursive https://github.com/ratschlab/metagraph.git`
-2. install *sdsl-lite* in `metagraph/external-libraries/` by running the following script from the repository root directory
-```bash
-git submodule sync
-git submodule update --init --recursive
-
-pushd metagraph/external-libraries/sdsl-lite
-./install.sh $PWD
-popd
-```
-
-3. make a **build** directory `mkdir -p metagraph/build && cd metagraph/build`
-4. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))` (for alphabets other than DNA, see below)
-5. (optional) run unit tests `./unit_tests`
-6. (optional) run integration tests `./integration_tests`
-
-### Build types: `cmake .. <arguments>` where arguments are:
-- `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]` -- build modes (`Release` by default)
-- `-DBUILD_STATIC=[ON|OFF]` -- link statically (`OFF` by default)
-- `-DLINK_OPT=[ON|OFF]` -- enable link time optimization (`OFF` by default)
-- `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
-- `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default, if available)
-- `-DWITH_MSSE42=[ON|OFF]` -- compile with support for the msse4.2 instructions (`ON` by default, if available)
-- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 ## Typical workflow
 1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
@@ -103,20 +28,6 @@ DATA="../tests/data/transcripts_1000.fa"
 ./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000.dbg
 ```
 
-### Graph cleaning
-```
-DATA="../tests/data/transcripts_1000.fa"
-K=12
-
-./metagraph build -k $K --count-kmers -o transcripts_1000 $DATA
-
-./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 --to-fasta -o transcripts_1000_clean_contigs transcripts_1000.dbg
-
-zless transcripts_1000_clean_contigs.fasta.gz | tail
-```
-
-For real examples, see [scripts](./metagraph/scripts).
-
 ### Print usage
 `./metagraph`
 
@@ -136,46 +47,11 @@ For real examples, see [scripts](./metagraph/scripts).
 2>&1 | tee <LOG_DIR>/log.txt
 ```
 
-* #### Build from chunks (use only for very large graphs)
-1) Build chunks
-```bash
-for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do \
-    ./metagraph build -v --parallel 30 -k 20 --mem-cap-gb 100 \
-                            -o <GRAPH_DIR>/graph --suffix $F \
-                            <DATA_DIR>/*.fasta.gz \
-    2>&1 | tee <LOG_DIR>/log_$F.txt; \
-done
-```
-2) Concatenate chunks
-```bash
-./metagraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
-```
-
 #### Build from k-mers filtered with KMC
 ```bash
-CUTOFF=5
 K=20
-./KMC/kmc -ci$CUTOFF -t30 -k$K -m5 -fq -b <FILE>.fasta.gz <FILE>.kmc_$CUTOFF ./KMC
-./metagraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
-```
-
-#### Distributed build
-1) Build chunks
-```bash
-for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
-    bsub -J assemble$F -W 8:00 -n 30 -R "rusage[mem=15000]" \
-        "ls -1a <DATA_DIR>/*.fasta.gz | /usr/bin/time -v ./metagraph build -v \
-            --parallel 30 -k 24 --mem-cap-gb 350 --suffix $F -o <GRAPH_DIR>/graph \
-        2>&1 | tee <LOG_DIR>/log_$F"; \
-done
-```
-2) Concatenate chunks
-```bash
-bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
-    ~/metagraph concatenate -v -l 3 \
-                                  -i <GRAPH_DIR>/graph \
-                                  -o <GRAPH_DIR>/graph \
-    2>&1 | tee <LOG_DIR>/log_stack.txt"
+./KMC/kmc -ci5 -t4 -k$K -m5 -fm <FILE>.fasta.gz <FILE>.cutoff_5 ./KMC
+./metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph <FILE>.cutoff_5.kmc_pre
 ```
 
 ### Annotate graph
