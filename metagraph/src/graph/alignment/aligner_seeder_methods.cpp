@@ -417,40 +417,12 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
-template <class BaseSeeder>
-auto LabeledSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
-    std::vector<Seed> seeds;
-    std::vector<node_index> base_nodes = std::move(this->query_nodes_);
-
-    for (size_t i = 0; i < targets_.size(); ++i) {
-        this->query_nodes_.assign(base_nodes.size(), DeBruijnGraph::npos);
-        call_ones(*signatures_[i], [&](size_t j) {
-            this->query_nodes_[j] = base_nodes[j];
-        });
-        this->num_matching_ = this->num_exact_matching();
-
-        for (Seed &seed : BaseSeeder::get_seeds()) {
-            if (targets_[i].size() && !seed.get_offset())
-                seed.target_columns = targets_[i];
-
-            seeds.emplace_back(std::move(seed));
-        }
-    }
-
-    std::swap(this->query_nodes_, base_nodes);
-    this->num_matching_ = this->num_exact_matching();
-
-    return seeds;
-}
-
 
 template class ExactSeeder<>;
 template class MEMSeeder<>;
 template class UniMEMSeeder<>;
 template class SuffixSeeder<ExactSeeder<>>;
 template class SuffixSeeder<UniMEMSeeder<>>;
-template class SuffixSeeder<LabeledSeeder<UniMEMSeeder<>>>;
-template class SuffixSeeder<LabeledSeeder<ExactSeeder<>>>;
 
 } // namespace align
 } // namespace graph

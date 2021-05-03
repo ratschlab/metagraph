@@ -131,32 +131,6 @@ class SuffixSeeder : public BaseSeeder {
 
 };
 
-template <class BaseSeeder>
-class LabeledSeeder : public BaseSeeder {
-  public:
-    typedef typename BaseSeeder::node_index node_index;
-    typedef typename BaseSeeder::Seed Seed;
-    typedef Vector<uint64_t> Targets;
-
-    template <typename... Args>
-    LabeledSeeder(const std::vector<Targets> &targets,
-                  const std::vector<std::unique_ptr<bitmap>> &signatures,
-                  Args&&... args)
-          : BaseSeeder(std::forward<Args>(args)...),
-            targets_(targets), signatures_(signatures) {
-        static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
-        assert(targets_.size() == signatures_.size());
-    }
-
-    virtual ~LabeledSeeder() {}
-
-    virtual std::vector<Seed> get_seeds() const override;
-
-  private:
-    const std::vector<Targets> &targets_;
-    const std::vector<std::unique_ptr<bitmap>> &signatures_;
-};
-
 } // namespace align
 } // namespace graph
 } // namespace mtg
