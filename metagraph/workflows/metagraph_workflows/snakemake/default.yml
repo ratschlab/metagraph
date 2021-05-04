@@ -17,6 +17,7 @@ brwt_parallel_nodes: 5
 brwt_linkage_subsample: 100000
 
 metagraph_cmd: 'metagraph'
+gnu_time_cmd: '/usr/bin/time'
 
 default_disk_mb: 10000
 max_memory_mb: 4048

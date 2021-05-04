@@ -20,6 +20,7 @@ annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source'
 
 
 metagraph_cmd=config['metagraph_cmd']
+time_cmd=cfg_utils.get_gnu_time_command(config)
 
 max_threads=take_value_or_default(constants.MAX_THREADS, workflow.cores)
 
@@ -81,7 +82,7 @@ rule annotate:
         
         OUT_DIR=$(dirname {output.done})
         mkdir -p $OUT_DIR
-        cat $SEQ_PATHS | {metagraph_cmd} annotate \
+        cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
           {verbose_opt} \
           --parallel {threads} \
           -i {input.dbg_graph} \
@@ -116,7 +117,7 @@ rule generate_brwt_linkage:
     log: cfg_utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
     shell:
         """        
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type brwt \
             --linkage \
             --greedy \
@@ -141,7 +142,7 @@ rule transform_annotation:
     log: cfg_utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
     shell:
         """        
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type {wildcards.anno_type} \
             --parallel {threads} \
             -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
@@ -164,7 +165,7 @@ rule annotate_brwt:
     log: cfg_utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
         """        
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type brwt \
             --parallel-nodes {params.parallel_nodes} \
             --greedy \
@@ -188,7 +189,7 @@ rule relax_brwt:
     log: cfg_utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
         """        
-        {metagraph_cmd} relax_brwt \
+        {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \
@@ -219,7 +220,7 @@ rule transform_rd_stage0:
         COLS_DIR=$(dirname {output.columns_rd_row_count})
         mkdir -p $COLS_DIR
         
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
             --row-diff-stage 0 \
             -i {input.dbg_graph} \
@@ -250,7 +251,7 @@ rule transform_rd_stage1:
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
         """
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
             --row-diff-stage 1 \
             -i {input.dbg_graph} \
@@ -278,7 +279,7 @@ rule transform_rd_stage2:
     log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
     shell:
         """
-        cat {input.columns_file} | {metagraph_cmd} transform_anno {verbose_opt} \
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff \
             --row-diff-stage 2 \
             -i {input.dbg_graph} \
@@ -307,7 +308,7 @@ rule annotate_row_diff_brwt:
     shell:
         """
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
-        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {metagraph_cmd} transform_anno {verbose_opt} \
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
             --anno-type row_diff_brwt \
             --greedy \
             --fast \
@@ -333,7 +334,7 @@ rule relax_row_diff_brwt:
     log: cfg_utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
         """        
-        {metagraph_cmd} relax_brwt \
+        {time_cmd} {metagraph_cmd} relax_brwt \
             -o {output.annotations_relaxed} \
             {verbose_opt} \
             --relax-arity {params.relax_arity} \

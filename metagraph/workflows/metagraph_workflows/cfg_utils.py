@@ -1,9 +1,28 @@
-from metagraph_workflows.constants import RULE_CONFIGS_KEY, TMP_DIR
-from pathlib import Path
+import logging
 
+from metagraph_workflows.constants import RULE_CONFIGS_KEY, TMP_DIR, GNU_TIME_CMD
+from pathlib import Path
+import subprocess
 
 def get_wdir(config):
     return Path(config['output_directory'])
+
+
+def get_gnu_time_command(config):
+    EMTPY_CMD = ''
+    cmd = config.get(GNU_TIME_CMD, EMTPY_CMD)
+
+    if cmd:
+        test_cmd=[cmd, '--version']
+        proc = subprocess.run(test_cmd, capture_output=True)
+        if proc.returncode == 0:
+            return f"{cmd} --verbose"
+        else:
+            logging.error(f"Command {' '.join(test_cmd)} for GNU time could not be executed successfully: {proc.stderr}")
+    else:
+        logging.warning("No GNU Time command provided.")
+
+    return EMTPY_CMD
 
 
 def get_log_path(rule_name, config, wildcards=None):

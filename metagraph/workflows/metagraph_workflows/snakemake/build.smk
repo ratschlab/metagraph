@@ -23,7 +23,7 @@ rule build:
     log: cfg_utils.get_log_path(BUILD_RULE, config)
     shell:
         """
-        cat {input} | {metagraph_cmd} build {verbose_opt} \
+        cat {input} | {time_cmd} {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         -k {params.k} \
         -o {output} \
@@ -92,7 +92,7 @@ rule extract_kmer_counts:
         KMC_BINS=$(( KMC_BINS > {params.max_bins} ? {params.max_bins} : KMC_BINS))
 
         mkdir -p {output.temp_dir}
-        kmc -v -k{params.k} -m{params.max_ram_gb} -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG {input} {params.base} {output.temp_dir} > {log} 2>&1
+        {time_cmd} kmc -v -k{params.k} -m{params.max_ram_gb} -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG {input} {params.base} {output.temp_dir} > {log} 2>&1
         """
 
 kmer_estimates=True
@@ -116,7 +116,7 @@ rule build_canonical_graph_single_sample:
     log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input.seq}" | {metagraph_cmd} build {verbose_opt} \
+        echo "{input.seq}" | {time_cmd} {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode canonical \
         -k {params.k} \
@@ -138,7 +138,7 @@ rule primarize_canonical_graph_single_sample:
     log: cfg_utils.get_log_path(PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input}" | {metagraph_cmd} transform {verbose_opt} \
+        echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
         --parallel {threads} \
@@ -170,7 +170,7 @@ rule build_joint_graph:
             SEQ_PATHS="{input}"
         fi
 
-        cat $SEQ_PATHS | {metagraph_cmd} build {verbose_opt} \
+        cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode canonical \
         -k {params.k} \
@@ -191,7 +191,7 @@ rule primarize_joint_graph:
     log: cfg_utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE, config)
     shell:
         """
-        echo "{input}" | {metagraph_cmd} transform {verbose_opt} \
+        echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
         --parallel {threads} \
@@ -215,7 +215,7 @@ rule build_joint_primary:
     log: cfg_utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
         """
-        {metagraph_cmd} build {verbose_opt} \
+        {time_cmd} {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode primary \
         -k {params.k} \
