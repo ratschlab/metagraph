@@ -190,6 +190,7 @@ class Config {
         RBFish,
         RbBRWT,
         IntBRWT,
+        IntRowDiffBRWT,
     };
 
     enum GraphType {

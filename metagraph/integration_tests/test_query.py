@@ -6,17 +6,40 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
-from helpers import get_test_class_name, build_annotation, graph_file_extension, anno_file_extension, GRAPH_TYPES, ANNO_TYPES, product
+from helpers import get_test_class_name
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
 """Test graph construction"""
 
-METAGRAPH = './metagraph'
 DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
+
+anno_file_extension = {'column': '.column.annodbg',
+                       'row': '.row.annodbg',
+                       'row_diff': '.row_diff.annodbg',
+                       'row_sparse': '.row_sparse.annodbg',
+                       'row_diff_brwt': '.row_diff_brwt.annodbg',
+                       'row_diff_sparse': '.row_diff_sparse.annodbg',
+                       'rb_brwt': '.rb_brwt.annodbg',
+                       'brwt': '.brwt.annodbg',
+                       'int_brwt': '.int_brwt.annodbg',
+                       'row_diff_int_brwt': '.row_diff_int_brwt.annodbg',
+                       'rbfish': '.rbfish.annodbg',
+                       'flat': '.flat.annodbg'}
+
+GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
+ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
 NUM_THREADS = 4
+
+def product(graph_types, anno_types):
+    result  = []
+    for graph in graph_types:
+        for anno in anno_types:
+            if graph == 'succinct' or not anno.startswith('row_diff'):
+                result.append((graph, anno))
+    return result
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
@@ -28,7 +51,7 @@ NUM_THREADS = 4
     ),
     class_name_func=get_test_class_name
 )
-class TestQuery(unittest.TestCase):
+class TestQuery(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -88,11 +111,11 @@ class TestQuery(unittest.TestCase):
         cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
         cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
+            cls.anno_repr,
             separate,
             no_fork_opt,
             no_anchor_opt
@@ -489,7 +512,7 @@ class TestQuery(unittest.TestCase):
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-class TestQueryCanonical(unittest.TestCase):
+class TestQueryCanonical(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -539,11 +562,11 @@ class TestQueryCanonical(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
-            cls.tempdir.name + '/annotation'
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr
         )
 
         # check annotation
@@ -673,7 +696,7 @@ class TestQueryCanonical(unittest.TestCase):
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-class TestQueryPrimary(unittest.TestCase):
+class TestQueryPrimary(TestingBase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
@@ -747,11 +770,11 @@ class TestQueryPrimary(unittest.TestCase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        build_annotation(
-            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        cls._annotate_graph(
             TEST_DATA_DIR + '/transcripts_100.fa',
-            cls.anno_repr,
-            cls.tempdir.name + '/annotation'
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr
         )
 
         # check annotation

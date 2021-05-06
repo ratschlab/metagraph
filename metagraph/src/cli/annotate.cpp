@@ -154,15 +154,17 @@ void add_kmer_counts(const std::string &file,
     // remember the number of base labels to remove those unique to each sequence quickly
     const size_t num_base_labels = labels.size();
 
-    mtg::common::logger->trace("Parsing k-mer counts from '{}'",
-        utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz"
-    );
+    const std::string &counts_fname
+            = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
+
+    logger->trace("Parsing k-mer counts from '{}'", counts_fname);
+
     read_extended_fasta_file_critical<uint32_t>(file, "kmer_counts",
         [&](size_t k, const kseq_t *read_stream, const uint32_t *kmer_counts) {
             if (k != graph.get_k()) {
-                mtg::common::logger->error("File '{}' contains counts for k-mers of "
-                                          "length {} but graph is constructed with k={}",
-                                          file, k, graph.get_k());
+                logger->error("File '{}' contains counts for k-mers of "
+                              "length {} but graph is constructed with k={}",
+                              file, k, graph.get_k());
                 exit(1);
             }
             assert(read_stream->seq.l >= k && "sequences can't be shorter than k-mers");
@@ -244,28 +246,61 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (config.count_kmers) {
         // add k-mer counts
         for (const auto &file : files) {
-            add_kmer_counts(
-                file,
-                anno_graph->get_graph(),
-                forward_and_reverse,
-                config.filename_anno,
-                config.annotate_sequence_headers,
-                config.fasta_anno_comment_delim,
-                config.fasta_header_delimiter,
-                config.anno_labels,
-                [&](std::string sequence,
-                            std::vector<std::string> labels,
-                            std::vector<uint64_t> kmer_counts) {
-                    thread_pool.enqueue(
-                        [&](std::string &sequence,
-                                std::vector<std::string> &labels,
-                                std::vector<uint64_t> &kmer_counts) {
-                            anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
-                        },
-                        std::move(sequence), std::move(labels), std::move(kmer_counts)
-                    );
-                }
-            );
+            const std::string &counts_fname
+                    = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
+
+            if (fs::exists(counts_fname)) {
+                add_kmer_counts(
+                    file,
+                    anno_graph->get_graph(),
+                    forward_and_reverse,
+                    config.filename_anno,
+                    config.annotate_sequence_headers,
+                    config.fasta_anno_comment_delim,
+                    config.fasta_header_delimiter,
+                    config.anno_labels,
+                    [&](std::string sequence,
+                                std::vector<std::string> labels,
+                                std::vector<uint64_t> kmer_counts) {
+                        thread_pool.enqueue(
+                            [&](std::string &sequence,
+                                    std::vector<std::string> &labels,
+                                    std::vector<uint64_t> &kmer_counts) {
+                                anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
+                            },
+                            std::move(sequence), std::move(labels), std::move(kmer_counts)
+                        );
+                    }
+                );
+            } else {
+                logger->warn("No k-mer counts found at '{}'. Every input k-mer"
+                             " will have count 1.", counts_fname);
+                call_annotations(
+                    file,
+                    config.refpath,
+                    anno_graph->get_graph(),
+                    forward_and_reverse,
+                    config.min_count,
+                    config.max_count,
+                    config.filename_anno,
+                    config.annotate_sequence_headers,
+                    config.fasta_anno_comment_delim,
+                    config.fasta_header_delimiter,
+                    config.anno_labels,
+                    [&](std::string sequence, auto labels) {
+                        thread_pool.enqueue(
+                            [&anno_graph](const std::string &sequence, const auto &labels) {
+                                const size_t k = anno_graph->get_graph().get_k();
+                                if (sequence.size() >= k) {
+                                    anno_graph->add_kmer_counts(sequence, labels,
+                                        std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                                }
+                            },
+                            std::move(sequence), std::move(labels)
+                        );
+                    }
+                );
+            }
         }
     }
 

@@ -39,34 +39,22 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                           config.infbase);
             exit(1);
         }
-        const Config::AnnotationType input_anno_type
-                = parse_annotation_type(config.infbase_annotators.at(0));
         // row_diff annotation is special, as it must know the graph structure
-        if (input_anno_type == Config::AnnotationType::RowDiff
-            || input_anno_type == Config::AnnotationType::RowDiffBRWT
-            || input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
-            auto dbg_graph = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph());
-
+        using namespace annot::binmat;
+        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+            const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph());
             if (!dbg_graph) {
-                logger->error(
-                        "Only succinct de Bruijn graph representations are "
-                        "supported for row-diff annotations");
+                logger->error("Only succinct de Bruijn graph representations"
+                              " are supported for row-diff annotations");
                 std::exit(1);
             }
-            // this is really ugly, but the alternative is to add a set_graph method to
-            // all annotations
-            using namespace annot::binmat;
-            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
-            if (input_anno_type == Config::AnnotationType::RowDiff) {
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
-                std::string anchor_fname = config.infbase + kRowDiffAnchorExt;
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_anchor(anchor_fname);
-                std::string fork_succ_fname = config.infbase + kRowDiffForkSuccExt;
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_fork_succ(fork_succ_fname);
-            } else if (input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
-                dynamic_cast<RowDiff<RowSparse> &>(matrix).set_graph(dbg_graph);
-            } else {
-                dynamic_cast<RowDiff<BRWT> &>(matrix).set_graph(dbg_graph);
+
+            row_diff->set_graph(dbg_graph);
+
+            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
         }
     }
