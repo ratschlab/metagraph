@@ -24,7 +24,7 @@ using mtg::graph::AnnotatedDBG;
 using mtg::graph::DifferentialAssemblyConfig;
 
 
-void clean_label_set(const AnnotatedDBG &anno_graph,
+void check_and_sort_labels(const AnnotatedDBG &anno_graph,
                      std::vector<std::string> &label_set) {
     bool detected_missing_labels = false;
     for (const std::string &label : label_set) {
@@ -161,8 +161,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 ","
             );
 
-            clean_label_set(anno_graph, shared_foreground_labels);
-            clean_label_set(anno_graph, shared_background_labels);
+            check_and_sort_labels(anno_graph, shared_foreground_labels);
+            check_and_sort_labels(anno_graph, shared_background_labels);
 
             continue;
         }
@@ -184,8 +184,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             ","
         );
 
-        clean_label_set(anno_graph, foreground_labels);
-        clean_label_set(anno_graph, background_labels);
+        check_and_sort_labels(anno_graph, foreground_labels);
+        check_and_sort_labels(anno_graph, background_labels);
 
         callback(*mask_graph_from_labels(anno_graph,
                                          foreground_labels, background_labels,
@@ -196,7 +196,14 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     }
 }
 
-std::pair<std::vector<std::string>, unsigned int> parse_diff_file(std::ifstream &fin) {
+std::pair<std::vector<std::string>, unsigned int>
+parse_diff_file(const std::string &fname) {
+    std::ifstream fin(fname);
+    if (!fin.good()) {
+        throw std::iostream::failure("Failed to read label mask file");
+        exit(1);
+    }
+
     std::string line;
     std::vector<std::string> lines;
     unsigned int num_experiments = 0;
@@ -243,13 +250,7 @@ int assemble(Config *config) {
 
         assert(!config->label_mask_file.empty());
 
-        std::ifstream fin(config->label_mask_file);
-        if (!fin.good()) {
-            throw std::iostream::failure("Failed to read label mask file");
-            exit(1);
-        }
-
-        auto [lines, num_experiments] = parse_diff_file(fin);
+        auto [lines, num_experiments] = parse_diff_file(config->label_mask_file);
         if (!num_experiments)
             return 0;
 
