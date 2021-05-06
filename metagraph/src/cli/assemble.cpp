@@ -149,6 +149,9 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
         auto line_split = utils::split_string(line, "\t", false);
 
         if (line[0] == '@') {
+            // lines of the form '@\tIN1,IN2,IN3\tOUT1,OUT2,OUT3' designate
+            // in- and out-labels which are shared by all subsequent lines.
+            // A line of this form does NOT define an assembly experiment on its own.
             logger->trace("Counting shared k-mers");
 
             // shared in and out labels
@@ -208,6 +211,7 @@ parse_diff_file(const std::string &fname) {
     std::vector<std::string> lines;
     unsigned int num_experiments = 0;
     while (std::getline(fin, line)) {
+        // lines starting with '#' are considered to be comments and ignored
         if (line.empty() || line[0] == '#')
             continue;
 
