@@ -1146,7 +1146,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path out_dir,
                          fs::path swap_dir,
                          RowDiffStage construction_stage,
-                         fs::path count_vector_fname) {
+                         fs::path count_vector_fname,
+                         bool with_values) {
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1184,6 +1185,19 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         for ( ; i < files.size(); ++i) {
             // also add some space for buffers for each column
             uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
+            if (with_values) {
+                // also add k-mer counts
+                try {
+                    const auto &values_fname
+                        = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kCountExtension;
+                    file_size += fs::file_size(values_fname);
+                } catch (...) {
+                    // Count vectors may be missing for empty annotations. If a count file
+                    // is missing for a non-empty annotation, the error will be thrown later
+                    // in convert_batch_to_row_diff, so we skip it here in any case.
+                }
+            }
             if (file_size > mem_bytes) {
                 logger->warn("Not enough memory to process {}, requires {} MB, skipped",
                              files[i], file_size / 1e6);
@@ -1214,7 +1228,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         } else {
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
-                    construction_stage == RowDiffStage::COMPUTE_REDUCTION);
+                    construction_stage == RowDiffStage::COMPUTE_REDUCTION,
+                    with_values);
         }
 
         logger->trace("Batch processed in {} sec", timer.elapsed());

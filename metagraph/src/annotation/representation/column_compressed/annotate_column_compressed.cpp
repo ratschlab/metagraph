@@ -56,6 +56,20 @@ ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
 }
 
 template <typename Label>
+ColumnCompressed<Label>::ColumnCompressed(std::vector<std::unique_ptr<bit_vector>>&& columns,
+                                          const LabelEncoder<Label> &label_encoder,
+                                          size_t num_columns_cached,
+                                          const std::string &swap_dir,
+                                          uint64_t buffer_size_bytes,
+                                          uint8_t count_width)
+      : ColumnCompressed(columns.at(0)->size(),
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+    bitmatrix_ = std::move(columns);
+    label_encoder_ = label_encoder;
+    flushed_ = true;
+}
+
+template <typename Label>
 ColumnCompressed<Label>::~ColumnCompressed() {
     // Note: this is needed to make sure that everything is flushed to bitmatrix_
     //       BEFORE bitmatrix_ is destroyed

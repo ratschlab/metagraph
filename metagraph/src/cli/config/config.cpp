@@ -567,6 +567,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
+                                    || anno_type == IntRowDiffBRWT
                                     || anno_type == RowDiffRowSparse;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
@@ -684,6 +685,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_sparse";
         case IntBRWT:
             return "int_brwt";
+        case IntRowDiffBRWT:
+            return "row_diff_int_brwt";
     }
     throw std::runtime_error("Never happens");
 }
@@ -715,6 +718,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowSparse;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
+    } else if (string == "row_diff_int_brwt") {
+        return AnnotationType::IntRowDiffBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -777,7 +782,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
-                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
@@ -1125,6 +1130,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
+            fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\n");
