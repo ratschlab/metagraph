@@ -694,7 +694,8 @@ template <typename NodeType>
 bool DefaultColumnExtender<NodeType>
 ::skip_backtrack_start(const std::vector<DBGAlignment> &extensions,
                        const AlignNode &) const {
-    return extensions.size() == config_.num_alternative_paths;
+    return extensions.size() >= config_.num_alternative_paths
+        && extensions.back().get_score() < extensions.front().get_score();
 }
 
 template <typename NodeType>
