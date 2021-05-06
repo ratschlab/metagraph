@@ -85,7 +85,7 @@ void test_mask_unitigs(double inlabel_fraction,
                        double outlabel_fraction,
                        double other_label_fraction,
                        const std::unordered_set<std::string> &ref_kmers) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : {1, 4}) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
         size_t k = 3;
