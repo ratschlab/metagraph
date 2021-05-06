@@ -243,10 +243,8 @@ TEST(AnnotatedDBG, Transform) {
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 convert<RowFlatAnnotator>(
-                    std::move(dynamic_cast<ColumnCompressed<>&>(
-                        *anno_graph->annotator_
-                    )
-                )).release()
+                    dynamic_cast<ColumnCompressed<>&&>(*anno_graph->annotator_)
+                ).release()
             )
         );
 
