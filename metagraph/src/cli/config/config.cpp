@@ -173,10 +173,14 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
-        } else if (!strcmp(argv[i], "--intersect-columns")) {
-            intersect_columns = true;
-        } else if (!strcmp(argv[i], "--intersect-ratio")) {
-            intersect_ratio = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--aggregate-columns")) {
+            aggregate_columns = true;
+        } else if (!strcmp(argv[i], "--intersected-anno")) {
+            intersected_columns = get_value(i++);
+        } else if (!strcmp(argv[i], "--min-fraction")) {
+            min_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-fraction")) {
+            max_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -309,6 +313,8 @@ Config::Config(int argc, char *argv[]) {
             min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
             fallback_abundance_cutoff = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--smoothing-window")) {
+            smoothing_window = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-singletons")) {
             num_singleton_kmers = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
@@ -422,8 +428,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (intersect_ratio < 0 || intersect_ratio > 1) {
-        std::cerr << "Error: intersection ratio must be in range [0, 1]"
+    if (min_fraction < 0 || min_fraction > 1 || max_fraction < 0 || max_fraction > 1) {
+        std::cerr << "Error: min_fraction and max_fraction must be in range [0, 1]"
                   << std::endl;
         print_usage_and_exit = true;
     }
@@ -672,6 +678,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
+        case IntBRWT:
+            return "int_brwt";
     }
     throw std::runtime_error("Never happens");
 }
@@ -701,6 +709,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
+    } else if (string == "int_brwt") {
+        return AnnotationType::IntBRWT;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -762,9 +772,9 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse,\n"
-                                   "\t\t  row, flat, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -857,6 +867,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\t                         \t\tthan this value (0: auto) [1]\n");
             fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be\n"
                             "\t                         \t\tdetermined (-1: disables fallback) [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --smoothing-window [INT] \twindow size for smoothing k-mer counts in unitigs [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-bins-q [FLOAT ...] \tbinning quantiles for partitioning k-mers with\n"
                             "\t                              \t\tdifferent abundance levels ['0 1']\n"
@@ -1051,9 +1063,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
-            fprintf(stderr, "\t   --anchors [STR]\t\tlocation of the anchor file (for row_diff) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
+            fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1084,8 +1096,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform_anno -o <annotation-basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --intersect-columns \t\tcompute intersection of the annotation columns [off]\n");
-            fprintf(stderr, "\t   --intersect-ratio [FLOAT] \tinclude k-mer if it appears in this ratio of columns [1.0]\n");
+            fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
+            fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
+            fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
+            fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
+            fprintf(stderr, "\t   --intersected-anno [STR] \tannotation with columns to intersect with ANNOTATOR (count shared bits) [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
@@ -1132,6 +1149,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");

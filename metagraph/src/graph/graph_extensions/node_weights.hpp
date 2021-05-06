@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <sdsl/int_vector.hpp>
+#include <sdsl/int_vector_buffer.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -36,6 +37,9 @@ class NodeWeights : public SequenceGraph::GraphExtension {
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
+    // serialize weights from buffer |weights| without loading all in RAM
+    static void serialize(sdsl::int_vector_buffer<>&& weights,
+                          const std::string &filename_base);
 
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 

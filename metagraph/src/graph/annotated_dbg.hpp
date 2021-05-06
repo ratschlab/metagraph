@@ -79,7 +79,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // add k-mer counts to the annotation
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
-                         std::vector<uint32_t>&& kmer_counts);
+                         std::vector<uint64_t>&& kmer_counts);
 
     /*********************** Special queries **********************/
 
@@ -90,16 +90,22 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<Label> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                                   size_t min_count) const;
 
-    // return top |num_top_labels| labels with their counts
+    // Return top |num_top_labels| labels with their counts.
+    // The returned counts are weighted by the annotated relation counts if
+    // |with_kmer_counts| is true.
     std::vector<std::pair<Label, size_t>>
     get_top_labels(std::string_view sequence,
                    size_t num_top_labels,
-                   double presence_ratio = 0.0) const;
+                   double presence_ratio = 0.0,
+                   bool with_kmer_counts = false) const;
 
+    // The returned counts are weighted by the annotated relation counts if
+    // |with_kmer_counts| is true.
     std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                    size_t num_top_labels,
-                   size_t min_count = 0) const;
+                   size_t min_count = 0,
+                   bool with_kmer_counts = false) const;
 
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,

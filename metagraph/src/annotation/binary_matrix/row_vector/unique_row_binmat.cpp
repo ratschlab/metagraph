@@ -66,12 +66,6 @@ bool UniqueRowBinmat::get(Row i, Column j) const {
     return std::find(row.begin(), row.end(), j) != row.end();
 }
 
-UniqueRowBinmat::SetBitPositions UniqueRowBinmat::get_row(Row i) const {
-    assert(i < row_rank_.size());
-    assert(row_rank_[i] < unique_rows_.size());
-    return unique_rows_[row_rank_[i]];
-}
-
 std::vector<BinaryMatrix::SetBitPositions>
 UniqueRowBinmat::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows;

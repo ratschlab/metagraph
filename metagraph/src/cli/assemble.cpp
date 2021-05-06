@@ -26,22 +26,18 @@ using mtg::graph::DifferentialAssemblyConfig;
 
 void clean_label_set(const AnnotatedDBG &anno_graph,
                      std::vector<std::string> &label_set) {
-    label_set.erase(std::remove_if(label_set.begin(), label_set.end(),
-        [&](const std::string &label) {
-            bool exists = anno_graph.label_exists(label);
-            if (!exists)
-                logger->trace("Removing label {}", label);
-
-            return !exists;
+    bool detected_missing_labels = false;
+    for (const std::string &label : label_set) {
+        if (!anno_graph.label_exists(label)) {
+            detected_missing_labels = true;
+            logger->trace("Label {} is not found in annotation", label);
         }
-    ), label_set.end());
+    }
+
+    if (detected_missing_labels)
+        exit(1);
 
     std::sort(label_set.begin(), label_set.end());
-    auto end = std::unique(label_set.begin(), label_set.end());
-    for (auto it = end; it != label_set.end(); ++it) {
-        logger->trace("Removing duplicate label {}", *it);
-    }
-    label_set.erase(end, label_set.end());
 }
 
 
@@ -63,16 +59,25 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
         &label_mask_in_post, &label_mask_out_post
     };
 
+    bool has_overlap = false;
     for (const auto *label_set : label_sets) {
         for (const auto *other_label_set : label_sets) {
             if (label_set == other_label_set)
                 continue;
 
             if (utils::count_intersection(label_set->begin(), label_set->end(),
-                                          other_label_set->begin(), other_label_set->end()))
-                logger->warn("Overlapping label sets");
+                                          other_label_set->begin(), other_label_set->end())) {
+                has_overlap = true;
+                break;
+            }
         }
+
+        if (has_overlap)
+            break;
     }
+
+    if (has_overlap)
+        logger->warn("Overlapping label sets");
 
     logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
     logger->trace("Masked in (post-processing): {}", fmt::join(label_mask_in_post, " "));

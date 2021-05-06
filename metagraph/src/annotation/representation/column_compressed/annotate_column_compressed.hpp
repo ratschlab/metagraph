@@ -32,13 +32,15 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size_bytes = 1e9);
+                     uint64_t buffer_size_bytes = 1e9,
+                     uint8_t count_width = 8);
 
     ColumnCompressed(sdsl::bit_vector&& column,
                      const std::string &column_label,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size_bytes = 1e9);
+                     uint64_t buffer_size_bytes = 1e9,
+                     uint8_t count_width = 8);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
@@ -52,7 +54,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     // for each label and index 'indices[i]' add count 'counts[i]'
     void add_label_counts(const std::vector<Index> &indices,
                           const VLabels &labels,
-                          const std::vector<uint32_t> &counts) override;
+                          const std::vector<uint64_t> &counts) override;
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
@@ -66,6 +68,14 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
+
+    using ValuesCallback = std::function<void(uint64_t offset,
+                                              const Label &,
+                                              sdsl::int_vector<>&&)>;
+    static void load_column_values(const std::vector<std::string> &filenames,
+                                   const ValuesCallback &callback,
+                                   size_t num_threads = 1);
+
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 
@@ -100,6 +110,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     std::string file_extension() const override { return kExtension; }
 
     static constexpr auto kExtension = ".column.annodbg";
+    static constexpr auto kCountExtension = ".column.annodbg.counts";
 
   private:
     void set(Index i, size_t j, bool value);
@@ -124,6 +135,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
+    uint8_t count_width_;
+    uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
 
     using MultiLabelEncoded<Label>::label_encoder_;

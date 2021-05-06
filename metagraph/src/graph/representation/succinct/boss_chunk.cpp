@@ -269,7 +269,7 @@ void BOSS::Chunk::extend(Chunk &other) {
     assert(!weights_.size() || weights_.size() == W_.size());
 }
 
-void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
+void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector_buffer<> *weights) {
     assert(last_.size() == W_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
 
@@ -278,16 +278,15 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(graph->is_valid());
 
     if (weights) {
-        weights_.flush();
-        std::ifstream in(weights_.filename(), std::ios::binary);
-        weights->load(in);
+        *weights = sdsl::int_vector_buffer<>();
+        weights->swap(weights_);
     }
 }
 
 BOSS*
 BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                                     bool verbose,
-                                    sdsl::int_vector<> *weights,
+                                    sdsl::int_vector_buffer<> *weights,
                                     const std::string &swap_dir) {
     assert(chunk_filenames.size());
 

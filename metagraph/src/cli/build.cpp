@@ -157,11 +157,12 @@ int build_graph(Config *config) {
         assert(graph_data.size());
 
         if (config->count_kmers) {
-            sdsl::int_vector<> kmer_counts;
+            sdsl::int_vector_buffer<> kmer_counts;
             graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
-            graph->add_extension(std::make_shared<NodeWeights>(std::move(kmer_counts)));
-            assert(graph->get_extension<NodeWeights>()->is_compatible(*graph));
+            NodeWeights::serialize(std::move(kmer_counts),
+                    utils::remove_suffix(config->outfbase, DBGSuccinct::kExtension)
+                                                            + DBGSuccinct::kExtension);
         } else {
             graph_data.initialize_boss(boss_graph.get());
             graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));

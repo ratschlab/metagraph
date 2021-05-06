@@ -216,7 +216,6 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     return std::move(*masked_graph);
 }
 
-
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,

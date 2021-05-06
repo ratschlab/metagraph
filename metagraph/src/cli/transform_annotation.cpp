@@ -1,5 +1,7 @@
 #include "transform_annotation.hpp"
 
+#include <progress_bar.hpp>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -228,6 +230,69 @@ parse_linkage_matrix(const std::string &filename) {
     return linkage;
 }
 
+auto convert_to_MultiBRWT(const std::vector<std::string> &files,
+                          const Config &config) {
+    std::string linkage_file = config.linkage_file;
+    if (!linkage_file.size()) {
+        logger->trace("Generating new column linkage...");
+        binmat::LinkageMatrix linkage_matrix
+                = compute_linkage(files, Config::ColumnCompressed, config);
+        linkage_file = config.outfbase + ".linkage";
+        std::ofstream out(linkage_file);
+        out << linkage_matrix.format(CSVFormat) << std::endl;
+        logger->trace("Generated new linkage and saved to {}", linkage_file);
+    }
+
+    auto linkage = parse_linkage_matrix(linkage_file);
+    logger->trace("Linkage loaded from {}", linkage_file);
+
+    return convert_to_BRWT<MultiBRWTAnnotator>(
+                files, linkage, config.parallel_nodes,
+                get_num_threads(), config.tmp_dir);
+}
+
+IntMultiBRWTAnnotator
+convert_to_IntMultiBRWT(const std::vector<std::string> &files,
+                        const Config &config,
+                        const Timer &timer) {
+    auto brwt_annotator = convert_to_MultiBRWT(files, config);
+
+    logger->trace("Converted to Multi-BRWT in {} sec", timer.elapsed());
+
+    std::vector<sdsl::dac_vector_dp<>> column_values;
+    ColumnCompressed<>::load_column_values(files,
+        [&](size_t j, const std::string &label, sdsl::int_vector<>&& values) {
+            if (label != brwt_annotator->get_label_encoder().decode(j)) {
+                logger->error("The order of labels in Multi-BRWT is different"
+                              " from the order of the input columns");
+                exit(1);
+            }
+            sdsl::dac_vector_dp<> values_compressed(std::move(values));
+            #pragma omp critical
+            {
+                while (j >= column_values.size()) {
+                    column_values.push_back(sdsl::int_vector<>());
+                }
+                column_values[j] = std::move(values_compressed);
+            }
+        },
+        get_num_threads()
+    );
+
+    if (column_values.size() != brwt_annotator->num_labels()) {
+        logger->error("The number of annotation columns does not match"
+                      " the number of columns with relation values ({} != {})",
+                      brwt_annotator->num_labels(), column_values.size());
+        exit(1);
+    }
+
+    auto multi_brwt = brwt_annotator->release_matrix();
+    return IntMultiBRWTAnnotator(
+                std::make_unique<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>(
+                        std::move(*multi_brwt), std::move(column_values)),
+                brwt_annotator->get_label_encoder());
+}
+
 
 int transform_annotation(Config *config) {
     assert(config);
@@ -369,17 +434,28 @@ int transform_annotation(Config *config) {
     /**************** operations on columns *****************/
     /********************************************************/
 
-    if (config->intersect_columns) {
+    if (config->aggregate_columns) {
         logger->trace("Loading annotation...");
 
         uint64_t num_columns = get_num_columns(files, Config::ColumnCompressed);
         if (!num_columns) {
-            logger->warn("No input columns to intersect");
+            logger->warn("No input columns to aggregate");
             exit(1);
         }
 
-        sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
+        const uint64_t min_cols
+            = std::max((uint64_t)std::ceil(num_columns * config->min_fraction),
+                       (uint64_t)config->min_count);
+        const uint64_t max_cols
+            = std::min((uint64_t)std::floor(num_columns * config->max_fraction),
+                       (uint64_t)config->max_count);
 
+        // TODO: set width to log2(max_cols + 1) but make sure atomic
+        //       increments can't lead to overflow
+        sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
+        ProgressBar progress_bar(num_columns, "Intersect columns",
+                                 std::cerr, !get_verbose());
+        ThreadPool thread_pool(get_num_threads(), 1);
         std::mutex mu;
         auto on_column = [&](uint64_t, const auto &, auto&& col) {
             #pragma omp critical
@@ -392,8 +468,11 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
             }
-            col->call_ones([&](uint64_t i) {
-                atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+            thread_pool.enqueue([&,col{std::move(col)}]() {
+                col->call_ones([&](uint64_t i) {
+                    atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+                });
+                ++progress_bar;
             });
         };
 
@@ -401,29 +480,73 @@ int transform_annotation(Config *config) {
             logger->error("Couldn't load annotations");
             exit(1);
         }
+        thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        uint64_t min_cols = num_columns * config->intersect_ratio;
-        logger->trace("Selecting k-mers supported in at least {} / {} columns",
-                      min_cols, num_columns);
+        logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
+                      min_cols, max_cols, num_columns);
 
-        sdsl::bit_vector intersection(sum.size(), false);
+        sdsl::bit_vector mask(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
-            if (sum[i] >= min_cols) {
-                intersection[i] = true;
+            if (sum[i] >= min_cols && sum[i] <= max_cols) {
+                mask[i] = true;
             }
         }
         sum = sdsl::int_vector<>();
 
-        ColumnCompressed<> intersected_column(std::move(intersection),
-                                              "intersection");
+        const std::string &col_name = config->anno_labels.size()
+                                        ? config->anno_labels[0]
+                                        : "mask";
+        ColumnCompressed<> aggregated_column(std::move(mask), col_name);
 
         const auto &outfname = utils::remove_suffix(config->outfbase,
                                                     ColumnCompressed<>::kExtension)
                                                 + ColumnCompressed<>::kExtension;
-        intersected_column.serialize(outfname);
-        logger->trace("Columns are intersected and the resulting column"
-                      " is serialized to {}", outfname);
+        aggregated_column.serialize(outfname);
+        logger->trace("Columns are aggregated and the resulting column '{}'"
+                      " serialized to {}", col_name, outfname);
+        return 0;
+    }
+
+    // TODO: move to column_op
+    if (config->intersected_columns.size()) {
+        ColumnCompressed<> base_columns(0);
+        if (!base_columns.load(config->intersected_columns)) {
+            logger->error("Cannot load base columns from file '{}'",
+                          config->intersected_columns);
+            exit(1);
+        }
+
+        logger->trace("Loading input annotations and computing the inner product...");
+
+        for (const auto &file : files) {
+            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+                    = initialize_annotation(file, *config);
+            if (!annotator->load(file)) {
+                logger->error("Cannot load annotations from file '{}'", file);
+                exit(1);
+            }
+
+            for (const std::string &base_label : base_columns.get_all_labels()) {
+                std::vector<std::pair<uint64_t, size_t>> col;
+                base_columns.get_column(base_label).call_ones([&col](uint64_t i) {
+                    col.emplace_back(i, 1);
+                });
+                // TODO: make parallel (call sum_rows on batches)
+                auto row_sum = annotator->get_matrix().sum_rows(std::move(col),
+                                                                config->min_count,
+                                                                config->max_count);
+
+                std::cout << fmt::format("({}<{}>, {}<*>):", config->intersected_columns,
+                                         base_label, file);
+                for (auto [j, sum] : row_sum) {
+                    const std::string &label = annotator->get_label_encoder().decode(j);
+                    std::cout << fmt::format("\t<{}>:{}", label, sum);
+                }
+                std::cout << "\n";
+            }
+        }
+
         return 0;
     }
 
@@ -514,6 +637,7 @@ int transform_annotation(Config *config) {
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
+                && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -572,30 +696,17 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BRWT: {
-                if (!config->linkage_file.size()) {
-                    logger->trace("Generating new column linkage...");
-                    binmat::LinkageMatrix linkage_matrix
-                            = compute_linkage(files, input_anno_type, *config);
-                    config->linkage_file = config->outfbase + ".linkage";
-                    std::ofstream out(config->linkage_file);
-                    out << linkage_matrix.format(CSVFormat) << std::endl;
-                    logger->trace("Generated new linkage and saved to {}",
-                                  config->linkage_file);
-                }
-                std::vector<std::vector<uint64_t>> linkage
-                        = parse_linkage_matrix(config->linkage_file);
-                logger->trace("Linkage loaded from {}", config->linkage_file);
-
-                auto brwt_annotator = convert_to_BRWT<MultiBRWTAnnotator>(
-                        files, linkage, config->parallel_nodes,
-                        get_num_threads(), config->tmp_dir);
-
+                auto brwt_annotator = convert_to_MultiBRWT(files, *config);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
-
-                logger->trace("Serializing to '{}'", config->outfbase);
-
                 brwt_annotator->serialize(config->outfbase);
-
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::IntBRWT: {
+                auto annotator = convert_to_IntMultiBRWT(files, *config, timer);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                annotator.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
             case Config::BinRelWT_sdsl: {
@@ -797,6 +908,9 @@ int relax_multi_brwt(Config *config) {
         case Config::RowDiffBRWT:
             annotator = std::make_unique<RowDiffBRWTAnnotator>();
             break;
+        case Config::IntBRWT:
+            annotator = std::make_unique<IntMultiBRWTAnnotator>();
+            break;
         default:
             logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
             exit(1);
@@ -814,7 +928,9 @@ int relax_multi_brwt(Config *config) {
 
     const binmat::BRWT &matrix = anno_type == Config::BRWT
             ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
-            : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs();
+            : (anno_type == Config::IntBRWT
+                ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
+                : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs());
     relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
                get_num_threads());
 

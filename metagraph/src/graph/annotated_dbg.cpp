@@ -10,6 +10,7 @@
 
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -18,6 +19,8 @@
 
 namespace mtg {
 namespace graph {
+
+using mtg::annot::matrix::IntMatrix;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -69,7 +72,7 @@ void AnnotatedSequenceGraph
 
 void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
                                    const std::vector<Label> &labels,
-                                   std::vector<uint32_t>&& kmer_counts) {
+                                   std::vector<uint64_t>&& kmer_counts) {
     assert(check_compatibility());
     assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
 
@@ -164,7 +167,8 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
-                             double presence_ratio) const {
+                             double presence_ratio,
+                             bool with_kmer_counts) const {
     assert(presence_ratio >= 0.);
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
@@ -190,10 +194,11 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         return {};
 
     auto top_labels = get_top_labels(index_counts.values_container(),
-                                     num_top_labels, min_count);
+                                     num_top_labels, min_count, with_kmer_counts);
 
     assert(std::all_of(top_labels.begin(), top_labels.end(),
-                       [&](const auto &pair) { return pair.second <= num_kmers; }));
+                       [&](const auto &pair) { return pair.second <= num_kmers; })
+            || with_kmer_counts);
 
     return top_labels;
 }
@@ -320,18 +325,16 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     return results;
 }
 
-std::vector<StringCountPair>
-AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
-                             size_t num_top_labels,
-                             size_t min_count) const {
-    assert(check_compatibility());
-
-    auto code_counts = annotator_->get_matrix().sum_rows(index_counts, min_count);
-
+template <class Container>
+std::vector<StringCountPair> top_labels(Container&& code_counts,
+                                        const annot::LabelEncoder<> &label_encoder,
+                                        size_t num_top_labels,
+                                        size_t min_count) {
     assert(std::all_of(
         code_counts.begin(), code_counts.end(),
         [&](const auto &code_count) { return code_count.second >= min_count; }
     ));
+    std::ignore = min_count;
 
     if (code_counts.size() > num_top_labels) {
         // sort labels by counts to get the top |num_top_labels|
@@ -344,8 +347,6 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
         code_counts.resize(num_top_labels);
     }
 
-    const auto &label_encoder = annotator_->get_label_encoder();
-
     // TODO: remove this step?
     std::vector<StringCountPair> label_counts(code_counts.size());
     for (size_t i = 0; i < code_counts.size(); ++i) {
@@ -354,6 +355,25 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     }
 
     return label_counts;
+}
+
+std::vector<StringCountPair>
+AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
+                             size_t num_top_labels,
+                             size_t min_count,
+                             bool with_kmer_counts) const {
+    assert(check_compatibility());
+
+    if (with_kmer_counts) {
+        return top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
+                                                  .sum_row_values(index_counts, min_count),
+                          annotator_->get_label_encoder(),
+                          num_top_labels, min_count);
+    } else {
+        return top_labels(annotator_->get_matrix().sum_rows(index_counts, min_count),
+                          annotator_->get_label_encoder(),
+                          num_top_labels, min_count);
+    }
 }
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {

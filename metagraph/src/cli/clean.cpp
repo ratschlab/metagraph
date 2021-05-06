@@ -68,7 +68,7 @@ int clean_graph(Config *config) {
             || config->min_unitig_median_kmer_abundance != 1
             || config->count_slice_quantiles[0] != 0
             || config->count_slice_quantiles[1] != 1) {
-        if (!(node_weights)) {
+        if (!node_weights) {
             logger->error("Cannot load k-mer counts from file '{}'", files.at(0));
             exit(1);
         }
@@ -142,7 +142,7 @@ int clean_graph(Config *config) {
                     callback(unitig, path);
             }, num_threads, config->min_tip_size, graph->get_mode() == graph::DeBruijnGraph::CANONICAL);
 
-        } else if (config->unitigs || config->min_tip_size > 1) {
+        } else if (config->unitigs || config->min_tip_size > 1 || config->smoothing_window > 1) {
             graph->call_unitigs(callback,
                                 num_threads,
                                 config->min_tip_size,
@@ -174,6 +174,8 @@ int clean_graph(Config *config) {
                 for (auto node : path) {
                     kmer_counts.push_back((*node_weights)[node]);
                 }
+                // smooth k-mer counts in the unitig
+                utils::smooth_vector(config->smoothing_window, &kmer_counts);
 
                 std::lock_guard<std::mutex> lock(seq_mutex);
                 writer.write(contig, kmer_counts);
