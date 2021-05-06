@@ -1,7 +1,7 @@
 MetaGraph - User Manual
 =======================
 
-Welcome to the user manual of MetaGraph!
+Welcome to the user manual of `MetaGraph <https://metagraph.ethz.ch>`_!
 
 This manual includes setup instructions and usage tutorials outlining the key use cases for the MetaGraph
 framework, a software platform for indexing and analysis of very large sequence collections.
