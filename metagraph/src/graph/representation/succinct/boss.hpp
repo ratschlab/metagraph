@@ -158,10 +158,7 @@ class BOSS {
 
     edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
         TAlphabet d = get_W(edge) % alph_size;
-
-        if (!d)
-            return npos;
-
+        assert(d != kSentinelCode && "sinks have no row-diff successors");
         // make one traversal step
         edge = fwd(edge, d);
         // pick the row-diff successor
