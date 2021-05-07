@@ -77,6 +77,8 @@ class Config {
     double memory_available = 1;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
+    unsigned int min_value = 1;
+    unsigned int max_value = std::numeric_limits<unsigned int>::max();
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;

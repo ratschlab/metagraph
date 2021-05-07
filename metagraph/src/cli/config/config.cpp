@@ -181,6 +181,10 @@ Config::Config(int argc, char *argv[]) {
             min_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--max-fraction")) {
             max_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--min-value")) {
+            min_value = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--max-value")) {
+            max_value = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
@@ -1103,9 +1107,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
+            fprintf(stderr, "\t                       \t\t\tFormula: min-count <= \\sum_i 1{min-value <= c_i <= max-value} <= max-count\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
+            fprintf(stderr, "\t   --min-value [INT] \t\tmin value for filtering [1]\n");
             fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
+            fprintf(stderr, "\t   --max-value [INT] \t\tmax value for filtering [inf]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
             fprintf(stderr, "\t   --intersected-anno [STR] \tannotation with columns to intersect with ANNOTATOR (count shared bits) [off]\n");
