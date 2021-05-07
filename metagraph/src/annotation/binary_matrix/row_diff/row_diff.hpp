@@ -152,8 +152,6 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 
     while (!anchor_[row]) {
         boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-        if (!boss_edge)
-            return result;
 
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
@@ -195,7 +193,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
         graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
                 graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
 
-        while (boss_edge) {
+        while (true) {
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                     graph_->boss_to_kmer_index(boss_edge));
 

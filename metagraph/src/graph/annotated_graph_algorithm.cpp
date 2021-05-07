@@ -374,7 +374,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     std::mutex vector_backup_mutex;
     std::atomic_thread_fence(std::memory_order_release);
     bool async = num_threads > 1;
-    binmat.slice_columns(label_in_codes,
+    binmat.call_columns(label_in_codes,
         [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
@@ -391,7 +391,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     counts.width(width);
     std::atomic_thread_fence(std::memory_order_release);
 
-    binmat.slice_columns(label_out_codes,
+    binmat.call_columns(label_out_codes,
         [&](auto, const bitmap &rows) {
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
