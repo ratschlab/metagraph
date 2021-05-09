@@ -128,6 +128,8 @@ void TaxClassifier::update_scores_and_lca(const TaxId start_node,
             act_dist_to_root > *best_lca_dist_to_root) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
+        } else if (act_dist_to_root == *best_lca_dist_to_root && (*node_scores)[act_node] > (*node_scores)[*best_lca]) {
+            *best_lca = act_node;
         }
     }
     for (uint64_t i = 0; i < processed_parents.size(); ++i) {
@@ -139,6 +141,8 @@ void TaxClassifier::update_scores_and_lca(const TaxId start_node,
             act_dist_to_root > *best_lca_dist_to_root) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
+        } else if (act_dist_to_root == *best_lca_dist_to_root && (*node_scores)[act_node] > (*node_scores)[*best_lca]) {
+            *best_lca = act_node;
         }
     }
 }
