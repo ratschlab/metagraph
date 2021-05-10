@@ -118,7 +118,7 @@ rule build_canonical_graph_single_sample:
     output:
         graph=temp(canonical_graphs_dir/"{sample_id}.dbg"),
         temp_dir=temp(directory(wdir / "temp_build_canonical_{sample_id}")),
-    threads: max_threads
+    threads: BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_threads(max_threads)
     resources:
         mem_mb=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem(),
         disk_mb=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_disk(),
@@ -158,7 +158,7 @@ PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="primarize_canonical_graph_single_s
 rule primarize_canonical_graph_single_sample:
     input: canonical_graphs_dir/"{sample_id}.dbg"
     output: temp(contigs_dir/"{sample_id}_primary.fasta.gz")
-    threads: max_threads
+    threads: PrimarizeCanonicalGraphSingleSampleResources(config).get_threads(max_threads)
     resources:
         mem_mb=PrimarizeCanonicalGraphSingleSampleResources(config).get_mem(),
     priority: 100
