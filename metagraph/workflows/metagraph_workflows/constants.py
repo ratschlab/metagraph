@@ -8,7 +8,7 @@ PRIMARIZE_SAMPLES_SEPARATELY = 'primarize_samples_separately'
 
 KMC_MAX_BINS="kmc_max_bins"
 KMC_MEM_MB_PER_THREAD="kmc_mem_mb_per_thread"
-
+KMC_MEM_OVERHEAD_FACTOR= "kmc_mem_overhead_factor"
 
 SAMPLE_IDS_PATH="sample_ids_path"
 SAMPLE_STAGING_SCRIPT_PATH="sample_staging_script_path"

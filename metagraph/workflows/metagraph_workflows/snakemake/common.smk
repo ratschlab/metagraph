@@ -32,7 +32,7 @@ def get_disk_cap(wilcards, resources):
 
 def generate_col_paths(seq_file):
     with open(seq_file) as f:
-        column_names = [f"{f.strip().split('/')[-1]}" for f in f.readlines()]
+        column_names = [f"{f.strip().rstrip('/').split('/')[-1]}" for f in f.readlines()]
 
         duplicate_col_names = [grp_key for (grp_key, names_lst) in itertools.groupby(sorted(column_names)) if len(list(names_lst)) > 1]
         assert not duplicate_col_names, f"Found duplicate filenames: { ', '.join(duplicate_col_names)}"

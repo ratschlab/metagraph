@@ -7,12 +7,13 @@ from metagraph_workflows import constants
 
 
 def get_sample_name(l):
-    file_name = Path(l).name.strip()
+    file_name = Path(l.strip()).name
 
-    m = re.compile(r'(.*)\.(fasta|[a-zA-Z]{2,4})(.gz)?').match(file_name)
+    m = re.compile(r'^([^.]*)\.(fasta|[a-zA-Z]{2,4})(\.gz)?$').match(file_name)
     if m:
         return m.groups()[0]
-    return None  # TODO add warning or excpeiotn
+
+    return file_name
 
 
 def derive_sample_dictionary(transcript_path_list_path: Union[Path, str]):
@@ -58,7 +59,7 @@ def generate_col_paths(annotation_cols_path, seqs_file_list_path, config):
 
     else:
         with open(seqs_file_list_path) as f:
-            column_names = [f"{f.strip().split('/')[-1]}" for f in
+            column_names = [f"{f.strip().rstrip('/').split('/')[-1]}" for f in
                             f.readlines()]
 
             duplicate_col_names = [grp_key for (grp_key, names_lst) in

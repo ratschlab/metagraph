@@ -72,27 +72,40 @@ rule extract_kmer_counts:
         temp_dir=temp(directory(kmc_dir/"temp_{sample_id}.kmc")),
     threads: ResourceConfig(EXTRACT_KMER_COUNTS_RULE, config).get_threads(max_threads)
     resources:
-        mem_mb=lambda wildcards, threads: threads * config[constants.KMC_MEM_MB_PER_THREAD]
+        mem_mb=lambda wildcards, threads: int((threads * config[constants.KMC_MEM_MB_PER_THREAD]) * config[constants.KMC_MEM_OVERHEAD_FACTOR])
     priority: 10
     params:
         k=config['k'],
         max_bins=config[constants.KMC_MAX_BINS],
-        max_ram_gb=lambda wildcards, resources: max(int(resources.mem_mb/1024.0), 1),
+        mem_buffer=lambda wildcards, resources: max(int((resources.mem_mb * (1.0 / config[constants.KMC_MEM_OVERHEAD_FACTOR])) / 1024), 1),
         base=lambda wildcards: kmc_dir/wildcards['sample_id'],
     log: cfg_utils.get_log_path(EXTRACT_KMER_COUNTS_RULE, config, ['sample_id'])
     shell:
-        """
-        FORMAT_FLAG="-fq"
-        
-        if [[ "{input}" =~ .*(.fa|.fa.gz|.fasta|.fasta.gz|.fna|.fna.gz)$  ]]; then
-             FORMAT_FLAG="-fm"
-        fi
-        
+        """        
         KMC_BINS=$(( $(ulimit -n) - 10))
         KMC_BINS=$(( KMC_BINS > {params.max_bins} ? {params.max_bins} : KMC_BINS))
 
         mkdir -p {output.temp_dir}
-        {time_cmd} kmc -v -k{params.k} -m{params.max_ram_gb} -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG {input} {params.base} {output.temp_dir} > {log} 2>&1
+                
+        INPUT="{input}"
+        SOME_INPUT_FILE="{input}"
+        if [ -d {input} ]; then
+            # in case sample is split up in several files
+            SAMPLE_FILE={output.temp_dir}/samples.lst
+            ls {input}/* > $SAMPLE_FILE
+            INPUT="$SAMPLE_FILE"
+            INPUT="@$INPUT"
+            
+            # pick arbitrary file, assuming all file in the directory are of the same type
+            SOME_INPUT_FILE=$(cat $SAMPLE_FILE | head -n 1)
+        fi
+        
+        FORMAT_FLAG="-fq"
+        if [[ "$SOME_INPUT_FILE" =~ .*(.fa|.fa.gz|.fasta|.fasta.gz|.fna|.fna.gz)$  ]]; then
+             FORMAT_FLAG="-fm"
+        fi
+        
+        {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} > {log} 2>&1
         """
 
 kmer_estimates=True
@@ -102,7 +115,9 @@ rule build_canonical_graph_single_sample:
     input:
         seq=rule_utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict),
         kmer=kmc_dir/"{sample_id}.json" if kmer_estimates else []
-    output: temp(canonical_graphs_dir/"{sample_id}.dbg")
+    output:
+        graph=temp(canonical_graphs_dir/"{sample_id}.dbg"),
+        temp_dir=temp(directory(wdir / "temp_build_canonical_{sample_id}")),
     threads: max_threads
     resources:
         mem_mb=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem(),
@@ -111,19 +126,31 @@ rule build_canonical_graph_single_sample:
     params:
         k=config['k'],
         tempdir_opt=cfg_utils.temp_dir_config(config),
+        temp_file=wdir,
         mem_buffer=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_disk_cap(),
     log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        echo "{input.seq}" | {time_cmd} {metagraph_cmd} build {verbose_opt} \
+        
+        INPUT_CMD="echo {input.seq}"
+        
+        mkdir -p {output.temp_dir}
+        
+        SAMPLE_FILE={output.temp_dir}/samples.lst
+        if [ -d {input.seq} ]; then
+            ls {input.seq}/* > $SAMPLE_FILE
+            INPUT_CMD="cat $SAMPLE_FILE"
+        fi
+        
+        $INPUT_CMD | {time_cmd} {metagraph_cmd} build {verbose_opt} \
         --parallel {threads} \
         --mode canonical \
         -k {params.k} \
-        -o {output} \
+        -o {output.graph} \
         --mem-cap-gb {params.mem_buffer} \
         --disk-cap-gb {params.disk_cap} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} > {log} 2>&1  
         """
 
 
