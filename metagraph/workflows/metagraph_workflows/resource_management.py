@@ -178,7 +178,9 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
             file_size_mib = max(int(math.ceil(input_path.stat().st_size / 1024.0**2)), 1)
             logger.debug(f"File size of {input_path.name} is {file_size_mib}")
 
-            return file_size_mib + 2*BASE_MEM
+            # factor 2 is based on experiments on the mouse data set.
+            # In most cases factor 1.3 to 1.5 would be enough, however, there are outliers
+            return 2*file_size_mib
 
         return TBD_VALUE
 
