@@ -1,5 +1,4 @@
 import json
-import logging
 import math
 import os
 from pathlib import Path
@@ -10,6 +9,7 @@ from metagraph_workflows import constants
 from metagraph_workflows.cfg_utils import get_rule_specific_config
 from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
     MEM_BUFFER_MB_KEY, THREADS_KEY
+from metagraph_workflows.utils import logger
 
 BASE_MEM = 1 * 1024
 FALLBACK_MAX_MEM = 4 * 1024
@@ -56,7 +56,7 @@ class ResourceConfig:
 
                 max_mem = _get_max_memory(self.config)
                 if mem_mb > max_mem:
-                    logging.warning(
+                    logger.warning(
                         f"The estimated memory of {mem_mb} MB "
                         f"is larger than the max memory {max_mem}.")
 
@@ -177,7 +177,7 @@ class PrimarizeCanonicalGraphSingleSampleResources(ResourceConfig):
 
         if input_path.exists():
             file_size_mib = max(int(math.ceil(input_path.stat().st_size / 1024.0**2)), 1)
-            logging.debug(f"File size of {input_path.name} is {file_size_mib}")
+            logger.debug(f"File size of {input_path.name} is {file_size_mib}")
 
             return file_size_mib + 2*BASE_MEM
 

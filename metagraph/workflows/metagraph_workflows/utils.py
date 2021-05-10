@@ -1,5 +1,8 @@
 from pathlib import Path
 from typing import Union
+import logging
+
+logger = logging.getLogger("metagraph_workflow")
 
 
 def create_transcript_path_list(path: Union[Path, str], transcript_path: Union[Path, str], suffix=''):
