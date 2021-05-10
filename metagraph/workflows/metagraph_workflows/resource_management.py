@@ -136,7 +136,9 @@ class SupportsMemBufferSizeWithEstimation(SupportsMemBufferSize):
 
 class SupportsDiskCap(ResourceConfig):
     def get_disk_cap(self):
-        return self.get_disk() # TODO: come up with a heuristic
+        def _get_disk_cap(wildcards):
+            return int(self.get_disk()(wildcards) / 1024)
+        return _get_disk_cap # TODO: come up with a heuristic
 
 
 class BuildGraphResources(SupportsMemBufferSize, SupportsDiskCap):
