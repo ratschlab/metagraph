@@ -83,7 +83,6 @@ class SupportsMemBufferSize(ResourceConfig):
 
     CAP_MEM_FRACTION = 0.85
 
-    MAX_BUFFER_SIZE_MIB = 50 * 1024
     def get_mem_buffer_gib(self):
         """
         value for the `--mem-cap-gb` parameter (in GiB)
@@ -93,7 +92,7 @@ class SupportsMemBufferSize(ResourceConfig):
                                                   MEM_BUFFER_MB_KEY, self.config)
 
             if not mem_cap_mb:
-                mem_cap_mb = min(self._mem_buf_estimate(wildcards, resources, input, threads), self.MAX_BUFFER_SIZE_MIB)
+                mem_cap_mb = min(self._mem_buf_estimate(wildcards, resources, input, threads), self.config[constants.MAX_BUFFER_SIZE_MB])
 
                 if mem_cap_mb == TBD_VALUE:
                     return TBD_VALUE

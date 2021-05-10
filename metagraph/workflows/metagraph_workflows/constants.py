@@ -22,6 +22,7 @@ BRWT_LINKAGE_SUBSAMPLE="brwt_linkage_subsample"
 MAX_THREADS = 'max_threads'
 MAX_MEMORY_MB = 'max_memory_mb'
 MAX_DISK_MB = 'max_disk_mb'
+MAX_BUFFER_SIZE_MB = 'max_buffer_size_mb'
 
 RULE_CONFIGS_KEY = 'rules'
 THREADS_KEY = 'threads'

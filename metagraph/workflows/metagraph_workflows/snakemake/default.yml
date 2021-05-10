@@ -22,6 +22,7 @@ gnu_time_cmd: '/usr/bin/time'
 
 default_disk_mb: 10000
 max_memory_mb: 4048
+max_buffer_size_mb: 51200
 
 sample_ids_path: ''
 sample_staging_script_path: ''
