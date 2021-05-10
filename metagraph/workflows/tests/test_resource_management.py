@@ -7,7 +7,8 @@ from metagraph_workflows import constants
 @pytest.fixture()
 def config():
     return {
-        constants.MAX_MEMORY_MB: 16000
+        constants.MAX_MEMORY_MB: 16000,
+        constants.MAX_BUFFER_SIZE_MB: 50000
     }
 
 
