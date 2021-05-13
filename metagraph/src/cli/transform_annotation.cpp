@@ -138,7 +138,7 @@ uint64_t get_num_columns(const std::vector<std::string> &files,
             : RowDiffColumnAnnotator::kExtension;
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        std::string file = utils::remove_suffix(files[i], extension) + extension;
+        std::string file = utils::make_suffix(files[i], extension);
         std::ifstream instream(file, std::ios::binary);
         if (!instream.good()) {
             logger->error("Can't read from {}", file);
@@ -499,9 +499,8 @@ int transform_annotation(Config *config) {
                                         : "mask";
         ColumnCompressed<> aggregated_column(std::move(mask), col_name);
 
-        const auto &outfname = utils::remove_suffix(config->outfbase,
-                                                    ColumnCompressed<>::kExtension)
-                                                + ColumnCompressed<>::kExtension;
+        const auto &outfname = utils::make_suffix(config->outfbase,
+                                                  ColumnCompressed<>::kExtension);
         aggregated_column.serialize(outfname);
         logger->trace("Columns are aggregated and the resulting column '{}'"
                       " serialized to {}", col_name, outfname);

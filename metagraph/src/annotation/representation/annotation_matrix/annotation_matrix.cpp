@@ -10,6 +10,7 @@ namespace mtg {
 namespace annot {
 
 using utils::remove_suffix;
+using utils::make_suffix;
 
 
 template <class BinaryMatrixType, typename Label>
@@ -55,8 +56,7 @@ template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
-                            std::ios::binary);
+    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
@@ -66,8 +66,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
-    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                           std::ios::binary);
+    std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
     if (!instream.good())
         return false;
 

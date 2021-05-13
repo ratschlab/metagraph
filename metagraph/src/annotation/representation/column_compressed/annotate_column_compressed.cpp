@@ -18,6 +18,7 @@ namespace mtg {
 namespace annot {
 
 using utils::remove_suffix;
+using utils::make_suffix;
 using mtg::common::logger;
 
 
@@ -163,11 +164,10 @@ template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
-                            std::ios::binary);
+    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
     if (!outstream.good()) {
         logger->error("Could not open file for writing: {}",
-                      remove_suffix(filename, kExtension) + kExtension);
+                      make_suffix(filename, kExtension));
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -229,7 +229,7 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
 
     label_encoder_.clear();
 
-    const std::string &f = remove_suffix(filename, kExtension) + kExtension;
+    const std::string &f = make_suffix(filename, kExtension);
     logger->trace("Loading annotations from file {}", f);
 
     try {
@@ -335,7 +335,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+        auto filename = make_suffix(filenames[i - 1], kExtension);
 
         std::ifstream in(filename, std::ios::binary);
         if (!in.good()) {
@@ -362,7 +362,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
-        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading annotations from file {}", filename);
         try {
             std::ifstream in(filename, std::ios::binary);
@@ -416,7 +416,7 @@ void ColumnCompressed<Label>
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = remove_suffix(filenames[i - 1], kExtension) + kExtension;
+        auto filename = make_suffix(filenames[i - 1], kExtension);
 
         std::ifstream in(filename, std::ios::binary);
         if (!in) {
@@ -443,7 +443,7 @@ void ColumnCompressed<Label>
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
-        const auto &filename = remove_suffix(filenames[i], kExtension) + kExtension;
+        const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading labels from {}", filename);
         try {
             std::ifstream in(filename, std::ios::binary);
@@ -766,12 +766,8 @@ bool ColumnCompressed<Label>
 
     #pragma omp parallel for num_threads(num_threads)
     for (uint64_t j = 0; j < num_labels(); ++j) {
-        std::ofstream outstream(
-            remove_suffix(prefix, kExtension)
-                + "." + std::to_string(j)
-                + ".text.annodbg"
-        );
-
+        std::ofstream outstream(remove_suffix(prefix, kExtension)
+                                    + fmt::format(".{}.text.annodbg", j));
         if (!outstream.good()) {
             logger->error("Dumping column {} failed", j);
             success = false;

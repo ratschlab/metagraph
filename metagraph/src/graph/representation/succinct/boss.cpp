@@ -29,7 +29,6 @@ namespace mtg {
 namespace graph {
 namespace boss {
 
-using utils::remove_suffix;
 using common::logger;
 
 #define CHECK_INDEX(idx) \
@@ -229,7 +228,7 @@ bool BOSS::operator==(const BOSS &other) const {
 }
 
 void BOSS::serialize(const std::string &filename) const {
-    const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
+    const auto out_filename = utils::make_suffix(filename, kExtension);
 
     std::ofstream outstream(out_filename, std::ios::binary);
     if (!outstream.good()) {
@@ -263,7 +262,7 @@ void BOSS::serialize(std::ofstream &outstream) const {
 }
 
 bool BOSS::load(const std::string &filename) {
-    auto file = remove_suffix(filename, kExtension) + kExtension;
+    auto file = utils::make_suffix(filename, kExtension);
 
     std::ifstream instream(file, std::ios::binary);
 

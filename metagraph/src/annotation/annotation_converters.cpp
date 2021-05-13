@@ -1273,12 +1273,12 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                     "Please specify the anchor file location via `-i <anchor_location>'");
             std::exit(1);
         }
-        std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
+        std::string anchors_file = utils::make_suffix(graph_file, kRowDiffAnchorExt);
         if (!fs::exists(anchors_file)) {
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
-        std::string fork_succ_file = utils::remove_suffix(graph_file, kRowDiffForkSuccExt) + kRowDiffForkSuccExt;
+        std::string fork_succ_file = utils::make_suffix(graph_file, kRowDiffForkSuccExt);
         if (!std::filesystem::exists(fork_succ_file)) {
             logger->error("Couldn't find fork successor bitmap at {}", fork_succ_file);
             std::exit(1);

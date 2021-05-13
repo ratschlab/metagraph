@@ -161,8 +161,7 @@ int build_graph(Config *config) {
             graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
             graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
             NodeWeights::serialize(std::move(kmer_counts),
-                    utils::remove_suffix(config->outfbase, DBGSuccinct::kExtension)
-                                                            + DBGSuccinct::kExtension);
+                    utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
         } else {
             graph_data.initialize_boss(boss_graph.get());
             graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));

@@ -24,11 +24,8 @@ int transform_graph(Config *config) {
     assert(files.size() == 1);
     assert(config->outfbase.size());
 
-    if (config->initialize_bloom) {
-        std::filesystem::remove(
-            utils::remove_suffix(config->outfbase, ".bloom") + ".bloom"
-        );
-    }
+    if (config->initialize_bloom)
+        std::filesystem::remove(utils::make_suffix(config->outfbase, ".bloom"));
 
     Timer timer;
     logger->trace("Graph loading...");
@@ -67,13 +64,10 @@ int transform_graph(Config *config) {
 
         assert(dbg_succ->get_bloom_filter());
 
-        auto prefix = utils::remove_suffix(config->outfbase, dbg_succ->bloom_filter_file_extension());
-        std::ofstream bloom_outstream(
-            prefix + dbg_succ->bloom_filter_file_extension(), std::ios::binary
-        );
-
-        if (!bloom_outstream.good())
-            throw std::ios_base::failure("Can't write to file " + prefix + dbg_succ->bloom_filter_file_extension());
+        auto fname = utils::make_suffix(config->outfbase, dbg_succ->bloom_filter_file_extension());
+        std::ofstream bloom_outstream(fname, std::ios::binary);
+        if (!bloom_outstream)
+            throw std::ios_base::failure("Can't write to file " + fname);
 
         dbg_succ->get_bloom_filter()->serialize(bloom_outstream);
 
