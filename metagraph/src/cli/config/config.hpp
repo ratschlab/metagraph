@@ -58,6 +58,7 @@ class Config {
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
+    bool coordinates = false;
 
     unsigned int k = 3;
 

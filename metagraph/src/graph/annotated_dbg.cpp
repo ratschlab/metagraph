@@ -98,6 +98,24 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
     annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 
+void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
+                                  const std::vector<Label> &labels,
+                                  uint64_t coord) {
+    assert(check_compatibility());
+
+    std::vector<row_index> indices;
+    indices.reserve(sequence.size() - dbg_.get_k() + 1);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+
+    for (node_index i : indices) {
+        // only insert indexes for matched k-mers and shift counts accordingly
+        if (i > 0)
+            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+        coord++;
+    }
+}
+
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                             double presence_ratio) const {
     assert(presence_ratio >= 0.);

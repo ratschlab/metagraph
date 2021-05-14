@@ -113,6 +113,8 @@ Config::Config(int argc, char *argv[]) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
+        } else if (!strcmp(argv[i], "--coordinates")) {
+            coordinates = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
         } else if (!strcmp(argv[i], "--count-width")) {
@@ -1072,6 +1074,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
+            fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");

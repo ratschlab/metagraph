@@ -246,6 +246,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     if (config.count_kmers) {
         // add k-mer counts
         for (const auto &file : files) {
+            logger->trace("Annotating k-mer counts for file {}", file);
+
             const std::string &counts_fname
                     = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
 
@@ -301,6 +303,45 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     }
                 );
             }
+        }
+    } else if (config.coordinates) {
+        for (const auto &file : files) {
+            logger->trace("Annotating k-mer coordinates for file {}", file);
+
+            if (file_format(file) != "FASTA"
+                    && file_format(file) != "FASTQ") {
+                logger->error("Currently only FASTA or FASTQ format is supported"
+                              " for annotating k-mer coordinates");
+                exit(1);
+            }
+
+            uint64_t coord = 0;
+            call_annotations(
+                file,
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence, auto labels) {
+                    const size_t k = anno_graph->get_graph().get_k();
+                    if (sequence.size() < k)
+                        return;
+                    uint64_t num_kmers = sequence.size() - k + 1;
+                    thread_pool.enqueue(
+                        [&anno_graph,coord](const std::string &sequence, const auto &labels) {
+                            anno_graph->add_kmer_coord(sequence, labels, coord);
+                        },
+                        std::move(sequence), std::move(labels)
+                    );
+                    coord += num_kmers;
+                }
+            );
         }
     }
 

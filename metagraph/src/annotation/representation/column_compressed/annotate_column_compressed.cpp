@@ -142,6 +142,26 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
     }
 }
 
+// for each label and index 'i' add numeric attribute 'coord'
+template <typename Label>
+void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
+    const auto &columns = get_matrix().data();
+
+    if (coords_.size() != columns.size())
+        coords_.resize(columns.size());
+
+    for (const auto &label : labels) {
+        const size_t j = label_encoder_.insert_and_encode(label);
+
+        if (uint64_t rank = columns[j]->conditional_rank1(i)) {
+            coords_[j].emplace_back(rank - 1, coord);
+        } else {
+            logger->warn("Trying to add attribute {} for non-annotated object {}."
+                         " The attribute is ignored.", coord, i);
+        }
+    }
+}
+
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
@@ -180,6 +200,53 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
         column->serialize(outstream);
     }
 
+    if (coords_.size()) {
+        outstream = std::ofstream(remove_suffix(filename, kExtension) + kCoordExtension,
+                                  std::ios::binary);
+        if (!outstream) {
+            logger->error("Could not open file for writing: {}",
+                          remove_suffix(filename, kExtension) + kCoordExtension);
+            throw std::ofstream::failure("Bad stream");
+        }
+
+        uint64_t num_coordinates = 0;
+
+        for (size_t j = 0; j < coords_.size(); ++j) {
+            // sort pairs <rank, coord>
+            auto c_v = coords_[j];
+            std::sort(c_v.begin(), c_v.end());
+            // marks where the next block starts
+            //  *- * *
+            // 1001010
+            sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
+            // packed coordinates
+            uint32_t width = 64;
+            for (auto [r, coord] : c_v) {
+                width = std::min(width, sdsl::bits::hi(coord) + 1);
+            }
+            sdsl::int_vector<> coords(c_v.size(), 0, width);
+            uint64_t t = 0;
+            uint64_t last = -1;
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                auto [r, coord] = c_v[i];
+                coords[i] = coord;
+                if (r != last) {
+                    delim[t++] = 1;
+                    last = r;
+                }
+                t++;
+            }
+            delim[t++] = 1;
+            assert(t == delim.size());
+
+            bit_vector_smart(std::move(delim)).serialize(outstream);
+            coords.serialize(outstream);
+
+            num_coordinates += c_v.size();
+        }
+        logger->info("Num coordinates: {}", num_coordinates);
+    }
+
     if (!relation_counts_.size())
         return;
 
@@ -198,7 +265,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(outstream);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -209,12 +276,14 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
                 sum_counts += v;
             }
 
-            relation_counts_[j].serialize(outstream);
+            sdsl::int_vector<> packed = relation_counts_[j];
+            sdsl::util::bit_compress(packed);
+            packed.serialize(outstream);
         }
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(outstream);
     }
 
     logger->info("Num relation counts: {}", num_counts);
