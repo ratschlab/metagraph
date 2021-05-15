@@ -62,10 +62,10 @@ void TaxClassifier::import_taxonomy(const std::string &filepath) {
 TaxClassifier::TaxClassifier(const std::string &filepath,
                              const double lca_coverage_rate,
                              const double kmers_discovery_rate) {
-    if (lca_coverage_rate <= 0.5 || lca_coverage_rate > 1) {
-        logger->error("Error: current lca_coverage_rate is {}. Please modify its value to be a fraction: 0.5 < lca_coverage_rate <= 1.", lca_coverage_rate);
-        exit(1);
-    }
+    // if (lca_coverage_rate <= 0.5 || lca_coverage_rate > 1) {
+    //     logger->error("Error: current lca_coverage_rate is {}. Please modify its value to be a fraction: 0.5 < lca_coverage_rate <= 1.", lca_coverage_rate);
+    //     exit(1);
+    // }
     assert(kmers_discovery_rate >= 0 && kmers_discovery_rate <= 1);
     Timer timer;
     logger->trace("Constructing Classifier object..");

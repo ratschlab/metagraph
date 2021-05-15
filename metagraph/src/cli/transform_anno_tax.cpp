@@ -69,6 +69,8 @@ int transform_anno_tax(Config *config) {
         }
     }
 
+    std::cerr << "total number of labels = " << all_labels.size() << "\n";
+
     annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->label_taxid_map, all_labels);
 
     for (uint32_t i = 0; i < filenames.size(); ++i) {

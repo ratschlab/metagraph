@@ -122,8 +122,8 @@ def main(argv: [str]):
     not_in_kraken = 0
 
     for label in metagraph_results:
-        acc_version = label.split("|")[3]
-        # acc_version = label.split("|")[2].split("-")[0]
+        # acc_version = label.split("|")[3]
+        acc_version = label.split("|")[2].split("-")[0]
         if acc_version not in lookup_label_taxid:
             num_unclassified += 1
             # print("acc vers not in lookup table", acc_version)

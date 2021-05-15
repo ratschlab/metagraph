@@ -155,19 +155,19 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
     }
 }
 
-std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-    std::vector<std::string> label_parts = utils::split_string(label, "|");
-    if (label_parts.size() <= 3 || label_parts[3] == "") {
-        logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
-        exit(1);
-    }
-    return label_parts[3];
-}
+// std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+//     std::vector<std::string> label_parts = utils::split_string(label, "|");
+//     if (label_parts.size() <= 3 || label_parts[3] == "") {
+//         logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
+//         exit(1);
+//     }
+//     return label_parts[3];
+// }
 
-//std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-//    auto aux = utils::split_string(label, "|")[2];
-//    return utils::split_string(aux, " ")[0];
-//}
+std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+   auto aux = utils::split_string(label, "|")[2];
+   return utils::split_string(aux, " ")[0];
+}
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepath,
@@ -289,6 +289,8 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version,
     return true;
 }
 
+int taxid_used_spaces = 0;
+
 void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot) {
     std::vector<std::string> all_labels = annot.get_all_labels();
     for (const std::string &label : all_labels) {
@@ -297,10 +299,14 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
         if (!get_normalized_taxid(accession_version, &taxid)) {
             continue;
         }
+        int num_kmers_per_label = 0;
+        int num_zero_kmers = 0;
         annot.call_objects(label, [&](const KmerId &index) {
             if (index <= 0) {
+                num_zero_kmers += 1;
                 return;
             }
+            num_kmers_per_label += 1;
             if (index >= this->taxonomic_map.size()) {
                 // Double the size of this->taxonomic_map until the current 'index' fits inside.
                 uint64_t new_size = this->taxonomic_map.size();
@@ -319,6 +325,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
             }
 
             if (this->taxonomic_map[index] == 0) {
+                taxid_used_spaces ++;
                 this->taxonomic_map[index] = taxid;
             } else {
                 NormalizedTaxId lca =
@@ -327,10 +334,22 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
                 this->taxonomic_map[index] = lca;
           }
         });
+        std::cerr << label << " \tnum_kmers_per_label=" << num_kmers_per_label << "\t taxid_used_spaces=" << taxid_used_spaces << "\n";
     }
 }
 
 void TaxonomyDB::export_to_file(const std::string &filepath) {
+    std::cerr << "taxonomic_map before strip right zero size=" << taxonomic_map.size() << "\n";
+
+    uint64_t first_zero_to_strip = 0;
+    for (int64_t i = this->taxonomic_map.size() - 1; i >= 0 && this->taxonomic_map[i] == 0; i--) {
+        first_zero_to_strip = i;
+    }
+    assert(i > 0);
+
+    std::cerr << "first_zero_to_strip=" << first_zero_to_strip << "\n";
+    std::cerr << "0kmers in the middle = " << first_zero_to_strip - taxid_used_spaces << "\n";
+
     if (num_get_taxid_calls_failed) {
         logger->warn("During the annotation matrix parsing, there could not be found {} taxids associated to the labels in the anno matrix (total evaluations:  {}).",
                      num_get_taxid_calls_failed, num_get_taxid_calls);
@@ -367,11 +386,18 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     std::vector<std::pair<uint64_t, uint64_t>> taxid_frequencies(1);
 
     // Compute taxid_frequencies.
-    for (size_t i = 0; i < this->taxonomic_map.size(); ++i) {
-        if (this->taxonomic_map[i] == 0) {
-            continue;
+    for (size_t i = 0; i < first_zero_to_strip; ++i) {
+        // if (this->taxonomic_map[i] == 0) {
+        //     continue;
+        // }
+        if (i > 0 && (this->taxonomic_map[i] == 0 && this->taxonomic_map[i-1] != 0) ) {
+            std::cerr << "l=" << i << " ";
+        }
+        if (i > 0 && (this->taxonomic_map[i] != 0 && this->taxonomic_map[i-1] == 0)) {
+            std::cerr << "r=" << i << "\n";
         }
         uint64_t taxid = this->taxonomic_map[i];
+        // assert(taxid > 0);
         while (taxid >= taxid_frequencies.size()) {
             taxid_frequencies.resize(2 * taxid_frequencies.size());
         }
@@ -385,6 +411,11 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
             }
             return a.second > b.second;
         });
+    
+    std::cerr << "most frequent taxids\n";
+    for (uint64_t i = 0; i < 10; ++i) {
+        std::cerr << taxid_frequencies[i].first << " " << taxid_frequencies[i].second << "\n";
+    }
 
     sdsl::int_vector<> code_to_taxid(taxid_frequencies.size());
     for (uint64_t i = 0; i < taxid_frequencies.size(); ++i) {
@@ -399,10 +430,10 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         taxid_to_code[code_to_taxid[i]] = i;
     }
 
-    sdsl::int_vector<> code_vector(this->taxonomic_map.size());
+    sdsl::int_vector<> code_vector(first_zero_to_strip);
     uint64_t code_vector_cnt = 0;
-    for (TaxId taxid : this->taxonomic_map) {
-        code_vector[code_vector_cnt++] = taxid_to_code[taxid];
+    for (uint64_t i = 0; i < first_zero_to_strip; ++i) {
+        code_vector[code_vector_cnt++] = taxid_to_code[this->taxonomic_map[i]];
     }
     sdsl::dac_vector_dp<sdsl::rrr_vector<>> code(code_vector);
 
