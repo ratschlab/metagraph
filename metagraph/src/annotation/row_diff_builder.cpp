@@ -142,6 +142,9 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     async_writer.join();
 }
 
+uint64_t update_row_reduction(
+            const std::vector<std::vector<std::unique_ptr<bit_vector>>> &diff_columns,
+            sdsl::int_vector_buffer<> &row_reduction);
 
 // convert index
 inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
@@ -960,55 +963,15 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
 
-                // if there are too many chunks, merge them into larger ones
-                // TODO: move this pre-merging to elias_fano::merge_files
-                //       and implement it for SortedSetDisk too.
-                while (filenames.size() > files_open_per_thread) {
-                    // chunk 0 stores fwd bits and hence not merged
-                    std::vector<std::string> new_chunks = { filenames.at(0) };
-                    size_t i = 1;
-                    while (i < filenames.size()) {
-                        std::vector<std::string> to_merge;
-                        while (i < filenames.size()
-                                && to_merge.size() + 1 < files_open_per_thread) {
-                            to_merge.push_back(filenames[i++]);
-                        }
-
-                        if (to_merge.size() < 2) {
-                            // nothing to merge
-                            new_chunks.push_back(to_merge.at(0));
-                            continue;
-                        }
-
-                        assert(to_merge.size() < files_open_per_thread);
-
-                        new_chunks.push_back(to_merge.at(0) + "_");
-                        std::vector<T> buf;
-                        buf.reserve(BUFFER_SIZE);
-
-                        elias_fano::merge_files<T>(to_merge, [&](T i) {
-                            buf.push_back(i);
-                            if (buf.size() == buf.capacity()) {
-                                Encoder<T>::append_block(buf, new_chunks.back());
-                                buf.resize(0);
-                            }
-                        });
-                        if (buf.size()) {
-                            Encoder<T>::append_block(buf, new_chunks.back());
-                        }
-                    }
-                    filenames.swap(new_chunks);
-                }
-
-                uint64_t rk = 0;
+                const bool remove_chunks = true;
+                uint64_t r = 0;
                 elias_fano::merge_files<T>(filenames, [&](T v) {
                     call(utils::get_first(v));
                     if constexpr(with_values) {
                         assert(v.second && "zero diffs must have been skipped");
-                        values[l_idx][j][rk] = matrix::encode_diff(v.second);
+                        values[l_idx][j][r++] = matrix::encode_diff(v.second);
                     }
-                    rk++;
-                });
+                }, remove_chunks, files_open_per_thread);
             };
             columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
                                                             row_diff_bits[l_idx][j]);
@@ -1047,8 +1010,20 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     utils::remove_temp_dir(tmp_path);
 
-    if (!compute_row_reduction)
-        return;
+    if (compute_row_reduction) {
+        uint64_t num_larger_rows = update_row_reduction(diff_columns, row_reduction);
+        logger->trace("Rows with negative row reduction: {} in vector {}",
+                      num_larger_rows, row_reduction_fname);
+    }
+}
+
+uint64_t update_row_reduction(
+            const std::vector<std::vector<std::unique_ptr<bit_vector>>> &diff_columns,
+            sdsl::int_vector_buffer<> &row_reduction) {
+    ThreadPool async_writer(1, 1);
+    std::vector<uint32_t> row_nbits_block;
+    // buffer for writing previous block while populating next row_nbits_block
+    std::vector<uint32_t> row_nbits_block_other;
 
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
@@ -1056,7 +1031,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
             for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
@@ -1085,8 +1060,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     async_writer.join();
 
-    logger->trace("Rows with negative row reduction: {} in vector {}",
-                  num_larger_rows, row_reduction_fname);
+    return num_larger_rows;
 }
 
 } // namespace annot
