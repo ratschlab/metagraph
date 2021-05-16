@@ -934,10 +934,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     std::vector<std::vector<std::unique_ptr<bit_vector>>> diff_columns(label_encoders.size());
 
-    const uint32_t files_open_per_thread
+    const uint32_t chunks_open_per_thread
             = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads) / (2 + with_values);
-    if (files_open_per_thread < 3) {
-        logger->error("Can't merge with less than 3 files per thread open. "
+    if (chunks_open_per_thread < 3) {
+        logger->error("Can't merge with less than 3 chunks per thread open. "
                       "Max num files open: {}. Current number of threads: {}.",
                       MAX_NUM_FILES_OPEN, num_threads);
         exit(1);
@@ -971,7 +971,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         assert(v.second && "zero diffs must have been skipped");
                         values[l_idx][j][r++] = matrix::encode_diff(v.second);
                     }
-                }, remove_chunks, files_open_per_thread);
+                }, remove_chunks, chunks_open_per_thread);
             };
             columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
                                                             row_diff_bits[l_idx][j]);
