@@ -153,6 +153,7 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
     for (const auto &label : labels) {
         const size_t j = label_encoder_.insert_and_encode(label);
 
+        // TODO: optimize -- compute rank only in the end in serialize
         if (uint64_t rank = columns[j]->conditional_rank1(i)) {
             coords_[j].emplace_back(rank - 1, coord);
         } else {
@@ -215,29 +216,30 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
             // sort pairs <rank, coord>
             auto c_v = coords_[j];
             std::sort(c_v.begin(), c_v.end());
+            assert(std::unique(c_v.begin(), c_v.end()) == c_v.end());
             // marks where the next block starts
             //  *- * *
             // 1001010
             sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
-            // packed coordinates
-            uint32_t width = 64;
+            // pack coordinates
+            uint64_t max_coord = 0;
             for (auto [r, coord] : c_v) {
-                width = std::min(width, sdsl::bits::hi(coord) + 1);
+                max_coord = std::max(max_coord, coord);
             }
-            sdsl::int_vector<> coords(c_v.size(), 0, width);
-            uint64_t t = 0;
-            uint64_t last = -1;
+            sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord) + 1);
+            uint64_t cur = 0;
+            delim[cur] = 1;
             for (size_t i = 0; i < c_v.size(); ++i) {
                 auto [r, coord] = c_v[i];
-                coords[i] = coord;
-                if (r != last) {
-                    delim[t++] = 1;
-                    last = r;
+                while (cur < r) {
+                    delim[++cur + i] = 1;
                 }
-                t++;
+                coords[i] = coord;
+                // delim[cur + i] is already set to 0;
             }
-            delim[t++] = 1;
-            assert(t == delim.size());
+            for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
+                delim[t] = 1;
+            }
 
             bit_vector_smart(std::move(delim)).serialize(outstream);
             coords.serialize(outstream);

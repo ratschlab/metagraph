@@ -108,6 +108,11 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
 
     graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
 
+    if (!indices.size())
+        return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
     for (node_index i : indices) {
         // only insert indexes for matched k-mers and shift counts accordingly
         if (i > 0)
