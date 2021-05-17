@@ -13,7 +13,8 @@ namespace mtg {
 namespace annot {
 
 void count_labels_per_row(const std::vector<std::string> &source_files,
-                          const std::string &row_count_fname);
+                          const std::string &row_count_fname,
+                          bool with_coordinates = false);
 
 void build_pred_succ(const std::string &graph_filename,
                      const std::string &outfbase,

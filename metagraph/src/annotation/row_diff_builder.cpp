@@ -64,7 +64,8 @@ load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
 }
 
 void count_labels_per_row(const std::vector<std::string> &source_files,
-                          const std::string &row_count_fname) {
+                          const std::string &row_count_fname,
+                          bool with_coordinates) {
     if (source_files.empty())
         return;
 
@@ -73,6 +74,37 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     if (!num_rows) {
         logger->warn("Input annotations have no rows");
         return;
+    }
+
+    std::vector<std::vector<bit_vector_smart>> delims(source_files.size());
+    if (with_coordinates) {
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (size_t i = 0; i < source_files.size(); ++i) {
+            if (!sources[i].num_labels())
+                continue;
+
+            const auto &coords_fname = utils::remove_suffix(source_files[i],
+                                                            ColumnCompressed<>::kExtension)
+                                            + ColumnCompressed<>::kCoordExtension;
+            std::ifstream in(coords_fname, std::ios::binary);
+            if (!in) {
+                logger->error("Could not open file with coordinates {}", coords_fname);
+                exit(1);
+            }
+
+            sdsl::int_vector<> temp;
+            delims[i].resize(sources[i].num_labels());
+            for (auto &bv : delims[i]) {
+                try {
+                    bv.load(in);
+                    temp.load(in);
+                } catch (...) {
+                    logger->error("Couldn't read coordinates from {}", coords_fname);
+                    exit(1);
+                }
+            }
+        }
+        logger->trace("Done loading coordinates");
     }
 
     // initializing the row count vector
@@ -114,7 +146,14 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
                         = *sources[l_idx].get_matrix().data()[j];
                 source_col.call_ones_in_range(block_begin, block_begin + block_size,
                     [&](uint64_t i) {
-                        __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
+                        if (with_coordinates) {
+                            uint64_t rk = source_col.rank1(i);
+                            uint32_t num_coords = delims[l_idx][j].select1(rk + 1)
+                                                    - delims[l_idx][j].select1(rk);
+                            __atomic_add_fetch(&row_count_block[i - block_begin], num_coords, __ATOMIC_RELAXED);
+                        } else {
+                            __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
+                        }
                     }
                 );
             }

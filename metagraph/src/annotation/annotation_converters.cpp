@@ -1237,7 +1237,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         if (construction_stage == RowDiffStage::COUNT_LABELS) {
-            count_labels_per_row(file_batch, count_vector_fname);
+            count_labels_per_row(file_batch, count_vector_fname, with_coordinates);
         } else {
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
