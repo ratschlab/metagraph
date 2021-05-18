@@ -123,8 +123,8 @@ class KmerExtractorT {
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNACaseSent);
     #elif _DNA5_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA5,
-                   const uint8_t CharToCode[128] = alphabets::kCharToDNA5,
-                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA5);
+                   const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                   const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
     #elif _DNA_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA,
                    const uint8_t CharToCode[128] = alphabets::kCharToDNA,
