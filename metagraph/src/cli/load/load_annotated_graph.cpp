@@ -4,6 +4,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -36,7 +37,15 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
             : initialize_annotation(config.anno_type, config, max_index);
 
     if (config.infbase_annotators.size()) {
-        if (!annotation_temp->load(config.infbase_annotators.at(0))) {
+        bool loaded = false;
+        if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
+            loaded = cc->merge_load(config.infbase_annotators);
+        } else {
+            logger->warn("Cannot merge annotations of this type. Only the first"
+                         " file {} will be loaded.", config.infbase_annotators.at(0));
+            loaded = annotation_temp->load(config.infbase_annotators.at(0));
+        }
+        if (!loaded) {
             logger->error("Cannot load annotations for graph {}, file corrupted",
                           config.infbase);
             exit(1);
