@@ -1231,18 +1231,16 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                 [&](const bit_vector &source_col, uint64_t row_idx, uint64_t chunk_idx,
                         size_t s, size_t j,
                         const uint64_t *succ, const uint64_t *, const uint64_t *) {
+                    if (!succ)
+                        return;
+
                     // get annotated coordinates for this k-mer
                     const auto curr_value = get_value(source_col, s, j, row_idx);
-
-                    if (succ) {
-                        const auto diff = get_diff(curr_value, get_value(source_col, s, j, *succ));
-                        if (diff.size()) {
-                            // reduction (zero diff)
-                            __atomic_add_fetch(&row_nbits_block[chunk_idx],
-                                               curr_value.size() - diff.size(),
-                                               __ATOMIC_RELAXED);
-                        }
-                    }
+                    const auto diff = get_diff(curr_value, get_value(source_col, s, j, *succ));
+                    // reduction (zero diff)
+                    __atomic_add_fetch(&row_nbits_block[chunk_idx],
+                                       curr_value.size() - diff.size(),
+                                       __ATOMIC_RELAXED);
                 },
                 [&](uint64_t block_begin) {
                     __atomic_thread_fence(__ATOMIC_ACQUIRE);
