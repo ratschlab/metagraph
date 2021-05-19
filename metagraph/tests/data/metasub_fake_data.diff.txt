@@ -1,3 +1,0 @@
-metasub_other	1.0,1.0,0.1,0.1,1.0	kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal,zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0
-metasub_no_other	1.0,1.0,0.1,0.1,0.0	kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal,zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0
-metasub_by_kmer	1.0,0.0,0.1,1.0,1.0	kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal,zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0
