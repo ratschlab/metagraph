@@ -82,7 +82,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     auto &[counts, union_mask] = count_vector;
 
     // in and out counts are stored interleaved in the counts vector
-    assert(counts.size() == union_mask.size() * 2);
+    assert(counts.size() == union_mask->size() * 2);
 
     auto masked_graph = make_initial_masked_graph(graph_ptr,
                                                   counts, std::move(union_mask),
