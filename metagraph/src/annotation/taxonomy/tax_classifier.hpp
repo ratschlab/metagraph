@@ -86,6 +86,10 @@ class TaxClassifier {
 
     double lca_coverage_rate;
     double kmers_discovery_rate;
+
+  public:
+    static int64_t time_spent_map_to_nodes;
+    static int64_t time_spent_assign_class;
 };
 
 } // namespace annot

@@ -98,6 +98,10 @@ int taxonomic_classification(Config *config) {
     }
     thread_pool.join();
 
+    std::cout << "time_spent_map_to_nodes = " << tax_classifier.time_spent_map_to_nodes << "\n";
+    std::cout << "algorithm               = " << tax_classifier.time_spent_assign_class - tax_classifier.time_spent_map_to_nodes << "\n";
+    std::cout << "time_spent_assign_class = " << tax_classifier.time_spent_assign_class << "\n";
+
     print_all_results(
             [](const std::string name_seq, const uint64_t &taxid) {
                 std::string result = fmt::format(

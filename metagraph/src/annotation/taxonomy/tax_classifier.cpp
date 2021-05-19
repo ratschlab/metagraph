@@ -13,6 +13,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include <chrono>
 
 #include "common/logger.hpp"
 
@@ -21,6 +22,10 @@ namespace annot {
 
 using mtg::common::logger;
 using TaxId = TaxClassifier::TaxId;
+
+
+int64_t TaxClassifier::time_spent_map_to_nodes = 0;
+int64_t TaxClassifier::time_spent_assign_class = 0;
 
 void TaxClassifier::import_taxonomy(const std::string &filepath) {
     Timer timer;
@@ -178,8 +183,15 @@ TaxId TaxClassifier::find_lca(const TaxId a, const TaxId b) const {
     return lca;
 }
 
+using namespace std::chrono;
+
+
 TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                   const std::string &sequence) const {
+    auto assign_start = (duration_cast< milliseconds >(
+        system_clock::now().time_since_epoch()
+    ));
+
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
 
     std::vector<uint64_t> forward_kmers;
@@ -196,6 +208,10 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     graph.map_to_nodes(reversed_sequence, [&](const uint64_t &i) {
         backward_kmers[--backward_kmer_index] = i;
     });
+
+    time_spent_map_to_nodes += std::chrono::duration_cast<std::chrono::milliseconds>(duration_cast< milliseconds >(
+        system_clock::now().time_since_epoch()
+    ) - assign_start).count();
 
     uint64_t total_discovered_kmers = 0;
 
@@ -242,6 +258,11 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                               &node_scores, &nodes_already_propagated, &best_lca,
                               &best_lca_dist_to_root);
     }
+
+    time_spent_assign_class += std::chrono::duration_cast<std::chrono::milliseconds>(duration_cast< milliseconds >(
+        system_clock::now().time_since_epoch()
+    ) - assign_start).count();
+
     return best_lca;
 }
 

@@ -289,7 +289,7 @@ bool TaxonomyDB::get_normalized_taxid(const std::string accession_version,
     return true;
 }
 
-int taxid_used_spaces = 0;
+uint64_t taxid_used_spaces = 0;
 
 void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::string> &annot) {
     std::vector<std::string> all_labels = annot.get_all_labels();
@@ -299,6 +299,7 @@ void TaxonomyDB::kmer_to_taxid_map_update(const annot::MultiLabelEncoded<std::st
         if (!get_normalized_taxid(accession_version, &taxid)) {
             continue;
         }
+        assert (taxid > 0); // no accession_version should have an associated taxid=0.  
         int num_kmers_per_label = 0;
         int num_zero_kmers = 0;
         annot.call_objects(label, [&](const KmerId &index) {
@@ -390,12 +391,12 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         // if (this->taxonomic_map[i] == 0) {
         //     continue;
         // }
-        if (i > 0 && (this->taxonomic_map[i] == 0 && this->taxonomic_map[i-1] != 0) ) {
-            std::cerr << "l=" << i << " ";
-        }
-        if (i > 0 && (this->taxonomic_map[i] != 0 && this->taxonomic_map[i-1] == 0)) {
-            std::cerr << "r=" << i << "\n";
-        }
+        // if (i > 0 && (this->taxonomic_map[i] == 0 && this->taxonomic_map[i-1] != 0) ) {
+        //     std::cerr << "l=" << i << " ";
+        // }
+        // if (i > 0 && (this->taxonomic_map[i] != 0 && this->taxonomic_map[i-1] == 0)) {
+        //     std::cerr << "r=" << i << "\n";
+        // }
         uint64_t taxid = this->taxonomic_map[i];
         // assert(taxid > 0);
         while (taxid >= taxid_frequencies.size()) {
