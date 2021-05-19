@@ -39,7 +39,7 @@ class BinaryMatrix {
     virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
     virtual void call_columns(const std::vector<Column> &columns,
-                              const std::function<void(Column, bitmap&&)> &callback,
+                              const std::function<void(Column, const bitmap&)> &callback,
                               size_t num_threads = 1) const;
 
     virtual bool load(std::istream &in) = 0;

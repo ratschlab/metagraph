@@ -77,13 +77,11 @@ ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
 }
 
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
-                               const std::function<void(Column, bitmap&&)> &callback,
+                               const std::function<void(Column, const bitmap&)> &callback,
                                size_t num_threads) const {
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < columns.size(); ++j) {
-        const bitmap *c = (*columns_)[columns[j]].get();
-        callback(j, bitmap_generator([c](const auto &call_one) { c->call_ones(call_one); },
-                                     c->size(), c->num_set_bits()));
+        callback(j, *(*columns_)[columns[j]]);
     }
 }
 

@@ -28,7 +28,7 @@ class ColumnMajor : public BinaryMatrix {
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
 
     void call_columns(const std::vector<Column> &columns,
-                      const std::function<void(Column, bitmap&&)> &callback,
+                      const std::function<void(Column, const bitmap&)> &callback,
                       size_t num_threads = 1) const override;
 
     bool load(std::istream &in) override;
