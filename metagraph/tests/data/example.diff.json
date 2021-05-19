@@ -1,0 +1,64 @@
+{
+    "groups": [
+        {
+            "shared_labels": {
+                "__comment__": "these are shared by all experiments in this group",
+                "in": [],
+                "out": []
+            },
+            "experiments": [
+                {
+                    "__comment__": [
+                        "This is an example of the k-mer-based mode.",
+                        "A k-mer is an in-k-mer if it has at least in_min_fraction",
+                        "(default value 1.0) in-labels.",
+                        "A k-mer is an out-k-mer if it has more than out_max_fraction",
+                        "(default value 0.0) out-labels.",
+                    ],
+                    "name": "metasub_by_kmer",
+                    "in_min_fraction": 1.0,
+                    "out_max_fraction": 0.1,
+                    "in": ["kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal",
+                           "zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0"],
+                    "out": []
+                },
+                {
+                    "__comment__": [
+                        "This is an example of the unitig-based mode.",
+                        "A unitig is kept if at least unitig_in_min_fraction of its",
+                        "k-mers are in-k-mers and at most unitig_out_max_fraction of",
+                        "its k-mers are out-k-mers.",
+                        "Also, at most unitig_other_max_fraction of its k-mers can",
+                        "have other labels."
+                    ],
+                    "name": "metasub_other",
+                    "in_min_fraction": 1.0,
+                    "out_max_fraction": 0.1,
+                    "unitig_in_min_fraction": 1.0,
+                    "unitig_out_max_fraction": 0.1,
+                    "unitig_other_max_fraction": 1.0,
+                    "in": ["kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal",
+                           "zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0"],
+                    "out": []
+                },
+            ]
+        },
+        {
+            "shared_labels": {
+                "in": ["kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal"],
+                "out": []
+            },
+            "experiments": [
+                {
+                    "name": "metasub_no_other",
+                    "in_min_fraction": 1.0,
+                    "out_max_fraction": 0.1,
+                    "unitig_in_min_fraction": 1.0,
+                    "unitig_out_max_fraction": 0.1,
+                    "unitig_other_max_fraction": 0.0,
+                    "in": ["zh_sample;metasub_name=nan;city=zurich;latitude=nan;longitude=nan;surface_material=nan;station=nan;num_reads=1303795.0"]
+                }
+            ]
+        }
+    ]
+}

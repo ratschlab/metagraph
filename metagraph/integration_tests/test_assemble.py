@@ -278,7 +278,7 @@ class TestDiffAssembly(TestingBase):
             outfile=self.tempdir.name + '/diff_contigs',
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            mask=TEST_DATA_DIR + '/metasub_fake_data.diff.json'
+            mask=TEST_DATA_DIR + '/example.diff.json'
         )
         res = subprocess.run([assemble_command], shell=True)
         self.assertEqual(res.returncode, 0)

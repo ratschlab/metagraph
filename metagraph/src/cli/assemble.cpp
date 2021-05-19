@@ -101,7 +101,7 @@ DifferentialAssemblyConfig parse_diff_config(const Json::Value &experiment,
     diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
     diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
-    diff_config.label_mask_other_unitig_fraction = experiment.get("other_max_fraction", 1.0).asDouble();
+    diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
 
     logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
     logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
