@@ -1,5 +1,6 @@
 #include "assemble.hpp"
 
+#include <json/json.h>
 #include <spdlog/fmt/fmt.h>
 
 #include "common/algorithms.hpp"
@@ -92,35 +93,15 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     ));
 }
 
-DifferentialAssemblyConfig parse_diff_config(const std::string &config_str,
+DifferentialAssemblyConfig parse_diff_config(const Json::Value &experiment,
                                              bool canonical) {
     DifferentialAssemblyConfig diff_config;
     diff_config.add_complement = canonical;
-
-    auto vals = utils::split_string(config_str, ",");
-    auto it = vals.begin();
-    if (it != vals.end()) {
-        diff_config.label_mask_in_kmer_fraction = std::stof(*it);
-        ++it;
-    }
-    if (it != vals.end()) {
-        diff_config.label_mask_in_unitig_fraction = std::stof(*it);
-        ++it;
-    }
-    if (it != vals.end()) {
-        diff_config.label_mask_out_kmer_fraction = std::stof(*it);
-        ++it;
-    }
-    if (it != vals.end()) {
-        diff_config.label_mask_out_unitig_fraction = std::stof(*it);
-        ++it;
-    }
-    if (it != vals.end()) {
-        diff_config.label_mask_other_unitig_fraction = std::stof(*it);
-        ++it;
-    }
-
-    assert(it == vals.end());
+    diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
+    diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
+    diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
+    diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
+    diff_config.label_mask_other_unitig_fraction = experiment.get("other_max_fraction", 1.0).asDouble();
 
     logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
     logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
@@ -137,89 +118,73 @@ typedef std::function<void(const graph::MaskedDeBruijnGraph&,
 
 void call_masked_graphs(const AnnotatedDBG &anno_graph,
                         Config *config,
-                        const std::vector<std::string> &lines,
-                        const CallMaskedGraphHeader &callback,
-                        size_t num_threads) {
+                        const CallMaskedGraphHeader &callback) {
+    assert(!config->label_mask_file.empty());
+
+    std::ifstream fin(config->label_mask_file);
+    if (!fin.good())
+        throw std::iostream::failure("Failed to read assembly experiment JSON");
+
+    size_t num_threads = std::max(1u, get_num_threads());
+
+    Json::Value diff_json;
+    fin >> diff_json;
+
+    std::vector<std::string> foreground_labels;
+    std::vector<std::string> background_labels;
     std::vector<std::string> shared_foreground_labels;
     std::vector<std::string> shared_background_labels;
 
-    for (const std::string &line : lines) {
-        assert(line.size() && line[0] != '#');
+    for (const Json::Value &group : diff_json["groups"]) {
+        if (group["shared_labels"]) {
+            shared_foreground_labels.clear();
+            shared_background_labels.clear();
 
-        auto line_split = utils::split_string(line, "\t", false);
+            for (const Json::Value &in_label : group["shared_labels"]["in"]) {
+                shared_foreground_labels.push_back(in_label.asString());
+            }
 
-        if (line[0] == '@') {
-            // lines of the form '@\tIN1,IN2,IN3\tOUT1,OUT2,OUT3' designate
-            // in- and out-labels which are shared by all subsequent lines.
-            // A line of this form does NOT define an assembly experiment on its own.
-            logger->trace("Counting shared k-mers");
-
-            // shared in and out labels
-            if (line_split.size() <= 1 || line_split.size() > 3)
-                throw std::iostream::failure("Each line in mask file must have 2-3 fields.");
-
-            shared_foreground_labels = utils::split_string(line_split[1], ",");
-            shared_background_labels = utils::split_string(
-                line_split.size() == 3 ? line_split[2] : "",
-                ","
-            );
+            for (const Json::Value &out_label : group["shared_labels"]["out"]) {
+                shared_background_labels.push_back(out_label.asString());
+            }
 
             check_and_sort_labels(anno_graph, shared_foreground_labels);
             check_and_sort_labels(anno_graph, shared_background_labels);
-
-            continue;
         }
 
-        if (line_split.size() <= 2 || line_split.size() > 4)
-            throw std::iostream::failure("Each line in mask file must have 3-4 fields.");
+        if (!group["experiments"])
+            throw std::runtime_error("Missing experiments in group");
 
-        DifferentialAssemblyConfig diff_config = parse_diff_config(
-            line_split[1],
-            anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
-        );
+        for (const Json::Value &experiment : group["experiments"]) {
+            DifferentialAssemblyConfig diff_config = parse_diff_config(
+                experiment,
+                anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
+            );
 
-        if (config->enumerate_out_sequences)
-            line_split[0] += ".";
+            foreground_labels.clear();
+            background_labels.clear();
 
-        auto foreground_labels = utils::split_string(line_split[2], ",");
-        auto background_labels = utils::split_string(
-            line_split.size() == 4 ? line_split[3] : "",
-            ","
-        );
+            for (const Json::Value &in_label : experiment["in"]) {
+                foreground_labels.push_back(in_label.asString());
+            }
 
-        check_and_sort_labels(anno_graph, foreground_labels);
-        check_and_sort_labels(anno_graph, background_labels);
+            for (const Json::Value &out_label : experiment["out"]) {
+                background_labels.push_back(out_label.asString());
+            }
 
-        callback(*mask_graph_from_labels(anno_graph,
-                                         foreground_labels, background_labels,
-                                         shared_foreground_labels,
-                                         shared_background_labels,
-                                         diff_config, num_threads),
-                 line_split[0]);
+            check_and_sort_labels(anno_graph, foreground_labels);
+            check_and_sort_labels(anno_graph, background_labels);
+
+            callback(*mask_graph_from_labels(anno_graph,
+                                             foreground_labels, background_labels,
+                                             shared_foreground_labels,
+                                             shared_background_labels,
+                                             diff_config, num_threads),
+                     experiment["name"].asString()
+                        + (config->enumerate_out_sequences ? "." : ""));
+        }
     }
 }
-
-std::pair<std::vector<std::string>, unsigned int>
-parse_diff_file(const std::string &fname) {
-    std::ifstream fin(fname);
-    if (!fin.good())
-        throw std::iostream::failure("Failed to read label mask file");
-
-    std::string line;
-    std::vector<std::string> lines;
-    unsigned int num_experiments = 0;
-    while (std::getline(fin, line)) {
-        // lines starting with '#' are considered to be comments and ignored
-        if (line.empty() || line[0] == '#')
-            continue;
-
-        num_experiments += (line[0] != '@');
-        lines.emplace_back(std::move(line));
-    }
-
-    return { std::move(lines), num_experiments };
-}
-
 
 int assemble(Config *config) {
     assert(config);
@@ -250,15 +215,9 @@ int assemble(Config *config) {
 
         std::mutex write_mutex;
 
-        assert(!config->label_mask_file.empty());
-
-        auto [lines, num_experiments] = parse_diff_file(config->label_mask_file);
-        if (!num_experiments)
-            return 0;
-
         size_t num_threads = std::max(1u, get_num_threads());
 
-        call_masked_graphs(*anno_graph, config, lines,
+        call_masked_graphs(*anno_graph, config,
             [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
                 seq_io::FastaWriter writer(config->outfbase, header,
                                            config->enumerate_out_sequences,
@@ -266,23 +225,20 @@ int assemble(Config *config) {
                                            "a" /* append mode */);
 
                 if (config->unitigs || config->min_tip_size > 1) {
-                    graph.call_unitigs([&](const auto &unitig, auto&&) {
+                    graph.call_unitigs([&](const std::string &unitig, auto&&) {
                                            std::lock_guard<std::mutex> lock(write_mutex);
                                            writer.write(unitig);
                                        },
-                                       num_threads,
-                                       config->min_tip_size,
+                                       num_threads, config->min_tip_size,
                                        config->kmers_in_single_form);
                 } else {
-                    graph.call_sequences([&](const auto &seq, auto&&) {
+                    graph.call_sequences([&](const std::string &seq, auto&&) {
                                              std::lock_guard<std::mutex> lock(write_mutex);
                                              writer.write(seq);
                                          },
-                                         num_threads,
-                                         config->kmers_in_single_form);
+                                         num_threads, config->kmers_in_single_form);
                 }
-            },
-            num_threads
+            }
         );
 
         return 0;
