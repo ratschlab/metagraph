@@ -99,9 +99,9 @@ template <class BaseMatrix>
 std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    const auto &boss = graph_->get_boss();
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
