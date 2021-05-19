@@ -81,11 +81,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     );
     auto &[counts, union_mask] = count_vector;
 
-    // counts is a double-width, interleaved vector where the significant bits
-    // represent the out-label count and the least significant bits represent
-    // the in-label count
-    uint32_t width = counts.width() / 2;
-    uint64_t int_mask = (uint64_t(1) << width) - 1;
+    // in and out counts are stored interleaved in the counts vector
+    assert(counts.size() == union_mask.size() * 2);
 
     auto masked_graph = make_initial_masked_graph(graph_ptr,
                                                   counts, std::move(union_mask),
@@ -119,9 +116,8 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         logger->trace("Filtering by node");
         update_masked_graph_by_node(*masked_graph, [&](node_index node) {
-            uint64_t count = count_vector.first[node];
-            uint64_t in_count = count & int_mask;
-            uint64_t out_count = count >> width;
+            uint64_t in_count = count_vector.first[node * 2];
+            uint64_t out_count = count_vector.first[node * 2 + 1];
             uint64_t sum = in_count + out_count;
             return in_count >= config.label_mask_in_kmer_fraction * sum
                 && out_count <= config.label_mask_out_kmer_fraction * sum;
@@ -133,7 +129,6 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     logger->trace("Filtering by unitig");
 
     size_t num_labels = anno_graph.get_annotation().num_labels();
-    counts.width(width);
 
     auto get_kept_intervals = [&](const auto &unitig, const auto &path)
             -> std::vector<std::pair<size_t, size_t>> {
@@ -142,8 +137,10 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         sdsl::bit_vector out_mask(path.size(), false);
         sdsl::bit_vector other_mask(check_other ? path.size() : 0, false);
 
-        size_t min_label_in_count = config.label_mask_in_kmer_fraction * (labels_in.size() + labels_in_post.size());
-        size_t max_label_out_count = config.label_mask_out_kmer_fraction * (labels_out.size() + labels_out_post.size());
+        size_t min_label_in_count = config.label_mask_in_kmer_fraction
+                                        * (labels_in.size() + labels_in_post.size());
+        size_t max_label_out_count = config.label_mask_out_kmer_fraction
+                                        * (labels_out.size() + labels_out_post.size());
 
         size_t in_kmer_count = 0;
         size_t out_kmer_count = 0;
@@ -223,6 +220,10 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           bool add_complement,
                           bool make_boss,
                           size_t num_threads) {
+    // counts is a double-length vector storing the in-label and out-label
+    // counts interleaved
+    assert(counts.size() == mask->size() * 2);
+
     graph_ptr = std::shared_ptr<const DeBruijnGraph>(
         std::shared_ptr<const DeBruijnGraph>(), &graph_ptr->get_base_graph()
     );
@@ -244,7 +245,6 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         // we can't guarantee that the reverse complement is present, so
         // construct a new subgraph
         logger->trace("Constructing BOSS from labeled subgraph");
-        uint32_t width = counts.width() / 2;
         std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
         std::mutex add_mutex;
         BOSSConstructor constructor(
@@ -254,10 +254,13 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             masked_graph->num_nodes() * 32
         );
         masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
-            sdsl::int_vector<> path_counts(path.size(), 0, width * 2);
+            sdsl::int_vector<> path_counts(path.size() * 2, 0, counts.width());
             auto it = path_counts.begin();
             for (node_index i : path) {
-                *it = counts[i];
+                *it = counts[i * 2];
+                ++it;
+
+                *it = counts[i * 2 + 1];
                 ++it;
             }
 
@@ -286,7 +289,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         );
 
         logger->trace("Reconstructing count vector");
-        counts = aligned_int_vector(graph_ptr->max_index() + 1, 0, width * 2, 16);
+        counts = aligned_int_vector((graph_ptr->max_index() + 1) * 2,
+                                    0, counts.width(), 16);
 
         std::atomic_thread_fence(std::memory_order_release);
 
@@ -298,8 +302,11 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto &[seq, seq_counts] = contigs[l];
             size_t j = 0;
             graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_exchange(counts, i, contigs[l].second[j++],
+                atomic_exchange(counts, i * 2, contigs[l].second[j],
                                 vector_backup_mutex, memorder);
+                atomic_exchange(counts, i * 2 + 1, contigs[l].second[j + 1],
+                                vector_backup_mutex, memorder);
+                j += 2;
             });
             assert(j == seq_counts.size());
         }
@@ -314,8 +321,14 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 // so to add values properly, it should be reshaped first
                 size_t j = seq_counts.size();
                 graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    uint64_t old_val = atomic_exchange(counts, i, contigs[l].second[--j],
+                    uint64_t old_val = atomic_exchange(counts, i * 2 + 1,
+                                                       contigs[l].second[--j],
                                                        vector_backup_mutex, memorder);
+                    std::ignore = old_val;
+                    assert(!old_val);
+
+                    old_val = atomic_exchange(counts, i * 2, contigs[l].second[--j],
+                                              vector_backup_mutex, memorder);
                     std::ignore = old_val;
                     assert(!old_val);
                 });
@@ -328,7 +341,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
     }
 
-    assert(counts.size() == graph_ptr->max_index() + 1);
+    assert(counts.size() == (graph_ptr->max_index() + 1) * 2);
 
     return masked_graph;
 }
@@ -352,10 +365,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
     sdsl::bit_vector indicator(graph.max_index() + 1, false);
 
-    // at this stage, the width of counts is twice what it should be, since
-    // the intention is to store the in label and out label counts interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(graph.max_index() + 1,
-                                                   0, width * 2, 16);
+    // the in and out counts are stored interleaved
+    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
 
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
@@ -379,17 +390,11 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, async, memorder);
-                atomic_fetch_and_add(counts, i, 1, vector_backup_mutex, memorder);
+                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, memorder);
             });
         },
         num_threads
     );
-
-    std::atomic_thread_fence(std::memory_order_acquire);
-
-    // correct the width of counts, making it single-width
-    counts.width(width);
-    std::atomic_thread_fence(std::memory_order_release);
 
     binmat.call_columns(label_out_codes,
         [&](auto, const bitmap &rows) {
@@ -411,9 +416,6 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     // TODO: this function doesn't work if MAKE_BOSS is false and the complements
     //       of k-mers should also be present
     static_assert(MAKE_BOSS);
-
-    // set the width to be double again
-    counts.width(width * 2);
 
     return std::make_pair(std::move(counts), std::move(union_mask));
 }
