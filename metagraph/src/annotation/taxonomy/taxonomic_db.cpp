@@ -346,7 +346,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     for (int64_t i = this->taxonomic_map.size() - 1; i >= 0 && this->taxonomic_map[i] == 0; i--) {
         first_zero_to_strip = i;
     }
-    assert(i > 0);
+    assert(first_zero_to_strip > 0);
 
     std::cerr << "first_zero_to_strip=" << first_zero_to_strip << "\n";
     std::cerr << "0kmers in the middle = " << first_zero_to_strip - taxid_used_spaces << "\n";

@@ -26,6 +26,7 @@ using TaxId = TaxClassifier::TaxId;
 
 int64_t TaxClassifier::time_spent_map_to_nodes = 0;
 int64_t TaxClassifier::time_spent_assign_class = 0;
+int64_t TaxClassifier::time_spent_assign_class_canceled = 0;
 
 void TaxClassifier::import_taxonomy(const std::string &filepath) {
     Timer timer;
@@ -188,30 +189,35 @@ using namespace std::chrono;
 
 TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                                   const std::string &sequence) const {
-    auto assign_start = (duration_cast< milliseconds >(
-        system_clock::now().time_since_epoch()
-    ));
+    auto assign_start = high_resolution_clock::now();
 
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
 
-    std::vector<uint64_t> forward_kmers;
+    uint64_t total_kmers = sequence.size() - graph.get_k() + 1;
+    std::vector<uint64_t> forward_kmers(total_kmers);
+
+    uint64_t cnt_forward = 0;
     graph.map_to_nodes(sequence, [&](const uint64_t &i) {
-        forward_kmers.push_back(i);
+        // forward_kmers.push_back(i);
+        forward_kmers[cnt_forward++] =i;
+        // forward_kmers.push_back(0);
     });
     std::string reversed_sequence = sequence;
     reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
 
-    uint64_t total_kmers = forward_kmers.size();
+    // assert(forward_kmers.size() == total_kmers);
     uint64_t backward_kmer_index = total_kmers;
     std::vector<uint64_t> backward_kmers(total_kmers);
+
+    // for (uint64_t i = 0; i < total_kmers; ++i) {
+    //     backward_kmers[i] = 5 - 5;
+    // }
 
     graph.map_to_nodes(reversed_sequence, [&](const uint64_t &i) {
         backward_kmers[--backward_kmer_index] = i;
     });
 
-    time_spent_map_to_nodes += std::chrono::duration_cast<std::chrono::milliseconds>(duration_cast< milliseconds >(
-        system_clock::now().time_since_epoch()
-    ) - assign_start).count();
+    time_spent_map_to_nodes += (high_resolution_clock::now() - assign_start).count();
 
     uint64_t total_discovered_kmers = 0;
 
@@ -233,6 +239,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
             } else if (backward_taxid == 0) {
                 curr_taxid = forward_taxid;
             } else {
+                // curr_taxid = forward_taxid;
                 curr_taxid = find_lca(forward_taxid, backward_taxid);
             }
         }
@@ -243,6 +250,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     }
 
     if (total_discovered_kmers <= this->kmers_discovery_rate * total_kmers) {
+        time_spent_assign_class_canceled += (high_resolution_clock::now() - assign_start).count();
         return 0; // 0 is a wildcard for not enough discovered kmers.
     }
 
@@ -259,9 +267,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
                               &best_lca_dist_to_root);
     }
 
-    time_spent_assign_class += std::chrono::duration_cast<std::chrono::milliseconds>(duration_cast< milliseconds >(
-        system_clock::now().time_since_epoch()
-    ) - assign_start).count();
+    time_spent_assign_class += (high_resolution_clock::now() - assign_start).count();
 
     return best_lca;
 }

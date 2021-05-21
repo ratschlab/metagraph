@@ -6,6 +6,7 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "seq_io/sequence_io.hpp"
+#include "common/utils/string_utils.hpp"
 
 #include "common/logger.hpp"
 
@@ -99,18 +100,27 @@ int taxonomic_classification(Config *config) {
     thread_pool.join();
 
     std::cout << "time_spent_map_to_nodes = " << tax_classifier.time_spent_map_to_nodes << "\n";
-    std::cout << "algorithm               = " << tax_classifier.time_spent_assign_class - tax_classifier.time_spent_map_to_nodes << "\n";
+    std::cout << "algorithm               = " << tax_classifier.time_spent_assign_class + tax_classifier.time_spent_assign_class_canceled - tax_classifier.time_spent_map_to_nodes << "\n";
     std::cout << "time_spent_assign_class = " << tax_classifier.time_spent_assign_class << "\n";
+    std::cout << "time_spent_assign_class_canceled = " << tax_classifier.time_spent_assign_class_canceled << "\n";
+
+    uint64_t num_hits = 0;
 
     print_all_results(
-            [](const std::string name_seq, const uint64_t &taxid) {
+            [&](const std::string name_seq, const uint64_t &taxid) {
                 std::string result = fmt::format(
                       "Sequence '{}' was classified with Tax ID '{}'\n",
                       name_seq, taxid);
                 std::cout << result << std::endl;
+                if (utils::split_string(name_seq, "|")[1] == to_string(taxid)) {
+                    num_hits += 1;
+                }
             });
 
     logger->trace("Finished all the queries in {}s.", timer.elapsed());
+
+    std::cerr << "num hits = " << num_hits << "\n total results =" << pair_label_taxid.size() << "\n";
+    std::cerr << "hit rate = " << (double)num_hits / pair_label_taxid.size() << "\n";
 
     return 0;
 }
