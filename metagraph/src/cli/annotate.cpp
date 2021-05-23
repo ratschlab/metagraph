@@ -218,6 +218,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
+    const size_t batch_size = 1'000;
+    const size_t batch_length = 100'000;
+
     // iterate over input files
     for (const auto &file : files) {
         BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
@@ -226,7 +229,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     anno_graph->annotate_sequences(std::move(data));
                 }, std::move(data));
             },
-            1'000, 100'000
+            batch_size, batch_length, batch_size
         );
         call_annotations(
             file,
@@ -264,7 +267,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     anno_graph->add_kmer_counts(std::move(data));
                 }, std::move(data));
             },
-            1'000, 100'000
+            batch_size, batch_length, batch_size
         );
 
         for (const auto &file : files) {
