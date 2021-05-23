@@ -1344,8 +1344,8 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     auto &v = set_rows_fwd[s][j];
 
                     for (uint64_t coord : diff) {
-                        assert(!v.size() || v.back() != std::make_pair(row_idx, coord)
-                                && "coordinates must be unique and can't repeat");
+                        assert((!v.size() || v.back() != std::make_pair(row_idx, coord))
+                               && "coordinates must be unique and can't repeat");
                         v.emplace_back(row_idx, coord);
                         row_diff_coords[s][j]++;
 
