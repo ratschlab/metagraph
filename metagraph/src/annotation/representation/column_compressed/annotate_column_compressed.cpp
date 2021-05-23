@@ -118,7 +118,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         relation_counts_.resize(columns.size());
 
     for (const auto &label : labels) {
-        const auto j = label_encoder_.insert_and_encode(label);
+        const auto j = label_encoder_.encode(label);
 
         if (!relation_counts_[j].size()) {
             relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, count_width_);

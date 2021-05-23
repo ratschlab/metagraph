@@ -34,6 +34,9 @@ class AnnotatedSequenceGraph {
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);
+    // thread-safe, can be called from multiple threads concurrently
+    virtual void annotate_sequences(
+        const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
@@ -78,6 +81,10 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);
+
+    void add_kmer_counts(std::vector<std::tuple<std::string,
+                                                std::vector<Label>,
+                                                std::vector<uint64_t>>>&& data);
 
     /*********************** Special queries **********************/
 
