@@ -34,6 +34,8 @@ class AnnotatedSequenceGraph {
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);
+    // thread-safe, can be called from multiple threads concurrently
+    virtual void annotate_sequences(const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;

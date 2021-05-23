@@ -221,10 +221,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (const auto &file : files) {
         BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
             [&](auto&& data) {
-                thread_pool.enqueue([&](const auto &data) {
-                    for (const auto [sequence, labels] : data) {
-                        anno_graph->annotate_sequence(sequence, labels);
-                    }
+                thread_pool.enqueue([&](auto &data) {
+                    anno_graph->annotate_sequences(std::move(data));
                 }, std::move(data));
             }, 1'000, 100'000
         );
