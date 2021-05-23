@@ -82,7 +82,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);
 
-    // annotate k-mer counts from batch, thread-safe for concurrent calls
+    // add k-mer counts from batch, thread-safe for concurrent calls
     void add_kmer_counts(std::vector<std::tuple<std::string,
                                                 std::vector<Label>,
                                                 std::vector<uint64_t>>>&& data);
