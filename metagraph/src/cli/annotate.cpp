@@ -4,6 +4,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "seq_io/formats.hpp"
@@ -218,6 +219,15 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     // iterate over input files
     for (const auto &file : files) {
+        BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
+            [&](auto&& data) {
+                thread_pool.enqueue([&](const auto &data) {
+                    for (const auto [sequence, labels] : data) {
+                        anno_graph->annotate_sequence(sequence, labels);
+                    }
+                }, std::move(data));
+            }, 1'000, 100'000
+        );
         call_annotations(
             file,
             config.refpath,
@@ -231,12 +241,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.fasta_header_delimiter,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
-                thread_pool.enqueue(
-                    [&anno_graph](const std::string &sequence, const auto &labels) {
-                        anno_graph->annotate_sequence(sequence, labels);
-                    },
-                    std::move(sequence), std::move(labels)
-                );
+                batcher.push_and_pay(sequence.size(), std::move(sequence), std::move(labels));
             }
         );
     }
