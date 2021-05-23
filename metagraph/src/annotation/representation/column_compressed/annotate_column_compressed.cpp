@@ -120,7 +120,7 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         relation_counts_.resize(columns.size());
 
     for (const auto &label : labels) {
-        const auto j = label_encoder_.insert_and_encode(label);
+        const auto j = label_encoder_.encode(label);
 
         if (!relation_counts_[j].size()) {
             relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, count_width_);
@@ -147,21 +147,11 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 // for each label and index 'i' add numeric attribute 'coord'
 template <typename Label>
 void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
-    const auto &columns = get_matrix().data();
-
-    if (coords_.size() != columns.size())
-        coords_.resize(columns.size());
+    coords_.resize(num_labels());
 
     for (const auto &label : labels) {
-        const size_t j = label_encoder_.insert_and_encode(label);
-
-        // TODO: optimize -- compute rank only in the end in serialize
-        if (uint64_t rank = columns[j]->conditional_rank1(i)) {
-            coords_[j].emplace_back(rank - 1, coord);
-        } else {
-            logger->warn("Trying to add attribute {} for non-annotated object {}."
-                         " The attribute is ignored.", coord, i);
-        }
+        const size_t j = label_encoder_.encode(label);
+        coords_[j].emplace_back(i, coord);
     }
 }
 
@@ -267,6 +257,26 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
         ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
         assert(std::unique(c_v.begin(), c_v.end()) == c_v.end());
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (size_t i = 0; i < c_v.size(); ++i) {
+            if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
+                c_v[i].first = rank;
+            } else {
+                logger->warn("Trying to add attribute {} for non-annotated object {}."
+                             " The attribute is ignored.", c_v[i].second, c_v[i].first);
+            }
+        }
+
+        // transform rank to index
+        size_t it = 0;
+        for (size_t i = 0; i < c_v.size(); ++i) {
+            if (c_v[i].first) {
+                c_v[i].first--;
+                c_v[it++] = c_v[i];
+            }
+        }
+        c_v.resize(it);
+
         // marks where the next block starts
         //  *- * *
         // 1001010
