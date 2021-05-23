@@ -151,7 +151,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
-    std::vector<std::vector<std::pair<Index, uint64_t>>> coords_;
+    std::vector<Vector<std::pair<Index, uint64_t>>> coords_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
