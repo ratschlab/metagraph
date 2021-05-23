@@ -130,6 +130,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     bitmap_builder& decompress_builder(size_t j);
     bitmap_dyn& decompress_bitmap(size_t j);
     const bitmap& get_column(size_t j) const;
+    void serialize_counts(const std::string &filename) const;
+    void serialize_coordinates(const std::string &filename) const;
 
     uint64_t num_rows_;
 
