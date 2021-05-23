@@ -206,6 +206,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename) {
     auto anno_graph = initialize_annotated_dbg(graph, config);
+    const size_t k = anno_graph->get_graph().get_k();
 
     bool forward_and_reverse = config.forward_and_reverse;
     if (anno_graph->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL) {
@@ -224,7 +225,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 thread_pool.enqueue([&](auto &data) {
                     anno_graph->annotate_sequences(std::move(data));
                 }, std::move(data));
-            }, 1'000, 100'000
+            },
+            1'000, 100'000
         );
         call_annotations(
             file,
@@ -239,7 +241,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.fasta_header_delimiter,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
-                batcher.push_and_pay(sequence.size(), std::move(sequence), std::move(labels));
+                if (sequence.size() >= k) {
+                    batcher.push_and_pay(sequence.size(),
+                                         std::move(sequence), std::move(labels));
+                }
             }
         );
     }
@@ -248,6 +253,20 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     if (config.count_kmers) {
         // add k-mer counts
+        BatchAccumulator<std::tuple<std::string,
+                                    std::vector<std::string>,
+                                    std::vector<uint64_t>>> batcher(
+            [&](auto&& data) {
+                using Batch = std::vector<std::tuple<std::string,
+                                                     std::vector<std::string>,
+                                                     std::vector<uint64_t>>>;
+                thread_pool.enqueue([&](Batch &data) {
+                    anno_graph->add_kmer_counts(std::move(data));
+                }, std::move(data));
+            },
+            1'000, 100'000
+        );
+
         for (const auto &file : files) {
             logger->trace("Annotating k-mer counts for file {}", file);
 
@@ -267,14 +286,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     [&](std::string sequence,
                                 std::vector<std::string> labels,
                                 std::vector<uint64_t> kmer_counts) {
-                        thread_pool.enqueue(
-                            [&](std::string &sequence,
-                                    std::vector<std::string> &labels,
-                                    std::vector<uint64_t> &kmer_counts) {
-                                anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
-                            },
-                            std::move(sequence), std::move(labels), std::move(kmer_counts)
-                        );
+                        if (sequence.size() >= k) {
+                            batcher.push_and_pay(sequence.size(),
+                                                 std::move(sequence), std::move(labels),
+                                                 std::move(kmer_counts));
+                        }
                     }
                 );
             } else {
@@ -293,21 +309,25 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.fasta_header_delimiter,
                     config.anno_labels,
                     [&](std::string sequence, auto labels) {
-                        thread_pool.enqueue(
-                            [&anno_graph](const std::string &sequence, const auto &labels) {
-                                const size_t k = anno_graph->get_graph().get_k();
-                                if (sequence.size() >= k) {
-                                    anno_graph->add_kmer_counts(sequence, labels,
-                                        std::vector<uint64_t>(sequence.size() - k + 1, 1));
-                                }
-                            },
-                            std::move(sequence), std::move(labels)
-                        );
+                        if (sequence.size() >= k) {
+                            batcher.push_and_pay(sequence.size(),
+                                                 std::move(sequence), std::move(labels),
+                                                 std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                        }
                     }
                 );
             }
         }
     } else if (config.coordinates) {
+        BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
+            [&](auto&& data) {
+                thread_pool.enqueue([&](auto &data) {
+                    anno_graph->add_kmer_coords(std::move(data));
+                }, std::move(data));
+            },
+            1'000, 100'000
+        );
+
         for (const auto &file : files) {
             logger->trace("Annotating k-mer coordinates for file {}", file);
 
@@ -332,17 +352,12 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.fasta_header_delimiter,
                 config.anno_labels,
                 [&](std::string sequence, auto labels) {
-                    const size_t k = anno_graph->get_graph().get_k();
-                    if (sequence.size() < k)
-                        return;
-                    uint64_t num_kmers = sequence.size() - k + 1;
-                    thread_pool.enqueue(
-                        [&anno_graph,coord](const std::string &sequence, const auto &labels) {
-                            anno_graph->add_kmer_coord(sequence, labels, coord);
-                        },
-                        std::move(sequence), std::move(labels)
-                    );
-                    coord += num_kmers;
+                    if (sequence.size() >= k) {
+                        uint64_t num_kmers = sequence.size() - k + 1;
+                        batcher.push_and_pay(sequence.size(),
+                                             std::move(sequence), std::move(labels), coord);
+                        coord += num_kmers;
+                    }
                 }
             );
         }
