@@ -77,7 +77,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
-    // add k-mer counts to the annotation
+    // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);

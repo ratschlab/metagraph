@@ -74,34 +74,34 @@ void AnnotatedSequenceGraph
 ::annotate_sequences(const std::vector<std::pair<std::string, std::vector<Label>>> &data) {
     assert(check_compatibility());
 
-    std::vector<std::vector<row_index>> indices(data.size());
+    std::vector<std::vector<row_index>> ids(data.size());
     size_t last = 0;
     for (size_t t = 0; t < data.size(); ++t) {
         // if the labels are the same, write indexes to the same array
-        auto &ids = data[t].second == data[last].second ? indices[last] : indices[t];
-        ids.reserve(data[t].first.size());
+        auto &indices = data[t].second == data[last].second ? ids[last] : ids[t];
+        indices.reserve(data[t].first.size());
 
         graph_->map_to_nodes(data[t].first, [&](node_index i) {
             if (i > 0)
-                ids.push_back(graph_to_anno_index(i));
+                indices.push_back(graph_to_anno_index(i));
         });
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
 
     for (size_t t = 0; t < data.size(); ++t) {
-        if (!indices[t].size())
+        if (!ids[t].size())
             continue;
 
         if (force_fast_) {
             auto row_major = dynamic_cast<annot::RowCompressed<Label>*>(annotator_.get());
             if (row_major) {
-                row_major->add_labels_fast(indices[t], data[t].second);
+                row_major->add_labels_fast(ids[t], data[t].second);
                 continue;
             }
         }
 
-        annotator_->add_labels(indices[t], data[t].second);
+        annotator_->add_labels(ids[t], data[t].second);
     }
 }
 
