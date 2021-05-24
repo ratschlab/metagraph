@@ -116,7 +116,7 @@ int assemble(Config *config) {
 
         logger->trace("Writing graph to GFA...");
 
-        std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa") + ".gfa");
+        std::ofstream gfa_file(utils::make_suffix(config->outfbase, ".gfa"));
         std::mutex str_mutex;
 
         gfa_file << "H\tVN:Z:1.0" << std::endl;

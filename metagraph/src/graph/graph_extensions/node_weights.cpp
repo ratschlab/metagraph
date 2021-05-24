@@ -1,10 +1,14 @@
 #include "node_weights.hpp"
 
+#include <filesystem>
+
 #include "common/algorithms.hpp"
 
 
 namespace mtg {
 namespace graph {
+
+namespace fs = std::filesystem;
 
 NodeWeights::NodeWeights(uint64_t max_index, size_t bits_per_count)
       : weights_(max_index, 0, bits_per_count),
@@ -31,8 +35,7 @@ void NodeWeights::remove_nodes(const bitmap &nodes_removed) {
 
 bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
     const auto weights_filename
-        = utils::remove_suffix(filename_base, kWeightsExtension)
-                                        + kWeightsExtension;
+            = utils::make_suffix(filename_base, kWeightsExtension);
     try {
         std::ifstream instream(weights_filename, std::ios::binary);
         if (!instream.good())
@@ -50,12 +53,18 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
 }
 
 void NodeWeights::serialize(const std::string &filename_base) const {
-    const auto weights_filename
-        = utils::remove_suffix(filename_base, kWeightsExtension)
-                                        + kWeightsExtension;
+    const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
 
-    std::ofstream outstream(weights_filename, std::ios::binary);
+    std::ofstream outstream(fname, std::ios::binary);
     weights_.serialize(outstream);
+}
+
+void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,
+                            const std::string &filename_base) {
+    const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
+    const std::string old_fname = weights.filename();
+    weights.close(false); // close without removing the file
+    fs::rename(old_fname, fname);
 }
 
 bool NodeWeights::is_compatible(const SequenceGraph &graph, bool verbose) const {

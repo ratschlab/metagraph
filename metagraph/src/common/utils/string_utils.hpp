@@ -18,6 +18,8 @@ std::string remove_suffix(const std::string &str, const std::string &suffix,
     return remove_suffix(remove_suffix(str, suffix), other_suffixes...);
 }
 
+std::string make_suffix(const std::string &str, const std::string &suffix);
+
 std::string join_strings(const std::vector<std::string> &strings,
                          const std::string &delimiter,
                          bool discard_empty_strings = false);
