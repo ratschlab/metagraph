@@ -104,6 +104,13 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
     std::vector<node_index> added_nodes;
     min_scores_.clear();
 
+    auto populate_min_scores = [&](const Vector<uint64_t> &targets) {
+        for (uint64_t target : targets) {
+            if (!min_scores_.count(target))
+                min_scores_.emplace(target, aggregator_.get_min_path_score(target));
+        }
+    };
+
     DefaultColumnExtender<NodeType>::call_visited_nodes([&](node_index node, size_t, size_t) {
         auto [it, inserted] = targets_.emplace(node, 0);
         if (inserted) {
@@ -112,16 +119,15 @@ void LabeledBacktrackingExtender<NodeType>::init_backtrack() const {
                 added_rows.push_back(row);
                 added_nodes.push_back(node);
             });
+        } else {
+            populate_min_scores(*(targets_set_.begin() + it->second));
         }
     });
 
     auto it = added_nodes.begin();
-    for (auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
+    for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows)) {
         assert(it != added_nodes.end());
-        for (uint64_t target : labels) {
-            if (!min_scores_.count(target))
-                min_scores_.emplace(target, aggregator_.get_min_path_score(target));
-        }
+        populate_min_scores(labels);
         auto jt = targets_set_.emplace(labels).first;
         targets_[*it] = jt - targets_set_.begin();
         ++it;
