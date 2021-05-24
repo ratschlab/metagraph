@@ -423,10 +423,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
                 auto rev = path;
                 rev.reverse_complement(graph_, query_rc);
                 if (rev.empty()) {
-                    DEBUG_LOG("Alignment cannot be reversed, returning");
-                    if (path.get_score() >= min_path_score)
-                        alignment_callback(std::move(path));
-
+                    DEBUG_LOG("This local alignment cannot be reversed, skipping");
                     return;
                 }
 

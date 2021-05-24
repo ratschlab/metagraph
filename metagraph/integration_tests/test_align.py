@@ -41,7 +41,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph}  --align-max-nodes-per-seq-char 24 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -115,6 +115,7 @@ class TestDNAAlign(TestingBase):
         last_split = params_str[5].split("\t");
         self.assertEqual(last_split[0], "MT-11/1")
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
+        self.assertEqual(last_split[2], "-")
         self.assertEqual(last_split[4], "57")
         self.assertEqual(last_split[6], "114S3=1X10=1X10=1X10=")
 
@@ -133,7 +134,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 32782', params_str[1])
         self.assertEqual('mode: canonical', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph} --align-max-nodes-per-seq-char 24 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -150,8 +151,6 @@ class TestDNAAlign(TestingBase):
         last_split = params_str[5].split("\t");
         self.assertEqual(last_split[0], "MT-11/1")
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
-        # self.assertEqual(last_split[4], "25")
-        # self.assertEqual(last_split[6], "20S6=1X3=5D9=1X4=106S")
         self.assertEqual(last_split[4], "57")
         self.assertEqual(last_split[6], "114S3=1X10=1X10=1X10=")
 
@@ -169,7 +168,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 32782', params_str[1])
         self.assertEqual('mode: canonical', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
+        stats_command = '{exe} align -i {graph}  --align-max-nodes-per-seq-char 24 --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -199,7 +198,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16391', params_str[1])
         self.assertEqual('mode: primary', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align -i {graph}  --align-max-nodes-per-seq-char 24 --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -216,8 +215,6 @@ class TestDNAAlign(TestingBase):
         last_split = params_str[5].split("\t");
         self.assertEqual(last_split[0], "MT-11/1")
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
-        # self.assertEqual(last_split[4], "25")
-        # self.assertEqual(last_split[6], "20S6=1X3=5D9=1X4=106S")
         self.assertEqual(last_split[4], "57")
         self.assertEqual(last_split[6], "114S3=1X10=1X10=1X10=")
 
@@ -235,7 +232,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16391', params_str[1])
         self.assertEqual('mode: primary', params_str[2])
 
-        stats_command = '{exe} align -i {graph} --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
+        stats_command = '{exe} align -i {graph}  --align-max-nodes-per-seq-char 24 --align-min-exact-match 0.0 --align-min-seed-length 10 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT.primary' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
