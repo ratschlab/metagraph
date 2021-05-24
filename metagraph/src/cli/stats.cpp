@@ -268,8 +268,8 @@ int print_stats(Config *config) {
 
         using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
         if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
-            std::string ext = annot::binmat::kRowDiffAnchorExt;
-            std::string anchors_file = utils::remove_suffix(config->infbase, ext) + ext;
+            std::string anchors_file = utils::make_suffix(config->infbase,
+                                                          annot::binmat::kRowDiffAnchorExt);
             if (!config->infbase.empty() && std::filesystem::exists(anchors_file)) {
                 const_cast<RowDiffCol *>(rd)->load_anchor(anchors_file);
             }

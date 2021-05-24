@@ -21,7 +21,6 @@ namespace graph {
 
 using namespace mtg::graph::boss;
 
-using utils::remove_suffix;
 using mtg::common::logger;
 
 typedef DBGSuccinct::node_index node_index;
@@ -650,8 +649,7 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
     valid_edges_.reset();
 
     {
-        std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                               std::ios::binary);
+        std::ifstream instream(utils::make_suffix(filename, kExtension), std::ios::binary);
 
         if (!boss_graph_->load(instream))
             return false;
@@ -669,7 +667,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     if (!load_without_mask(filename))
         return false;
 
-    auto prefix = remove_suffix(filename, kExtension);
+    auto prefix = utils::remove_suffix(filename, kExtension);
 
     std::ifstream instream(prefix + kDummyMaskExtension, std::ios::binary);
     if (!instream.good())
@@ -740,7 +738,7 @@ bool DBGSuccinct::load(const std::string &filename) {
 }
 
 void DBGSuccinct::serialize(const std::string &filename) const {
-    auto prefix = remove_suffix(filename, kExtension);
+    auto prefix = utils::remove_suffix(filename, kExtension);
 
     // Clear any existing Bloom filters
     std::filesystem::remove(prefix + kBloomFilterExtension);

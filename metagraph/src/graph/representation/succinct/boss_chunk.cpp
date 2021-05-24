@@ -269,7 +269,7 @@ void BOSS::Chunk::extend(Chunk &other) {
     assert(!weights_.size() || weights_.size() == W_.size());
 }
 
-void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
+void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector_buffer<> *weights) {
     assert(last_.size() == W_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
 
@@ -278,16 +278,15 @@ void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector<> *weights) {
     assert(graph->is_valid());
 
     if (weights) {
-        weights_.flush();
-        std::ifstream in(weights_.filename(), std::ios::binary);
-        weights->load(in);
+        *weights = sdsl::int_vector_buffer<>();
+        weights->swap(weights_);
     }
 }
 
 BOSS*
 BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                                     bool verbose,
-                                    sdsl::int_vector<> *weights,
+                                    sdsl::int_vector_buffer<> *weights,
                                     const std::string &swap_dir) {
     assert(chunk_filenames.size());
 
@@ -299,8 +298,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     Chunk full_chunk;
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
-        auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
-                                                        + kFileExtension;
+        auto filename = utils::make_suffix(chunk_filenames[i], kFileExtension);
 
         Chunk graph_chunk(1, 0, swap_dir);
         if (!graph_chunk.load(filename)) {
@@ -330,8 +328,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {
-    std::string fname
-        = utils::remove_suffix(infbase, kFileExtension) + kFileExtension;
+    std::string fname = utils::make_suffix(infbase, kFileExtension);
 
     try {
         W_.close(true);
@@ -373,8 +370,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
 }
 
 void BOSS::Chunk::serialize(const std::string &outbase) {
-    std::string fname
-        = utils::remove_suffix(outbase, kFileExtension) + kFileExtension;
+    std::string fname = utils::make_suffix(outbase, kFileExtension);
 
     W_.flush();
     fs::copy(W_.filename(), fname + ".W", fs::copy_options::overwrite_existing);

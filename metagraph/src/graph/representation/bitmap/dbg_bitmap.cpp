@@ -262,8 +262,7 @@ void DBGBitmap::serialize(std::ostream &out) const {
 }
 
 void DBGBitmap::serialize(const std::string &filename) const {
-    std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
-                      std::ios::binary);
+    std::ofstream out(utils::make_suffix(filename, kExtension), std::ios::binary);
     serialize(out);
 }
 
@@ -301,8 +300,7 @@ bool DBGBitmap::load(std::istream &in) {
 }
 
 bool DBGBitmap::load(const std::string &filename) {
-    std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
-                     std::ios::binary);
+    std::ifstream in(utils::make_suffix(filename, kExtension), std::ios::binary);
     return load(in);
 }
 

@@ -9,7 +9,7 @@
 
 
 namespace utils {
-    std::string remove_suffix(const std::string &str, const std::string &suffix);
+    std::string make_suffix(const std::string &str, const std::string &suffix);
 } // namespace utils
 
 
@@ -120,9 +120,7 @@ class SequenceGraph {
         remove_extension<ExtensionSubtype>();
         auto extension = std::make_shared<ExtensionSubtype>();
 
-        auto filename_base = utils::remove_suffix(filename, file_extension());
-
-        if (!extension->load(filename_base + file_extension()))
+        if (!extension->load(utils::make_suffix(filename, file_extension())))
             return nullptr;
 
         add_extension(extension);

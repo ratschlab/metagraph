@@ -102,6 +102,7 @@ add_compile_options(
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(
     -Wno-exit-time-destructors
+    -Wno-deprecated-declarations
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
@@ -563,7 +564,7 @@ file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
   "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
 )
 file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  DESTINATION "${PROJECT_BINARY_DIR}/"
+  DESTINATION "${PROJECT_BINARY_DIR}"
   FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                    GROUP_READ GROUP_EXECUTE
                    WORLD_READ WORLD_EXECUTE

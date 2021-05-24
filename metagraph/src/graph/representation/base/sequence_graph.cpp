@@ -38,8 +38,8 @@ void SequenceGraph::add_extension(std::shared_ptr<GraphExtension> extension) {
 }
 
 void SequenceGraph::serialize_extensions(const std::string &filename) const {
-    for (auto extension : extensions_) {
-        extension->serialize(utils::remove_suffix(filename, file_extension()) + file_extension());
+    for (const auto &extension : extensions_) {
+        extension->serialize(utils::make_suffix(filename, file_extension()));
     }
 }
 

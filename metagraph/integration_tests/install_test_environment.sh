@@ -10,6 +10,10 @@ fi
 API_DIR="$1"
 VENV_DIR="$2"
 
+if [ -f ${VENV_DIR}/DONE ]; then
+  echo "Found a previously set up virtual environment in ${VENV_DIR}"
+  return
+fi
 echo "Setting up virtual environment in ${VENV_DIR}"
 python3 -m venv ${VENV_DIR}
 source ${VENV_DIR}/bin/activate

@@ -235,6 +235,10 @@ class EliasFanoEncoderBuffered<std::pair<T, C>> {
 
     size_t finish();
 
+    /** Append sorted array #data to EF-coded #out_fname */
+    static size_t append_block(const std::vector<std::pair<T, C>> &data,
+                               const std::string &file_name);
+
   private:
     void encode_chunk();
 
