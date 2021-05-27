@@ -215,9 +215,11 @@ DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
 
-    return complete_
-        ? index
-        : (kmers_[index] ? kmers_.rank1(index) - 1 : npos);
+    if (complete_)
+        return index;
+
+    uint64_t rk = kmers_.conditional_rank1(index);
+    return rk ? rk - 1 : npos;
 }
 
 DBGBitmap::node_index DBGBitmap::kmer_to_node(std::string_view kmer) const {
@@ -248,7 +250,7 @@ std::string DBGBitmap::get_node_sequence(node_index node) const {
 }
 
 uint64_t DBGBitmap::num_nodes() const {
-    assert(kmers_[0] && "The first bit must be always set to 1");
+    assert(kmers_[0] && "The first bit must always be set to 1");
     return kmers_.num_set_bits() - 1;
 }
 
