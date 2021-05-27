@@ -82,13 +82,14 @@ class TaxClassifier {
     /**
      * taxonomic_map returns the taxid LCA for a given kmer.
      */
-    sdsl::int_vector<> taxonomic_map;
+    std::vector<int64_t> taxonomic_map;
 
     double lca_coverage_rate;
     double kmers_discovery_rate;
 
   public:
     static int64_t time_spent_map_to_nodes;
+    static int64_t time_spent_map_to_nodes_plus;
     static int64_t time_spent_assign_class;
     static int64_t time_spent_assign_class_canceled;
 

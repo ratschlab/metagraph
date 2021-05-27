@@ -37,7 +37,11 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    Vector<std::pair<mtg::kmer::KMer<long unsigned int, 2>, bool> > kmers_list = sequence_to_kmers(sequence, mode_ == CANONICAL);
+    std::sort(kmers_list.begin(), kmers_list.end(), [](const std::pair<DBGBitmap::Kmer, bool> &a, const std::pair<DBGBitmap::Kmer, bool> b) {
+        return a.first < b.first;
+    });
+    for (const auto &[kmer, is_valid] : kmers_list) {
         if (terminate())
             return;
 

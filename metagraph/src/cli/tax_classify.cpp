@@ -100,6 +100,7 @@ int taxonomic_classification(Config *config) {
     thread_pool.join();
 
     std::cout << "time_spent_map_to_nodes = " << tax_classifier.time_spent_map_to_nodes << "\n";
+    std::cout << "time_spent_map_to_nodes_plus = " << tax_classifier.time_spent_map_to_nodes_plus << "\n";
     std::cout << "algorithm               = " << tax_classifier.time_spent_assign_class + tax_classifier.time_spent_assign_class_canceled - tax_classifier.time_spent_map_to_nodes << "\n";
     std::cout << "time_spent_assign_class = " << tax_classifier.time_spent_assign_class << "\n";
     std::cout << "time_spent_assign_class_canceled = " << tax_classifier.time_spent_assign_class_canceled << "\n";

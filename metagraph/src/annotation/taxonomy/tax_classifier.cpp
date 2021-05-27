@@ -8,6 +8,8 @@
 #include <tsl/hopscotch_set.h>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/dac_vector.hpp>
+#include <sdsl/vlc_vector.hpp>
+#include <sdsl/vectors.hpp>
 
 #include "common/serialization.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -25,6 +27,7 @@ using TaxId = TaxClassifier::TaxId;
 
 
 int64_t TaxClassifier::time_spent_map_to_nodes = 0;
+int64_t TaxClassifier::time_spent_map_to_nodes_plus = 0;
 int64_t TaxClassifier::time_spent_assign_class = 0;
 int64_t TaxClassifier::time_spent_assign_class_canceled = 0;
 
@@ -50,16 +53,27 @@ void TaxClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
 
+    std::vector<uint32_t> code_to_taxid_v(code_to_taxid.size());
+    for (uint32_t i = 0; i < code_to_taxid.size(); ++i) {
+        code_to_taxid_v[i] = code_to_taxid[i];
+    }
+
     sdsl::dac_vector_dp<sdsl::rrr_vector<>> code;
+    // sdsl::dac_vector<> code;
+    // sdsl::vlc_vector<sdsl::coder::elias_gamma, 128> code;
     code.load(f);
     if (code.empty()) {
         logger->error("Can't load serialized 'code' from file {}.", filepath.c_str());
         std::exit(1);
     }
+    std::vector<uint32_t> code_v(code.size());
+    for (uint32_t i = 0; i < code.size(); ++i) {
+        code_v[i] = code[i];
+    }
 
     this->taxonomic_map.resize(code.size());
     for (uint64_t i = 0; i < code.size(); ++i) {
-        this->taxonomic_map[i] = code_to_taxid[code[i]];
+        this->taxonomic_map[i] = code_to_taxid_v[code_v[i]];
     }
 
     logger->trace("Finished taxdb importing after {}s", timer.elapsed());
@@ -199,7 +213,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     uint64_t cnt_forward = 0;
     graph.map_to_nodes(sequence, [&](const uint64_t &i) {
         // forward_kmers.push_back(i);
-        forward_kmers[cnt_forward++] =i;
+        forward_kmers[cnt_forward++] = i;
         // forward_kmers.push_back(0);
     });
     std::string reversed_sequence = sequence;
@@ -248,6 +262,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
             num_kmers_per_node[curr_taxid]++;
         }
     }
+    time_spent_map_to_nodes_plus += (high_resolution_clock::now() - assign_start).count();
 
     if (total_discovered_kmers <= this->kmers_discovery_rate * total_kmers) {
         time_spent_assign_class_canceled += (high_resolution_clock::now() - assign_start).count();

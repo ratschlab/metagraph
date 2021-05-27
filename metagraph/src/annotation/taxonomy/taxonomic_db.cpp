@@ -5,7 +5,9 @@
 #include <fstream>
 #include <string>
 #include <sdsl/int_vector.hpp>
+#include <sdsl/vlc_vector.hpp>
 #include <sdsl/dac_vector.hpp>
+#include <sdsl/vectors.hpp>
 #include <vector>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
@@ -437,6 +439,8 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         code_vector[code_vector_cnt++] = taxid_to_code[this->taxonomic_map[i]];
     }
     sdsl::dac_vector_dp<sdsl::rrr_vector<>> code(code_vector);
+    // sdsl::dac_vector<> code(code_vector);
+    // sdsl::vlc_vector<sdsl::coder::elias_gamma, 128> code(code_vector);
 
     // Denormalize code_to_taxid.
     for (uint64_t i = 0; i < code_to_taxid.size(); ++i) {
