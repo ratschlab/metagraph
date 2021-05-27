@@ -215,9 +215,11 @@ DBGBitmap::node_index DBGBitmap::to_node(const Kmer &kmer) const {
     assert(index < kmers_.size());
     assert(!complete_ || kmers_[index]);
 
-    return complete_
-        ? index
-        : (kmers_[index] ? kmers_.rank1(index) - 1 : npos);
+    if (complete_)
+        return index;
+
+    uint64_t rk = kmers_.conditional_rank1(index);
+    return rk ? rk - 1 : npos;
 }
 
 DBGBitmap::node_index DBGBitmap::kmer_to_node(std::string_view kmer) const {
