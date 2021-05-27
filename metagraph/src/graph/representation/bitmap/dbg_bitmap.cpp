@@ -250,7 +250,7 @@ std::string DBGBitmap::get_node_sequence(node_index node) const {
 }
 
 uint64_t DBGBitmap::num_nodes() const {
-    assert(kmers_[0] && "The first bit must be always set to 1");
+    assert(kmers_[0] && "The first bit must always be set to 1");
     return kmers_.num_set_bits() - 1;
 }
 
