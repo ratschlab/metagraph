@@ -187,7 +187,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
             if (!label_encoder.size())
                 common::logger->warn("No labels in {}", filenames[i]);
 
-            std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
+            std::vector<std::unique_ptr<bit_vector>> &cols = matrix.diffs().data();
 
             for (uint32_t j = 0; j < cols.size(); ++j) {
                 callback(offsets[i] + j, label_encoder.decode(j), std::move(cols[j]));

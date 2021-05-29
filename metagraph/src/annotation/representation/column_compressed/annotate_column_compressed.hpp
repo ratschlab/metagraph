@@ -133,8 +133,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     const std::string swap_dir_;
     const uint64_t buffer_size_bytes_;
 
-    std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-    binmat::ColumnMajor annotation_matrix_view_ { bitmatrix_ };
+    binmat::ColumnMajor matrix_;
+    std::vector<std::unique_ptr<bit_vector>> &bitmatrix_ { matrix_.data() };
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;

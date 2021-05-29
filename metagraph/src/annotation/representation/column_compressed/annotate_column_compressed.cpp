@@ -754,14 +754,14 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 template <typename Label>
 const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
-    return annotation_matrix_view_;
+    return matrix_;
 }
 
 template <typename Label>
 binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return binmat::ColumnMajor(std::move(bitmatrix_));
+    return std::move(matrix_);
 }
 
 template <typename Label>
