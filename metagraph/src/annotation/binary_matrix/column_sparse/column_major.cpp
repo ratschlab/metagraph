@@ -43,7 +43,7 @@ ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
 
     for (size_t j = 0; j < columns_.size(); ++j) {
         assert(columns_[j]);
-        const auto &col = *columns_[j];
+        const bit_vector &col = *columns_[j];
 
         for (size_t i = 0; i < row_ids.size(); ++i) {
             assert(row_ids[i] < num_rows());
@@ -88,11 +88,11 @@ bool ColumnMajor::load(std::istream &in) {
     try {
         columns_.resize(load_number(in));
 
-        for (auto &column : columns_) {
-            assert(!column);
+        for (auto &c : columns_) {
+            assert(!c);
 
-            column = std::make_unique<bit_vector_sd>();
-            if (!column->load(in))
+            c = std::make_unique<bit_vector_sd>();
+            if (!c->load(in))
                 return false;
         }
         return true;
@@ -104,16 +104,14 @@ bool ColumnMajor::load(std::istream &in) {
 void ColumnMajor::serialize(std::ostream &out) const {
     serialize_number(out, columns_.size());
 
-    for (const auto &column : columns_) {
-        assert(column);
-        // conversion pilfers the converted object, so we place the result back into
-        // #column, to ensure the ColumnMajor instance is valid after serialization
-        // TODO: better to serialize in the original format and add a loader that is able
+    for (const auto &c : columns_) {
+        assert(c);
+        // TODO: better serialize in the original format and add a loader that is able
         // to infer the format from the binary data
-        if (const auto *sd_ptr = dynamic_cast<const bit_vector_sd *>(column.get())) {
+        if (const auto *sd_ptr = dynamic_cast<const bit_vector_sd *>(c.get())) {
             sd_ptr->serialize(out);
         } else {
-            column->copy_to<bit_vector_sd>().serialize(out);
+            c->copy_to<bit_vector_sd>().serialize(out);
         }
     }
 }
@@ -122,9 +120,9 @@ void ColumnMajor::serialize(std::ostream &out) const {
 uint64_t ColumnMajor::num_relations() const {
     uint64_t num_set_bits = 0;
 
-    for (const auto &column : columns_) {
-        assert(column);
-        num_set_bits += column->num_set_bits();
+    for (const auto &c : columns_) {
+        assert(c);
+        num_set_bits += c->num_set_bits();
     }
     return num_set_bits;
 }
