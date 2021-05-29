@@ -218,6 +218,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
+    // not too small, not too large
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
 
@@ -264,7 +265,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                                                      std::vector<std::string>,
                                                      std::vector<uint64_t>>>;
                 thread_pool.enqueue([&](Batch &data) {
-                    anno_graph->add_kmer_counts(std::move(data));
+                    for (auto &[seq, labels, kmer_counts] : data) {
+                        anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
+                    }
                 }, std::move(data));
             },
             batch_size, batch_length, batch_size

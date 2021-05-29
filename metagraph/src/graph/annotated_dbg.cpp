@@ -132,42 +132,6 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
         annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 
-void AnnotatedDBG::add_kmer_counts(std::vector<std::tuple<std::string,
-                                                          std::vector<Label>,
-                                                          std::vector<uint64_t>>>&& data) {
-    assert(check_compatibility());
-
-    std::vector<std::vector<row_index>> ids(data.size());
-    for (size_t t = 0; t < data.size(); ++t) {
-        const auto &[sequence, labels, _] = data[t];
-        if (sequence.size() < dbg_.get_k())
-            continue;
-
-        std::vector<uint64_t> &kmer_counts = std::get<2>(data[t]);
-        assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
-
-        auto &indices = ids[t];
-        indices.reserve(sequence.size() - dbg_.get_k() + 1);
-        size_t end = 0;
-
-        graph_->map_to_nodes(sequence, [&](node_index i) {
-            // only insert indexes for matched k-mers and shift counts accordingly
-            if (i > 0) {
-                indices.push_back(graph_to_anno_index(i));
-                kmer_counts[indices.size() - 1] = kmer_counts[end++];
-            }
-        });
-
-        kmer_counts.resize(end);
-    }
-
-    for (size_t t = 0; t < data.size(); ++t) {
-        const auto &[_, labels, kmer_counts] = data[t];
-        if (ids[t].size())
-            annotator_->add_label_counts(ids[t], labels, kmer_counts);
-    }
-}
-
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                             double presence_ratio) const {
     assert(presence_ratio >= 0.);
