@@ -151,7 +151,6 @@ class Config {
     std::string host_address;
     std::string taxonomic_tree;
     std::string label_taxid_map;
-    uint32_t max_path_length = 50;
     std::string linkage_file;
     std::string intersected_columns;
 
