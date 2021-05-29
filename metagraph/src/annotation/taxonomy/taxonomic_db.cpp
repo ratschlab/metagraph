@@ -157,19 +157,19 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
     }
 }
 
-// std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-//     std::vector<std::string> label_parts = utils::split_string(label, "|");
-//     if (label_parts.size() <= 3 || label_parts[3] == "") {
-//         logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
-//         exit(1);
-//     }
-//     return label_parts[3];
-// }
+ std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+     std::vector<std::string> label_parts = utils::split_string(label, "|");
+     if (label_parts.size() <= 3 || label_parts[3] == "") {
+         logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
+         exit(1);
+     }
+     return label_parts[3];
+ }
 
-std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-   auto aux = utils::split_string(label, "|")[2];
-   return utils::split_string(aux, " ")[0];
-}
+//std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+//   auto aux = utils::split_string(label, "|")[2];
+//   return utils::split_string(aux, " ")[0];
+//}
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepath,
