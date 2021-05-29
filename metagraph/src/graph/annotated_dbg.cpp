@@ -128,12 +128,8 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
 
     kmer_counts.resize(end);
 
-    if (!indices.size())
-        return;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    annotator_->add_label_counts(indices, labels, kmer_counts);
+    if (indices.size())
+        annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 
 void AnnotatedDBG::add_kmer_counts(std::vector<std::tuple<std::string,
@@ -164,8 +160,6 @@ void AnnotatedDBG::add_kmer_counts(std::vector<std::tuple<std::string,
 
         kmer_counts.resize(end);
     }
-
-    std::lock_guard<std::mutex> lock(mutex_);
 
     for (size_t t = 0; t < data.size(); ++t) {
         const auto &[_, labels, kmer_counts] = data[t];

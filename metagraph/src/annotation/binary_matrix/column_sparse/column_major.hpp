@@ -15,6 +15,8 @@ class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
     ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
+    ColumnMajor(const std::vector<std::unique_ptr<bit_vector>> &columns)
+        : columns_(&columns) {}
     ColumnMajor(ColumnMajor&& other);
 
     uint64_t num_columns() const override { return columns_->size(); }
@@ -39,10 +41,6 @@ class ColumnMajor : public BinaryMatrix {
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
              size_t min_count = 1,
              size_t count_cap = std::numeric_limits<size_t>::max()) const override;
-
-    void update_pointer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-        columns_ = &columns;
-    }
 
     const auto& data() const { return *columns_; }
 
