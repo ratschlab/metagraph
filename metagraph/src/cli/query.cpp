@@ -317,7 +317,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     if (const auto *int_matrix
             = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
         std::vector<uint64_t> row_indexes;
-        for (auto [in_full, _] : full_to_small) {
+        for (const auto &[in_full, _] : full_to_small) {
             assert(in_full < full_annotation.num_objects());
             row_indexes.push_back(in_full);
         }
@@ -326,7 +326,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
-        for (uint64_t i = 0; i < rows.size(); ++i) {
+        for (uint64_t i = 0; i < slice.size(); ++i) {
             rows[full_to_small[i].second] = std::move(slice[i]);
         }
 
