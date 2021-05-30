@@ -17,7 +17,7 @@ namespace annot {
 
 /**
  * Multithreading:
- *  The non-const methods must be called sequentially.
+ *  The non-const methods must be called sequentially (except add_label_counts).
  *  Then, any subset of the public const methods can be called concurrently.
  */
 template <typename Label = std::string>
@@ -59,6 +59,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
     // for each label and index 'indices[i]' add count 'counts[i]'
+    // thread-safe
     void add_label_counts(const std::vector<Index> &indices,
                           const VLabels &labels,
                           const std::vector<uint64_t> &counts) override;
@@ -132,8 +133,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     const std::string swap_dir_;
     const uint64_t buffer_size_bytes_;
 
-    std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-    mutable binmat::ColumnMajor annotation_matrix_view_;
+    binmat::ColumnMajor matrix_;
+    std::vector<std::unique_ptr<bit_vector>> &bitmatrix_ { matrix_.data() };
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;
@@ -142,6 +143,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
+    mutable std::mutex counts_mu_;
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;

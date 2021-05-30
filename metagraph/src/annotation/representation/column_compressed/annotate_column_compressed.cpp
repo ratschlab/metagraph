@@ -106,6 +106,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 }
 
 // for each label and index 'indices[i]' add count 'counts[i]'
+// thread-safe
 template <typename Label>
 void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices,
                                                const VLabels &labels,
@@ -114,11 +115,20 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 
     const auto &columns = get_matrix().data();
 
-    if (relation_counts_.size() != columns.size())
-        relation_counts_.resize(columns.size());
-
     for (const auto &label : labels) {
-        const auto j = label_encoder_.insert_and_encode(label);
+        const auto j = label_encoder_.encode(label);
+
+        std::vector<uint64_t> ranks(indices.size());
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (!(ranks[i] = columns[j]->conditional_rank1(indices[i])))
+                logger->warn("Trying to add count {} for non-annotated object {}."
+                             " The count will be ignored.", counts[i], indices[i]);
+        }
+
+        std::unique_lock<std::mutex> lock(counts_mu_);
+
+        if (relation_counts_.size() != columns.size())
+            relation_counts_.resize(columns.size());
 
         if (!relation_counts_[j].size()) {
             relation_counts_[j] = sdsl::int_vector<>(columns[j]->num_set_bits(), 0, count_width_);
@@ -129,14 +139,10 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
         }
 
         for (size_t i = 0; i < indices.size(); ++i) {
-            if (uint64_t rank = columns[j]->conditional_rank1(indices[i])) {
+            if (ranks[i]) {
                 uint64_t count = std::min(counts[i], max_count_);
-                sdsl::int_vector_reference<sdsl::int_vector<>> ref = relation_counts_[j][rank - 1];
+                auto ref = relation_counts_[j][ranks[i] - 1];
                 ref = std::min((uint64_t)ref, max_count_ - count) + count;
-
-            } else {
-                logger->warn("Trying to add count {} for non-annotated object {}."
-                             " The count was ignored.", counts[i], indices[i]);
             }
         }
     }
@@ -748,15 +754,14 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 template <typename Label>
 const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
-    annotation_matrix_view_.update_pointer(bitmatrix_);
-    return annotation_matrix_view_;
+    return matrix_;
 }
 
 template <typename Label>
 binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return binmat::ColumnMajor(std::move(bitmatrix_));
+    return std::move(matrix_);
 }
 
 template <typename Label>

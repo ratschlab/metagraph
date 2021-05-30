@@ -70,11 +70,49 @@ void AnnotatedSequenceGraph
     annotator_->add_labels(indices, labels);
 }
 
+void AnnotatedSequenceGraph
+::annotate_sequences(const std::vector<std::pair<std::string, std::vector<Label>>> &data) {
+    assert(check_compatibility());
+
+    std::vector<std::vector<row_index>> ids(data.size());
+    size_t last = 0;
+    for (size_t t = 0; t < data.size(); ++t) {
+        // if the labels are the same, write indexes to the same array
+        auto &indices = data[t].second == data[last].second ? ids[last] : ids[t];
+        indices.reserve(data[t].first.size());
+
+        graph_->map_to_nodes(data[t].first, [&](node_index i) {
+            if (i > 0)
+                indices.push_back(graph_to_anno_index(i));
+        });
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (size_t t = 0; t < data.size(); ++t) {
+        if (!ids[t].size())
+            continue;
+
+        if (force_fast_) {
+            auto row_major = dynamic_cast<annot::RowCompressed<Label>*>(annotator_.get());
+            if (row_major) {
+                row_major->add_labels_fast(ids[t], data[t].second);
+                continue;
+            }
+        }
+
+        annotator_->add_labels(ids[t], data[t].second);
+    }
+}
+
 void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
                                    const std::vector<Label> &labels,
                                    std::vector<uint64_t>&& kmer_counts) {
     assert(check_compatibility());
     assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
+
+    if (sequence.size() < dbg_.get_k())
+        return;
 
     std::vector<row_index> indices;
     indices.reserve(sequence.size() - dbg_.get_k() + 1);
@@ -90,12 +128,8 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
 
     kmer_counts.resize(end);
 
-    if (!indices.size())
-        return;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    annotator_->add_label_counts(indices, labels, kmer_counts);
+    if (indices.size())
+        annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
