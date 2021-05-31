@@ -13,7 +13,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
-#include "annotation/int_matrix/extended/csc_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
 
