@@ -14,22 +14,27 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
       : num_columns_(num_columns),
         num_rows_(num_columns > 0 ? num_rows : 0) {
     //TODO(ddanciu): use an int_vector_buffer instead to save memory
-    uint8_t col_index_width = num_columns ? sdsl::bits::hi(num_columns - 1) + 1 : 1;
-    sdsl::int_vector<> elements(num_relations, 0, col_index_width);
+    sdsl::int_vector<> set_bits(num_relations);
     sdsl::bit_vector boundary(num_relations + num_rows, 0);
+    uint64_t offset = 0;
     uint64_t idx = 0;
     uint64_t b_idx = 0;
     call_rows([&](const auto &column_indices) {
         for (uint64_t col : column_indices) {
-            elements[idx++] = col;
+            assert(offset % num_columns_ == 0);
+            set_bits[idx++] = offset + col;
             b_idx++;
         }
         boundary[b_idx++] = 1;
+        offset += num_columns_;
+        // reset the offset when it's about to overflow
+        if (offset > std::numeric_limits<uint64_t>::max() - num_columns_)
+            offset = 0;
     });
     assert(idx == num_relations);
 
     boundary_ = bit_vector_small(boundary);
-    elements_ = sdsl::enc_vector<>(elements);
+    set_bits_ = sdsl::enc_vector<>(set_bits);
 }
 
 bool RowSparse::get(Row row, Column column) const {
@@ -53,7 +58,7 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
     uint64_t end_idx = boundary_.next1(start_idx);
     for (uint64_t i = start_idx; i != end_idx; ++i) {
-        result.push_back(elements_[i - row]);
+        result.push_back(set_bits_[i - row] % num_columns_);
     }
     return result;
 }
@@ -61,7 +66,7 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
 bool RowSparse::load(std::istream &f) {
     try {
         f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
-        elements_.load(f);
+        set_bits_.load(f);
         boundary_.load(f);
         num_rows_ = boundary_.num_set_bits();
     } catch (...) {
@@ -72,7 +77,7 @@ bool RowSparse::load(std::istream &f) {
 
 void RowSparse::serialize(std::ostream &f) const  {
     f.write(reinterpret_cast<const char *>(&num_columns_), sizeof(uint64_t));
-    elements_.serialize(f);
+    set_bits_.serialize(f);
     boundary_.serialize(f);
 }
 
