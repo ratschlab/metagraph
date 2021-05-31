@@ -363,6 +363,7 @@ Config::Config(int argc, char *argv[]) {
             filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--disk-swap")) {
             tmp_dir = get_value(i++);
+            utils::set_swap_path(tmp_dir);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
             disk_cap_bytes = atoi(get_value(i++)) * 1e9;
         } else if (argv[i][0] == '-') {

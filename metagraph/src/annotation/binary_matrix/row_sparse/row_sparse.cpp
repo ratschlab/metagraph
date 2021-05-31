@@ -1,6 +1,7 @@
 #include "row_sparse.hpp"
 
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 #include "graph/representation/succinct/boss.hpp"
 
 namespace mtg {
@@ -13,8 +14,8 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
                      uint64_t num_relations)
       : num_columns_(num_columns),
         num_rows_(num_columns > 0 ? num_rows : 0) {
-    //TODO(ddanciu): use an int_vector_buffer instead to save memory
-    sdsl::int_vector<> set_bits(num_relations);
+    const auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "set_bits");
+    sdsl::int_vector_buffer<> set_bits(tmp_dir/"vector", std::ios::in | std::ios::out);
     sdsl::bit_vector boundary(num_relations + num_rows, 0);
     uint64_t offset = 0;
     uint64_t idx = 0;
@@ -35,6 +36,7 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
 
     boundary_ = bit_vector_small(boundary);
     set_bits_ = sdsl::enc_vector<>(set_bits);
+    utils::remove_temp_dir(tmp_dir);
 }
 
 bool RowSparse::get(Row row, Column column) const {
