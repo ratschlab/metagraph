@@ -314,15 +314,15 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                               utils::LessFirst(), num_threads);
     }
 
-    if (const auto *int_matrix
-            = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+    if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
         std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(full_to_small.size());
         for (const auto &[in_full, _] : full_to_small) {
             assert(in_full < full_annotation.num_objects());
             row_indexes.push_back(in_full);
         }
 
-        auto slice = int_matrix->get_row_values(row_indexes);
+        auto slice = mat->get_row_values(row_indexes);
 
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
