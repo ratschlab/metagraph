@@ -44,7 +44,7 @@ CSRMatrix::SetBitPositions CSRMatrix::get_row(Row row) const {
     assert(row < vector_.size());
     SetBitPositions result;
     result.reserve(vector_[row].size());
-    for (auto [j, _] : vector_[row]) {
+    for (const auto &[j, _] : vector_[row]) {
         result.push_back(j);
     }
     return result;
