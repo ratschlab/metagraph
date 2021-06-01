@@ -15,7 +15,7 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
       : num_columns_(num_columns),
         num_rows_(num_columns > 0 ? num_rows : 0) {
     const auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "set_bits");
-    sdsl::int_vector_buffer<> set_bits(tmp_dir/"vector", std::ios::in | std::ios::out);
+    sdsl::int_vector_buffer<> set_bits(tmp_dir/"vector", std::ios::out);
     sdsl::bit_vector boundary(num_relations + num_rows, 0);
     uint64_t offset = 0;
     uint64_t idx = 0;
