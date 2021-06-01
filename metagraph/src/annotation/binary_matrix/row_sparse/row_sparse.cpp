@@ -19,19 +19,18 @@ RowSparse::RowSparse(const std::function<void(const RowCallback &)> &call_rows,
     sdsl::int_vector_buffer<> set_bits(tmp_dir/"vector", std::ios::out,
                                        1024 * 1024, col_index_width);
     sdsl::bit_vector boundary(num_relations + num_rows, 0);
-    uint64_t idx = 0;
     uint64_t b_idx = 0;
     call_rows([&](const auto &column_indices) {
         assert(std::is_sorted(column_indices.begin(), column_indices.end()));
         uint64_t last = 0;
         for (uint64_t col : column_indices) {
-            set_bits[idx++] = col - last;
+            set_bits.push_back(col - last);
             last = col;
             b_idx++;
         }
         boundary[b_idx++] = 1;
     });
-    assert(idx == num_relations);
+    assert(set_bits.size() == num_relations);
 
     boundary_ = bit_vector_small(boundary);
     set_bits_ = sdsl::vlc_vector<>(set_bits);
