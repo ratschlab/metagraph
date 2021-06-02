@@ -452,8 +452,10 @@ Config::Config(int argc, char *argv[]) {
     }
 #endif
 
-    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+    if (tmp_dir == "OUTFBASE_TEMP_DIR") {
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
+    }
+    utils::set_swap_path(tmp_dir);
 
     if (identity != CONCATENATE
             && identity != STATS
