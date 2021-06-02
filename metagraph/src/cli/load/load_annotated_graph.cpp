@@ -41,8 +41,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
             loaded = cc->merge_load(config.infbase_annotators);
         } else {
-            logger->warn("Cannot merge annotations of this type. Only the first"
-                         " file {} will be loaded.", config.infbase_annotators.at(0));
+            if (config.infbase_annotators.size() > 1) {
+                logger->warn("Cannot merge annotations of this type. Only the first"
+                             " file {} will be loaded.", config.infbase_annotators.at(0));
+            }
             loaded = annotation_temp->load(config.infbase_annotators.at(0));
         }
         if (!loaded) {

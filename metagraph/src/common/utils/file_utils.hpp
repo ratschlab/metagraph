@@ -13,6 +13,9 @@
 
 namespace utils {
 
+void set_swap_path(std::filesystem::path dir_path);
+std::filesystem::path get_swap_path();
+
 std::filesystem::path create_temp_dir(std::filesystem::path path,
                                       const std::string &name = "");
 void remove_temp_dir(std::filesystem::path dir_name);

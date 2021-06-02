@@ -44,11 +44,11 @@ def product(graph_types, anno_types):
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
-        [repr for repr in GRAPH_TYPES + ['succinct_bloom', 'succinct_mask'] if not (repr == 'bitmap' and PROTEIN_MODE)],
+        [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
         ANNO_TYPES + ['row_diff_brwt_separate',
                       'row_diff_brwt_no_fork_opt',
                       'row_diff_brwt_no_anchor_opt']
-    ),
+    ) + product(['succinct_bloom', 'succinct_mask'], ['flat']),
     class_name_func=get_test_class_name
 )
 class TestQuery(TestingBase):
@@ -505,10 +505,8 @@ class TestQuery(TestingBase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=product(
-        list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
-        ANNO_TYPES
-    ),
+    input_values=(product(list(set(GRAPH_TYPES) - {'hashstr'}), ANNO_TYPES) +
+                  product(['succinct_bloom', 'succinct_mask'], ['flat'])),
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -689,10 +687,8 @@ class TestQueryCanonical(TestingBase):
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
-    input_values=product(
-        list(set(GRAPH_TYPES) - {'hashstr'}) + ['succinct_bloom', 'succinct_mask'],
-        ANNO_TYPES
-    ),
+    input_values=(product(list(set(GRAPH_TYPES) - {'hashstr'}), ANNO_TYPES) +
+                  product(['succinct_bloom', 'succinct_mask'], ['flat'])),
     class_name_func=get_test_class_name
 )
 @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")

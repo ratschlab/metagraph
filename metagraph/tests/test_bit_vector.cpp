@@ -128,7 +128,7 @@ void reference_based_test(const bit_vector &vector,
 
     ASSERT_DEBUG_DEATH(vector.select1(0), "");
 
-    for (size_t i : {1, 2, 10, 100, 1000}) {
+    for (size_t i : { 1, 2, 10, 100, 1000 }) {
         ASSERT_DEBUG_DEATH(vector.select1(max_rank + i), "");
         EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2))
             << bit_vector_stat(reference);
@@ -150,6 +150,13 @@ void reference_based_test(const bit_vector &vector,
     for (size_t i = 1; i < vector.size(); ++i) {
         EXPECT_EQ(vector[i], vector.rank1(i) - vector.rank1(i - 1));
         EXPECT_EQ(vector[i], reference[i]);
+        uint64_t cond_rk = vector.conditional_rank1(i);
+        if (cond_rk) {
+            EXPECT_TRUE(reference[i]);
+            EXPECT_EQ(vector.rank1(i), cond_rk);
+        } else {
+            EXPECT_FALSE(reference[i]);
+        }
     }
 
     EXPECT_EQ(reference, vector.to_vector());
@@ -380,14 +387,13 @@ uint64_t space_taken(const bit_vector_type &vec) {
 
 TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
     double tolerance = 0.01;
-    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .95 };
 
     if constexpr(std::is_same_v<TypeParam, bit_vector_hyb<>>)
         return;
 
     DataGenerator gen;
     for (uint64_t size : { 1'000'000, 10'000'000 }) {
-        for (double density : densities) {
+        for (double density : { .05, .2, .4, .5, .7, .9, .95 }) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
             uint64_t footprint = space_taken(TypeParam(bv));
             EXPECT_GE(TypeParam::predict_size(bv.size(), sdsl::util::cnt_one_bits(bv)),
@@ -400,11 +406,10 @@ TYPED_TEST(BitVectorTest, PredictedMemoryFootprint) {
 
 TEST(select_support_mcl, PredictedMemoryFootprint) {
     double tolerance = 0.01;
-    std::vector<double> densities = { .05, .2, .4, .5, .7, .9, .98 };
 
     DataGenerator gen;
     for (uint64_t size : { 1'000'000, 10'000'000, 100'000'000 }) {
-        for (double density : densities) {
+        for (double density : { .05, .2, .4, .5, .7, .9, .98 }) {
             sdsl::bit_vector bv = gen.generate_random_column(size, density);
 
             uint64_t footprint = space_taken(sdsl::select_support_mcl<1>(&bv));

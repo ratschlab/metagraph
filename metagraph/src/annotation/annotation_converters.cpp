@@ -289,14 +289,10 @@ convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
-    // we are going to take the columns from the annotator and thus
-    // have to replace them with empty columns to keep the structure valid
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
-    std::vector<std::unique_ptr<bit_vector>> columns
-            = annotator.release_matrix()->diffs().release_columns();
 
     auto matrix = std::make_unique<BRWT>(
-            BRWTBottomUpBuilder::build(std::move(columns),
+            BRWTBottomUpBuilder::build(std::move(annotator.release_matrix()->diffs().data()),
                                        partitioning,
                                        num_parallel_nodes,
                                        num_threads)

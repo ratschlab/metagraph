@@ -29,6 +29,7 @@ const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
 using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 using namespace mtg::graph;
 
 using mtg::common::logger;
@@ -269,9 +270,9 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
  *                              and its submatrix.
  * @param[in]  num_threads      The number of threads used.
  *
- * @return     Annotation submatrix in the UniqueRowAnnotator representation
+ * @return     Annotation submatrix
  */
-std::unique_ptr<annot::UniqueRowAnnotator>
+std::unique_ptr<AnnotatedDBG::Annotator>
 slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
@@ -311,6 +312,29 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
         ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
                               utils::LessFirst(), num_threads);
+    }
+
+    if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+        std::vector<uint64_t> row_indexes;
+        row_indexes.reserve(full_to_small.size());
+        for (const auto &[in_full, _] : full_to_small) {
+            assert(in_full < full_annotation.num_objects());
+            row_indexes.push_back(in_full);
+        }
+
+        auto slice = mat->get_row_values(row_indexes);
+
+        Vector<CSRMatrix::RowValues> rows(num_rows);
+
+        for (uint64_t i = 0; i < slice.size(); ++i) {
+            rows[full_to_small[i].second] = std::move(slice[i]);
+        }
+
+        // copy annotations from the full graph to the query graph
+        return std::make_unique<annot::IntRowAnnotator>(
+            std::make_unique<CSRMatrix>(std::move(rows), full_annotation.num_labels()),
+            full_annotation.get_label_encoder()
+        );
     }
 
     using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,

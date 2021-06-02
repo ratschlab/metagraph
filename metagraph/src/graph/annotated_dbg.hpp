@@ -35,7 +35,8 @@ class AnnotatedSequenceGraph {
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);
     // thread-safe, can be called from multiple threads concurrently
-    virtual void annotate_sequences(const std::vector<std::pair<std::string, std::vector<Label>>> &data);
+    virtual void annotate_sequences(
+        const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
@@ -76,14 +77,10 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
-    // add k-mer counts to the annotation
+    // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);
-
-    void add_kmer_counts(std::vector<std::tuple<std::string,
-                                                std::vector<Label>,
-                                                std::vector<uint64_t>>>&& data);
 
     // add k-mer coordinates to the annotation
     void add_kmer_coord(std::string_view sequence,
