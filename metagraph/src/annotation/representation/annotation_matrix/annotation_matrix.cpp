@@ -14,11 +14,6 @@ using utils::make_suffix;
 
 
 template <class BinaryMatrixType, typename Label>
-std::string
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::file_extension() const { return kExtension; }
-
-template <class BinaryMatrixType, typename Label>
 bool
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::has_label(Index i, const Label &label) const {
@@ -76,16 +71,6 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
     } catch (...) {
         return false;
     }
-}
-
-template <class BinaryMatrixType, typename Label>
-uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
-    return matrix_->num_rows();
-}
-
-template <class BinaryMatrixType, typename Label>
-uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
-    return matrix_->num_relations();
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -226,6 +211,8 @@ template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::st
 template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>, std::string>;
+
+template class StaticBinRelAnnotator<matrix::CSRMatrix, std::string>;
 
 } // namespace annot
 } // namespace mtg
