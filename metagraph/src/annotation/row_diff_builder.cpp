@@ -2,6 +2,7 @@
 
 #include <omp.h>
 #include <progress_bar.hpp>
+#include <sdsl/vlc_vector.hpp>
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
@@ -1443,16 +1444,20 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     filenames.push_back(tmp_file(l_idx, j, chunk));
                 }
 
-                uint64_t last = -1;
+                uint64_t last_i = -1;
+                uint64_t last_c = 0;
                 elias_fano::merge_files<T>(filenames, [&](T pair) {
                     const auto &[i, coord] = pair;
-                    if (i != last) {
+                    if (i != last_i) {
                         call(i);
-                        last = i;
+                        last_i = i;
+                        last_c = 0;
                         *delims_it++ = 1;
                     }
                     if (coord != dummy_coord) {
-                        *coords_it++ = coord;
+                        assert(coord >= last_c && "pairs must be sorted");
+                        *coords_it++ = coord - last_c;
+                        last_c = coord;
                         ++delims_it;
                     }
                 }, true, chunks_open_per_thread);
@@ -1463,8 +1468,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
                                                             row_diff_bits[l_idx][j]);
             bit_vector_smart(std::move(diff_delims)).serialize(out_coord);
-            sdsl::util::bit_compress(diff_coords);
-            diff_coords.serialize(out_coord);
+            sdsl::dac_vector<>(diff_coords).serialize(out_coord);
         }
         logger->trace("Serialized {}", fpath_coord);
         auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
