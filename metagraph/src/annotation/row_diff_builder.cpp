@@ -1468,7 +1468,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
                                                             row_diff_bits[l_idx][j]);
             bit_vector_smart(std::move(diff_delims)).serialize(out_coord);
-            sdsl::dac_vector<>(diff_coords).serialize(out_coord);
+            sdsl::dac_vector_dp<>(diff_coords).serialize(out_coord);
         }
         logger->trace("Serialized {}", fpath_coord);
         auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
