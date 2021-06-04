@@ -32,7 +32,7 @@ class TaxonomyDB {
      * @param [input] input_accessions contains all the accession version in the annotation matrix input.
      */
     TaxonomyDB(const std::string &tax_tree_filepath,
-               const std::string &label_taxid_map_filepath,
+               const std::string &label_taxid_map_filepath = "",
                const tsl::hopscotch_set<AccessionVersion> &input_accessions = tsl::hopscotch_set<AccessionVersion>{});
 
     /**

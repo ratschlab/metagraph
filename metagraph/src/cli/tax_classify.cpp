@@ -51,6 +51,7 @@ void run_sequence_batch_db(const std::vector<std::pair<std::string, std::string>
 						   ThreadPool &thread_pool) {
 	thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
 		for (std::pair<std::string, std::string> &seq : sequences) {
+			std::cerr << "\n" << seq.second << " ";
 			append_new_result(seq.second, taxonomy.assign_class(anno, seq.first));
 		}
 	}, std::move(seq_batch));
@@ -120,8 +121,8 @@ int taxonomic_classification(Config *config) {
     const std::vector<std::string> &files = config->fnames;
 
     Timer timer;
-    logger->trace("Loading TaxonomyDB...");
-    if (config->label_taxid_map != "") {
+    if (config->infbase_annotators.size()) {
+		std::cerr << "\n\nRun tax classify from TaxonomyDB\n\n";
 		logger->trace("Graph and Annotation loading...");
 		std::shared_ptr<graph::DeBruijnGraph> graph = load_critical_dbg(config->infbase);
 		std::unique_ptr<graph::AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
@@ -129,7 +130,7 @@ int taxonomic_classification(Config *config) {
 
 		timer.reset();
 		logger->trace("Constructing TaxonomyDB...");
-		annot::TaxonomyDB taxonomy(config->taxonomic_tree, config->label_taxid_map);
+		annot::TaxonomyDB taxonomy(config->taxonomic_tree);
 		logger->trace("Finished TaxonomyDB construction in {}s.", timer.elapsed());
 
 		ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
@@ -138,8 +139,9 @@ int taxonomic_classification(Config *config) {
 		}
 		thread_pool.join();
 
-		timer.reset();
+		// timer.reset();
     } else {
+		logger->trace("Loading TaxonomyDB...");
 		mtg::annot::TaxClassifier tax_classifier(config->taxonomic_tree,
 												 config->lca_coverage_fraction,
 												 config->discovery_fraction);

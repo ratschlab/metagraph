@@ -156,13 +156,18 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
     }
 }
 
+// std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+//     std::vector<std::string> label_parts = utils::split_string(label, "|");
+//     if (label_parts.size() <= 3 || label_parts[3] == "") {
+//         logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
+//         exit(1);
+//     }
+//     return label_parts[3];
+// }
+
 std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-    std::vector<std::string> label_parts = utils::split_string(label, "|");
-    if (label_parts.size() <= 3 || label_parts[3] == "") {
-        logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
-        exit(1);
-    }
-    return label_parts[3];
+    auto aux = utils::split_string(label, "|")[2];
+    return utils::split_string(aux, " ")[0];
 }
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
@@ -181,6 +186,8 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
         logger->error("The accession to taxid map table is not in the standard (*.accession2taxid) format {}.", label_taxid_map_filepath);
         exit(1);
     }
+
+    std::cerr << "input_accessions.size=" << input_accessions.size() << "\n\n\n";
 
     while (getline(f, line)) {
         if (line == "") {
@@ -209,15 +216,17 @@ TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
         logger->error("Can't open taxonomic tree file {}.", tax_tree_filepath);
         std::exit(1);
     }
-    if (!std::filesystem::exists(label_taxid_map_filepath)) {
-        logger->error("Can't open label_taxid_map file {}.", label_taxid_map_filepath);
-        std::exit(1);
-    }
+    // if (!std::filesystem::exists(label_taxid_map_filepath)) {
+    //     logger->error("Can't open label_taxid_map file {}.", label_taxid_map_filepath);
+    //     std::exit(1);
+    // }
 
     Timer timer;
-    logger->trace("Parsing label_taxid_map file..");
-    read_label_taxid_map(label_taxid_map_filepath, input_accessions);
-    logger->trace("Finished label_taxid_map file in {}s", timer.elapsed());
+    if (label_taxid_map_filepath != "") {
+        logger->trace("Parsing label_taxid_map file..");
+        read_label_taxid_map(label_taxid_map_filepath, input_accessions);
+        logger->trace("Finished label_taxid_map file in {}s", timer.elapsed());
+    }
 
     timer.reset();
     logger->trace("Parsing taxonomic tree..");
@@ -418,11 +427,24 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 TaxId TaxonomyDB::assign_class(const graph::AnnotatedDBG &anno, const std::string &sequence) const {
 	std::vector<std::string> labels_discovered = anno.get_labels(sequence, 0.3);
 
-	for (uint64_t i = 0; i < labels_discovered.size(); ++i) {
-		std::cerr << labels_discovered[i] << "\n";
-	}
+    std::vector<NormalizedTaxId> curr_taxids;
 
-	return 0;
+    std::cerr << "this->normalized_taxid.size=" << this->normalized_taxid.size() << " ";
+
+	for (uint64_t i = 0; i < labels_discovered.size(); ++i) {
+        std::string act_str = utils::split_string(labels_discovered[i], "|")[1];
+        TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+        std::cerr << " act_str=" << act_str << " act=" << act;
+        if (this->normalized_taxid.count(act)) {
+            curr_taxids.push_back(this->normalized_taxid.at(act));
+        }
+	}
+    if (curr_taxids.size() == 0) {
+        std::cerr << "could not find valid labels\n";
+        return 0;
+    }
+    std::cerr << " " << this->denormalized_taxid[find_lca(curr_taxids)] << "\n";
+	return this->denormalized_taxid[find_lca(curr_taxids)];
 }
 
 } // namespace annot
