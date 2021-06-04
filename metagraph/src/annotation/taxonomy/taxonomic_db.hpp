@@ -33,7 +33,7 @@ class TaxonomyDB {
      */
     TaxonomyDB(const std::string &tax_tree_filepath,
                const std::string &label_taxid_map_filepath,
-               const tsl::hopscotch_set<AccessionVersion> &input_accessions);
+               const tsl::hopscotch_set<AccessionVersion> &input_accessions = tsl::hopscotch_set<AccessionVersion>{});
 
     /**
      * Iterate the received annotation matrix (kmer-OX labels-OY) for updating the
@@ -57,6 +57,8 @@ class TaxonomyDB {
     bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const;
     static std::string get_accession_version_from_label(const std::string &label);
 
+	TaxId assign_class(const graph::AnnotatedDBG &anno,
+					   const std::string &sequence) const;
 
   private:
     /**

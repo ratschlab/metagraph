@@ -25,6 +25,7 @@ namespace annot {
 using mtg::common::logger;
 
 using NormalizedTaxId = TaxonomyDB::NormalizedTaxId;
+using TaxId = TaxonomyDB::TaxId;
 
 uint64_t TaxonomyDB::num_get_taxid_calls = 0;
 uint64_t TaxonomyDB::num_get_taxid_calls_failed = 0;
@@ -191,7 +192,7 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
             logger->error("The accession to taxid map table contains incomplete lines. Please make sure that this file was not manually modified {}", label_taxid_map_filepath);
             exit(1);
         }
-        if (input_accessions.count(parts[1])) {
+        if (input_accessions.size() == 0 || input_accessions.count(parts[1])) {
             this->label_taxid_map[parts[1]] = static_cast<TaxId>(std::stoull(parts[2]));
         }
     }
@@ -200,10 +201,10 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
 TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
                        const std::string &label_taxid_map_filepath,
                        const tsl::hopscotch_set<AccessionVersion> &input_accessions) {
-    if (!input_accessions.size()) {
-        logger->error("Can't construct TaxonomyDB for an empty set of accession versions.");
-        std::exit(1);
-    }
+//    if (!input_accessions.size()) {
+//        logger->error("Can't construct TaxonomyDB for an empty set of accession versions.");
+//        std::exit(1);
+//    }
     if (!std::filesystem::exists(tax_tree_filepath)) {
         logger->error("Can't open taxonomic tree file {}.", tax_tree_filepath);
         std::exit(1);
@@ -412,6 +413,16 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 
     logger->trace("Finished exporting metagraph taxonomic data after {}s",
                   timer.elapsed());
+}
+
+TaxId TaxonomyDB::assign_class(const graph::AnnotatedDBG &anno, const std::string &sequence) const {
+	std::vector<std::string> labels_discovered = anno.get_labels(sequence, 0.3);
+
+	for (uint64_t i = 0; i < labels_discovered.size(); ++i) {
+		std::cerr << labels_discovered[i] << "\n";
+	}
+
+	return 0;
 }
 
 } // namespace annot
