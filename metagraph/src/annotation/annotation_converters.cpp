@@ -1144,7 +1144,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          RowDiffStage construction_stage,
                          fs::path count_vector_fname,
                          bool with_values,
-                         bool with_coordinates) {
+                         bool with_coordinates,
+                         size_t coords_in_seq) {
     assert(!with_values || !with_coordinates);
 
     if (out_dir.empty())
@@ -1238,7 +1239,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
                     construction_stage == RowDiffStage::COMPUTE_REDUCTION,
-                    with_values, with_coordinates);
+                    with_values, with_coordinates, coords_in_seq);
         }
 
         logger->trace("Batch processed in {} sec", timer.elapsed());

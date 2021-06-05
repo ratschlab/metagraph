@@ -667,7 +667,8 @@ int transform_annotation(Config *config) {
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
                                     config->max_path_length, out_dir, config->tmp_dir,
                                     static_cast<RowDiffStage>(config->row_diff_stage),
-                                    config->outfbase, config->count_kmers, config->coordinates);
+                                    config->outfbase, config->count_kmers,
+                                    config->coordinates, config->num_kmers_in_seq);
                 break;
             }
             case Config::RowCompressed: {

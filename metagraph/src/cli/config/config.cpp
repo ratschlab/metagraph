@@ -115,6 +115,11 @@ Config::Config(int argc, char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
+        } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
+            // FYI: experimental
+            std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
+                         " should only be used for experimental purposes" << std::endl;
+            num_kmers_in_seq = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
         } else if (!strcmp(argv[i], "--count-width")) {

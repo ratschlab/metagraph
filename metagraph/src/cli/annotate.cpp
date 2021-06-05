@@ -358,6 +358,12 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.fasta_header_delimiter,
                 config.anno_labels,
                 [&](std::string sequence, auto labels) {
+                    if (config.num_kmers_in_seq
+                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
+                        logger->error("All input sequences must have the same"
+                                      " length when flag --const-length is on");
+                        exit(1);
+                    }
                     if (sequence.size() >= k) {
                         uint64_t num_kmers = sequence.size() - k + 1;
                         batcher.push_and_pay(sequence.size(),

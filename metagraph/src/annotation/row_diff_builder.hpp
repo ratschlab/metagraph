@@ -37,7 +37,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                uint64_t buf_size_bytes,
                                bool compute_row_reduction = true,
                                bool with_values = false,
-                               bool with_coordinates = false);
+                               bool with_coordinates = false,
+                               size_t coords_in_seq = 0);
 
 } // namespace annot
 } // namespace mtg
