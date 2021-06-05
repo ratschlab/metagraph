@@ -1286,6 +1286,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     std::vector<std::vector<std::vector<T>>> set_rows_fwd(sources.size());
     std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
     std::vector<std::vector<uint64_t>> row_diff_coords(sources.size());
+    std::vector<std::vector<uint64_t>> num_coords_anchored(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
     auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
@@ -1306,6 +1307,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
         set_rows_bwd[s].resize(sources[s].num_labels());
         row_diff_bits[s].assign(sources[s].num_labels(), 0);
         row_diff_coords[s].assign(sources[s].num_labels(), 0);
+        num_coords_anchored[s].assign(sources[s].num_labels(), 0);
         // The first chunk will contain forward bits, all sorted.
         // The other ones (added later) will contain chunks of sorted pred bits.
         num_chunks[s].assign(sources[s].num_labels(), 1);
@@ -1335,7 +1337,12 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                 // get annotated coordinates for this k-mer
                 const auto curr_value = get_value(source_col, s, j, row_idx);
 
-                const auto diff = anchor[row_idx]
+                bool is_anchor = anchor[row_idx];
+
+                if (is_anchor)
+                    num_coords_anchored[s][j] += curr_value.size();
+
+                const auto diff = is_anchor
                     ? curr_value
                     : get_diff(curr_value, get_value(source_col, s, j, *succ));
 
@@ -1389,9 +1396,10 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                 std::sort(bwd.begin(), bwd.end());
                 dump_chunk_to_disk(bwd, s, j, num_chunks[s][j]++);
             }
-            logger->trace("Number of coordinates for column {} reduced from {} to {}",
-                          sources[s].get_label_encoder().decode(j),
-                          coords[s][j].size(), row_diff_coords[s][j]);
+            logger->trace("Number of coordinates for column {} reduced from {}"
+                          " to {}, number of coordinates stored in anchors: {}",
+                          sources[s].get_label_encoder().decode(j), coords[s][j].size(),
+                          row_diff_coords[s][j], num_coords_anchored[s][j]);
         }
     }
 
