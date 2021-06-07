@@ -790,6 +790,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<std::vector<std::vector<T>>> set_rows_bwd(sources.size());
     std::vector<std::vector<std::vector<T>>> set_rows_fwd(sources.size());
     std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
+    std::vector<std::vector<uint64_t>> num_relations_anchored(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
 
     auto tmp_file = [&](size_t s, size_t j, size_t chunk) {
@@ -813,6 +814,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         set_rows_fwd[s].resize(sources[s].num_labels());
         set_rows_bwd[s].resize(sources[s].num_labels());
         row_diff_bits[s].assign(sources[s].num_labels(), 0);
+        num_relations_anchored[s].assign(sources[s].num_labels(), 0);
         // The first chunk will contain forward bits, all sorted.
         // The other ones (added later) will contain chunks of sorted pred bits.
         num_chunks[s].assign(sources[s].num_labels(), 1);
@@ -899,9 +901,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
                     }
                 } else {
+                    bool is_anchor = anchor[row_idx];
                     // add current bit if this node is an anchor
                     // or if the successor has zero diff
-                    uint64_t succ_value = anchor[row_idx] ? 0 : get_value(source_col, source_idx, j, *succ);
+                    uint64_t succ_value = is_anchor ? 0 : get_value(source_col, source_idx, j, *succ);
                     if (succ_value != curr_value) {
                         // no reduction, we must keep the bit
                         auto &v = set_rows_fwd[source_idx][j];
@@ -910,6 +913,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         } else {
                             v.push_back(row_idx);
                         }
+                        if (is_anchor)
+                            num_relations_anchored[source_idx][j]++;
 
                         if (v.size() == v.capacity()) {
                             // dump chunk to disk
@@ -970,6 +975,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 std::sort(bwd.begin(), bwd.end());
                 dump_chunk_to_disk(bwd, s, j, num_chunks[s][j]++);
             }
+
+            logger->trace("Number of relations for column {} reduced from {}"
+                          " to {}, of them stored in anchors: {}",
+                          sources[s].get_label_encoder().decode(j),
+                          sources[s].get_matrix().data()[j]->num_set_bits(),
+                          row_diff_bits[s][j], num_relations_anchored[s][j]);
         }
     }
 
