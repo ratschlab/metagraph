@@ -18,7 +18,7 @@ namespace cli {
 
 using mtg::common::logger;
 
-uint64_t QUERY_SEQ_BATCH_SIZE = 10000;
+uint64_t QUERY_SEQ_BATCH_SIZE = 1000;
 
 std::vector<std::pair<std::string, uint64_t> > pair_label_taxid;
 std::mutex tax_mutex;
@@ -49,10 +49,12 @@ void run_sequence_batch_db(const std::vector<std::pair<std::string, std::string>
 						   const annot::TaxonomyDB &taxonomy,
 						   const graph::AnnotatedDBG &anno,
 						   ThreadPool &thread_pool) {
+	std::cerr << "before enque" << std::endl;
 	thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
 		for (std::pair<std::string, std::string> &seq : sequences) {
-			std::cerr << "\n" << seq.second << " ";
-			append_new_result(seq.second, taxonomy.assign_class(anno, seq.first));
+			// std::cerr << "\nseq=" << seq.second << "\n";
+			// append_new_result(seq.second, taxonomy.assign_class(anno, seq.first));
+			append_new_result(seq.second, taxonomy.assign_class_slow(anno, seq.first));
 		}
 	}, std::move(seq_batch));
 }
@@ -91,6 +93,7 @@ void execute_fasta_file_db(const string &file,
 						   const graph::AnnotatedDBG &anno,
 						   const annot::TaxonomyDB &taxonomy) {
 	logger->trace("Parsing query sequences from file {}.", file);
+	std::cerr << "inside execute_fasta_file_db\n";
 
 	seq_io::FastaParser fasta_parser(file);
 
@@ -121,7 +124,7 @@ int taxonomic_classification(Config *config) {
     const std::vector<std::string> &files = config->fnames;
 
     Timer timer;
-    if (config->infbase_annotators.size()) {
+    if (true) {
 		std::cerr << "\n\nRun tax classify from TaxonomyDB\n\n";
 		logger->trace("Graph and Annotation loading...");
 		std::shared_ptr<graph::DeBruijnGraph> graph = load_critical_dbg(config->infbase);
@@ -130,7 +133,7 @@ int taxonomic_classification(Config *config) {
 
 		timer.reset();
 		logger->trace("Constructing TaxonomyDB...");
-		annot::TaxonomyDB taxonomy(config->taxonomic_tree);
+		annot::TaxonomyDB taxonomy(config->taxonomic_tree, "", tsl::hopscotch_set<std::string>{});
 		logger->trace("Finished TaxonomyDB construction in {}s.", timer.elapsed());
 
 		ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
@@ -164,15 +167,22 @@ int taxonomic_classification(Config *config) {
 		thread_pool.join();
 	}
 
+	uint64_t num_hits = 0;
     print_all_results(
-            [](const std::string name_seq, const uint64_t &taxid) {
+            [&](const std::string name_seq, const uint64_t &taxid) {
                 std::string result = fmt::format(
                       "Sequence '{}' was classified with Tax ID '{}'\n",
                       name_seq, taxid);
                 std::cout << result << std::endl;
+				if (utils::split_string(name_seq, "|")[1] == to_string(taxid)) {
+                    num_hits += 1;
+                }
             });
 
     logger->trace("Finished all the queries in {}s.", timer.elapsed());
+
+	std::cerr << "num hits = " << num_hits << "\n total results =" << pair_label_taxid.size() << "\n";
+    std::cerr << "hit rate = " << (double)num_hits / pair_label_taxid.size() << "\n";
 
     return 0;
 }

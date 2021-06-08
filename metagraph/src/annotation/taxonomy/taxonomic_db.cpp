@@ -33,6 +33,7 @@ uint64_t TaxonomyDB::num_get_taxid_calls_failed = 0;
 void TaxonomyDB::dfs_statistics(const NormalizedTaxId node,
                                 const ChildrenList &tree,
                                 std::vector<NormalizedTaxId> *tree_linearization) {
+    // std::cerr << "dfs node=" << node << std::endl;
     this->node_to_linearization_idx[node] = tree_linearization->size();
     tree_linearization->push_back(node);
     uint64_t depth = 0;
@@ -43,6 +44,7 @@ void TaxonomyDB::dfs_statistics(const NormalizedTaxId node,
             depth = this->node_depth[child];
         }
     }
+    // std::cerr << "fin node=" << node << std::endl;
     this->node_depth[node] = depth + 1;
 }
 
@@ -72,12 +74,19 @@ void TaxonomyDB::read_tree(const std::string &tax_tree_filepath,
         uint64_t act = static_cast<uint64_t>(std::stoull(parts[0]));
         uint64_t parent = static_cast<uint64_t>(std::stoull(parts[2]));
         full_parents_list[act] = parent;
+        node_parent[act] = parent;
     }
 
     std::queue<TaxId> relevant_taxids;
     for (const pair<AccessionVersion, TaxId>  &it : this->label_taxid_map) {
         relevant_taxids.push(it.second);
     }
+    if (this->label_taxid_map.size() == 0) {
+        for (auto it : full_parents_list) {
+            relevant_taxids.push(it.first);
+        }
+    }
+
     assert(relevant_taxids.size());
 
     // We want to treat the case when "taxid==0" as a wildcard for not initialised value.
@@ -188,6 +197,7 @@ void TaxonomyDB::read_label_taxid_map(const std::string &label_taxid_map_filepat
     }
 
     std::cerr << "input_accessions.size=" << input_accessions.size() << "\n\n\n";
+    std::cerr << "fst line = " << line << '\n';
 
     while (getline(f, line)) {
         if (line == "") {
@@ -212,6 +222,7 @@ TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
 //        logger->error("Can't construct TaxonomyDB for an empty set of accession versions.");
 //        std::exit(1);
 //    }
+    std::cerr << "inside TaxonomyDB constructor" << std::endl;
     if (!std::filesystem::exists(tax_tree_filepath)) {
         logger->error("Can't open taxonomic tree file {}.", tax_tree_filepath);
         std::exit(1);
@@ -228,12 +239,16 @@ TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
         logger->trace("Finished label_taxid_map file in {}s", timer.elapsed());
     }
 
+    std::cerr << "after parsing label" << std::endl;
+
     timer.reset();
     logger->trace("Parsing taxonomic tree..");
     TaxonomyDB::ChildrenList tree;
-    NormalizedTaxId root_node;
+    // NormalizedTaxId root_node;
     read_tree(tax_tree_filepath, &tree, &root_node);
     logger->trace("Finished parsing taxonomic tree in {}s", timer.elapsed());
+
+    std::cerr << "after parsing taxid" << std::endl;
 
     timer.reset();
     logger->trace("Calculating tree statistics..");
@@ -242,11 +257,14 @@ TaxonomyDB::TaxonomyDB(const std::string &tax_tree_filepath,
     this->node_depth.resize(tree.size());
     dfs_statistics(root_node, tree, &tree_linearization);
     logger->trace("Finished calculating tree statistics in {}s", timer.elapsed());
+    std::cerr << "after statistics" << std::endl;
 
     timer.reset();
     logger->trace("Starting rmq preprocessing..");
     rmq_preprocessing(tree_linearization);
     logger->trace("Finished rmq preprocessing in {}s", timer.elapsed());
+
+    std::cerr << "after all the construction steps" << std::endl;
 }
 
 NormalizedTaxId TaxonomyDB::find_lca(const std::vector<NormalizedTaxId> &taxids) const {
@@ -351,7 +369,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     }
 
     const std::vector<NormalizedTaxId> &linearization = this->rmq_data[0];
-    tsl::hopscotch_map<TaxId, TaxId> node_parent;
+    // tsl::hopscotch_map<TaxId, TaxId> node_parent;
 
     node_parent[this->denormalized_taxid[linearization[0]]] =
             this->denormalized_taxid[linearization[0]];
@@ -427,24 +445,242 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 TaxId TaxonomyDB::assign_class(const graph::AnnotatedDBG &anno, const std::string &sequence) const {
 	std::vector<std::string> labels_discovered = anno.get_labels(sequence, 0.3);
 
+    std::string reversed_sequence = sequence;
+    reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+	std::vector<std::string> labels_discovered_rev = anno.get_labels(reversed_sequence, 0.3);
+
     std::vector<NormalizedTaxId> curr_taxids;
 
-    std::cerr << "this->normalized_taxid.size=" << this->normalized_taxid.size() << " ";
+    // std::cerr << "this->normalized_taxid.size=" << this->normalized_taxid.size() << " ";
 
 	for (uint64_t i = 0; i < labels_discovered.size(); ++i) {
         std::string act_str = utils::split_string(labels_discovered[i], "|")[1];
         TaxId act = static_cast<uint64_t>(std::stoull(act_str));
-        std::cerr << " act_str=" << act_str << " act=" << act;
+        // std::cerr << " act_str=" << act_str << " act=" << act;
+        if (this->normalized_taxid.count(act)) {
+            curr_taxids.push_back(this->normalized_taxid.at(act));
+        }
+	}
+    for (uint64_t i = 0; i < labels_discovered_rev.size(); ++i) {
+        std::string act_str = utils::split_string(labels_discovered_rev[i], "|")[1];
+        TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+        // std::cerr << " act_str=" << act_str << " act=" << act;
         if (this->normalized_taxid.count(act)) {
             curr_taxids.push_back(this->normalized_taxid.at(act));
         }
 	}
     if (curr_taxids.size() == 0) {
-        std::cerr << "could not find valid labels\n";
+        // std::cerr << "could not find valid labels\n";
         return 0;
     }
-    std::cerr << " " << this->denormalized_taxid[find_lca(curr_taxids)] << "\n";
+    // std::cerr << " " << this->denormalized_taxid[find_lca(curr_taxids)] << "\n";
 	return this->denormalized_taxid[find_lca(curr_taxids)];
+}
+
+
+void TaxonomyDB::update_scores_and_lca(const TaxId start_node,
+                                          const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
+                                          const uint64_t desired_number_kmers,
+                                          tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
+                                          tsl::hopscotch_set<TaxId> *nodes_already_propagated,
+                                          TaxId *best_lca,
+                                          uint64_t *best_lca_dist_to_root) const {
+    if (nodes_already_propagated->count(start_node)) {
+        return;
+    }
+    uint64_t score_from_processed_parents = 0;
+    uint64_t score_from_unprocessed_parents = num_kmers_per_node.at(start_node);
+
+    std::vector<TaxId> processed_parents;
+    std::vector<TaxId> unprocessed_parents;
+
+    TaxId act_node = start_node;
+    unprocessed_parents.push_back(act_node);
+
+    while (act_node != this->root_node) {
+        act_node = this->node_parent.at(act_node);
+        if (!nodes_already_propagated->count(act_node)) {
+            if (num_kmers_per_node.count(act_node)) {
+                score_from_unprocessed_parents += num_kmers_per_node.at(act_node);
+            }
+            unprocessed_parents.push_back(act_node);
+        } else {
+            if (num_kmers_per_node.count(act_node)) {
+                score_from_processed_parents += num_kmers_per_node.at(act_node);
+            }
+            processed_parents.push_back(act_node);
+        }
+    }
+    for (uint64_t i = 0; i < unprocessed_parents.size(); ++i) {
+        TaxId &act_node = unprocessed_parents[i];
+        (*node_scores)[act_node] =
+                score_from_processed_parents + score_from_unprocessed_parents;
+        nodes_already_propagated->insert(act_node);
+
+        uint64_t act_dist_to_root =
+                processed_parents.size() + unprocessed_parents.size() - i;
+        if ((*node_scores)[act_node] >= desired_number_kmers &&
+            act_dist_to_root > *best_lca_dist_to_root) {
+            *best_lca = act_node;
+            *best_lca_dist_to_root = act_dist_to_root;
+        }
+    }
+    for (uint64_t i = 0; i < processed_parents.size(); ++i) {
+        TaxId &act_node = processed_parents[i];
+        (*node_scores)[act_node] += score_from_unprocessed_parents;
+
+        uint64_t act_dist_to_root = processed_parents.size() - i;
+        if ((*node_scores)[act_node] >= desired_number_kmers &&
+            act_dist_to_root > *best_lca_dist_to_root) {
+            *best_lca = act_node;
+            *best_lca_dist_to_root = act_dist_to_root;
+        }
+    }
+}
+
+TaxId TaxonomyDB::find_lca(const TaxId a, const TaxId b) const {
+    std::vector<TaxId> ancestors_a;
+    std::vector<TaxId> ancestors_b;
+
+    TaxId curr_node = a;
+    while (curr_node != this->root_node) {
+        ancestors_a.push_back(curr_node);
+        curr_node = this->node_parent.at(curr_node);
+    }
+    curr_node = b;
+    while (curr_node != this->root_node) {
+        ancestors_b.push_back(curr_node);
+        curr_node = this->node_parent.at(curr_node);
+    }
+
+    TaxId lca = this->root_node;
+    int idx_ancs_a = ancestors_a.size() - 1;
+    int idx_ancs_b = ancestors_b.size() - 1;
+
+    while (idx_ancs_a >= 0  && idx_ancs_b >= 0) {
+        if (ancestors_a[idx_ancs_a] == ancestors_b[idx_ancs_b]) {
+            lca = ancestors_a[idx_ancs_a];
+        } else {
+            break;
+        }
+        idx_ancs_a --;
+        idx_ancs_b --;
+    }
+    return lca;
+}
+
+TaxId TaxonomyDB::assign_class_slow(const graph::AnnotatedDBG &anno, const std::string &sequence) const {
+    int cnt_kmer = 0;
+    std::vector<uint64_t> forward_kmers;
+    anno.get_graph_ptr()->map_to_nodes(sequence, [&](uint64_t i) {
+        if (i > 0) {
+            std::vector<std::string> labels_discovered = anno.annotator_->get(i - 1);
+            std::vector<NormalizedTaxId> curr_taxids;
+            for (uint64_t j = 0; j < labels_discovered.size(); ++j) {
+                // std::cerr << "\t lb -> " << labels_discovered[j] << "\n";
+                std::string act_str = utils::split_string(labels_discovered[j], "|")[1];
+                TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+                if (this->normalized_taxid.count(act)) {
+                    curr_taxids.push_back(this->normalized_taxid.at(act));
+                }
+            }
+            if (curr_taxids.size() == 0) {
+                forward_kmers.push_back(0);
+            } else {
+                forward_kmers.push_back(this->denormalized_taxid[find_lca(curr_taxids)]);
+            }
+
+            // std::cerr << "\t f" << forward_kmers.back() << "\n";
+        } else {
+            forward_kmers.push_back(0);
+        }
+        cnt_kmer++;
+    });
+
+    std::string reversed_sequence = sequence;
+    reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+	std::vector<uint64_t> backward_kmers(cnt_kmer); 
+
+    anno.get_graph_ptr()->map_to_nodes(reversed_sequence, [&](uint64_t i) {
+        cnt_kmer--;
+        if (cnt_kmer < 0) {
+            std::cerr << "\n\n\n cnt_kmer < 0!!!!! \n" << std::endl;
+        }
+        if (i > 0) {
+            std::vector<std::string> labels_discovered = anno.annotator_->get(i - 1);
+            std::vector<NormalizedTaxId> curr_taxids;
+            for (uint64_t j = 0; j < labels_discovered.size(); ++j) {
+                std::string act_str = utils::split_string(labels_discovered[j], "|")[1];
+                TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+                if (this->normalized_taxid.count(act)) {
+                    curr_taxids.push_back(this->normalized_taxid.at(act));
+                }
+            }
+
+            if (curr_taxids.size() != 0) {
+                backward_kmers[cnt_kmer] = this->denormalized_taxid[find_lca(curr_taxids)];
+            }
+            // std::cerr << "\t b" << forward_kmers.back() << "\n";
+        }
+    });
+
+    tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
+
+    uint64_t total_discovered_kmers = 0;
+
+    for (uint64_t i = 0; i < backward_kmers.size(); ++i) {
+
+        if (forward_kmers[i] == 0 && backward_kmers[i] == 0) {
+            continue;
+        }
+        TaxId curr_taxid;
+        if (backward_kmers[i] == 0) {
+            curr_taxid = forward_kmers[i];
+        } else if (forward_kmers[i] == 0) {
+            curr_taxid = backward_kmers[i];
+        } else {
+            TaxId forward_taxid = forward_kmers[i];
+            TaxId backward_taxid = backward_kmers[i];
+            if (forward_taxid == 0) {
+                curr_taxid = backward_taxid;
+            } else if (backward_taxid == 0) {
+                curr_taxid = forward_taxid;
+            } else {
+                curr_taxid = find_lca(forward_taxid, backward_taxid);
+            }
+        }
+        if (curr_taxid) {
+            total_discovered_kmers += 1;
+            num_kmers_per_node[curr_taxid]++;
+        }
+    }
+
+    uint64_t total_kmers = forward_kmers.size();
+
+    if (total_discovered_kmers <= 0.2 * total_kmers) {
+        return 0; // 0 is a wildcard for not enough discovered kmers.
+    }
+
+    tsl::hopscotch_set<TaxId> nodes_already_propagated;
+    tsl::hopscotch_map<TaxId, uint64_t> node_scores;
+
+    uint64_t desired_number_kmers = total_discovered_kmers * 0.4;
+    TaxId best_lca = this->root_node;
+    uint64_t best_lca_dist_to_root = 1;
+
+    for (const pair<TaxId, uint64_t> &node_pair : num_kmers_per_node) {
+        TaxId start_node = node_pair.first;
+        update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers,
+                              &node_scores, &nodes_already_propagated, &best_lca,
+                              &best_lca_dist_to_root);
+    }
+
+    // for (auto &it : node_scores) {
+    //     std::cerr << "\t" << it.first << " " << it.second << "\n";
+    // }
+
+    return best_lca;
+
 }
 
 } // namespace annot

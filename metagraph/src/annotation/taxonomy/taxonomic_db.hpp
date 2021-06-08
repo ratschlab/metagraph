@@ -32,8 +32,8 @@ class TaxonomyDB {
      * @param [input] input_accessions contains all the accession version in the annotation matrix input.
      */
     TaxonomyDB(const std::string &tax_tree_filepath,
-               const std::string &label_taxid_map_filepath = "",
-               const tsl::hopscotch_set<AccessionVersion> &input_accessions = tsl::hopscotch_set<AccessionVersion>{});
+               const std::string &label_taxid_map_filepath,
+               const tsl::hopscotch_set<AccessionVersion> &input_accessions);
 
     /**
      * Iterate the received annotation matrix (kmer-OX labels-OY) for updating the
@@ -58,6 +58,9 @@ class TaxonomyDB {
     static std::string get_accession_version_from_label(const std::string &label);
 
 	TaxId assign_class(const graph::AnnotatedDBG &anno,
+					   const std::string &sequence) const;
+  
+  TaxId assign_class_slow(const graph::AnnotatedDBG &anno,
 					   const std::string &sequence) const;
 
   private:
@@ -101,11 +104,21 @@ class TaxonomyDB {
                         const ChildrenList &tree,
                         std::vector<NormalizedTaxId> *tree_linearization);
 
+    void update_scores_and_lca(const TaxId start_node,
+                                          const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
+                                          const uint64_t desired_number_kmers,
+                                          tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
+                                          tsl::hopscotch_set<TaxId> *nodes_already_propagated,
+                                          TaxId *best_lca,
+                                          uint64_t *best_lca_dist_to_root) const;
+    TaxId find_lca(const TaxId a, const TaxId b) const;
+
     /**
      * node_depth returns the depth for each node in the taxonomic tree.
      * The root is the unique node with maximal depth and all the leaves have depth 1.
      */
     std::vector<uint64_t> node_depth;
+    TaxId root_node;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization
@@ -155,6 +168,8 @@ class TaxonomyDB {
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
     static uint64_t num_get_taxid_calls;
     static uint64_t num_get_taxid_calls_failed;
+
+    tsl::hopscotch_map<TaxId, TaxId> node_parent;
 };
 
 } // namespace annot
